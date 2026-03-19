@@ -10,13 +10,12 @@ on:
       - 'docs/**'
       - 'include/**/*.h'
       - 'README.md'
-      - '.codespellrc'
       - '.github/workflows/docs-check.yml'
 
 jobs:
   sphinx:
     name: sphinx-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - name: Check out code
       uses: actions/checkout@v4
@@ -33,20 +32,9 @@ jobs:
     - name: Build documentation
       run: cmake --build build --target sphinx-html
 
-  codespell:
-    name: codespell
-    runs-on: ubuntu-latest
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v4
-    - name: Install codespell
-      run: pip install codespell
-    - name: Run codespell
-      run: codespell
-
   rst-lint:
     name: rst-lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - name: Check out code
       uses: actions/checkout@v4

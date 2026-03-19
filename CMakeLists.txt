@@ -132,6 +132,7 @@ target_link_libraries(hipobj
   PUBLIC
     hip::host
     hsa-runtime64::hsa-runtime64
+    stdc++
   PRIVATE
     dl)
 

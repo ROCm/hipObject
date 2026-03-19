@@ -7,9 +7,12 @@ on:
     branches: [main]
 
 jobs:
-  spellcheck:
-    runs-on: ubuntu-latest
+  codespell:
+    name: codespell
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: rojopolis/spellcheck-github-actions@0.44.0
-        name: Spellcheck
+      - name: Install codespell
+        run: pip install codespell
+      - name: Run codespell
+        run: codespell
