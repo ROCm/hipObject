@@ -8,8 +8,9 @@
 
 #include "rdma-numa-wrapper.hpp"
 
-#include <dlfcn.h>
 #include <cstddef>
+
+#include <dlfcn.h>
 
 namespace hipObj {
 
@@ -20,8 +21,7 @@ NUMAWrapper::NUMAWrapper() {
   }
   if (handle_) {
     auto* sym = dlsym(handle_, "numa_num_configured_nodes");
-    numa_num_configured_nodes_ =
-      reinterpret_cast<int (*)()>(sym);
+    numa_num_configured_nodes_ = reinterpret_cast<int (*)()>(sym);
   }
 }
 

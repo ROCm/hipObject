@@ -15,20 +15,16 @@
 
 #include "hipobj.h"
 
-static int stubSendRequest(
-    void* ctx, const char* token,
-    size_t tokenLen) {
+static int stubSendRequest(void* ctx, const char* token, size_t tokenLen) {
   (void)ctx;
   fprintf(stderr,
-    "[put-object] would send RDMA token "
-    "(%zu bytes) via S3 PUT x-amz-rdma-token\n",
-    tokenLen);
+          "[put-object] would send RDMA token "
+          "(%zu bytes) via S3 PUT x-amz-rdma-token\n",
+          tokenLen);
   return 0;
 }
 
-static int stubRecvReply(
-    void* ctx, char* reply,
-    size_t* replyLen) {
+static int stubRecvReply(void* ctx, char* reply, size_t* replyLen) {
   (void)ctx;
   const char* ok = "ok";
   size_t len = strlen(ok);
@@ -42,17 +38,13 @@ static int stubRecvReply(
 
 int main(int argc, char* argv[]) {
   if (argc < 2) {
-    fprintf(stderr,
-      "Usage: %s <object-size-bytes>\n",
-      argv[0]);
+    fprintf(stderr, "Usage: %s <object-size-bytes>\n", argv[0]);
     return 1;
   }
 
-  size_t objSize =
-    static_cast<size_t>(atol(argv[1]));
+  size_t objSize = static_cast<size_t>(atol(argv[1]));
   if (objSize == 0) {
-    fprintf(stderr,
-      "Invalid object size: %s\n", argv[1]);
+    fprintf(stderr, "Invalid object size: %s\n", argv[1]);
     return 1;
   }
 
@@ -64,27 +56,23 @@ int main(int argc, char* argv[]) {
 
   hipObjError_t err = hipObjInit(&cfg);
   if (err.opError != hipObjSuccess) {
-    fprintf(stderr,
-      "hipObjInit failed: %s\n",
-      hipObjGetErrorString(err.opError));
+    fprintf(stderr, "hipObjInit failed: %s\n",
+            hipObjGetErrorString(err.opError));
     return 1;
   }
 
   void* devPtr = nullptr;
-  hipError_t hip_err =
-    hipMalloc(&devPtr, objSize);
+  hipError_t hip_err = hipMalloc(&devPtr, objSize);
   if (hip_err != hipSuccess) {
-    fprintf(stderr,
-      "hipMalloc failed: %d\n", hip_err);
+    fprintf(stderr, "hipMalloc failed: %d\n", hip_err);
     hipObjShutdown();
     return 1;
   }
 
   err = hipObjBufRegister(devPtr, objSize);
   if (err.opError != hipObjSuccess) {
-    fprintf(stderr,
-      "hipObjBufRegister failed: %s\n",
-      hipObjGetErrorString(err.opError));
+    fprintf(stderr, "hipObjBufRegister failed: %s\n",
+            hipObjGetErrorString(err.opError));
     (void)hipFree(devPtr);
     hipObjShutdown();
     return 1;
@@ -94,16 +82,12 @@ int main(int argc, char* argv[]) {
   ops.sendRequest = stubSendRequest;
   ops.recvReply = stubRecvReply;
 
-  err = hipObjPut(
-    nullptr, devPtr, objSize, 0, &ops, nullptr);
+  err = hipObjPut(nullptr, devPtr, objSize, 0, &ops, nullptr);
   if (err.opError != hipObjSuccess) {
-    fprintf(stderr,
-      "hipObjPut failed: %s\n",
-      hipObjGetErrorString(err.opError));
+    fprintf(stderr, "hipObjPut failed: %s\n",
+            hipObjGetErrorString(err.opError));
   } else {
-    fprintf(stdout,
-      "hipObjPut succeeded for %zu bytes\n",
-      objSize);
+    fprintf(stdout, "hipObjPut succeeded for %zu bytes\n", objSize);
   }
 
   hipObjBufDeregister(devPtr);

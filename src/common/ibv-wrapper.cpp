@@ -11,9 +11,10 @@
 #include <cstdio>
 #include <cstring>
 
-#include <dlfcn.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
+
+#include <dlfcn.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -49,11 +50,9 @@ void dlsym_load_optional(FuncPtr& out, void* handle, const char* prefix,
 IBVWrapper::IBVWrapper() {
   ibv_handle_ = dlopen("libibverbs.so", RTLD_NOW);
   if (!ibv_handle_)
-    ibv_handle_ = dlopen(
-      "/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW);
+    ibv_handle_ = dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW);
   if (!ibv_handle_) {
-    fprintf(stderr,
-            "hipObj: Could not open libibverbs.so. RDMA disabled.\n");
+    fprintf(stderr, "hipObj: Could not open libibverbs.so. RDMA disabled.\n");
     return;
   }
 
@@ -127,7 +126,7 @@ bool IBVWrapper::is_dmabuf_supported() {
 
 int IBVWrapper::init_function_table() {
 #define LOAD_SYM(field, prefix, name)                                          \
-  if (dlsym_load(funcs_.field, ibv_handle_, prefix, name) != 0)                 \
+  if (dlsym_load(funcs_.field, ibv_handle_, prefix, name) != 0)                \
     return -1;
 #define LOAD_SYM_OPT(field, prefix, name)                                      \
   dlsym_load_optional(funcs_.field, ibv_handle_, prefix, name);
@@ -200,14 +199,14 @@ int IBVWrapper::dealloc_pd(struct ibv_pd* pd) {
   return funcs_.dealloc_pd(pd);
 }
 
-struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr,
-                                   size_t length, int access) {
+struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length,
+                                  int access) {
   if (is_dmabuf_supported()) {
     uint64_t offset = 0;
     int fd = 0;
 
     hsa_status_t status = hsa_amd_portable_export_dmabuf(addr, length, &fd,
-                                                          &offset);
+                                                         &offset);
     if (status != HSA_STATUS_SUCCESS) {
       fprintf(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: %d\n",
               status);
@@ -215,8 +214,8 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr,
     }
 
     struct ibv_mr* mr = funcs_.reg_dmabuf_mr(pd, offset, length,
-                                            (uint64_t)(uintptr_t)addr, fd,
-                                            access);
+                                             (uint64_t)(uintptr_t)addr, fd,
+                                             access);
     if (mr)
       dmabuf_fd_map_[(uintptr_t)mr] = fd;
 
@@ -224,7 +223,7 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr,
   }
 
   int is_access_const = __builtin_constant_p(
-    ((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);
+    ((int)(access)&IBV_ACCESS_OPTIONAL_RANGE) == 0);
   if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
     return funcs_.reg_mr(pd, addr, length, (int)access);
   else
@@ -232,9 +231,9 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr,
 }
 
 struct ibv_mr* IBVWrapper::reg_mr_host(struct ibv_pd* pd, void* addr,
-                                        size_t length, int access) {
+                                       size_t length, int access) {
   int is_access_const = __builtin_constant_p(
-    ((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);
+    ((int)(access)&IBV_ACCESS_OPTIONAL_RANGE) == 0);
   if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
     return funcs_.reg_mr(pd, addr, length, (int)access);
   else

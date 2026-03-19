@@ -5,15 +5,13 @@
 
 #pragma once
 
-#include "hipobj.h"
-
 #include <string>
+
+#include "hipobj.h"
 
 namespace hipObj {
 
-int injectRdmaToken(hipObjOps_t* ops, void* ctx,
-                   const std::string& token);
-int receiveRdmaReply(hipObjOps_t* ops, void* ctx,
-                     int& rdmaStatus);
+int injectRdmaToken(hipObjOps_t* ops, void* ctx, const std::string& token);
+int receiveRdmaReply(hipObjOps_t* ops, void* ctx, int& rdmaStatus);
 
 } // namespace hipObj

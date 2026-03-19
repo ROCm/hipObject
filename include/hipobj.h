@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+
 #include <sys/types.h>
 
 #if defined(__GNUC__)
@@ -85,16 +86,14 @@ typedef struct {
   int hipError;
 } hipObjError_t;
 
-#define HIPOBJ_SUCCESS \
-  ((hipObjError_t){hipObjSuccess, 0})
+#define HIPOBJ_SUCCESS ((hipObjError_t){hipObjSuccess, 0})
 
 /*!
  * @brief Return a human-readable string for an
  *        operation error code
  * @ingroup error
  */
-HIPOBJ_API const char* hipObjGetErrorString(
-  hipObjOpError_t err);
+HIPOBJ_API const char* hipObjGetErrorString(hipObjOpError_t err);
 
 /* -------------------------------------------------------
  *  TYPES
@@ -127,8 +126,7 @@ typedef struct {
    * @param tokenLen  Length of token in bytes
    * @return 0 on success, negative on failure
    */
-  int (*sendRequest)(void* ctx, const char* token,
-                     size_t tokenLen);
+  int (*sendRequest)(void* ctx, const char* token, size_t tokenLen);
 
   /*!
    * Called by hipObject to receive the RDMA reply.
@@ -140,8 +138,7 @@ typedef struct {
    * @param replyLen  In: buffer size; out: actual length
    * @return 0 on success, negative on failure
    */
-  int (*recvReply)(void* ctx, char* reply,
-                   size_t* replyLen);
+  int (*recvReply)(void* ctx, char* reply, size_t* replyLen);
 } hipObjOps_t;
 
 /*!
@@ -173,8 +170,7 @@ typedef struct {
  * @return hipObjError_t
  * @ingroup core
  */
-HIPOBJ_API hipObjError_t hipObjInit(
-  hipObjConfig_t* config);
+HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t* config);
 
 /*!
  * @brief Shut down the hipObject library
@@ -202,8 +198,7 @@ HIPOBJ_API hipObjError_t hipObjShutdown(void);
  * @return hipObjError_t
  * @ingroup buffer
  */
-HIPOBJ_API hipObjError_t hipObjBufRegister(
-  void* devPtr, size_t size);
+HIPOBJ_API hipObjError_t hipObjBufRegister(void* devPtr, size_t size);
 
 /*!
  * @brief Deregister a previously registered GPU buffer
@@ -213,8 +208,7 @@ HIPOBJ_API hipObjError_t hipObjBufRegister(
  * @return hipObjError_t
  * @ingroup buffer
  */
-HIPOBJ_API hipObjError_t hipObjBufDeregister(
-  void* devPtr);
+HIPOBJ_API hipObjError_t hipObjBufDeregister(void* devPtr);
 
 /* -------------------------------------------------------
  *  DATA TRANSFER
@@ -236,10 +230,9 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(
  * @return hipObjError_t
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjGet(
-  hipObjHandle_t handle, void* devPtr,
-  size_t size, off_t offset,
-  hipObjOps_t* ops, void* ctx);
+HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr,
+                                   size_t size, off_t offset, hipObjOps_t* ops,
+                                   void* ctx);
 
 /*!
  * @brief PUT: store GPU memory to an S3 object via
@@ -257,10 +250,9 @@ HIPOBJ_API hipObjError_t hipObjGet(
  * @return hipObjError_t
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjPut(
-  hipObjHandle_t handle, const void* devPtr,
-  size_t size, off_t offset,
-  hipObjOps_t* ops, void* ctx);
+HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
+                                   size_t size, off_t offset, hipObjOps_t* ops,
+                                   void* ctx);
 
 /*!
  * @brief Return the library version as a string

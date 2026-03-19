@@ -5,9 +5,9 @@
 
 #pragma once
 
-#include "ibv-core.hpp"
-
 #include <cstdint>
+
+#include "ibv-core.hpp"
 
 namespace hipObj {
 
@@ -24,11 +24,10 @@ struct RcConnection {
 int openRdmaDevice(int nicIndex, RcConnection& conn);
 int openRdmaDeviceByName(const char* devName, RcConnection& conn);
 void closeRdmaDevice(RcConnection& conn);
-int createRcQp(RcConnection& conn, int cqSize,
-               int maxSendWr, int maxRecvWr);
+int createRcQp(RcConnection& conn, int cqSize, int maxSendWr, int maxRecvWr);
 int transitionQpToInit(RcConnection& conn);
-int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum,
-                      uint16_t destLid, union ibv_gid destGid);
+int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum, uint16_t destLid,
+                      union ibv_gid destGid);
 int transitionQpToRts(RcConnection& conn);
 
 } // namespace hipObj

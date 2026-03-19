@@ -4,6 +4,12 @@
  */
 
 #include "hipobj.h"
+
+#include <cstdio>
+#include <cstring>
+
+#include <hip/hip_runtime.h>
+
 #include "buffer.h"
 #include "control.hpp"
 #include "hipobj-private.h"
@@ -12,10 +18,6 @@
 #include "state.h"
 #include "token.hpp"
 #include "transport.hpp"
-
-#include <hip/hip_runtime.h>
-#include <cstdio>
-#include <cstring>
 
 namespace hipObj {
 
@@ -90,16 +92,15 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
     }
   }
   const char* devName = nullptr;
-  int nicIndex = hipObj::GetClosestNicToGpu(
-    gpuDevice,
-    config->nicHint ? config->nicHint : nullptr,
-    &devName);
+  int nicIndex = hipObj::GetClosestNicToGpu(gpuDevice,
+                                            config->nicHint ? config->nicHint
+                                                            : nullptr,
+                                            &devName);
   if (nicIndex < 0) {
     return {hipObjNicNotFound, 0};
   }
-  int ret = (devName)
-    ? hipObj::openRdmaDeviceByName(devName, hipObj::g_conn)
-    : hipObj::openRdmaDevice(nicIndex, hipObj::g_conn);
+  int ret = (devName) ? hipObj::openRdmaDeviceByName(devName, hipObj::g_conn)
+                      : hipObj::openRdmaDevice(nicIndex, hipObj::g_conn);
   if (ret != 0) {
     return {hipObjRdmaError, 0};
   }
@@ -155,8 +156,7 @@ hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
   if (hipObj::g_bufferMap.isRegistered(devPtr)) {
     return {hipObjBufAlreadyRegistered, 0};
   }
-  int ret = hipObj::g_bufferMap.registerBuffer(
-    devPtr, size, hipObj::g_conn.pd);
+  int ret = hipObj::g_bufferMap.registerBuffer(devPtr, size, hipObj::g_conn.pd);
   if (ret != 0) {
     return {hipObjRdmaError, 0};
   }
@@ -182,9 +182,8 @@ hipObjError_t hipObjBufDeregister(void* devPtr) try {
   return hipObj::handleException();
 }
 
-hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr,
-                        size_t size, off_t offset,
-                        hipObjOps_t* ops, void* ctx) try {
+hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr, size_t size,
+                        off_t offset, hipObjOps_t* ops, void* ctx) try {
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
     return {hipObjNotInitialized, 0};
@@ -220,9 +219,8 @@ hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr,
   return hipObj::handleException();
 }
 
-hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
-                       size_t size, off_t offset,
-                       hipObjOps_t* ops, void* ctx) try {
+hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr, size_t size,
+                        off_t offset, hipObjOps_t* ops, void* ctx) try {
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
     return {hipObjNotInitialized, 0};
@@ -230,8 +228,7 @@ hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
   if (!ops) {
     return {hipObjInvalidValue, 0};
   }
-  struct ibv_mr* mr =
-    hipObj::g_bufferMap.lookupMr(const_cast<void*>(devPtr));
+  struct ibv_mr* mr = hipObj::g_bufferMap.lookupMr(const_cast<void*>(devPtr));
   if (!mr) {
     return {hipObjBufNotRegistered, 0};
   }
@@ -261,10 +258,8 @@ hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
 
 const char* hipObjGetVersionString(void) try {
   static char buf[32];
-  snprintf(buf, sizeof(buf), "%d.%d.%d",
-           HIPOBJ_VERSION_MAJOR,
-           HIPOBJ_VERSION_MINOR,
-           HIPOBJ_VERSION_PATCH);
+  snprintf(buf, sizeof(buf), "%d.%d.%d", HIPOBJ_VERSION_MAJOR,
+           HIPOBJ_VERSION_MINOR, HIPOBJ_VERSION_PATCH);
   return buf;
 } catch (...) {
   return "0.0.0";
