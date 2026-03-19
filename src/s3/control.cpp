@@ -4,22 +4,21 @@
  */
 
 #include "control.hpp"
-#include "token.hpp"
 
 #include <cstring>
 
+#include "token.hpp"
+
 namespace hipObj {
 
-int injectRdmaToken(hipObjOps_t* ops, void* ctx,
-                   const std::string& token) {
+int injectRdmaToken(hipObjOps_t* ops, void* ctx, const std::string& token) {
   if (!ops || !ops->sendRequest) {
     return -1;
   }
   return ops->sendRequest(ctx, token.c_str(), token.size());
 }
 
-int receiveRdmaReply(hipObjOps_t* ops, void* ctx,
-                     int& rdmaStatus) {
+int receiveRdmaReply(hipObjOps_t* ops, void* ctx, int& rdmaStatus) {
   if (!ops || !ops->recvReply) {
     return -1;
   }

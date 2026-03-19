@@ -18,8 +18,7 @@ namespace hipObj {
 
 class BufferMap {
 public:
-  int registerBuffer(void* devPtr, size_t size,
-                     struct ibv_pd* pd);
+  int registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd);
   int deregisterBuffer(void* devPtr);
   void deregisterAll();
   struct ibv_mr* lookupMr(void* devPtr);

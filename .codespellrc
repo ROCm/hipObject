@@ -1,0 +1,4 @@
+[codespell]
+check-hidden = true
+skip = ./.git,./build,./build-*,.venv
+ignore-words-list = hsa,rdma,bnxt,nvme,hipobj

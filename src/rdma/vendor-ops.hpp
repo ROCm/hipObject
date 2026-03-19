@@ -26,12 +26,12 @@ constexpr uint32_t VENDOR_ID_PENSANDO = 0x1DD8;
 
 inline const char* provider_name(Provider p) {
   switch (p) {
-  case Provider::BNXT:
-    return "bnxt";
-  case Provider::IONIC:
-    return "ionic";
-  default:
-    return "unknown";
+    case Provider::BNXT:
+      return "bnxt";
+    case Provider::IONIC:
+      return "ionic";
+    default:
+      return "unknown";
   }
 }
 

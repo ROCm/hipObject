@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "vendor-ops.hpp"
+#include <cstring>
+
 #include "ibv-core.hpp"
 #include "ibv-wrapper.hpp"
-
-#include <cstring>
+#include "vendor-ops.hpp"
 
 namespace hipObj {
 

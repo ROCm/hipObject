@@ -20,14 +20,28 @@ set(HIPOBJ_LIBRARY_VERSION
 set(HIPOBJ_LIBRARY_SOVERSION
   "${HIPOBJ_VERSION_MAJOR}")
 
-project(hipobj
-  VERSION ${HIPOBJ_LIBRARY_VERSION}
-  DESCRIPTION
-    "RDMA-accelerated S3 object storage for GPUs"
-  LANGUAGES C CXX HIP)
+option(HIPOBJ_DOCS_ONLY
+  "Only configure documentation targets (no HIP/ROCm)"
+  OFF)
+
+if(HIPOBJ_DOCS_ONLY)
+  project(hipobj
+    VERSION ${HIPOBJ_LIBRARY_VERSION}
+    DESCRIPTION
+      "RDMA-accelerated S3 object storage for GPUs"
+    LANGUAGES CXX)
+else()
+  project(hipobj
+    VERSION ${HIPOBJ_LIBRARY_VERSION}
+    DESCRIPTION
+      "RDMA-accelerated S3 object storage for GPUs"
+    LANGUAGES C CXX HIP)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_SOURCE_DIR}/cmake)
+
+if(NOT HIPOBJ_DOCS_ONLY)
 
 include(HIPOBJUseROCmCMake)
 include(HIPOBJCompilerOptions)
@@ -118,6 +132,7 @@ target_link_libraries(hipobj
   PUBLIC
     hip::host
     hsa-runtime64::hsa-runtime64
+    stdc++
   PRIVATE
     dl)
 
@@ -142,3 +157,7 @@ if(HIPOBJ_INSTALL_EXAMPLES)
 endif()
 
 include(HIPOBJInstall)
+
+endif() # NOT HIPOBJ_DOCS_ONLY
+
+include(HIPOBJDocumentation)

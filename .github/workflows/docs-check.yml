@@ -1,0 +1,44 @@
+name: Docs Check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - 'feat/**'
+    paths:
+      - 'docs/**'
+      - 'include/**/*.h'
+      - 'README.md'
+      - '.github/workflows/docs-check.yml'
+
+jobs:
+  sphinx:
+    name: sphinx-build
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake doxygen
+        pip install -r requirements.txt
+    - name: Configure docs-only build
+      run: |
+        cmake -S . -B build \
+          -DHIPOBJ_DOCS_ONLY=ON \
+          -DHIPOBJ_BUILD_DOCS=ON
+    - name: Build documentation
+      run: cmake --build build --target sphinx-html
+
+  rst-lint:
+    name: rst-lint
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+    - name: Install doc8
+      run: pip install doc8
+    - name: Lint RST files
+      run: doc8 docs/ --max-line-length 80

@@ -4,10 +4,11 @@
  */
 
 #include "transport.hpp"
-#include "ibv-wrapper.hpp"
-#include "rdma-topology.hpp"
 
 #include <cstring>
+
+#include "ibv-wrapper.hpp"
+#include "rdma-topology.hpp"
 
 namespace hipObj {
 
@@ -49,8 +50,8 @@ int openRdmaDevice(int nicIndex, RcConnection& conn) {
     return -1;
   }
   conn.gidIndex = 0;
-  if (ibv.query_gid(conn.ctx, conn.portNum, conn.gidIndex,
-                    &conn.localGid) != 0) {
+  if (ibv.query_gid(conn.ctx, conn.portNum, conn.gidIndex, &conn.localGid) !=
+      0) {
     ibv.dealloc_pd(conn.pd);
     ibv.close_device(conn.ctx);
     conn.pd = nullptr;
@@ -105,8 +106,7 @@ void closeRdmaDevice(RcConnection& conn) {
   }
 }
 
-int createRcQp(RcConnection& conn, int cqSize,
-               int maxSendWr, int maxRecvWr) {
+int createRcQp(RcConnection& conn, int cqSize, int maxSendWr, int maxRecvWr) {
   conn.cq = ibv.create_cq(conn.ctx, cqSize, nullptr, nullptr, 0);
   if (!conn.cq) {
     return -1;
@@ -135,15 +135,14 @@ int transitionQpToInit(RcConnection& conn) {
   attr.qp_state = IBV_QPS_INIT;
   attr.pkey_index = 0;
   attr.port_num = conn.portNum;
-  attr.qp_access_flags = IBV_ACCESS_REMOTE_READ |
-                         IBV_ACCESS_REMOTE_WRITE;
-  int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX |
-             IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
+  attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+  int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
+             IBV_QP_ACCESS_FLAGS;
   return ibv.modify_qp(conn.qp, &attr, mask);
 }
 
-int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum,
-                      uint16_t destLid, union ibv_gid destGid) {
+int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum, uint16_t destLid,
+                      union ibv_gid destGid) {
   struct ibv_qp_attr attr;
   std::memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
@@ -162,9 +161,8 @@ int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum,
   attr.ah_attr.grh.hop_limit = 64;
   attr.ah_attr.grh.sgid_index = conn.gidIndex;
   attr.ah_attr.grh.traffic_class = 0;
-  int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
-             IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
-             IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
+  int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+             IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
   return ibv.modify_qp(conn.qp, &attr, mask);
 }
 
@@ -178,8 +176,7 @@ int transitionQpToRts(RcConnection& conn) {
   attr.sq_psn = 0;
   attr.max_rd_atomic = 1;
   int mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-             IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
-             IBV_QP_MAX_QP_RD_ATOMIC;
+             IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
   return ibv.modify_qp(conn.qp, &attr, mask);
 }
 

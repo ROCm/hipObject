@@ -4,11 +4,13 @@
  */
 
 #include "buffer.h"
-#include "hipobj-private.h"
-#include "ibv-wrapper.hpp"
+
+#include <cstring>
 
 #include <hip/hip_runtime.h>
-#include <cstring>
+
+#include "hipobj-private.h"
+#include "ibv-wrapper.hpp"
 
 namespace hipObj {
 
@@ -20,8 +22,7 @@ constexpr int IBV_ACCESS_LOCAL_WRITE = 0x4;
 
 } // namespace
 
-int BufferMap::registerBuffer(void* devPtr, size_t size,
-                             struct ibv_pd* pd) {
+int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
   if (size > MAX_MR_SIZE) {
     return -1;
   }

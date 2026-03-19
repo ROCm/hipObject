@@ -1,5 +1,19 @@
 # hipObject
 
+[![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
+[![Build](https://github.com/ROCm/hipObject/actions/workflows/build-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/build-check.yml)
+[![Docs](https://github.com/ROCm/hipObject/actions/workflows/docs-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/docs-check.yml)
+[![Lint](https://github.com/ROCm/hipObject/actions/workflows/lint-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/lint-check.yml)
+[![Spelling](https://github.com/ROCm/hipObject/actions/workflows/spell-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/spell-check.yml)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](INSTALL.md)
+[![ROCm](https://img.shields.io/badge/ROCm-supported-green.svg)](https://rocm.docs.amd.com)
+[![Language](https://img.shields.io/badge/language-HIP%20%7C%20C-orange.svg)](https://rocm.docs.amd.com/projects/HIP/en/latest/)
+
+> [!CAUTION]
+> This release is an *early-access* software technology
+> preview. Running production workloads is *not*
+> recommended.
+
 RDMA-accelerated S3 object storage client for AMD GPUs.
 
 hipObject enables direct data transfers between AMD GPU VRAM
@@ -7,10 +21,6 @@ and S3-compatible object storage using RDMA over RoCEv2. It
 interoperates with NVIDIA cuObject-equipped storage servers
 via the `x-amz-rdma-token` S3 header protocol, providing a
 vendor-neutral client for GPU-direct object storage.
-
-## Status
-
-Early-access preview. Not recommended for production use.
 
 ## Features
 
@@ -96,6 +106,11 @@ The library uses RC (Reliable Connection) transport rather
 than DC (Dynamic Connection), since DC is exclusive to
 Mellanox/NVIDIA ConnectX hardware. A server-side adapter
 bridges RC clients to cuObject's DC-based server library.
+
+## Documentation
+
+Full documentation lives in the [`docs/`](docs/) directory
+and covers building, the API reference, and architecture.
 
 ## License
 

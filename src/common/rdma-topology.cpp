@@ -7,10 +7,9 @@
  */
 
 #include "rdma-topology.hpp"
-#include "rdma-numa-wrapper.hpp"
-#include "ibv-wrapper.hpp"
 
-#include <hip/hip_runtime.h>
+#include <limits.h>
+#include <stdlib.h>
 
 #include <algorithm>
 #include <cstring>
@@ -20,9 +19,12 @@
 #include <string>
 #include <vector>
 
-#include <limits.h>
-#include <stdlib.h>
+#include <hip/hip_runtime.h>
+
 #include <unistd.h>
+
+#include "ibv-wrapper.hpp"
+#include "rdma-numa-wrapper.hpp"
 
 namespace hipObj {
 

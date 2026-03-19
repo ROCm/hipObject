@@ -53,8 +53,7 @@ bool decodeRdmaReply(const char* reply, size_t replyLen, int& status) {
     status = 0;
     return true;
   }
-  if (replyLen >= 3 && reply[0] == 'e' && reply[1] == 'r' &&
-      reply[2] == 'r' &&
+  if (replyLen >= 3 && reply[0] == 'e' && reply[1] == 'r' && reply[2] == 'r' &&
       (replyLen == 3 || reply[3] == '\0' || reply[3] == '\n')) {
     status = -1;
     return true;
