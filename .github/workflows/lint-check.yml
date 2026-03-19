@@ -1,0 +1,28 @@
+name: Lint Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-17
+
+      - name: Check formatting
+        run: |
+          find include src test examples \
+            -name '*.cpp' -o -name '*.hpp' \
+            -o -name '*.h' | sort | while read f
+          do
+            clang-format-17 --dry-run \
+              --Werror "$f"
+          done

@@ -1,0 +1,64 @@
+# Build directories
+build/
+build*/
+bin/
+lib/
+cmake-build-*/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Compiled objects
+*.o
+*.ko
+*.obj
+*.elf
+*.mod
+*.mod.c
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Generated files
+compile_commands.json
+*.profraw
+*.profdata
+
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+
+# Misc
+.cache/
+tmp/
+*.log
+
+# Test artifacts
+Testing/
+test_results/
+
+# Package artifacts
+*.deb
+*.rpm
+*.tar.gz
