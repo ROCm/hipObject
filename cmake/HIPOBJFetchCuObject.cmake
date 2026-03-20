@@ -6,12 +6,21 @@
 # Optional download of NVIDIA cuObject libraries.
 #
 # cuObject Client: publicly available on the
-#   NVIDIA CUDA redistributable CDN.
+#   NVIDIA CUDA redistributable CDN and bundled
+#   in CUDA Toolkit 13.1.1+.
 # cuObject Server: NOT on the public CDN; must
 #   be installed separately (e.g. from NVIDIA's
 #   partner channel or a .deb package).
 #
-# Options:
+# Options (mutually-exclusive groups):
+#
+#   HIPOBJ_CUOBJECT_FROM_TOOLKIT  (default OFF)
+#     Uses FindCUDAToolkit to locate a CUDA
+#     installation, then searches its tree and
+#     standard system paths for both
+#     libcuobjclient and libcuobjserver.
+#     When ON the two options below are skipped.
+#
 #   HIPOBJ_FETCH_CUOBJECT_CLIENT  (default OFF)
 #     Downloads libcuobjclient from NVIDIA CDN
 #     and creates an IMPORTED target.
@@ -42,12 +51,158 @@ set(CUOBJECT_CLIENT_VERSION "1.1.0.44"
 set(CUOBJSERVER_ROOT "" CACHE PATH
   "Path to cuObject server installation")
 
+# ---- cuObject from CUDA Toolkit -----------
+#
+# Locate both client and server from a CUDA
+# toolkit installation (apt, runfile, or
+# manual).  Uses CMake's FindCUDAToolkit to
+# discover the root, then searches lib/ and
+# include/ trees.
+
+option(HIPOBJ_CUOBJECT_FROM_TOOLKIT
+  "Find cuObject libs in CUDA toolkit" OFF)
+
+if(HIPOBJ_CUOBJECT_FROM_TOOLKIT)
+  find_package(CUDAToolkit QUIET)
+
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES
+      "aarch64|arm64")
+    set(_cuobj_sys_libdir
+      "/usr/lib/aarch64-linux-gnu")
+  else()
+    set(_cuobj_sys_libdir
+      "/usr/lib/x86_64-linux-gnu")
+  endif()
+
+  set(_cuobj_tk_lib_paths "")
+  set(_cuobj_tk_hdr_paths "")
+
+  if(CUDAToolkit_FOUND
+      AND DEFINED CUDAToolkit_LIBRARY_ROOT)
+    list(APPEND _cuobj_tk_lib_paths
+      "${CUDAToolkit_LIBRARY_ROOT}/lib64"
+      "${CUDAToolkit_LIBRARY_ROOT}/lib")
+    list(APPEND _cuobj_tk_hdr_paths
+      "${CUDAToolkit_LIBRARY_ROOT}/include")
+  endif()
+
+  if(CUDAToolkit_FOUND
+      AND DEFINED CUDAToolkit_TARGET_DIR)
+    list(APPEND _cuobj_tk_lib_paths
+      "${CUDAToolkit_TARGET_DIR}/lib")
+    list(APPEND _cuobj_tk_hdr_paths
+      "${CUDAToolkit_TARGET_DIR}/include")
+  endif()
+
+  list(APPEND _cuobj_tk_lib_paths
+    /usr/local/cuda/lib64
+    /usr/local/cuda/lib
+    "${_cuobj_sys_libdir}"
+    /usr/local/lib)
+
+  list(APPEND _cuobj_tk_hdr_paths
+    /usr/local/cuda/include
+    /usr/include
+    /usr/local/include)
+
+  if(CUOBJSERVER_ROOT)
+    list(APPEND _cuobj_tk_lib_paths
+      "${CUOBJSERVER_ROOT}/lib64"
+      "${CUOBJSERVER_ROOT}/lib")
+    list(APPEND _cuobj_tk_hdr_paths
+      "${CUOBJSERVER_ROOT}/include")
+  endif()
+
+  # -- client --
+  find_library(CUOBJECT_CLIENT_LIBRARY
+    NAMES cuobjclient
+    PATHS ${_cuobj_tk_lib_paths}
+    PATH_SUFFIXES lib lib64)
+
+  find_path(CUOBJECT_CLIENT_INCLUDE_DIR
+    NAMES cuobjclient.h
+    PATHS ${_cuobj_tk_hdr_paths}
+    PATH_SUFFIXES include)
+
+  if(CUOBJECT_CLIENT_LIBRARY
+      AND CUOBJECT_CLIENT_INCLUDE_DIR)
+    set(CUOBJECT_CLIENT_FOUND TRUE)
+    if(NOT TARGET cuobjclient::cuobjclient)
+      add_library(cuobjclient::cuobjclient
+        SHARED IMPORTED)
+      set_target_properties(
+        cuobjclient::cuobjclient PROPERTIES
+        IMPORTED_LOCATION
+          "${CUOBJECT_CLIENT_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES
+          "${CUOBJECT_CLIENT_INCLUDE_DIR}")
+    endif()
+    message(STATUS
+      "cuObject client (toolkit): "
+      "${CUOBJECT_CLIENT_LIBRARY}")
+  else()
+    set(CUOBJECT_CLIENT_FOUND FALSE)
+    message(WARNING
+      "cuObject client not found in CUDA "
+      "toolkit.  Install with:\n"
+      "  sudo apt install cuda-toolkit\n"
+      "or set CUDAToolkit_ROOT to the "
+      "CUDA installation prefix.")
+  endif()
+
+  # -- server --
+  find_library(CUOBJECT_SERVER_LIBRARY
+    NAMES cuobjserver
+    PATHS ${_cuobj_tk_lib_paths}
+    PATH_SUFFIXES lib lib64)
+
+  find_path(CUOBJECT_SERVER_INCLUDE_DIR
+    NAMES cuobjserver.h
+    PATHS ${_cuobj_tk_hdr_paths}
+    PATH_SUFFIXES include)
+
+  if(CUOBJECT_SERVER_LIBRARY
+      AND CUOBJECT_SERVER_INCLUDE_DIR)
+    set(CUOBJECT_SERVER_FOUND TRUE)
+    if(NOT TARGET cuobjserver::cuobjserver)
+      add_library(cuobjserver::cuobjserver
+        SHARED IMPORTED)
+      set_target_properties(
+        cuobjserver::cuobjserver PROPERTIES
+        IMPORTED_LOCATION
+          "${CUOBJECT_SERVER_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES
+          "${CUOBJECT_SERVER_INCLUDE_DIR}")
+    endif()
+    message(STATUS
+      "cuObject server (toolkit): "
+      "${CUOBJECT_SERVER_LIBRARY}")
+  else()
+    set(CUOBJECT_SERVER_FOUND FALSE)
+    message(WARNING
+      "cuObject server not found.  The "
+      "server library is distributed as a "
+      "separate package.  Install with:\n"
+      "  sudo apt install libcuobjserver "
+      "libcuobjserver-dev\n"
+      "or set CUOBJSERVER_ROOT to its "
+      "install prefix.\n"
+      "See scripts/setup-cuobject-apt.sh "
+      "for automated setup.")
+  endif()
+
+  unset(_cuobj_sys_libdir)
+  unset(_cuobj_tk_lib_paths)
+  unset(_cuobj_tk_hdr_paths)
+endif()
+
 # ---- cuObject Client (CDN download) --------
 
 option(HIPOBJ_FETCH_CUOBJECT_CLIENT
   "Download NVIDIA cuObject client library" OFF)
 
-if(HIPOBJ_FETCH_CUOBJECT_CLIENT)
+if(HIPOBJ_FETCH_CUOBJECT_CLIENT
+    AND NOT HIPOBJ_CUOBJECT_FROM_TOOLKIT)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES
       "aarch64|arm64")
     set(_cuobj_platform "linux-sbsa")
@@ -141,7 +296,8 @@ endif()
 option(HIPOBJ_FIND_CUOBJECT_SERVER
   "Find system-installed cuObject server" OFF)
 
-if(HIPOBJ_FIND_CUOBJECT_SERVER)
+if(HIPOBJ_FIND_CUOBJECT_SERVER
+    AND NOT HIPOBJ_CUOBJECT_FROM_TOOLKIT)
   set(_cuobjsrv_search_paths
     ${CUOBJSERVER_ROOT}
     ${CUOBJSERVER_ROOT}/lib
