@@ -155,6 +155,14 @@ typedef struct {
   const char* nicHint;   /*!< NIC name hint, or NULL    */
 } hipObjConfig_t;
 
+/*! @brief RDMA token operation: server RDMA READ (client PUT) @ingroup io */
+#define HIPOBJ_RDMA_OP_PUT 0
+/*! @brief RDMA token operation: server RDMA WRITE (client GET) @ingroup io */
+#define HIPOBJ_RDMA_OP_GET 1
+
+/*! @brief x-amz-rdma-reply: server declined RDMA (HTTP fallback) @ingroup io */
+#define HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED 501
+
 /* -------------------------------------------------------
  *  CORE LIFECYCLE
  * ------------------------------------------------------- */
@@ -253,6 +261,46 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr,
 HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
                                    size_t size, off_t offset, hipObjOps_t* ops,
                                    void* ctx);
+
+/*!
+ * @brief Mint a hex-encoded RC RDMA token for a registered buffer
+ *
+ * The caller must release @p *outToken with hipObjPutRdmaToken().
+ * @p op is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved).
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjGetRdmaToken(const void* devPtr, size_t size,
+                                            int op, char** outToken);
+
+/*!
+ * @brief Release a token allocated by hipObjGetRdmaToken()
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char* token);
+
+/*!
+ * @brief Parse an x-amz-rdma-reply header value
+ *
+ * On success writes the HTTP-style reply code (200, 204, 206, 501)
+ * to @p httpCode.
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char* reply, size_t replyLen,
+                                              int* httpCode);
+
+/*!
+ * @brief Extract client NIC IPv4 from a minted RDMA token
+ *
+ * Writes a dotted-quad address into @p nicIp when the token GID
+ * carries an IPv4-mapped RoCEv2 suffix.  Returns hipObjSuccess with
+ * an empty string when no address is encoded.
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
+                                              size_t nicIpLen);
 
 /*!
  * @brief Return the library version as a string

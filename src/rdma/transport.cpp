@@ -9,6 +9,7 @@
 
 #include "ibv-wrapper.hpp"
 #include "rdma-topology.hpp"
+#include "vendor-ops.hpp"
 
 namespace hipObj {
 
@@ -141,12 +142,34 @@ int transitionQpToInit(RcConnection& conn) {
   return ibv.modify_qp(conn.qp, &attr, mask);
 }
 
+static void applyVendorQpAttrs(RcConnection& conn, struct ibv_qp_attr* attr) {
+  if (!conn.ctx || !attr) {
+    return;
+  }
+  struct ibv_device_attr devAttr;
+  std::memset(&devAttr, 0, sizeof(devAttr));
+  if (ibv.query_device(conn.ctx, &devAttr) != 0) {
+    return;
+  }
+#ifdef HIPOBJ_BNXT
+  if (isBnxtDevice(devAttr.vendor_id)) {
+    configureBnxtQp(attr);
+  }
+#endif
+#ifdef HIPOBJ_IONIC
+  if (isIonicDevice(devAttr.vendor_id)) {
+    configureIonicQp(attr);
+  }
+#endif
+}
+
 int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum, uint16_t destLid,
                       union ibv_gid destGid) {
   struct ibv_qp_attr attr;
   std::memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
   attr.path_mtu = IBV_MTU_4096;
+  applyVendorQpAttrs(conn, &attr);
   attr.dest_qp_num = destQpNum;
   attr.rq_psn = 0;
   attr.max_dest_rd_atomic = 1;
@@ -170,6 +193,7 @@ int transitionQpToRts(RcConnection& conn) {
   struct ibv_qp_attr attr;
   std::memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTS;
+  applyVendorQpAttrs(conn, &attr);
   attr.timeout = 14;
   attr.retry_cnt = 7;
   attr.rnr_retry = 7;

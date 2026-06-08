@@ -65,3 +65,46 @@ TEST(RdmaReply, DecodeNullReturnsFalse) {
   int status = 0;
   EXPECT_FALSE(hipObj::decodeRdmaReply(nullptr, 0, status));
 }
+
+TEST(RdmaReply, DecodeHttp200) {
+  int status = -1;
+  EXPECT_TRUE(hipObj::decodeRdmaReply("200", 3, status));
+  EXPECT_EQ(status, 0);
+}
+
+TEST(RdmaReply, DecodeHttp501NotSupported) {
+  int status = 0;
+  EXPECT_TRUE(hipObj::decodeRdmaReply("501", 3, status));
+  EXPECT_EQ(status, -2);
+}
+
+TEST(RdmaReply, ParseHttp206) {
+  int code = 0;
+  EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode("206", 3, code));
+  EXPECT_EQ(code, 206);
+}
+
+TEST(RdmaToken, FormatHeaderValue) {
+  const char* token = "aa";
+  void* buf = reinterpret_cast<void*>(0x7f0000001000ULL);
+  std::string header = hipObj::formatRdmaHeaderValue(token, buf, 4096);
+  EXPECT_EQ(header, "aa:00007f0000001000:0000000000001000");
+}
+
+TEST(RdmaToken, ParseClientNicFromGid) {
+  hipObj::RdmaToken token;
+  memset(&token, 0, sizeof(token));
+  token.transport = hipObj::TRANSPORT_RC;
+  token.gid[10] = 0xff;
+  token.gid[11] = 0xff;
+  token.gid[12] = 192;
+  token.gid[13] = 168;
+  token.gid[14] = 1;
+  token.gid[15] = 42;
+
+  std::string encoded = hipObj::encodeRdmaToken(token);
+  char nicIp[32];
+  EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded.c_str(), nicIp,
+                                                 sizeof(nicIp)));
+  EXPECT_STREQ(nicIp, "192.168.1.42");
+}

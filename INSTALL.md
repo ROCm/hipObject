@@ -46,7 +46,28 @@ sudo make install
 | `BUILD_TESTING`    | ON        | Build and register tests   |
 | `HIPOBJ_BUILD_DOCS`| OFF       | Build documentation        |
 | `HIPOBJ_DOCS_ONLY` | OFF       | Configure docs targets only|
+| `HIPOBJ_MINIO_CLIENT` | OFF    | Build minio-cpp RDMA bridge|
 | `ROCM_PATH`        | /opt/rocm | Path to ROCm install       |
+
+## MinIO C++ RDMA bridge (`HIPOBJ_MINIO_CLIENT`)
+
+Build the `hipobj_minio` library and `minio-getput-rdma` example:
+
+```bash
+cmake -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DHIPOBJ_MINIO_CLIENT=ON
+cmake --build build
+```
+
+Additional system packages (Ubuntu 24.04):
+
+```bash
+sudo apt install libssl-dev zlib1g-dev libcurl4-openssl-dev
+```
+
+See [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md)
+for lab validation against MinIO AIStor over RDMA.
 
 ## Building Documentation
 

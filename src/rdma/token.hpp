@@ -33,6 +33,16 @@ struct RdmaToken {
 
 std::string encodeRdmaToken(const RdmaToken& token);
 
+bool decodeRdmaTokenHex(const char* tokenHex, RdmaToken& out);
+
 bool decodeRdmaReply(const char* reply, size_t replyLen, int& status);
+
+bool parseRdmaReplyHttpCode(const char* reply, size_t replyLen, int& httpCode);
+
+bool parseClientNicFromTokenHex(const char* tokenHex, char* nicIp,
+                                size_t nicIpLen);
+
+std::string formatRdmaHeaderValue(const char* tokenHex, const void* buf,
+                                  size_t size);
 
 } // namespace hipObj

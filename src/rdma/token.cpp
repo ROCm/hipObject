@@ -8,6 +8,7 @@
 
 #include "token.hpp"
 
+#include <cstdio>
 #include <cstring>
 #include <sstream>
 
@@ -17,10 +18,36 @@ namespace {
 
 const char HEX[] = "0123456789abcdef";
 
+constexpr size_t kTokenBinaryLen = 1 + 4 + 16 + 4 + 8 + 8 + 1 + 2;
+constexpr size_t kTokenHexLen = kTokenBinaryLen * 2;
+
+int hexNibble(char c) {
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F')
+    return c - 'A' + 10;
+  return -1;
+}
+
+bool decodeHexBytePair(char hi, char lo, uint8_t& out) {
+  int h = hexNibble(hi);
+  int l = hexNibble(lo);
+  if (h < 0 || l < 0)
+    return false;
+  out = static_cast<uint8_t>((h << 4) | l);
+  return true;
+}
+
+bool isSuccessHttpCode(int code) {
+  return code == 200 || code == 204 || code == 206;
+}
+
 } // namespace
 
 std::string encodeRdmaToken(const RdmaToken& token) {
-  uint8_t buf[1 + 4 + 16 + 4 + 8 + 8 + 1 + 2];
+  uint8_t buf[kTokenBinaryLen];
   size_t off = 0;
 
   buf[off++] = token.transport;
@@ -45,20 +72,123 @@ std::string encodeRdmaToken(const RdmaToken& token) {
   return oss.str();
 }
 
-bool decodeRdmaReply(const char* reply, size_t replyLen, int& status) {
-  if (!reply || replyLen < 2)
+bool decodeRdmaTokenHex(const char* tokenHex, RdmaToken& out) {
+  if (!tokenHex)
     return false;
-  if (replyLen >= 2 && reply[0] == 'o' && reply[1] == 'k' &&
-      (replyLen == 2 || reply[2] == '\0' || reply[2] == '\n')) {
-    status = 0;
+  size_t hexLen = std::strlen(tokenHex);
+  if (hexLen != kTokenHexLen)
+    return false;
+
+  uint8_t buf[kTokenBinaryLen];
+  for (size_t i = 0; i < kTokenBinaryLen; ++i) {
+    if (!decodeHexBytePair(tokenHex[i * 2], tokenHex[i * 2 + 1], buf[i]))
+      return false;
+  }
+
+  size_t off = 0;
+  out.transport = buf[off++];
+  std::memcpy(&out.qpNum, buf + off, 4);
+  off += 4;
+  std::memcpy(out.gid, buf + off, 16);
+  off += 16;
+  std::memcpy(&out.rkey, buf + off, 4);
+  off += 4;
+  std::memcpy(&out.remoteAddr, buf + off, 8);
+  off += 8;
+  std::memcpy(&out.length, buf + off, 8);
+  off += 8;
+  out.portNum = buf[off++];
+  std::memcpy(&out.lid, buf + off, 2);
+  return true;
+}
+
+bool parseRdmaReplyHttpCode(const char* reply, size_t replyLen, int& httpCode) {
+  if (!reply || replyLen == 0)
+    return false;
+
+  size_t len = replyLen;
+  while (len > 0 && (reply[len - 1] == '\0' || reply[len - 1] == '\n' ||
+                     reply[len - 1] == '\r')) {
+    --len;
+  }
+  if (len == 0)
+    return false;
+
+  if (len >= 2 && reply[0] == 'o' && reply[1] == 'k') {
+    httpCode = 200;
     return true;
   }
-  if (replyLen >= 3 && reply[0] == 'e' && reply[1] == 'r' && reply[2] == 'r' &&
-      (replyLen == 3 || reply[3] == '\0' || reply[3] == '\n')) {
+  if (len >= 3 && reply[0] == 'e' && reply[1] == 'r' && reply[2] == 'r') {
+    httpCode = -1;
+    return true;
+  }
+
+  char tmp[16];
+  if (len >= sizeof(tmp))
+    return false;
+  std::memcpy(tmp, reply, len);
+  tmp[len] = '\0';
+
+  char* end = nullptr;
+  long code = std::strtol(tmp, &end, 10);
+  if (end == tmp || *end != '\0')
+    return false;
+  httpCode = static_cast<int>(code);
+  return true;
+}
+
+bool decodeRdmaReply(const char* reply, size_t replyLen, int& status) {
+  int httpCode = 0;
+  if (!parseRdmaReplyHttpCode(reply, replyLen, httpCode))
+    return false;
+  if (httpCode == 501) {
+    status = -2;
+    return true;
+  }
+  if (httpCode < 0) {
     status = -1;
     return true;
   }
-  return false;
+  if (isSuccessHttpCode(httpCode)) {
+    status = 0;
+    return true;
+  }
+  status = -1;
+  return true;
+}
+
+bool parseClientNicFromTokenHex(const char* tokenHex, char* nicIp,
+                                size_t nicIpLen) {
+  if (!nicIp || nicIpLen == 0)
+    return false;
+  nicIp[0] = '\0';
+  if (!tokenHex)
+    return false;
+
+  RdmaToken token;
+  if (!decodeRdmaTokenHex(tokenHex, token))
+    return false;
+
+  if (token.gid[10] != 0xff || token.gid[11] != 0xff)
+    return true;
+
+  int n = std::snprintf(nicIp, nicIpLen, "%u.%u.%u.%u",
+                        static_cast<unsigned>(token.gid[12]),
+                        static_cast<unsigned>(token.gid[13]),
+                        static_cast<unsigned>(token.gid[14]),
+                        static_cast<unsigned>(token.gid[15]));
+  if (n < 0 || static_cast<size_t>(n) >= nicIpLen)
+    return false;
+  return true;
+}
+
+std::string formatRdmaHeaderValue(const char* tokenHex, const void* buf,
+                                  size_t size) {
+  char header[512];
+  std::snprintf(header, sizeof(header), "%s:%016lx:%016lx", tokenHex,
+                reinterpret_cast<uintptr_t>(buf),
+                static_cast<unsigned long>(size));
+  return std::string(header);
 }
 
 } // namespace hipObj
