@@ -39,7 +39,7 @@ bool parseTokenHeader(const std::string& header, hipObj::RdmaToken& token,
   remoteAddr = std::strtoull(header.substr(c1 + 1, c2 - c1 - 1).c_str(),
                              nullptr, 16);
   size = static_cast<size_t>(
-      std::strtoull(header.substr(c2 + 1).c_str(), nullptr, 16));
+    std::strtoull(header.substr(c2 + 1).c_str(), nullptr, 16));
   if (remoteAddr != 0) {
     token.remoteAddr = remoteAddr;
   }
@@ -51,7 +51,7 @@ bool parseTokenHeader(const std::string& header, hipObj::RdmaToken& token,
 
 hipObj::RdmaToken buildServerToken(const hipObj::RcConnection& conn,
                                    struct ibv_mr* mr, size_t size) {
-  hipObj::RdmaToken token {};
+  hipObj::RdmaToken token{};
   token.transport = hipObj::TRANSPORT_RC;
   token.qpNum = conn.qp->qp_num;
   std::memcpy(token.gid, conn.localGid.raw, 16);
@@ -65,12 +65,12 @@ hipObj::RdmaToken buildServerToken(const hipObj::RcConnection& conn,
 
 int postRdmaWrite(hipObj::RcConnection& conn, struct ibv_mr* localMr,
                   size_t size, const hipObj::RdmaToken& clientToken) {
-  ibv_sge sge {};
+  ibv_sge sge{};
   sge.addr = reinterpret_cast<uint64_t>(localMr->addr);
   sge.length = static_cast<uint32_t>(size);
   sge.lkey = localMr->lkey;
 
-  ibv_send_wr wr {};
+  ibv_send_wr wr{};
   wr.wr_id = 1;
   wr.opcode = IBV_WR_RDMA_WRITE;
   wr.send_flags = IBV_SEND_SIGNALED;
@@ -88,12 +88,12 @@ int postRdmaWrite(hipObj::RcConnection& conn, struct ibv_mr* localMr,
 
 int postRdmaRead(hipObj::RcConnection& conn, struct ibv_mr* localMr,
                  size_t size, const hipObj::RdmaToken& clientToken) {
-  ibv_sge sge {};
+  ibv_sge sge{};
   sge.addr = reinterpret_cast<uint64_t>(localMr->addr);
   sge.length = static_cast<uint32_t>(size);
   sge.lkey = localMr->lkey;
 
-  ibv_send_wr wr {};
+  ibv_send_wr wr{};
   wr.wr_id = 2;
   wr.opcode = IBV_WR_RDMA_READ;
   wr.send_flags = IBV_SEND_SIGNALED;
@@ -112,7 +112,7 @@ int postRdmaRead(hipObj::RcConnection& conn, struct ibv_mr* localMr,
 } // namespace
 
 struct RdmaTestServer::Impl {
-  hipObj::RcConnection conn {};
+  hipObj::RcConnection conn{};
   struct ibv_mr* stagingMr = nullptr;
   void* stagingBuf = nullptr;
   size_t stagingSize = 64 * 1024 * 1024;
@@ -141,10 +141,11 @@ RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>()) {
     hipObj::closeRdmaDevice(impl_->conn);
     return;
   }
-  impl_->stagingMr = hipObj::ibv.reg_mr_host(
-      impl_->conn.pd, impl_->stagingBuf, impl_->stagingSize,
-      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-          IBV_ACCESS_REMOTE_WRITE);
+  impl_->stagingMr = hipObj::ibv.reg_mr_host(impl_->conn.pd, impl_->stagingBuf,
+                                             impl_->stagingSize,
+                                             IBV_ACCESS_LOCAL_WRITE |
+                                               IBV_ACCESS_REMOTE_READ |
+                                               IBV_ACCESS_REMOTE_WRITE);
   if (!impl_->stagingMr) {
     std::free(impl_->stagingBuf);
     impl_->stagingBuf = nullptr;
@@ -175,7 +176,7 @@ int RdmaTestServer::rdmaWriteToClient(const std::string& tokenHeader,
   if (!isReady()) {
     return -1;
   }
-  hipObj::RdmaToken clientToken {};
+  hipObj::RdmaToken clientToken{};
   uint64_t remoteAddr = 0;
   size_t xferSize = 0;
   if (!parseTokenHeader(tokenHeader, clientToken, remoteAddr, xferSize)) {
@@ -192,11 +193,12 @@ int RdmaTestServer::rdmaWriteToClient(const std::string& tokenHeader,
   if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
     return -1;
   }
-  if (postRdmaWrite(impl_->conn, impl_->stagingMr, xferSize, clientToken) != 0) {
+  if (postRdmaWrite(impl_->conn, impl_->stagingMr, xferSize, clientToken) !=
+      0) {
     return -1;
   }
-  hipObj::RdmaToken serverToken =
-      buildServerToken(impl_->conn, impl_->stagingMr, xferSize);
+  hipObj::RdmaToken serverToken = buildServerToken(impl_->conn,
+                                                   impl_->stagingMr, xferSize);
   replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken);
   if (impl_->conn.qp) {
     hipObj::ibv.destroy_qp(impl_->conn.qp);
@@ -213,7 +215,7 @@ int RdmaTestServer::rdmaReadFromClient(const std::string& tokenHeader,
   if (!isReady()) {
     return -1;
   }
-  hipObj::RdmaToken clientToken {};
+  hipObj::RdmaToken clientToken{};
   uint64_t remoteAddr = 0;
   size_t xferSize = 0;
   if (!parseTokenHeader(tokenHeader, clientToken, remoteAddr, xferSize)) {
@@ -237,8 +239,8 @@ int RdmaTestServer::rdmaReadFromClient(const std::string& tokenHeader,
   }
   data.assign(static_cast<uint8_t*>(impl_->stagingBuf),
               static_cast<uint8_t*>(impl_->stagingBuf) + xferSize);
-  hipObj::RdmaToken serverToken =
-      buildServerToken(impl_->conn, impl_->stagingMr, xferSize);
+  hipObj::RdmaToken serverToken = buildServerToken(impl_->conn,
+                                                   impl_->stagingMr, xferSize);
   replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken);
   if (impl_->conn.qp) {
     hipObj::ibv.destroy_qp(impl_->conn.qp);

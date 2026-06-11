@@ -27,8 +27,7 @@ public:
                         std::string& replyHeader);
 
   int rdmaReadFromClient(const std::string& tokenHeader, size_t size,
-                         std::vector<uint8_t>& data,
-                         std::string& replyHeader);
+                         std::vector<uint8_t>& data, std::string& replyHeader);
 
 private:
   struct Impl;

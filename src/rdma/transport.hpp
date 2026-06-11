@@ -11,6 +11,8 @@
 
 namespace hipObj {
 
+struct RdmaToken;
+
 struct RcConnection {
   struct ibv_context* ctx = nullptr;
   struct ibv_pd* pd = nullptr;

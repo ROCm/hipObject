@@ -91,7 +91,7 @@ TEST(RdmaReply, ParseHttp200WithPeerToken) {
   std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
   int code = 0;
   EXPECT_TRUE(
-      hipObj::parseRdmaReplyHttpCode(reply.c_str(), reply.size(), code));
+    hipObj::parseRdmaReplyHttpCode(reply.c_str(), reply.size(), code));
   EXPECT_EQ(code, 200);
 }
 
@@ -111,7 +111,7 @@ TEST(RdmaReply, ParsePeerTokenFromReply) {
   hipObj::RdmaToken parsed;
   int code = 0;
   EXPECT_TRUE(
-      hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
+    hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
   EXPECT_EQ(code, 200);
   EXPECT_EQ(parsed.qpNum, 99u);
   EXPECT_EQ(parsed.transport, hipObj::TRANSPORT_RC);
@@ -120,9 +120,10 @@ TEST(RdmaReply, ParsePeerTokenFromReply) {
 TEST(RdmaReply, LegacyOkHasNoPeerToken) {
   hipObj::RdmaToken parsed;
   int code = 0;
-  EXPECT_FALSE(
-      hipObj::parsePeerTokenFromReply("ok", 2, parsed, code));
+  EXPECT_FALSE(hipObj::parsePeerTokenFromReply("ok", 2, parsed, code));
 }
+
+TEST(RdmaToken, ParseClientNicFromGid) {
   hipObj::RdmaToken token;
   memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_RC;
@@ -135,7 +136,7 @@ TEST(RdmaReply, LegacyOkHasNoPeerToken) {
 
   std::string encoded = hipObj::encodeRdmaToken(token);
   char nicIp[32];
-  EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded.c_str(), nicIp,
-                                                 sizeof(nicIp)));
+  EXPECT_TRUE(
+    hipObj::parseClientNicFromTokenHex(encoded.c_str(), nicIp, sizeof(nicIp)));
   EXPECT_STREQ(nicIp, "192.168.1.42");
 }

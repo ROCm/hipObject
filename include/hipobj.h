@@ -287,8 +287,8 @@ HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char* token);
  *
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char* reply, size_t replyLen,
-                                              int* httpCode);
+HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char* reply,
+                                              size_t replyLen, int* httpCode);
 
 /*!
  * @brief Extract client NIC IPv4 from a minted RDMA token

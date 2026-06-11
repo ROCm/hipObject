@@ -20,7 +20,8 @@ struct HeaderState {
   hipObjS3CurlCtx* cfg;
 };
 
-size_t headerCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
+size_t headerCallback(char* buffer, size_t size, size_t nitems,
+                      void* userdata) {
   size_t total = size * nitems;
   auto* state = static_cast<HeaderState*>(userdata);
   std::string line(buffer, total);
@@ -79,7 +80,7 @@ int hipObjS3CurlSendRequest(void* ctx, const char* token, size_t tokenLen) {
   headers = curl_slist_append(headers, headerToken.c_str());
   headers = curl_slist_append(headers, "Content-Length: 0");
 
-  HeaderState state {cfg};
+  HeaderState state{cfg};
   cfg->lastReply[0] = '\0';
 
   curl_easy_setopt(curl, CURLOPT_URL, buildUrl(cfg).c_str());

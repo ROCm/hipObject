@@ -33,7 +33,9 @@ public:
 
   void setHandler(HttpHandler handler);
   int runOnce(int timeoutMs);
-  int fd() const { return listen_fd_; }
+  int fd() const {
+    return listen_fd_;
+  }
 
 private:
   int listen_fd_ = -1;

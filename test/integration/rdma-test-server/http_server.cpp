@@ -5,14 +5,14 @@
 
 #include "http_server.hpp"
 
+#include <cerrno>
+#include <cstring>
+#include <sstream>
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include <cerrno>
-#include <cstring>
-#include <sstream>
 
 namespace hipobj::test {
 
@@ -48,7 +48,7 @@ HttpServer::HttpServer(int port) {
   }
   int opt = 1;
   setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-  sockaddr_in addr {};
+  sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = INADDR_ANY;
   addr.sin_port = htons(static_cast<uint16_t>(port));
@@ -66,7 +66,9 @@ HttpServer::~HttpServer() {
   }
 }
 
-void HttpServer::setHandler(HttpHandler handler) { handler_ = std::move(handler); }
+void HttpServer::setHandler(HttpHandler handler) {
+  handler_ = std::move(handler);
+}
 
 int HttpServer::runOnce(int timeoutMs) {
   if (listen_fd_ < 0 || !handler_) {
@@ -75,7 +77,7 @@ int HttpServer::runOnce(int timeoutMs) {
   fd_set fds;
   FD_ZERO(&fds);
   FD_SET(listen_fd_, &fds);
-  timeval tv {};
+  timeval tv{};
   tv.tv_sec = timeoutMs / 1000;
   tv.tv_usec = (timeoutMs % 1000) * 1000;
   int ready = select(listen_fd_ + 1, &fds, nullptr, nullptr, &tv);

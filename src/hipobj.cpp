@@ -49,8 +49,8 @@ static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
   token.qpNum = g_conn.qp->qp_num;
   std::memcpy(token.gid, g_conn.localGid.raw, 16);
   token.rkey = mr->rkey;
-  token.remoteAddr =
-      reinterpret_cast<uint64_t>(mr->addr) + static_cast<uint64_t>(offset);
+  token.remoteAddr = reinterpret_cast<uint64_t>(mr->addr) +
+                     static_cast<uint64_t>(offset);
   token.length = static_cast<uint64_t>(size);
   token.portNum = g_conn.portNum;
   token.lid = 0;
@@ -71,7 +71,8 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen) {
 }
 
 static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
-                                     off_t offset, hipObjOps_t* ops, void* ctx) {
+                                     off_t offset, hipObjOps_t* ops,
+                                     void* ctx) {
   RdmaToken token;
   if (!buildRdmaToken(devPtr, size, offset, token)) {
     return {hipObjRdmaError, 0};

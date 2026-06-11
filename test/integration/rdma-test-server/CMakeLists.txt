@@ -35,7 +35,11 @@ target_include_directories(hipobj-rdma-test-server PRIVATE
   ${CMAKE_SOURCE_DIR}/src/s3
   ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(hipobj-rdma-test-server PRIVATE dl numa hip::host)
+target_link_libraries(hipobj-rdma-test-server PRIVATE
+  dl
+  numa
+  hip::host
+  hsa-runtime64::hsa-runtime64)
 
 if(HIPOBJ_BNXT)
   target_compile_definitions(hipobj-rdma-test-server PRIVATE HIPOBJ_BNXT)

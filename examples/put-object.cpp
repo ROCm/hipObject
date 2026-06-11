@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
   hipObjOps_t ops;
   void* opsCtx = nullptr;
 #if defined(HIPOBJ_HAVE_CURL)
-  hipObjS3CurlCtx curlCtx {};
+  hipObjS3CurlCtx curlCtx{};
   if (live) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
     curlCtx.endpoint = endpoint;
