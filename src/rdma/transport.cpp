@@ -5,10 +5,14 @@
 
 #include "transport.hpp"
 
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 #include "ibv-wrapper.hpp"
 #include "rdma-topology.hpp"
+#include "token.hpp"
+#include "vendor-ops.hpp"
 
 namespace hipObj {
 
@@ -49,7 +53,10 @@ int openRdmaDevice(int nicIndex, RcConnection& conn) {
     conn.ctx = nullptr;
     return -1;
   }
-  conn.gidIndex = 0;
+  conn.gidIndex = SelectBestGid(conn.ctx, conn.portNum);
+  if (conn.gidIndex < 0) {
+    conn.gidIndex = 0;
+  }
   if (ibv.query_gid(conn.ctx, conn.portNum, conn.gidIndex, &conn.localGid) !=
       0) {
     ibv.dealloc_pd(conn.pd);
@@ -141,12 +148,34 @@ int transitionQpToInit(RcConnection& conn) {
   return ibv.modify_qp(conn.qp, &attr, mask);
 }
 
+static void applyVendorQpAttrs(RcConnection& conn, struct ibv_qp_attr* attr) {
+  if (!conn.ctx || !attr) {
+    return;
+  }
+  struct ibv_device_attr devAttr;
+  std::memset(&devAttr, 0, sizeof(devAttr));
+  if (ibv.query_device(conn.ctx, &devAttr) != 0) {
+    return;
+  }
+#ifdef HIPOBJ_BNXT
+  if (isBnxtDevice(devAttr.vendor_id)) {
+    configureBnxtQp(attr);
+  }
+#endif
+#ifdef HIPOBJ_IONIC
+  if (isIonicDevice(devAttr.vendor_id)) {
+    configureIonicQp(attr);
+  }
+#endif
+}
+
 int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum, uint16_t destLid,
                       union ibv_gid destGid) {
   struct ibv_qp_attr attr;
   std::memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
   attr.path_mtu = IBV_MTU_4096;
+  applyVendorQpAttrs(conn, &attr);
   attr.dest_qp_num = destQpNum;
   attr.rq_psn = 0;
   attr.max_dest_rd_atomic = 1;
@@ -170,6 +199,7 @@ int transitionQpToRts(RcConnection& conn) {
   struct ibv_qp_attr attr;
   std::memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTS;
+  applyVendorQpAttrs(conn, &attr);
   attr.timeout = 14;
   attr.retry_cnt = 7;
   attr.rnr_retry = 7;
@@ -178,6 +208,45 @@ int transitionQpToRts(RcConnection& conn) {
   int mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
              IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
   return ibv.modify_qp(conn.qp, &attr, mask);
+}
+
+int connectRcPeer(RcConnection& conn, const RdmaToken& peerToken) {
+  if (!conn.qp || peerToken.transport != TRANSPORT_RC) {
+    return -1;
+  }
+  union ibv_gid peerGid;
+  std::memcpy(peerGid.raw, peerToken.gid, 16);
+  int ret = transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, peerGid);
+  if (ret != 0) {
+    return ret;
+  }
+  return transitionQpToRts(conn);
+}
+
+int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs) {
+  if (!conn.cq) {
+    return -1;
+  }
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeoutMs);
+  while (std::chrono::steady_clock::now() < deadline) {
+    struct ibv_wc wc;
+    int n = ibv.poll_cq(conn.cq, 1, &wc);
+    if (n < 0) {
+      return -1;
+    }
+    if (n == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      continue;
+    }
+    if (wc.status != IBV_WC_SUCCESS) {
+      return -1;
+    }
+    if (expectedOpcode < 0 || wc.opcode == expectedOpcode) {
+      return 0;
+    }
+  }
+  return 0;
 }
 
 } // namespace hipObj

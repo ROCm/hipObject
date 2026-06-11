@@ -156,6 +156,12 @@ if(HIPOBJ_INSTALL_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
+option(HIPOBJ_MINIO_CLIENT
+  "Build minio-cpp RDMA bridge (integrations/minio-cpp)" OFF)
+if(HIPOBJ_MINIO_CLIENT)
+  add_subdirectory(integrations/minio-cpp)
+endif()
+
 include(HIPOBJInstall)
 
 endif() # NOT HIPOBJ_DOCS_ONLY

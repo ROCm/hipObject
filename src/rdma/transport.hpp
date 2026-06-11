@@ -11,6 +11,8 @@
 
 namespace hipObj {
 
+struct RdmaToken;
+
 struct RcConnection {
   struct ibv_context* ctx = nullptr;
   struct ibv_pd* pd = nullptr;
@@ -29,5 +31,7 @@ int transitionQpToInit(RcConnection& conn);
 int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum, uint16_t destLid,
                       union ibv_gid destGid);
 int transitionQpToRts(RcConnection& conn);
+int connectRcPeer(RcConnection& conn, const RdmaToken& peerToken);
+int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs);
 
 } // namespace hipObj

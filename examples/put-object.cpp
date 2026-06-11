@@ -5,6 +5,10 @@
  *
  * Example: upload GPU VRAM to an S3 object
  *          directly via RDMA.
+ *
+ * Usage:
+ *   put-object <size-bytes>              # stub callbacks (no S3)
+ *   put-object <size-bytes> --live URL   # libcurl + test server
  */
 
 #include <cstdio>
@@ -14,6 +18,10 @@
 #include <hip/hip_runtime.h>
 
 #include "hipobj.h"
+
+#if defined(HIPOBJ_HAVE_CURL)
+#include "s3_curl_ops.h"
+#endif
 
 static int stubSendRequest(void* ctx, const char* token, size_t tokenLen) {
   (void)ctx;
@@ -38,7 +46,9 @@ static int stubRecvReply(void* ctx, char* reply, size_t* replyLen) {
 
 int main(int argc, char* argv[]) {
   if (argc < 2) {
-    fprintf(stderr, "Usage: %s <object-size-bytes>\n", argv[0]);
+    fprintf(stderr,
+            "Usage: %s <object-size-bytes> [--live URL [bucket] [object]]\n",
+            argv[0]);
     return 1;
   }
 
@@ -48,9 +58,24 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  bool live = false;
+  const char* endpoint = "http://127.0.0.1:9000";
+  const char* bucket = "test";
+  const char* object = "object";
+  if (argc >= 4 && std::strcmp(argv[2], "--live") == 0) {
+    live = true;
+    endpoint = argv[3];
+    if (argc >= 5) {
+      bucket = argv[4];
+    }
+    if (argc >= 6) {
+      object = argv[5];
+    }
+  }
+
   hipObjConfig_t cfg;
   memset(&cfg, 0, sizeof(cfg));
-  cfg.endpoint = "https://s3.example.com";
+  cfg.endpoint = endpoint;
   cfg.region = "us-east-1";
   cfg.gpuDevice = 0;
 
@@ -79,16 +104,41 @@ int main(int argc, char* argv[]) {
   }
 
   hipObjOps_t ops;
-  ops.sendRequest = stubSendRequest;
-  ops.recvReply = stubRecvReply;
+  void* opsCtx = nullptr;
+#if defined(HIPOBJ_HAVE_CURL)
+  hipObjS3CurlCtx curlCtx{};
+  if (live) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    curlCtx.endpoint = endpoint;
+    curlCtx.bucket = bucket;
+    curlCtx.object = object;
+    curlCtx.objectSize = objSize;
+    curlCtx.devPtr = devPtr;
+    curlCtx.isPut = 1;
+    ops.sendRequest = hipObjS3CurlSendRequest;
+    ops.recvReply = hipObjS3CurlRecvReply;
+    opsCtx = &curlCtx;
+  } else
+#endif
+  {
+    (void)live;
+    ops.sendRequest = stubSendRequest;
+    ops.recvReply = stubRecvReply;
+  }
 
-  err = hipObjPut(nullptr, devPtr, objSize, 0, &ops, nullptr);
+  err = hipObjPut(nullptr, devPtr, objSize, 0, &ops, opsCtx);
   if (err.opError != hipObjSuccess) {
     fprintf(stderr, "hipObjPut failed: %s\n",
             hipObjGetErrorString(err.opError));
   } else {
     fprintf(stdout, "hipObjPut succeeded for %zu bytes\n", objSize);
   }
+
+#if defined(HIPOBJ_HAVE_CURL)
+  if (live) {
+    curl_global_cleanup();
+  }
+#endif
 
   hipObjBufDeregister(devPtr);
   (void)hipFree(devPtr);

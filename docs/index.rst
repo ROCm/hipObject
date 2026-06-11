@@ -40,6 +40,7 @@ Operation     Description
    :caption: User Guide
 
    building
+   interop
 
 .. toctree::
    :maxdepth: 2

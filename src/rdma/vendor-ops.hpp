@@ -43,6 +43,9 @@ inline Provider provider_from_string(const std::string& s) {
   return Provider::UNKNOWN;
 }
 
+bool isBnxtDevice(uint32_t vendorId);
+bool isIonicDevice(uint32_t vendorId);
+
 int configureBnxtQp(struct ibv_qp_attr* attr);
 int configureIonicQp(struct ibv_qp_attr* attr);
 

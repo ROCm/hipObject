@@ -22,6 +22,7 @@ public:
   int deregisterBuffer(void* devPtr);
   void deregisterAll();
   struct ibv_mr* lookupMr(void* devPtr);
+  size_t lookupSize(void* devPtr) const;
   bool isRegistered(void* devPtr) const;
 
 private:
