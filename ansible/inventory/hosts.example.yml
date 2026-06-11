@@ -1,0 +1,29 @@
+---
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# Copy to inventory/hosts.yml and edit. Use ansible-vault or -e @secrets.yml
+# for keys; do not commit real credentials.
+
+all:
+  vars:
+    hipobj_minio_access_key: minioadmin
+    hipobj_minio_secret_key: changeme-strong-password
+    hipobj_s3_endpoint_host: minio-server.example.com
+    hipobj_mc_endpoint_url: "https://{{ hipobj_s3_endpoint_host }}"
+
+  children:
+    minio_rdma_servers:
+      hosts:
+        minio-rdma-01:
+          ansible_host: 10.0.0.1
+          ansible_user: ubuntu
+          become: true
+
+    hipobj_clients:
+      hosts:
+        hipobj-client-01:
+          ansible_host: 10.0.0.2
+          ansible_user: ubuntu
+          become: true

@@ -1,0 +1,83 @@
+---
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+- name: Prepare AMD client and build hipObject MinIO RDMA client
+  hosts: hipobj_clients
+  gather_facts: true
+  become: true
+  vars:
+    rocm_setup_user: "{{ hipobj_rocm_setup_user }}"
+
+  roles:
+    - role: sbates130272.batesste.rdma_setup
+    - role: sbates130272.batesste.rocm_setup
+
+  tasks:
+    - name: Install hipObject and minio-cpp build dependencies (Ubuntu)
+      ansible.builtin.apt:
+        name:
+          - git
+          - cmake
+          - ninja-build
+          - pkg-config
+          - libssl-dev
+          - zlib1g-dev
+          - libcurl4-openssl-dev
+        state: present
+        update_cache: true
+
+    - name: Ensure hipObject parent directory exists
+      ansible.builtin.file:
+        path: "{{ hipobj_source_dir | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Clone hipObject
+      ansible.builtin.git:
+        repo: "{{ hipobj_repo_url }}"
+        dest: "{{ hipobj_source_dir }}"
+        version: "{{ hipobj_repo_version }}"
+        accept_newhostkey: true
+
+    - name: Configure CMake with HIPOBJ_MINIO_CLIENT
+      ansible.builtin.command:
+        argv:
+          - cmake
+          - -S
+          - "{{ hipobj_source_dir }}"
+          - -B
+          - "{{ hipobj_build_dir }}"
+          - -DCMAKE_BUILD_TYPE={{ hipobj_cmake_build_type }}
+          - -DHIPOBJ_MINIO_CLIENT=ON
+          - -DHIPOBJ_BNXT={{ hipobj_cmake_hipobj_bnxt }}
+          - -DHIPOBJ_IONIC={{ hipobj_cmake_hipobj_ionic }}
+      args:
+        creates: "{{ hipobj_build_dir }}/CMakeCache.txt"
+      environment:
+        PATH: "/opt/rocm/bin:{{ ansible_env.PATH | default('') }}"
+
+    - name: Build hipObject including minio-getput-rdma
+      ansible.builtin.command:
+        argv:
+          - cmake
+          - --build
+          - "{{ hipobj_build_dir }}"
+          - --parallel
+          - "{{ ansible_processor_vcpus | default(4) | string }}"
+      environment:
+        PATH: "/opt/rocm/bin:{{ ansible_env.PATH | default('') }}"
+      changed_when: true
+
+    # Optional install; cmake --install output varies by generator — idempotency
+    # is handled by cmake itself when re-run.
+    - name: Install hipObject into prefix (optional)  # noqa: no-changed-when
+      ansible.builtin.command:
+        argv:
+          - cmake
+          - --install
+          - "{{ hipobj_build_dir }}"
+          - --prefix
+          - "{{ hipobj_install_prefix }}"
+      when: hipobj_do_install | bool

@@ -1,0 +1,35 @@
+---
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+hipobj_repo_url: https://github.com/ROCm/hipObject.git
+hipobj_repo_version: main
+hipobj_source_dir: "{{ ansible_env.HOME }}/Projects/hipobject"
+hipobj_build_dir: "{{ hipobj_source_dir }}/build-ansible"
+hipobj_install_prefix: /opt/hipobject
+hipobj_do_install: false
+
+hipobj_cmake_build_type: Release
+hipobj_cmake_hipobj_bnxt: "ON"
+hipobj_cmake_hipobj_ionic: "OFF"
+
+# Smoke test object size in bytes (see integrations/minio-cpp/TESTING.md).
+hipobj_test_size: "10485760"
+
+# sbates130272.batesste.rocm_setup: account that receives ROCm groups/config.
+hipobj_rocm_setup_user: "{{ ansible_user | default('root') }}"
+
+# Less disruptive client provisioning (override in inventory if needed).
+rocm_setup_skip_system_upgrade: true
+rocm_setup_run_checks: false
+rocm_setup_install_metrics_exporter: false
+
+rdma_setup_motd: false
+rdma_setup_install_rdma_exporter: false
+
+# MinIO Client binary (dl.min.io), not the Ubuntu "mc" APT package (Midnight
+# Commander). Override URL for mirrors or pin with hipobj_minio_mc_checksum.
+hipobj_minio_mc_download_url: https://dl.min.io/client/mc/release/linux-amd64/mc
+hipobj_minio_mc_install_path: /usr/local/bin/mc
+hipobj_minio_mc_checksum: ""

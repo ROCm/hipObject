@@ -1,0 +1,61 @@
+---
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+- name: Smoke test S3 over RDMA with minio-getput-rdma (GPU)
+  hosts: hipobj_clients
+  gather_facts: true
+
+  vars:
+    hipobj_mc_alias: hipobjlab
+
+  tasks:
+    - name: Install MinIO Client (mc) from official build
+      ansible.builtin.get_url:
+        url: "{{ hipobj_minio_mc_download_url }}"
+        dest: "{{ hipobj_minio_mc_install_path }}"
+        mode: "0755"
+        checksum: "{{ hipobj_minio_mc_checksum | default(omit, true) }}"
+      become: true
+
+    - name: Configure mc alias
+      ansible.builtin.command:
+        argv:
+          - "{{ hipobj_minio_mc_install_path }}"
+          - alias
+          - set
+          - "{{ hipobj_mc_alias }}"
+          - "{{ hipobj_mc_endpoint_url }}"
+          - "{{ hipobj_minio_access_key }}"
+          - "{{ hipobj_minio_secret_key }}"
+      changed_when: true
+
+    - name: Create hipobj-test bucket if missing
+      ansible.builtin.shell: |
+        set -e
+        "{{ hipobj_minio_mc_install_path }}" mb "{{ hipobj_mc_alias }}/hipobj-test" 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Run minio-getput-rdma with GPU buffer
+      ansible.builtin.command:
+        argv:
+          - "{{ hipobj_build_dir }}/integrations/minio-cpp/minio-getput-rdma"
+          - "{{ hipobj_s3_endpoint_host }}"
+          - "{{ hipobj_minio_access_key }}"
+          - "{{ hipobj_minio_secret_key }}"
+          - "{{ hipobj_test_size }}"
+          - gpu
+      environment:
+        PATH: "/opt/rocm/bin:{{ ansible_env.PATH | default('') }}"
+        LD_LIBRARY_PATH: "/opt/rocm/lib:{{ ansible_env.LD_LIBRARY_PATH | default('') }}"
+      register: hipobj_smoke
+      changed_when: false
+
+    - name: Assert GPU RDMA path reported data integrity
+      ansible.builtin.assert:
+        that:
+          - hipobj_smoke.stdout is search('Data integrity check passed')
+        fail_msg: "{{ hipobj_smoke.stdout }}{{ hipobj_smoke.stderr }}"

@@ -1,0 +1,18 @@
+---
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# MinIO AIStor RDMA server package URL (see STUFF.md in repository root).
+hipobj_minio_rdma_deb_url: >-
+  https://dl.minio.io/aistor/minio/edge/linux-amd64/minio.rdma_20260606035505.0.0_amd64.deb
+
+# Optional sha256 for get_url checksum; leave empty to skip verification.
+hipobj_minio_rdma_deb_checksum: ""
+
+# When true, install a minimal RDMA userspace stack before the .deb.
+hipobj_server_install_rdma_stack: true
+
+# After you confirm unit names from the package (dpkg -L), enable management.
+hipobj_minio_manage_service: false
+hipobj_minio_systemd_unit: minio
