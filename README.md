@@ -107,6 +107,17 @@ than DC (Dynamic Connection), since DC is exclusive to
 Mellanox/NVIDIA ConnectX hardware. A server-side adapter
 bridges RC clients to cuObject's DC-based server library.
 
+See [docs/interop.rst](docs/interop.rst) for the cuObject
+v1.2.0 compatibility matrix and testing guide.
+
+## Testing
+
+- **Unit tests**: `ctest -R test-rdma-token` (no hardware)
+- **RC test server**: `hipobj-rdma-test-server` (see interop doc)
+- **Live examples**: `get-object --live http://host:9000` with libcurl
+- **MinIO bridge**: `-DHIPOBJ_MINIO_CLIENT=ON` (see
+  `integrations/minio-cpp/TESTING.md`)
+
 ## Documentation
 
 Full documentation lives in the [`docs/`](docs/) directory

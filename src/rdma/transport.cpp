@@ -5,10 +5,13 @@
 
 #include "transport.hpp"
 
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 #include "ibv-wrapper.hpp"
 #include "rdma-topology.hpp"
+#include "token.hpp"
 #include "vendor-ops.hpp"
 
 namespace hipObj {
@@ -50,7 +53,10 @@ int openRdmaDevice(int nicIndex, RcConnection& conn) {
     conn.ctx = nullptr;
     return -1;
   }
-  conn.gidIndex = 0;
+  conn.gidIndex = SelectBestGid(conn.ctx, conn.portNum);
+  if (conn.gidIndex < 0) {
+    conn.gidIndex = 0;
+  }
   if (ibv.query_gid(conn.ctx, conn.portNum, conn.gidIndex, &conn.localGid) !=
       0) {
     ibv.dealloc_pd(conn.pd);
@@ -202,6 +208,45 @@ int transitionQpToRts(RcConnection& conn) {
   int mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
              IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
   return ibv.modify_qp(conn.qp, &attr, mask);
+}
+
+int connectRcPeer(RcConnection& conn, const RdmaToken& peerToken) {
+  if (!conn.qp || peerToken.transport != TRANSPORT_RC) {
+    return -1;
+  }
+  union ibv_gid peerGid;
+  std::memcpy(peerGid.raw, peerToken.gid, 16);
+  int ret = transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, peerGid);
+  if (ret != 0) {
+    return ret;
+  }
+  return transitionQpToRts(conn);
+}
+
+int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs) {
+  if (!conn.cq) {
+    return -1;
+  }
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeoutMs);
+  while (std::chrono::steady_clock::now() < deadline) {
+    struct ibv_wc wc;
+    int n = ibv.poll_cq(conn.cq, 1, &wc);
+    if (n < 0) {
+      return -1;
+    }
+    if (n == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      continue;
+    }
+    if (wc.status != IBV_WC_SUCCESS) {
+      return -1;
+    }
+    if (expectedOpcode < 0 || wc.opcode == expectedOpcode) {
+      return 0;
+    }
+  }
+  return 0;
 }
 
 } // namespace hipObj

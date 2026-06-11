@@ -45,4 +45,9 @@ bool parseClientNicFromTokenHex(const char* tokenHex, char* nicIp,
 std::string formatRdmaHeaderValue(const char* tokenHex, const void* buf,
                                   size_t size);
 
+bool parsePeerTokenFromReply(const char* reply, size_t replyLen,
+                             RdmaToken& peerToken, int& httpCode);
+
+std::string encodeReplyWithPeerToken(int httpCode, const RdmaToken& peerToken);
+
 } // namespace hipObj

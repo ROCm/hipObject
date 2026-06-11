@@ -35,20 +35,62 @@ static hipObjError_t handleException() {
   }
 }
 
-static bool buildRdmaToken(const void* devPtr, size_t size, RdmaToken& token) {
+static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
+                           RdmaToken& token) {
   struct ibv_mr* mr = g_bufferMap.lookupMr(const_cast<void*>(devPtr));
   if (!mr || !g_conn.qp) {
+    return false;
+  }
+  size_t regSize = g_bufferMap.lookupSize(const_cast<void*>(devPtr));
+  if (offset < 0 || static_cast<size_t>(offset) + size > regSize) {
     return false;
   }
   token.transport = TRANSPORT_RC;
   token.qpNum = g_conn.qp->qp_num;
   std::memcpy(token.gid, g_conn.localGid.raw, 16);
   token.rkey = mr->rkey;
-  token.remoteAddr = reinterpret_cast<uint64_t>(mr->addr);
+  token.remoteAddr =
+      reinterpret_cast<uint64_t>(mr->addr) + static_cast<uint64_t>(offset);
   token.length = static_cast<uint64_t>(size);
   token.portNum = g_conn.portNum;
   token.lid = 0;
   return true;
+}
+
+static int finishTransferAfterReply(const char* reply, size_t replyLen) {
+  RdmaToken peerToken;
+  int httpCode = 0;
+  if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
+    if (connectRcPeer(g_conn, peerToken) != 0) {
+      return -1;
+    }
+  }
+  (void)pollCompletion(g_conn, -1, 5000);
+  hipError_t err = hipDeviceSynchronize();
+  return (err == hipSuccess) ? 0 : -1;
+}
+
+static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
+                                     off_t offset, hipObjOps_t* ops, void* ctx) {
+  RdmaToken token;
+  if (!buildRdmaToken(devPtr, size, offset, token)) {
+    return {hipObjRdmaError, 0};
+  }
+  std::string encoded = encodeRdmaToken(token);
+  if (injectRdmaToken(ops, ctx, encoded) != 0) {
+    return {hipObjS3Error, 0};
+  }
+  char replyBuf[512];
+  size_t replyLen = sizeof(replyBuf);
+  int rdmaStatus = 0;
+  if (receiveRdmaReplyRaw(ops, ctx, replyBuf, &replyLen, rdmaStatus) != 0 ||
+      rdmaStatus != 0) {
+    return {hipObjS3Error, 0};
+  }
+  if (finishTransferAfterReply(replyBuf, replyLen) != 0) {
+    return {hipObjRdmaError, 0};
+  }
+  return HIPOBJ_SUCCESS;
 }
 
 } // namespace hipObj
@@ -201,6 +243,7 @@ hipObjError_t hipObjBufDeregister(void* devPtr) try {
 
 hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr, size_t size,
                         off_t offset, hipObjOps_t* ops, void* ctx) try {
+  (void)handle;
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
     return {hipObjNotInitialized, 0};
@@ -211,27 +254,14 @@ hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr, size_t size,
   if (!hipObj::g_bufferMap.lookupMr(devPtr)) {
     return {hipObjBufNotRegistered, 0};
   }
-  hipObj::RdmaToken token;
-  if (!hipObj::buildRdmaToken(devPtr, size, token)) {
-    return {hipObjRdmaError, 0};
-  }
-  std::string encoded = hipObj::encodeRdmaToken(token);
-  int ret = hipObj::injectRdmaToken(ops, ctx, encoded);
-  if (ret != 0) {
-    return {hipObjS3Error, 0};
-  }
-  int rdmaStatus = 0;
-  ret = hipObj::receiveRdmaReply(ops, ctx, rdmaStatus);
-  if (ret != 0 || rdmaStatus != 0) {
-    return {hipObjS3Error, 0};
-  }
-  return HIPOBJ_SUCCESS;
+  return hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
 } catch (...) {
   return hipObj::handleException();
 }
 
 hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr, size_t size,
                         off_t offset, hipObjOps_t* ops, void* ctx) try {
+  (void)handle;
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
     return {hipObjNotInitialized, 0};
@@ -242,21 +272,7 @@ hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr, size_t size,
   if (!hipObj::g_bufferMap.lookupMr(const_cast<void*>(devPtr))) {
     return {hipObjBufNotRegistered, 0};
   }
-  hipObj::RdmaToken token;
-  if (!hipObj::buildRdmaToken(devPtr, size, token)) {
-    return {hipObjRdmaError, 0};
-  }
-  std::string encoded = hipObj::encodeRdmaToken(token);
-  int ret = hipObj::injectRdmaToken(ops, ctx, encoded);
-  if (ret != 0) {
-    return {hipObjS3Error, 0};
-  }
-  int rdmaStatus = 0;
-  ret = hipObj::receiveRdmaReply(ops, ctx, rdmaStatus);
-  if (ret != 0 || rdmaStatus != 0) {
-    return {hipObjS3Error, 0};
-  }
-  return HIPOBJ_SUCCESS;
+  return hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
 } catch (...) {
   return hipObj::handleException();
 }
@@ -277,7 +293,7 @@ hipObjError_t hipObjGetRdmaToken(const void* devPtr, size_t size, int op,
     return {hipObjBufNotRegistered, 0};
   }
   hipObj::RdmaToken token;
-  if (!hipObj::buildRdmaToken(devPtr, size, token)) {
+  if (!hipObj::buildRdmaToken(devPtr, size, 0, token)) {
     return {hipObjRdmaError, 0};
   }
   std::string encoded = hipObj::encodeRdmaToken(token);

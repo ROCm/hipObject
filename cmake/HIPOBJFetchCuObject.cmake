@@ -35,7 +35,7 @@
 
 include(FetchContent)
 
-set(CUOBJECT_CLIENT_VERSION "1.1.0.44"
+set(CUOBJECT_CLIENT_VERSION "1.2.0.59"
   CACHE STRING
   "cuObject client library version to fetch")
 
@@ -52,11 +52,11 @@ if(HIPOBJ_FETCH_CUOBJECT_CLIENT)
       "aarch64|arm64")
     set(_cuobj_platform "linux-sbsa")
     set(_cuobj_sha256
-      "bab66b1e6a717c088f1e9213b833a8be7bf53a4d95a85482ba1c0cc004bf9680")
+      "b78b3e704303f56dfddc9411a43f40adad3951b301180549fe7d9b7809905efb")
   else()
     set(_cuobj_platform "linux-x86_64")
     set(_cuobj_sha256
-      "e86b350fbfe36024ce8df8efbbca9e4007e30f5a07432a112433f821751b3854")
+      "72a07d05c79bedc8b20a6a41e7ecf9ece63908a6ae946219110a6688db9b82a0")
   endif()
 
   set(_cuobj_base

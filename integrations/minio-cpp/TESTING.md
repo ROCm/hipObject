@@ -34,14 +34,17 @@ Confirm:
 
 ### QP state (INIT vs RTR/RTS)
 
-`hipObjInit` brings the client QP to **INIT**. The server-side RC adapter
-and cuObjServer are expected to complete the RC handshake for data-plane
-transfers. If end-to-end PUT/GET fail with RDMA errors while the control
-plane succeeds:
+`hipObjInit` brings the client QP to **INIT**. After a successful S3
+response, `hipObjGet` / `hipObjPut` complete the RC handshake when the
+server returns a peer token in `x-amz-rdma-reply` (format
+`200:<server-token-hex>`). The in-repo `hipobj-rdma-test-server` uses
+this format; MinIO AIStor + RC adapter may return numeric codes only.
+
+If end-to-end PUT/GET fail with RDMA errors while the control plane
+succeeds:
 
 1. Capture `ibv_devinfo` and server logs from cuObjServer / RC adapter.
-2. Try completing client-side `transitionQpToRtr` / `transitionQpToRts` in
-   `hipObjInit` once server routing parameters are known.
+2. Confirm whether the server reply includes a peer token for RC connect.
 3. Verify vendor QP attributes: BNXT/IONIC backends apply `configureBnxtQp`
    / `configureIonicQp` during RTR/RTS transitions in
    [`src/rdma/transport.cpp`](../../src/rdma/transport.cpp).

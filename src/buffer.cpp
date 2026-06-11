@@ -87,6 +87,15 @@ struct ibv_mr* BufferMap::lookupMr(void* devPtr) {
   return it->second.mr;
 }
 
+size_t BufferMap::lookupSize(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  if (it == entries_.end()) {
+    return 0;
+  }
+  return it->second.size;
+}
+
 bool BufferMap::isRegistered(void* devPtr) const {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   return entries_.find(key) != entries_.end();

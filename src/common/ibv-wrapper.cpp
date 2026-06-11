@@ -150,6 +150,9 @@ int IBVWrapper::init_function_table() {
   LOAD_SYM(create_qp, "ibv_", "create_qp");
   LOAD_SYM(modify_qp, "ibv_", "modify_qp");
   LOAD_SYM(destroy_qp, "ibv_", "destroy_qp");
+  LOAD_SYM(poll_cq, "ibv_", "poll_cq");
+  LOAD_SYM(post_send, "ibv_", "post_send");
+  LOAD_SYM(post_recv, "ibv_", "post_recv");
 
 #undef LOAD_SYM
 #undef LOAD_SYM_OPT
@@ -274,6 +277,20 @@ int IBVWrapper::modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr,
 
 int IBVWrapper::destroy_qp(struct ibv_qp* qp) {
   return funcs_.destroy_qp(qp);
+}
+
+int IBVWrapper::poll_cq(struct ibv_cq* cq, int num_entries, struct ibv_wc* wc) {
+  return funcs_.poll_cq(cq, num_entries, wc);
+}
+
+int IBVWrapper::post_send(struct ibv_qp* qp, struct ibv_send_wr* wr,
+                          struct ibv_send_wr** bad_wr) {
+  return funcs_.post_send(qp, wr, bad_wr);
+}
+
+int IBVWrapper::post_recv(struct ibv_qp* qp, struct ibv_recv_wr* wr,
+                          struct ibv_recv_wr** bad_wr) {
+  return funcs_.post_recv(qp, wr, bad_wr);
 }
 
 } // namespace hipObj

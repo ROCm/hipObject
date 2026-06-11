@@ -84,6 +84,17 @@ TEST(RdmaReply, ParseHttp206) {
   EXPECT_EQ(code, 206);
 }
 
+TEST(RdmaReply, ParseHttp200WithPeerToken) {
+  hipObj::RdmaToken peer;
+  memset(&peer, 0, sizeof(peer));
+  peer.qpNum = 7;
+  std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
+  int code = 0;
+  EXPECT_TRUE(
+      hipObj::parseRdmaReplyHttpCode(reply.c_str(), reply.size(), code));
+  EXPECT_EQ(code, 200);
+}
+
 TEST(RdmaToken, FormatHeaderValue) {
   const char* token = "aa";
   void* buf = reinterpret_cast<void*>(0x7f0000001000ULL);
@@ -91,7 +102,27 @@ TEST(RdmaToken, FormatHeaderValue) {
   EXPECT_EQ(header, "aa:00007f0000001000:0000000000001000");
 }
 
-TEST(RdmaToken, ParseClientNicFromGid) {
+TEST(RdmaReply, ParsePeerTokenFromReply) {
+  hipObj::RdmaToken peer;
+  memset(&peer, 0, sizeof(peer));
+  peer.transport = hipObj::TRANSPORT_RC;
+  peer.qpNum = 99;
+  std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
+  hipObj::RdmaToken parsed;
+  int code = 0;
+  EXPECT_TRUE(
+      hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
+  EXPECT_EQ(code, 200);
+  EXPECT_EQ(parsed.qpNum, 99u);
+  EXPECT_EQ(parsed.transport, hipObj::TRANSPORT_RC);
+}
+
+TEST(RdmaReply, LegacyOkHasNoPeerToken) {
+  hipObj::RdmaToken parsed;
+  int code = 0;
+  EXPECT_FALSE(
+      hipObj::parsePeerTokenFromReply("ok", 2, parsed, code));
+}
   hipObj::RdmaToken token;
   memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_RC;

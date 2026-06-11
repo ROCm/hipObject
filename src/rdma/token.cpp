@@ -123,11 +123,16 @@ bool parseRdmaReplyHttpCode(const char* reply, size_t replyLen, int& httpCode) {
     return true;
   }
 
-  char tmp[16];
+  char tmp[512];
   if (len >= sizeof(tmp))
     return false;
   std::memcpy(tmp, reply, len);
   tmp[len] = '\0';
+
+  char* colon = std::strchr(tmp, ':');
+  if (colon) {
+    *colon = '\0';
+  }
 
   char* end = nullptr;
   long code = std::strtol(tmp, &end, 10);
@@ -189,6 +194,54 @@ std::string formatRdmaHeaderValue(const char* tokenHex, const void* buf,
                 reinterpret_cast<uintptr_t>(buf),
                 static_cast<unsigned long>(size));
   return std::string(header);
+}
+
+bool parsePeerTokenFromReply(const char* reply, size_t replyLen,
+                             RdmaToken& peerToken, int& httpCode) {
+  if (!reply || replyLen == 0)
+    return false;
+
+  size_t len = replyLen;
+  while (len > 0 && (reply[len - 1] == '\0' || reply[len - 1] == '\n' ||
+                     reply[len - 1] == '\r')) {
+    --len;
+  }
+  if (len == 0)
+    return false;
+
+  const char* colon = static_cast<const char*>(std::memchr(reply, ':', len));
+  if (!colon || colon == reply) {
+    return false;
+  }
+
+  size_t codeLen = static_cast<size_t>(colon - reply);
+  char codeBuf[16];
+  if (codeLen >= sizeof(codeBuf))
+    return false;
+  std::memcpy(codeBuf, reply, codeLen);
+  codeBuf[codeLen] = '\0';
+
+  char* end = nullptr;
+  long code = std::strtol(codeBuf, &end, 10);
+  if (end == codeBuf || *end != '\0')
+    return false;
+  httpCode = static_cast<int>(code);
+
+  const char* tokenHex = colon + 1;
+  size_t tokenHexLen = len - codeLen - 1;
+  if (tokenHexLen != kTokenHexLen)
+    return false;
+
+  char tokenCopy[kTokenHexLen + 1];
+  std::memcpy(tokenCopy, tokenHex, tokenHexLen);
+  tokenCopy[tokenHexLen] = '\0';
+  return decodeRdmaTokenHex(tokenCopy, peerToken);
+}
+
+std::string encodeReplyWithPeerToken(int httpCode, const RdmaToken& peerToken) {
+  std::ostringstream oss;
+  oss << httpCode << ':' << encodeRdmaToken(peerToken);
+  return oss.str();
 }
 
 } // namespace hipObj

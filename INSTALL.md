@@ -47,6 +47,9 @@ sudo make install
 | `HIPOBJ_BUILD_DOCS`| OFF       | Build documentation        |
 | `HIPOBJ_DOCS_ONLY` | OFF       | Configure docs targets only|
 | `HIPOBJ_MINIO_CLIENT` | OFF    | Build minio-cpp RDMA bridge|
+| `HIPOBJ_INTEGRATION_TESTS` | ON | Build RC test server       |
+| `HIPOBJ_FETCH_CUOBJECT_CLIENT` | OFF | Fetch libcuobjclient 1.2.0.59 |
+| `HIPOBJ_FIND_CUOBJECT_SERVER` | OFF | Find libcuobjserver + probe |
 | `ROCM_PATH`        | /opt/rocm | Path to ROCm install       |
 
 ## MinIO C++ RDMA bridge (`HIPOBJ_MINIO_CLIENT`)
@@ -68,6 +71,25 @@ sudo apt install libssl-dev zlib1g-dev libcurl4-openssl-dev
 
 See [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md)
 for lab validation against MinIO AIStor over RDMA.
+
+## cuObject interoperability
+
+See [docs/interop.rst](docs/interop.rst) for the v1.2.0 compatibility
+matrix.  Build the in-repo RC test server:
+
+```bash
+cmake -B build -DBUILD_TESTING=ON
+cmake --build build --target hipobj-rdma-test-server
+```
+
+Optional cuObject library probes:
+
+```bash
+cmake -B build \
+  -DHIPOBJ_FETCH_CUOBJECT_CLIENT=ON \
+  -DHIPOBJ_FIND_CUOBJECT_SERVER=ON \
+  -DCUOBJSERVER_ROOT=/opt/nvidia/cuobjserver
+```
 
 ## Building Documentation
 
