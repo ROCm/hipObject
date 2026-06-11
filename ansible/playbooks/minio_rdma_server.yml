@@ -1,0 +1,38 @@
+---
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+- name: Install MinIO S3-over-RDMA server package
+  hosts: minio_rdma_servers
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Install minimal RDMA userspace stack (optional)
+      ansible.builtin.apt:
+        name:
+          - rdma-core
+          - ibverbs-utils
+        state: present
+        update_cache: true
+      when: hipobj_server_install_rdma_stack | bool
+
+    - name: Download MinIO RDMA server .deb
+      ansible.builtin.get_url:
+        url: "{{ hipobj_minio_rdma_deb_url }}"
+        dest: /tmp/minio.rdma_amd64.deb
+        mode: "0644"
+        checksum: "{{ hipobj_minio_rdma_deb_checksum | default(omit, true) }}"
+
+    - name: Install MinIO RDMA .deb
+      ansible.builtin.apt:
+        deb: /tmp/minio.rdma_amd64.deb
+        state: present
+
+    - name: Enable and start MinIO systemd unit (optional)
+      ansible.builtin.systemd:
+        name: "{{ hipobj_minio_systemd_unit }}"
+        enabled: true
+        state: started
+      when: hipobj_minio_manage_service | bool

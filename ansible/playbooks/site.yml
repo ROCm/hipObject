@@ -1,0 +1,13 @@
+---
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+- name: Install MinIO RDMA server
+  import_playbook: minio_rdma_server.yml
+
+- name: Build hipObject client
+  import_playbook: hipobj_client.yml
+
+- name: Smoke test S3 over RDMA client
+  import_playbook: hipobj_smoke_test.yml
