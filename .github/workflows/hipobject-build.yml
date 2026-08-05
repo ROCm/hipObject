@@ -2,7 +2,7 @@ name: hipObject compile and test
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
     paths-ignore:
       - '**/*.md'
       - '**/*.rst'
