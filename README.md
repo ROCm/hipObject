@@ -1,10 +1,11 @@
 # hipObject
 
 [![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
-[![Build](https://github.com/ROCm/hipObject/actions/workflows/build-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/build-check.yml)
-[![Docs](https://github.com/ROCm/hipObject/actions/workflows/docs-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/docs-check.yml)
-[![Lint](https://github.com/ROCm/hipObject/actions/workflows/lint-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/lint-check.yml)
-[![Spelling](https://github.com/ROCm/hipObject/actions/workflows/spell-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/spell-check.yml)
+[![Build](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml)
+[![Docs](https://github.com/ROCm/hipObject/actions/workflows/hipobject-docs.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-docs.yml)
+[![clang-format](https://github.com/ROCm/hipObject/actions/workflows/hipobject-clang-format.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-clang-format.yml)
+[![codespell](https://github.com/ROCm/hipObject/actions/workflows/hipobject-codespell.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-codespell.yml)
+[![Ansible](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](INSTALL.md)
 [![ROCm](https://img.shields.io/badge/ROCm-supported-green.svg)](https://rocm.docs.amd.com)
 [![Language](https://img.shields.io/badge/language-HIP%20%7C%20C-orange.svg)](https://rocm.docs.amd.com/projects/HIP/en/latest/)
