@@ -1,0 +1,34 @@
+name: hipObject clang-format
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hipfile-clang-format:
+    name: Formatting Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install clang-format
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install -y clang-format-18
+
+      - name: Run clang-format style check for C/C++ code
+        uses: DoozyX/clang-format-lint-action@bcb4eb2cb0d707ee4f3e5cc3b456eb075f12cf73 # v0.20
+        with:
+          extensions: 'c,h,cpp,hpp'
+          clangFormatVersion: 18
+          style: file

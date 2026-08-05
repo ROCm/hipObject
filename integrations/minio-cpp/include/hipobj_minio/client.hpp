@@ -13,7 +13,7 @@
 namespace hipobj::minio {
 
 class Client {
- public:
+public:
   Client(minio::s3::BaseUrl base_url, minio::creds::Provider* provider);
 
   minio::s3::PutObjectResponse PutObject(minio::s3::PutObjectArgs args);
@@ -21,7 +21,7 @@ class Client {
 
   bool RdmaAvailable() const;
 
- private:
+private:
   minio::s3::BaseUrl base_url_;
   minio::creds::Provider* provider_ = nullptr;
   minio::s3::Client s3_client_;
