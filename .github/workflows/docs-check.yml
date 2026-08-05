@@ -12,6 +12,9 @@ on:
       - 'README.md'
       - '.github/workflows/docs-check.yml'
 
+permissions:
+  contents: read
+
 jobs:
   sphinx:
     name: sphinx-build
