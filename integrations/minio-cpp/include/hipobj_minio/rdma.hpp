@@ -13,13 +13,13 @@
 namespace hipobj::minio {
 
 inline constexpr const char* kEmptySha256 =
-    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 inline constexpr const char* kUnsignedPayload = "UNSIGNED-PAYLOAD";
 
 inline constexpr const char* kAmzRdmaToken = "x-amz-rdma-token";
 inline constexpr const char* kAmzRdmaReply = "x-amz-rdma-reply";
 inline constexpr const char* kAmzRdmaBytesTransferred =
-    "x-amz-rdma-bytes-transferred";
+  "x-amz-rdma-bytes-transferred";
 
 inline constexpr int kRdmaReplySuccess = 200;
 inline constexpr int kRdmaReplyNoContent = 204;
