@@ -1,24 +1,33 @@
-name: Build Check
+name: hipObject compile and test
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.rst'
   pull_request:
-    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.rst'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     container:
       image: rocm/dev-ubuntu-24.04:7.2
       options: --user root
     env:
       ROCM_PATH: /opt/rocm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install dependencies
         run: |
