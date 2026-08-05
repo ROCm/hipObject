@@ -1,8 +1,9 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * Optional probe binary for a system-installed libcuobjserver.
+ */
+
+/* Optional probe binary for a system-installed libcuobjserver.
  * Verifies headers and linkage when HIPOBJ_FIND_CUOBJECT_SERVER=ON.
  */
 

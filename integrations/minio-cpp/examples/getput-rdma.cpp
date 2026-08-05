@@ -1,9 +1,9 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * AMD port of minio-cpp GetPutRDMA: PUT + GET over hipObject RDMA.
  */
+
+/* AMD port of minio-cpp GetPutRDMA: PUT + GET over hipObject RDMA */
 
 #include <cstdio>
 #include <cstdlib>

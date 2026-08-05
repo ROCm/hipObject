@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Sanitizer support (ASan, UBSan, TSan).
+# Sanitizer support (ASan, UBSan, TSan)
 
 option(HIPOBJ_USE_SANITIZERS
   "Enable sanitizers (address, undefined, thread)"

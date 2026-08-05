@@ -1,10 +1,9 @@
-/* Copyright (c) Advanced Micro Devices, Inc.
- * All rights reserved.
+/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * GPU buffer registration and MR cache.
  */
+
+/* GPU buffer registration and MR cache */
 
 #pragma once
 

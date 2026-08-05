@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# ROCm path detection and HIP platform configuration.
+# ROCm path detection and HIP platform configuration
 
 if(NOT CMAKE_HIP_PLATFORM)
   set(CMAKE_HIP_PLATFORM "amd"

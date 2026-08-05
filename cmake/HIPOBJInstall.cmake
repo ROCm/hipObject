@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Install rules for hipObject.
+# Install rules for hipObject
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

@@ -1,9 +1,9 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * RDMA token encoding/decoding.
  */
+
+/* RDMA token encoding/decoding */
 
 #pragma once
 

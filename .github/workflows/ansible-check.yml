@@ -1,7 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# SPDX-License-Identifier: MIT
-#
 # Validates Ansible layout on stock GitHub runners. Full site.yml is not
 # executed here: batesste rocm_setup / rdma_setup and GPU S3 smoke tests need
 # bare-metal lab hosts.
