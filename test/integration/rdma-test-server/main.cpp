@@ -1,8 +1,9 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * RC-native S3-over-RDMA integration test server.
+ */
+
+/* RC-native S3-over-RDMA integration test server.
  *
  * Accepts GET/PUT with x-amz-rdma-token, performs RC RDMA transfers,
  * and returns x-amz-rdma-reply with an optional peer token for the

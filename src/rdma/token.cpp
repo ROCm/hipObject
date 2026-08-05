@@ -1,10 +1,9 @@
-/* Copyright (c) Advanced Micro Devices, Inc.
- * All rights reserved.
+/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * RDMA token encoding/decoding implementation.
  */
+
+/* RDMA token encoding/decoding implementation */
 
 #include "token.hpp"
 

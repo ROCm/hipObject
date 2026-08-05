@@ -1,9 +1,10 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * User-defined literals for byte sizes.
- * Modeled after hipFile's hipfile-literals.h.
+ */
+
+/* User-defined literals for byte sizes
+ * Modeled after hipFile's hipfile-literals.h
  */
 
 #pragma once

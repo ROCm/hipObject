@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: MIT
-#
+
 # Fetch and expose minio-cpp dependencies using vcpkg-style
-# imported target names (unofficial::curlpp::curlpp, etc.).
+# imported target names (unofficial::curlpp::curlpp, etc.)
 
 include(FetchContent)
 

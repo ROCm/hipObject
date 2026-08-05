@@ -1,9 +1,10 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * Warning suppression macros for hipObject.
- * Modeled after hipFile's hipfile-warnings.h.
+ */
+
+/* Warning suppression macros for hipObject
+ * Modeled after hipFile's hipfile-warnings.h
  */
 
 #pragma once

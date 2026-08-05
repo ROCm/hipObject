@@ -1,9 +1,8 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: MIT
-#
-# Optional download of NVIDIA cuObject libraries.
+
+# Optional download of NVIDIA cuObject libraries
 #
 # cuObject Client: publicly available on the
 #   NVIDIA CUDA redistributable CDN.

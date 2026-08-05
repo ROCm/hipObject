@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Fetch or find GTest for unit testing.
+# Fetch or find GTest for unit testing
 
 include(FetchContent)
 

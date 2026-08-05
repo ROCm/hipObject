@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Optional clang-tidy integration.
+# Optional clang-tidy integration
 
 option(HIPOBJ_USE_CLANG_TIDY
   "Run clang-tidy during compilation" OFF)
