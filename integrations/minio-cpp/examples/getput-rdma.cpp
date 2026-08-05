@@ -8,7 +8,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -127,7 +126,8 @@ int main(int argc, char* argv[]) {
   }
 
   if (gpu_enabled) {
-    hipError_t err = hipMemcpy(hostptr, dev_ptr, bufsize, hipMemcpyDeviceToHost);
+    hipError_t err = hipMemcpy(hostptr, dev_ptr, bufsize,
+                               hipMemcpyDeviceToHost);
     if (err != hipSuccess) {
       std::cerr << "hipMemcpy failed: " << err << std::endl;
       free(hostptr);

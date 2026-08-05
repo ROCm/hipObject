@@ -6,7 +6,6 @@
 #include <cstring>
 
 #include <gtest/gtest.h>
-
 #include <hipobj.h>
 
 #include "token.hpp"
@@ -20,7 +19,8 @@ TEST(HipObjMinioHeader, FormatRdmaHeaderValue) {
   token.length = 4096;
   std::string encoded = hipObj::encodeRdmaToken(token);
   void* buf = reinterpret_cast<void*>(0x7f0000001000ULL);
-  std::string header = hipObj::formatRdmaHeaderValue(encoded.c_str(), buf, 4096);
+  std::string header = hipObj::formatRdmaHeaderValue(encoded.c_str(), buf,
+                                                     4096);
   EXPECT_EQ(header, encoded + ":00007f0000001000:0000000000001000");
 }
 
