@@ -10,7 +10,6 @@
 #include <cstring>
 
 #include <hipobj.h>
-
 #include <miniocpp/http.h>
 #include <miniocpp/request.h>
 #include <miniocpp/signer.h>
@@ -25,8 +24,8 @@ int parseRdmaReply(const std::string& rdma_reply) {
     return static_cast<int>(kRdmaNotSupported);
   }
   int httpCode = 0;
-  hipObjError_t err = hipObjParseRdmaReply(
-      rdma_reply.c_str(), rdma_reply.size(), &httpCode);
+  hipObjError_t err = hipObjParseRdmaReply(rdma_reply.c_str(),
+                                           rdma_reply.size(), &httpCode);
   if (err.opError != hipObjSuccess) {
     return 0;
   }
@@ -38,8 +37,7 @@ int parseRdmaReply(const std::string& rdma_reply) {
 
 std::string clientNicFromToken(const char* token) {
   char nicIp[32];
-  hipObjError_t err =
-      hipObjTokenClientNic(token, nicIp, sizeof(nicIp));
+  hipObjError_t err = hipObjTokenClientNic(token, nicIp, sizeof(nicIp));
   if (err.opError != hipObjSuccess || nicIp[0] == '\0') {
     return {};
   }
@@ -69,9 +67,9 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
     query_params.Add("partNumber", std::to_string(sctx->partNumber));
   }
 
-  if (minio::error::Error err = sctx->url.BuildUrl(
-          url, minio::http::Method::kPut, region, query_params, sctx->bucket,
-          sctx->object)) {
+  if (minio::error::Error err =
+        sctx->url.BuildUrl(url, minio::http::Method::kPut, region, query_params,
+                           sctx->bucket, sctx->object)) {
     return -1;
   }
 
@@ -128,8 +126,7 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
     return -1;
   }
 
-  std::string resp_checksum =
-      res.headers.GetFront("x-amz-checksum-crc64nvme");
+  std::string resp_checksum = res.headers.GetFront("x-amz-checksum-crc64nvme");
   if (!resp_checksum.empty()) {
     sctx->checksum = resp_checksum;
   }
@@ -151,9 +148,9 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
   minio::http::Url url;
   const std::string& region = sctx->region;
 
-  if (minio::error::Error err = sctx->url.BuildUrl(
-          url, minio::http::Method::kGet, region, query_params, sctx->bucket,
-          sctx->object)) {
+  if (minio::error::Error err =
+        sctx->url.BuildUrl(url, minio::http::Method::kGet, region, query_params,
+                           sctx->bucket, sctx->object)) {
     return -1;
   }
 
@@ -217,8 +214,8 @@ ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
   ssize_t ret = -1;
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
-    hipObjError_t terr =
-        hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &token);
+    hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT,
+                                            &token);
     if (terr.opError != hipObjSuccess || token == nullptr) {
       return -1;
     }
@@ -235,8 +232,8 @@ ssize_t rdmaGetWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
   ssize_t ret = -1;
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
-    hipObjError_t terr =
-        hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &token);
+    hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET,
+                                            &token);
     if (terr.opError != hipObjSuccess || token == nullptr) {
       return -1;
     }

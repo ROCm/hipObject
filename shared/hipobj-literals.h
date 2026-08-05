@@ -23,8 +23,7 @@ constexpr size_t operator""_MiB(unsigned long long v) {
 }
 
 constexpr size_t operator""_GiB(unsigned long long v) {
-  return static_cast<size_t>(v) * 1024ULL * 1024ULL
-         * 1024ULL;
+  return static_cast<size_t>(v) * 1024ULL * 1024ULL * 1024ULL;
 }
 
 } // namespace literals

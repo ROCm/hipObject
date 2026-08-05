@@ -9,7 +9,6 @@
 #include <sstream>
 
 #include <hipobj.h>
-
 #include <miniocpp/baseclient.h>
 #include <miniocpp/error.h>
 #include <miniocpp/http.h>
@@ -21,7 +20,7 @@ namespace hipobj::minio {
 namespace {
 
 class HipObjRuntime {
- public:
+public:
   static HipObjRuntime& Instance() {
     static HipObjRuntime inst;
     return inst;
@@ -57,7 +56,7 @@ class HipObjRuntime {
     return initialized_;
   }
 
- private:
+private:
   HipObjRuntime() = default;
 
   mutable std::mutex mutex_;
@@ -69,7 +68,8 @@ class HipObjRuntime {
 struct ScopedBufRegistration {
   void* ptr = nullptr;
   bool owned = false;
-  ScopedBufRegistration(void* p, bool own) : ptr(p), owned(own) {}
+  ScopedBufRegistration(void* p, bool own) : ptr(p), owned(own) {
+  }
   ~ScopedBufRegistration() {
     if (owned && ptr) {
       hipObjBufDeregister(ptr);
@@ -80,7 +80,8 @@ struct ScopedBufRegistration {
 } // namespace
 
 Client::Client(minio::s3::BaseUrl base_url, minio::creds::Provider* provider)
-    : base_url_(base_url), provider_(provider), s3_client_(base_url, provider) {}
+  : base_url_(base_url), provider_(provider), s3_client_(base_url, provider) {
+}
 
 bool Client::RdmaAvailable() const {
   return HipObjRuntime::Instance().IsReady();
@@ -97,12 +98,12 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
 
   const size_t size = *args.size;
 
-  hipObjError_t init_err =
-      HipObjRuntime::Instance().EnsureInit(base_url_, provider_);
+  hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_,
+                                                                provider_);
   if (init_err.opError != hipObjSuccess) {
-    return minio::s3::PutObjectResponse(minio::error::Error(
-        "hipObject init failed: " +
-        std::string(hipObjGetErrorString(init_err.opError))));
+    return minio::s3::PutObjectResponse(
+      minio::error::Error("hipObject init failed: " +
+                          std::string(hipObjGetErrorString(init_err.opError))));
   }
 
   bool registered_here = false;
@@ -110,26 +111,26 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
   if (reg_err.opError == hipObjSuccess) {
     registered_here = true;
   } else if (reg_err.opError != hipObjBufAlreadyRegistered) {
-    return minio::s3::PutObjectResponse(minio::error::Error(
-        "hipObjBufRegister failed: " +
-        std::string(hipObjGetErrorString(reg_err.opError))));
+    return minio::s3::PutObjectResponse(
+      minio::error::Error("hipObjBufRegister failed: " +
+                          std::string(hipObjGetErrorString(reg_err.opError))));
   }
   ScopedBufRegistration reg_guard(args.buf, registered_here);
 
   std::string region;
-  if (minio::s3::GetRegionResponse resp =
-          s3_client_.GetRegion(args.bucket, args.region)) {
+  if (minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket,
+                                                               args.region)) {
     region = resp.region;
   } else {
     return minio::s3::PutObjectResponse(resp);
   }
 
   S3RdmaContext put_ctx{
-      .provider = provider_,
-      .bucket = args.bucket,
-      .object = args.object,
-      .url = base_url_,
-      .region = region,
+    .provider = provider_,
+    .bucket = args.bucket,
+    .object = args.object,
+    .url = base_url_,
+    .region = region,
   };
 
   ssize_t ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
@@ -161,12 +162,12 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
 
   const size_t size = *args.size;
 
-  hipObjError_t init_err =
-      HipObjRuntime::Instance().EnsureInit(base_url_, provider_);
+  hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_,
+                                                                provider_);
   if (init_err.opError != hipObjSuccess) {
-    return minio::s3::GetObjectResponse(minio::error::Error(
-        "hipObject init failed: " +
-        std::string(hipObjGetErrorString(init_err.opError))));
+    return minio::s3::GetObjectResponse(
+      minio::error::Error("hipObject init failed: " +
+                          std::string(hipObjGetErrorString(init_err.opError))));
   }
 
   bool registered_here = false;
@@ -174,26 +175,26 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
   if (reg_err.opError == hipObjSuccess) {
     registered_here = true;
   } else if (reg_err.opError != hipObjBufAlreadyRegistered) {
-    return minio::s3::GetObjectResponse(minio::error::Error(
-        "hipObjBufRegister failed: " +
-        std::string(hipObjGetErrorString(reg_err.opError))));
+    return minio::s3::GetObjectResponse(
+      minio::error::Error("hipObjBufRegister failed: " +
+                          std::string(hipObjGetErrorString(reg_err.opError))));
   }
   ScopedBufRegistration reg_guard(args.buf, registered_here);
 
   std::string region;
-  if (minio::s3::GetRegionResponse resp =
-          s3_client_.GetRegion(args.bucket, args.region)) {
+  if (minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket,
+                                                               args.region)) {
     region = resp.region;
   } else {
     return minio::s3::GetObjectResponse(resp);
   }
 
   S3RdmaContext get_ctx{
-      .provider = provider_,
-      .bucket = args.bucket,
-      .object = args.object,
-      .url = base_url_,
-      .region = region,
+    .provider = provider_,
+    .bucket = args.bucket,
+    .object = args.object,
+    .url = base_url_,
+    .region = region,
   };
 
   ssize_t ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
