@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "control.hpp"
+#include "control.h"
 
 #include <cstring>
 
-#include "token.hpp"
+#include "token.h"
 
 namespace hipObj {
 

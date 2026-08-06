@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "hipobj_minio/client.hpp"
+#include "hipobj_minio/client.h"
 
 #include <mutex>
 #include <sstream>
@@ -13,7 +13,7 @@
 #include <miniocpp/error.h>
 #include <miniocpp/http.h>
 
-#include "hipobj_minio/rdma.hpp"
+#include "hipobj_minio/rdma.h"
 
 namespace hipobj::minio {
 

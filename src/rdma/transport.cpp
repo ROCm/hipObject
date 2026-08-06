@@ -3,16 +3,16 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "transport.hpp"
+#include "transport.h"
 
 #include <chrono>
 #include <cstring>
 #include <thread>
 
-#include "ibv-wrapper.hpp"
-#include "rdma-topology.hpp"
-#include "token.hpp"
-#include "vendor-ops.hpp"
+#include "ibv-wrapper.h"
+#include "rdma-topology.h"
+#include "token.h"
+#include "vendor-ops.h"
 
 namespace hipObj {
 

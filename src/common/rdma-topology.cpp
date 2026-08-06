@@ -6,7 +6,7 @@
  * RDMA topology implementation.
  */
 
-#include "rdma-topology.hpp"
+#include "rdma-topology.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -23,8 +23,8 @@
 
 #include <unistd.h>
 
-#include "ibv-wrapper.hpp"
-#include "rdma-numa-wrapper.hpp"
+#include "ibv-wrapper.h"
+#include "rdma-numa-wrapper.h"
 
 namespace hipObj {
 

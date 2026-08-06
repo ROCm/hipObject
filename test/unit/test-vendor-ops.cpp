@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "vendor-ops.hpp"
+#include "vendor-ops.h"
 
 TEST(VendorOps, ProviderNameBnxt) {
   EXPECT_STREQ(hipObj::provider_name(hipObj::Provider::BNXT), "bnxt");

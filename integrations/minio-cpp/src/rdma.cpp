@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "hipobj_minio/rdma.hpp"
+#include "hipobj_minio/rdma.h"
 
 #include <cstdio>
 #include <cstdlib>

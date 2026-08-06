@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "hipobj_minio/context.hpp"
+#include "hipobj_minio/context.h"
 
 namespace hipobj::minio {
 

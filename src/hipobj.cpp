@@ -12,13 +12,13 @@
 #include <hip/hip_runtime.h>
 
 #include "buffer.h"
-#include "control.hpp"
+#include "control.h"
 #include "hipobj-private.h"
-#include "ibv-wrapper.hpp"
-#include "rdma-topology.hpp"
+#include "ibv-wrapper.h"
+#include "rdma-topology.h"
 #include "state.h"
-#include "token.hpp"
-#include "transport.hpp"
+#include "token.h"
+#include "transport.h"
 
 namespace hipObj {
 

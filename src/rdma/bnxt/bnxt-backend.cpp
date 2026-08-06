@@ -5,9 +5,9 @@
 
 #include <cstring>
 
-#include "ibv-core.hpp"
-#include "ibv-wrapper.hpp"
-#include "vendor-ops.hpp"
+#include "ibv-core.h"
+#include "ibv-wrapper.h"
+#include "vendor-ops.h"
 
 namespace hipObj {
 

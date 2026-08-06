@@ -10,7 +10,7 @@
 #include <hip/hip_runtime.h>
 
 #include "hipobj-private.h"
-#include "ibv-wrapper.hpp"
+#include "ibv-wrapper.h"
 
 namespace hipObj {
 

@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <string>
 
-#include "ibv-core.hpp"
+#include "ibv-core.h"
 
 namespace hipObj {
 

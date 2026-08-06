@@ -7,7 +7,7 @@
 
 #include <gtest/gtest.h>
 
-#include "token.hpp"
+#include "token.h"
 
 TEST(RdmaToken, EncodeProducesHexString) {
   hipObj::RdmaToken token;
