@@ -5,7 +5,7 @@
 
 /* RDMA token encoding/decoding implementation */
 
-#include "token.hpp"
+#include "token.h"
 
 #include <cstdio>
 #include <cstring>

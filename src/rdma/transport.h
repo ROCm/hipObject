@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include "ibv-core.hpp"
+#include "ibv-core.h"
 
 namespace hipObj {
 

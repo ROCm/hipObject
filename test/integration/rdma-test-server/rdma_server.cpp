@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "rdma_server.hpp"
+#include "rdma_server.h"
 
 #include <cstdlib>
 #include <cstring>
 
-#include "ibv-wrapper.hpp"
-#include "token.hpp"
-#include "transport.hpp"
+#include "ibv-wrapper.h"
+#include "token.h"
+#include "transport.h"
 
 namespace hipobj::test {
 

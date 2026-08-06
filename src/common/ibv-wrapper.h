@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <map>
 
-#include "ibv-core.hpp"
+#include "ibv-core.h"
 
 namespace hipObj {
 

@@ -8,7 +8,7 @@
 #include <gtest/gtest.h>
 #include <hipobj.h>
 
-#include "token.hpp"
+#include "token.h"
 
 TEST(HipObjMinioHeader, FormatRdmaHeaderValue) {
   hipObj::RdmaToken token;

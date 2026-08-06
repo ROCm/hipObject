@@ -16,7 +16,7 @@
 
 #include <miniocpp/client.h>
 
-#include "hipobj_minio/client.hpp"
+#include "hipobj_minio/client.h"
 
 int main(int argc, char* argv[]) {
   if (argc < 4) {

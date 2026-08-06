@@ -6,7 +6,7 @@
  * Loads libibverbs via dlopen; no link dependency.
  */
 
-#include "ibv-wrapper.hpp"
+#include "ibv-wrapper.h"
 
 #include <cstdio>
 #include <cstring>

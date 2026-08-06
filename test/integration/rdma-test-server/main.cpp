@@ -17,8 +17,8 @@
 #include <string>
 #include <vector>
 
-#include "http_server.hpp"
-#include "rdma_server.hpp"
+#include "http_server.h"
+#include "rdma_server.h"
 
 namespace {
 

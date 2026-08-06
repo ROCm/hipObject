@@ -6,7 +6,7 @@
  * NUMA wrapper implementation via dlopen.
  */
 
-#include "rdma-numa-wrapper.hpp"
+#include "rdma-numa-wrapper.h"
 
 #include <cstddef>
 
