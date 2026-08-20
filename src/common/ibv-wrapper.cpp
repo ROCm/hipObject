@@ -2,7 +2,8 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * IBV wrapper implementation. Adapted from rocm-xio.
+ * IBV wrapper implementation. Derived from ROCm/rocSHMEM
+ * src/gda/ibv_wrapper.cpp via rocm-xio src/common/ibv-wrapper.cpp.
  * Loads libibverbs via dlopen; no link dependency.
  */
 
