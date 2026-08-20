@@ -1,11 +1,31 @@
-/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+/* This content was copied and modified from hipFile's
+ * shared/hipfile-warnings.h file, which was itself copied and
+ * modified from the HDF5 C library's src/H5warnings.h file
+ *
+ * (https://github.com/HDFGroup/hdf5)
+ *
+ * HDF5 copyright:
+ *
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Copyright by The HDF Group.                                               *
+ * All rights reserved.                                                      *
+ *                                                                           *
+ * This file is part of HDF5.  The full HDF5 copyright notice, including     *
+ * terms governing use, modification, and redistribution, is contained in    *
+ * the LICENSE file, which can be found at the root of the source code       *
+ * distribution tree, or in https://www.hdfgroup.org/licenses.               *
+ * If you do not have access to either file, you may request a copy from     *
+ * help@hdfgroup.org.                                                        *
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ *
+ * AMD changes:
+ *
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  */
 
-/* Warning suppression macros for hipObject
- * Modeled after hipFile's hipfile-warnings.h
- */
+/* Warning suppression macros for hipObject */
 
 #pragma once
 
