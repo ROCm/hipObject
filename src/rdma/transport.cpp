@@ -246,7 +246,10 @@ int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs) {
       return 0;
     }
   }
-  return 0;
+  // A timeout is a failure: no completion arrived for the awaited work
+  // request, so the transfer outcome is unknown and must not be reported
+  // as success.
+  return -1;
 }
 
 } // namespace hipObj

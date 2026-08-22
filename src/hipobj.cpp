@@ -65,7 +65,13 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen) {
       return -1;
     }
   }
-  (void)pollCompletion(g_conn, -1, 5000);
+  // A poll timeout or error completion is a failure: the transfer outcome
+  // is unknown. With the current one-sided protocol the responder side
+  // may not observe a completion at all (see issue #22), so this check
+  // reports "no evidence of failure" rather than "transfer verified".
+  if (pollCompletion(g_conn, -1, 5000) != 0) {
+    return -1;
+  }
   hipError_t err = hipDeviceSynchronize();
   return (err == hipSuccess) ? 0 : -1;
 }
