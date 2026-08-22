@@ -35,12 +35,15 @@ static int stubSendRequest(void* ctx, const char* token, size_t tokenLen) {
 
 static int stubRecvReply(void* ctx, char* reply, size_t* replyLen) {
   (void)ctx;
-  const char* ok = "ok";
-  size_t len = strlen(ok);
+  // No real server is contacted in stub mode; reply "501" (not
+  // implemented) so the transfer is reported as unsupported rather
+  // than silently succeeding.
+  const char* reply501 = "501";
+  size_t len = strlen(reply501);
   if (*replyLen < len) {
     return -1;
   }
-  memcpy(reply, ok, len);
+  memcpy(reply, reply501, len);
   *replyLen = len;
   return 0;
 }
@@ -127,10 +130,12 @@ int main(int argc, char* argv[]) {
     ops.recvReply = stubRecvReply;
   }
 
+  int exitCode = 0;
   err = hipObjGet(nullptr, devPtr, objSize, 0, &ops, opsCtx);
   if (err.opError != hipObjSuccess) {
     fprintf(stderr, "hipObjGet failed: %s\n",
             hipObjGetErrorString(err.opError));
+    exitCode = 1;
   } else {
     fprintf(stdout, "hipObjGet succeeded for %zu bytes\n", objSize);
   }
@@ -144,5 +149,5 @@ int main(int argc, char* argv[]) {
   hipObjBufDeregister(devPtr);
   (void)hipFree(devPtr);
   hipObjShutdown();
-  return 0;
+  return exitCode;
 }
