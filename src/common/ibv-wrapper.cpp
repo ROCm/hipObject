@@ -151,9 +151,14 @@ int IBVWrapper::init_function_table() {
   LOAD_SYM(create_qp, "ibv_", "create_qp");
   LOAD_SYM(modify_qp, "ibv_", "modify_qp");
   LOAD_SYM(destroy_qp, "ibv_", "destroy_qp");
-  LOAD_SYM(poll_cq, "ibv_", "poll_cq");
-  LOAD_SYM(post_send, "ibv_", "post_send");
-  LOAD_SYM(post_recv, "ibv_", "post_recv");
+  // poll_cq / post_send / post_recv are static inline helpers in verbs.h
+  // that delegate to the per-context ops table; depending on the
+  // rdma-core build they may not exist as dynamic symbols. Load them
+  // optionally and fall back to the context ops entries, which is what
+  // the inline functions themselves call.
+  LOAD_SYM_OPT(poll_cq, "ibv_", "poll_cq");
+  LOAD_SYM_OPT(post_send, "ibv_", "post_send");
+  LOAD_SYM_OPT(post_recv, "ibv_", "post_recv");
 
 #undef LOAD_SYM
 #undef LOAD_SYM_OPT
@@ -281,17 +286,27 @@ int IBVWrapper::destroy_qp(struct ibv_qp* qp) {
 }
 
 int IBVWrapper::poll_cq(struct ibv_cq* cq, int num_entries, struct ibv_wc* wc) {
-  return funcs_.poll_cq(cq, num_entries, wc);
+  if (funcs_.poll_cq) {
+    return funcs_.poll_cq(cq, num_entries, wc);
+  }
+  // Inline-function semantics from verbs.h: delegate to the context ops.
+  return cq->context->ops.poll_cq(cq, num_entries, wc);
 }
 
 int IBVWrapper::post_send(struct ibv_qp* qp, struct ibv_send_wr* wr,
                           struct ibv_send_wr** bad_wr) {
-  return funcs_.post_send(qp, wr, bad_wr);
+  if (funcs_.post_send) {
+    return funcs_.post_send(qp, wr, bad_wr);
+  }
+  return qp->context->ops.post_send(qp, wr, bad_wr);
 }
 
 int IBVWrapper::post_recv(struct ibv_qp* qp, struct ibv_recv_wr* wr,
                           struct ibv_recv_wr** bad_wr) {
-  return funcs_.post_recv(qp, wr, bad_wr);
+  if (funcs_.post_recv) {
+    return funcs_.post_recv(qp, wr, bad_wr);
+  }
+  return qp->context->ops.post_recv(qp, wr, bad_wr);
 }
 
 } // namespace hipObj
