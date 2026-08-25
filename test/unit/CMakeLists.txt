@@ -25,3 +25,6 @@ endif()
 
 hipobj_add_test(test-v2-wire
   test-v2-wire.cpp)
+
+hipobj_add_test(test-v2-state
+  test-v2-state.cpp)

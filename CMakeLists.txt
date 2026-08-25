@@ -99,6 +99,7 @@ set(HIPOBJ_SOURCES
   src/rdma/transport.cpp
   src/rdma/token.cpp
   src/rdma/v2-wire.cpp
+  src/rdma/v2-state.cpp
   src/s3/control.cpp)
 
 if(HIPOBJ_BNXT)

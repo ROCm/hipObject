@@ -264,6 +264,138 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
                                    size_t size, off_t offset, hipObjOps_t* ops,
                                    void* ctx);
 
+/* -------------------------------------------------------
+ *  hipobj-rc-v2 (TWO-ROUND-TRIP CONTROL PROTOCOL)
+ * ------------------------------------------------------- */
+
+/*!
+ * @brief V2 control endpoint settings
+ * @ingroup core
+ *
+ * The v2 protocol runs its prepare/ready/cancel exchange on a dedicated
+ * control endpoint; there is no default port, the caller must supply one.
+ */
+typedef struct {
+  const char* controlEndpoint; /*!< Required "http(s)://host:port" URI;
+                                    the library copies the string */
+} hipObjControlEndpointV2_t;
+
+/*!
+ * @brief V2 initialization configuration
+ * @ingroup core
+ */
+typedef struct {
+  hipObjConfig_t v1;                 /*!< All v1 fields */
+  hipObjControlEndpointV2_t control; /*!< v2 control endpoint (required) */
+} hipObjConfigV2_t;
+
+/* Forward declaration of the phase-aware callback set (see below). */
+typedef struct hipObjOpsV2 hipObjOpsV2_t;
+
+/*!
+ * @brief Per-transfer request description for the v2 phases
+ * @ingroup io
+ *
+ * Borrow contract: string fields are owned by the library and remain
+ * valid for the duration of a single callback invocation. Callbacks are
+ * synchronous (they return before the library continues) and must copy
+ * anything they need to keep.
+ */
+typedef struct {
+  const char* method;  /*!< "GET" or "PUT" */
+  const char* bucket;  /*!< Object bucket */
+  const char* key;     /*!< Object key */
+  const char* query;   /*!< Canonical query string or NULL */
+  const char* token;   /*!< 88-hex token[:addr:size] */
+  const char* session; /*!< READY/cancel: session id (library sets) */
+  const char* target;  /*!< Canonical rdma-target value (library sets) */
+  uint64_t size;       /*!< Transfer size in bytes */
+  uint64_t offset;     /*!< Byte offset into the object */
+  uint32_t cookie;     /*!< Client cookie (library generates) */
+  uint32_t clientPsn;  /*!< Client PSN, 1..0xffffff (library generates) */
+  const hipObjControlEndpointV2_t* endpoint; /*!< Control endpoint (library sets
+                                                from init) */
+} hipObjTransferReqV2_t;
+
+/*! @brief Response to PREPARE @ingroup io */
+typedef struct {
+  int httpStatus;        /*!< Status code (200/501/403/413/503/500) */
+  int protocolEcho;      /*!< 1 when X-Amz-Rdma-Protocol: hipobj-rc-v2 seen */
+  int unsupportedMarker; /*!< 1 when the explicit unsupported marker seen */
+  char serverToken[97];  /*!< 88-hex peer token + NUL */
+  char session[65];      /*!< 32-hex session id + NUL */
+  uint32_t serverPsn;    /*!< Server PSN, 1..0xffffff (0 = invalid) */
+} hipObjPrepareReplyV2_t;
+
+/*! @brief FINAL response (the reply to READY) @ingroup io */
+typedef struct {
+  int httpStatus;       /*!< 200 (GET) / 204 (PUT) / 5xx / 409 / 408 */
+  int protocolEcho;     /*!< 1 when the protocol echo header was present */
+  uint64_t bytes;       /*!< Bytes transferred per the server */
+  uint32_t cookieEcho;  /*!< Must match the request cookie */
+  char etag[128];       /*!< S3 ETag when present, else empty */
+  char versionId[128];  /*!< S3 version id when present, else empty */
+  char checksumB64[13]; /*!< 12-char canonical CRC64NVME base64 or empty */
+} hipObjFinalReplyV2_t;
+
+/*!
+ * @brief Phase-aware callbacks for the v2 control protocol
+ * @ingroup io
+ *
+ * Each send* callback performs one complete HTTP round trip on the
+ * control endpoint and fills @p out from the response. All callbacks are
+ * required for v2 transfers. The v1 member is unused by the v2 entry
+ * points and is kept for structural forward compatibility.
+ */
+typedef struct hipObjOpsV2 {
+  hipObjOps_t v1;
+
+  /*! Issue PREPARE; out is filled from the response headers. */
+  int (*sendPrepare)(void* ctx, const hipObjTransferReqV2_t* req,
+                     hipObjPrepareReplyV2_t* out);
+
+  /*! Issue READY; the response is FINAL. out reflects it. */
+  int (*sendReady)(void* ctx, const hipObjTransferReqV2_t* req,
+                   hipObjFinalReplyV2_t* out);
+
+  /*! Issue CANCEL (idempotent). Only the HTTP status matters. */
+  int (*sendCancel)(void* ctx, const hipObjTransferReqV2_t* req);
+} hipObjOpsV2_t;
+
+/*!
+ * @brief Initialize the library for hipobj-rc-v2 transfers
+ * @ingroup core
+ *
+ * Mutually exclusive with hipObjInit: whichever is called first wins and
+ * the other returns hipObjAlreadyInitialized until hipObjShutdown.
+ */
+HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t* config);
+
+/*!
+ * @brief V2 GET: download an object into a registered buffer
+ * @ingroup io
+ *
+ * Runs the two-round-trip protocol (PREPARE, then READY whose response
+ * is FINAL) against the configured control endpoint. The transfer size
+ * is capped at 2^31-1 bytes; larger requests fail with
+ * hipObjSizeTooLarge. When the server answers PREPARE with 501 plus the
+ * protocol-unsupported marker the function returns hipObjNotSupported
+ * and the caller may fall back to plain HTTP; failures after READY are
+ * never retried or fallen back. The session lifetime is the function
+ * scope: on return the session is terminated and the connection
+ * quiesced.
+ */
+HIPOBJ_API hipObjError_t hipObjGetV2(const char* bucket, const char* key,
+                                     void* devPtr, uint64_t size,
+                                     uint64_t offset, const char* query,
+                                     hipObjOpsV2_t* ops, void* ctx);
+
+/*! @brief V2 PUT, same contract as hipObjGetV2 @ingroup io */
+HIPOBJ_API hipObjError_t hipObjPutV2(const char* bucket, const char* key,
+                                     const void* devPtr, uint64_t size,
+                                     uint64_t offset, const char* query,
+                                     hipObjOpsV2_t* ops, void* ctx);
+
 /*!
  * @brief Mint a hex-encoded RC RDMA token for a registered buffer
  *
