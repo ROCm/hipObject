@@ -78,14 +78,15 @@ int postRecvImm(DeviceHandle* dh, RcConnV2& conn);
 
 /* Completion validation for the data phase. A GET consumes one
  * RECV_RDMA_WITH_IMM completion; a PUT consumes one RECV completion
- * carrying the immediate (flags & IBV_WC_WITH_IMM). Both carry the
- * transferred byte count in imm_data as uint32 network order. */
+ * carrying the immediate (flags & IBV_WC_WITH_IMM). The immediate
+ * carries the session cookie in network order - the byte count
+ * travels in the FINAL response instead. */
 enum class WcKind { kGet, kPut };
 
 struct WcExpectation {
   WcKind kind;
-  uint64_t wrId; /* expected wr_id (kRecvImm for receives) */
-  uint32_t imm;  /* expected immediate value */
+  uint64_t wrId;   /* expected wr_id (kRecvImm for receives) */
+  uint32_t cookie; /* expected immediate value (the cookie) */
 };
 
 /* Validates one work completion against the expectation; returns

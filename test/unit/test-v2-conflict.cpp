@@ -247,20 +247,20 @@ struct WcTestData : public ::testing::Test {
   }
 };
 
-/* GET data phase: one RECV_RDMA_WITH_IMM. */
+/* GET data phase: one RECV_RDMA_WITH_IMM carrying the cookie. */
 TEST_F(WcTestData, GetCompletion) {
-  auto wc = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 4096);
+  auto wc = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
   hipObj::v2::WcExpectation exp{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm,
-                                4096};
+                                0x1a2b3c4d};
   const char* reason = nullptr;
   EXPECT_TRUE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
 }
 
-/* PUT data phase: RECV plus the immediate flag. */
+/* PUT data phase: RECV plus the immediate cookie. */
 TEST_F(WcTestData, PutCompletion) {
-  auto wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 8192);
+  auto wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 0x1a2b3c4d);
   hipObj::v2::WcExpectation exp{hipObj::v2::WcKind::kPut, hipObj::v2::kRecvImm,
-                                8192};
+                                0x1a2b3c4d};
   const char* reason = nullptr;
   EXPECT_TRUE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
 
@@ -269,23 +269,23 @@ TEST_F(WcTestData, PutCompletion) {
   EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
 }
 
-/* Wrong opcode and byte-count mismatches are rejected. */
+/* Wrong opcode and cookie mismatches are rejected. */
 TEST_F(WcTestData, Mismatches) {
   const char* reason = nullptr;
-  auto wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 100);
+  auto wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 0x1a2b3c4d);
   hipObj::v2::WcExpectation get{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm,
-                                100};
+                                0x1a2b3c4d};
   EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, get, &reason));
 
-  auto wc2 = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 100);
+  auto wc2 = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
   hipObj::v2::WcExpectation bad{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm,
-                                999};
+                                0xdeadbeef};
   EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc2, bad, &reason));
 
-  auto wc3 = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 100);
+  auto wc3 = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
   wc3.status = IBV_WC_WR_FLUSH_ERR;
   hipObj::v2::WcExpectation ok{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm,
-                               100};
+                               0x1a2b3c4d};
   EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc3, ok, &reason));
 }
 

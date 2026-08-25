@@ -399,8 +399,8 @@ bool validateDataCompletion(const struct ibv_wc& wc,
       return false;
     }
   }
-  if (ntohl(wc.imm_data) != expect.imm) {
-    *reason = "immediate byte count mismatch";
+  if (ntohl(wc.imm_data) != expect.cookie) {
+    *reason = "immediate cookie mismatch";
     return false;
   }
   *reason = "";
