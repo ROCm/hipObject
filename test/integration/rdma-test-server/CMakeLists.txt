@@ -9,6 +9,7 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   ${CMAKE_SOURCE_DIR}/src/common/ibv-wrapper.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/transport.cpp
+  ${CMAKE_SOURCE_DIR}/src/common/hip-seam.cpp
   ${CMAKE_SOURCE_DIR}/src/common/rdma-topology.cpp
   ${CMAKE_SOURCE_DIR}/src/common/rdma-numa-wrapper.cpp)
 

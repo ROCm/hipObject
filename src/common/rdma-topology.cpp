@@ -22,6 +22,7 @@
 
 #include <unistd.h>
 
+#include "hip-seam.h"
 #include "ibv-wrapper.h"
 #include "rdma-numa-wrapper.h"
 
@@ -216,8 +217,9 @@ std::vector<IbvDeviceInfo> GetIbvDeviceList(const char* hca_list) {
 int GetClosestNicToGpu(int gpuIndex, const char* hca_list,
                        const char** dev_name) {
   char gpu_bus_id[32];
-  hipError_t err = hipDeviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id),
-                                        gpuIndex);
+  hipError_t err = hipObj::hipOps().hipDeviceGetPCIBusId(gpu_bus_id,
+                                                         sizeof(gpu_bus_id),
+                                                         gpuIndex);
   if (err != hipSuccess)
     return -1;
 

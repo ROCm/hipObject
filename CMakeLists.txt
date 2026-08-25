@@ -93,6 +93,7 @@ set(HIPOBJ_SOURCES
   src/hipobj.cpp
   src/state.cpp
   src/buffer.cpp
+  src/common/hip-seam.cpp
   src/common/ibv-wrapper.cpp
   src/common/rdma-topology.cpp
   src/common/rdma-numa-wrapper.cpp

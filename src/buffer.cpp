@@ -9,6 +9,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include "hip-seam.h"
 #include "hipobj-private.h"
 #include "ibv-wrapper.h"
 
@@ -38,7 +39,8 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
     return 0;
   }
   void* hostBuf = nullptr;
-  hipError_t err = hipHostMalloc(&hostBuf, size, hipHostMallocDefault);
+  hipError_t err = hipObj::hipOps().hipHostMalloc(&hostBuf, size,
+                                                  hipHostMallocDefault);
   if (err != hipSuccess || !hostBuf) {
     return -1;
   }

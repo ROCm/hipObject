@@ -13,6 +13,7 @@
 
 #include "buffer.h"
 #include "control.h"
+#include "hip-seam.h"
 #include "hipobj-private.h"
 #include "ibv-wrapper.h"
 #include "rdma-topology.h"
@@ -72,7 +73,7 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen) {
   if (pollCompletion(g_conn, -1, 5000) != 0) {
     return -1;
   }
-  hipError_t err = hipDeviceSynchronize();
+  hipError_t err = hipObj::hipOps().hipDeviceSynchronize();
   return (err == hipSuccess) ? 0 : -1;
 }
 
@@ -156,7 +157,7 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   }
   int gpuDevice = config->gpuDevice;
   if (gpuDevice < 0) {
-    hipError_t err = hipGetDevice(&gpuDevice);
+    hipError_t err = hipObj::hipOps().hipGetDevice(&gpuDevice);
     if (err != hipSuccess) {
       return {hipObjRdmaError, static_cast<int>(err)};
     }
