@@ -26,11 +26,24 @@ cmake --build build
 ./build/hipobj-examples/get-object 67108864
 ```
 
+This invocation uses the example's stub callbacks: it does not contact
+an S3 server or transfer object data. After initialization and buffer
+registration succeed, the stub reply reports `501` (not implemented),
+so the example ends with `hipObjGet failed: S3 error` and exit status
+1. That nonzero exit is expected for this layer.
+
 Confirm:
 
-- `hipObjInit` opens an RC QP (state INIT; see QP note below)
-- `hipObjBufRegister` succeeds (dmabuf or host-staged fallback)
-- Minted token length is 88 hex characters
+- stderr reaches `[get-object] would send RDMA token (88 bytes)`:
+  reaching this callback proves `hipObjInit` opened the RC QP (state
+  INIT; see QP note below) and `hipObjBufRegister` succeeded
+  (dmabuf or host-staged fallback), and the minted token length is
+  88 hex characters
+- the final `hipObjGet failed: S3 error` line and exit status 1 are
+  the expected stub outcome
+
+An exit status 1 without the token line means an earlier failure, such
+as initialization or buffer registration.
 
 ### QP state (INIT vs RTR/RTS)
 
