@@ -25,11 +25,15 @@ endif()
 
 function(hipobj_add_test TEST_NAME TEST_SOURCE)
   add_executable(${TEST_NAME} ${TEST_SOURCE})
+  # Link the unit-test object build (HIPOBJ_UNIT_TESTS), not the
+  # shipped library, so tests can swap seam tables. The macro must
+  # also be set on the test TU so headers declare the accessors.
   target_link_libraries(${TEST_NAME} PRIVATE
-    hipobj
+    hipobj_test_objects
     GTest::gtest
     GTest::gtest_main
   )
+  target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_UNIT_TESTS)
   target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/shared
