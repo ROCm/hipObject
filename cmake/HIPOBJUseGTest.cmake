@@ -33,6 +33,9 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
     GTest::gtest
     GTest::gtest_main
   )
+  if(TARGET hipobj_v2_server_objects)
+    target_link_libraries(${TEST_NAME} PRIVATE hipobj_v2_server_objects)
+  endif()
   target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_UNIT_TESTS)
   target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -41,6 +44,7 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
     ${CMAKE_SOURCE_DIR}/src/common
     ${CMAKE_SOURCE_DIR}/src/rdma
     ${CMAKE_SOURCE_DIR}/src/s3
+    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server
   )
   add_test(NAME ${TEST_NAME}
     COMMAND ${TEST_NAME})

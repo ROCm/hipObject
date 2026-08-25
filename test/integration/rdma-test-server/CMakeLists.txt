@@ -6,9 +6,13 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   main.cpp
   http_server.cpp
   rdma_server.cpp
+  v2_request.cpp
+  v2_session.cpp
   ${CMAKE_SOURCE_DIR}/src/common/ibv-wrapper.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/transport.cpp
+  ${CMAKE_SOURCE_DIR}/src/rdma/v2-clock.cpp
+  ${CMAKE_SOURCE_DIR}/src/rdma/v2-wire.cpp
   ${CMAKE_SOURCE_DIR}/src/common/hip-seam.cpp
   ${CMAKE_SOURCE_DIR}/src/common/rdma-topology.cpp
   ${CMAKE_SOURCE_DIR}/src/common/rdma-numa-wrapper.cpp)
