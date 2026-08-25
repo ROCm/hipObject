@@ -74,6 +74,8 @@ typedef enum {
   hipObjDmabufNotSupported,
   hipObjSizeTooLarge,
   hipObjInternalError,
+  hipObjNotSupported, /*!< Server explicitly does not support hipobj-rc-v2 */
+  hipObjBusy,         /*!< Server backpressure (503) and retries exhausted */
 } hipObjOpError_t;
 
 /*!

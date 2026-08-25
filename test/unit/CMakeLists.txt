@@ -22,3 +22,6 @@ if(CURL_FOUND)
     Threads::Threads)
   set_tests_properties(test-s3-curl-ops PROPERTIES TIMEOUT 60)
 endif()
+
+hipobj_add_test(test-v2-wire
+  test-v2-wire.cpp)

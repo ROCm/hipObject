@@ -131,6 +131,10 @@ const char* hipObjGetErrorString(hipObjOpError_t err) {
         return "Size too large";
       case hipObjInternalError:
         return "Internal error";
+      case hipObjNotSupported:
+        return "hipobj-rc-v2 not supported by server";
+      case hipObjBusy:
+        return "Server busy (backpressure)";
       default:
         return "Unknown error";
     }

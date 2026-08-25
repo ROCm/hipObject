@@ -98,6 +98,7 @@ set(HIPOBJ_SOURCES
   src/common/rdma-numa-wrapper.cpp
   src/rdma/transport.cpp
   src/rdma/token.cpp
+  src/rdma/v2-wire.cpp
   src/s3/control.cpp)
 
 if(HIPOBJ_BNXT)
