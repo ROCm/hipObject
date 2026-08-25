@@ -336,6 +336,7 @@ typedef struct {
   char etag[128];       /*!< S3 ETag when present, else empty */
   char versionId[128];  /*!< S3 version id when present, else empty */
   char checksumB64[13]; /*!< 12-char canonical CRC64NVME base64 or empty */
+  int cookiePresent;    /*!< 1 when the cookie echo header was present */
 } hipObjFinalReplyV2_t;
 
 /*!

@@ -186,7 +186,7 @@ protected:
   hipObj::DeviceHandle dh_;
 };
 
-/* T1: CRUD + capacity limits. */
+/* Registry CRUD plus the capacity limit. */
 TEST_F(V2RegistryTest, RegistryCrudAndLimits) {
   auto& reg = hipObj::v2::registry();
   EXPECT_EQ(reg.size(), 0u);
@@ -207,7 +207,7 @@ TEST_F(V2RegistryTest, RegistryCrudAndLimits) {
   EXPECT_EQ(reg.size(), 0u);
 }
 
-/* T1b: MR 256 limit is enforced by BufferMap. */
+/* The MR table limit is enforced by BufferMap. */
 TEST_F(V2RegistryTest, BufferMapMrLimit) {
   hipObj::BufferMap map;
   /* Register without verbs fakes: point at a fake pd; reg_mr is
@@ -217,11 +217,11 @@ TEST_F(V2RegistryTest, BufferMapMrLimit) {
   /* Instead simulate capacity through size() growth is not possible
    * without reg_mr; the cap check is compile-time constant + guard
    * order (checked before reg_mr call) - verified by code review
-   * and the T1 capacity path above. */
+   * and the capacity path above. */
   SUCCEED();
 }
 
-/* T2: MR ref gating. */
+/* MR reference gating. */
 TEST_F(V2RegistryTest, MrRefCountGating) {
   hipObj::BufferMap map;
   /* Directly exercise ref counters through the map's public ref
@@ -233,7 +233,7 @@ TEST_F(V2RegistryTest, MrRefCountGating) {
   EXPECT_EQ(map.mrRefCount(&fakePtr), 0u);
 }
 
-/* T3: connection-only teardown touches only qp/cq. */
+/* Connection teardown touches only qp/cq. */
 TEST_F(V2RegistryTest, ConnectionOnlyTeardown) {
   auto id = makeConn(&dh_);
   ASSERT_NE(id, 0u);
@@ -245,7 +245,7 @@ TEST_F(V2RegistryTest, ConnectionOnlyTeardown) {
   EXPECT_EQ(hipObj::v2::registry().size(), 0u);
 }
 
-/* T4a: destroy_qp failure poisons. */
+/* destroy_qp failure poisons the entry. */
 TEST_F(V2RegistryTest, DestroyQpFailurePoisons) {
   auto id = makeConn(&dh_);
   ASSERT_NE(id, 0u);
@@ -261,7 +261,7 @@ TEST_F(V2RegistryTest, DestroyQpFailurePoisons) {
   EXPECT_EQ(g_fake.destroyQpCalls, 2);
 }
 
-/* T4b: destroy_cq failure poisons; retry destroys cq only. */
+/* destroy_cq failure poisons; retry destroys cq only. */
 TEST_F(V2RegistryTest, DestroyCqFailurePoisons) {
   auto id = makeConn(&dh_);
   ASSERT_NE(id, 0u);
@@ -276,13 +276,13 @@ TEST_F(V2RegistryTest, DestroyCqFailurePoisons) {
   EXPECT_EQ(hipObj::v2::registry().size(), 0u);
 }
 
-/* T13: unknown ConnId is a no-op. */
+/* Releasing an unknown ConnId is a no-op. */
 TEST_F(V2RegistryTest, UnknownConnIdIsNoOp) {
   EXPECT_EQ(hipObj::v2::releaseConnection(9999), 0);
   EXPECT_FALSE(hipObj::v2::registry().isPoisoned(9999));
 }
 
-/* T15: double release claims once. */
+/* Double release destroys each object once. */
 TEST_F(V2RegistryTest, DoubleReleaseClaimsOnce) {
   auto id = makeConn(&dh_);
   ASSERT_NE(id, 0u);
@@ -292,7 +292,7 @@ TEST_F(V2RegistryTest, DoubleReleaseClaimsOnce) {
   EXPECT_EQ(g_fake.destroyCqCalls, 1);
 }
 
-/* T17: erase releases exactly one capacity slot. */
+/* Erase releases exactly one capacity slot. */
 TEST_F(V2RegistryTest, EraseReleasesCapacity) {
   auto& reg = hipObj::v2::registry();
   auto id = makeConn(&dh_);
@@ -312,7 +312,7 @@ TEST_F(V2RegistryTest, EraseReleasesCapacity) {
   }
 }
 
-/* T18: registry full suppresses qp creation. */
+/* A full registry suppresses object creation. */
 TEST_F(V2RegistryTest, RegistryFullSuppressesCreation) {
   auto& reg = hipObj::v2::registry();
   std::vector<hipObj::v2::ConnId> ids;
@@ -329,7 +329,7 @@ TEST_F(V2RegistryTest, RegistryFullSuppressesCreation) {
   }
 }
 
-/* T21: createRcConnV2 partial rollback failure raises a tombstone
+/* A partial rollback failure in createRcConnV2 raises a tombstone
  * the release path can still clean. */
 TEST_F(V2RegistryTest, PartialRollbackFailureTombstone) {
   auto& reg = hipObj::v2::registry();
@@ -358,7 +358,7 @@ TEST_F(V2RegistryTest, PartialRollbackFailureTombstone) {
   EXPECT_EQ(reg.size(), 0u);
 }
 
-/* T22 (part): create_qp failure with successful rollback frees the
+/* create_qp failure with successful rollback frees the
  * cq and the reservation. */
 TEST_F(V2RegistryTest, QpCreateFailureCleanRollback) {
   auto& reg = hipObj::v2::registry();
@@ -376,7 +376,7 @@ TEST_F(V2RegistryTest, QpCreateFailureCleanRollback) {
   EXPECT_EQ(reg.retired().used(), 0u);
 }
 
-/* T23: defensive Busy path (rid==0 + full ring). */
+/* Defensive busy path: live qp, no reservation, ring full. */
 TEST_F(V2RegistryTest, DefensiveBusyPath) {
   auto& reg = hipObj::v2::registry();
   hipObj::v2::ConnectionEntryV2 entry;
@@ -408,7 +408,7 @@ TEST_F(V2RegistryTest, DefensiveBusyPath) {
   EXPECT_EQ(reg.size(), 0u);
 }
 
-/* T6: topology fields reach the QP attributes. */
+/* Topology fields reach the QP attributes. */
 TEST_F(V2RegistryTest, TopologyFieldsReachQpAttrs) {
   dh_.portNum = 2;
   dh_.gidIndex = 3;
@@ -431,7 +431,7 @@ TEST_F(V2RegistryTest, TopologyFieldsReachQpAttrs) {
   EXPECT_TRUE(cqOk);
 }
 
-/* Retired ring lifecycle (T9 portion in commit 1: reserve/record/
+/* Retired ring lifecycle: reserve, record,
  * expire accounting is pure ring logic). */
 TEST_F(V2RegistryTest, RetiredRingLifecycle) {
   auto& ring = hipObj::v2::registry().retired();
@@ -455,7 +455,7 @@ TEST_F(V2RegistryTest, RetiredRingLifecycle) {
   EXPECT_EQ(ring.used(), 0u);
 }
 
-/* T19: reservation ownership - another entry cannot consume a
+/* Reservation ownership: recording consumes exactly the owned slot;
  * Reserved slot. */
 TEST_F(V2RegistryTest, ReservationOwnership) {
   auto& reg = hipObj::v2::registry();

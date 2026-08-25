@@ -234,6 +234,7 @@ bool parseFinalReply(int httpStatus, const std::string& headers,
   if ((httpStatus == 200 || httpStatus == 204) && !sawCookie) {
     return false;
   }
+  out.cookiePresent = sawCookie;
   return true;
 }
 

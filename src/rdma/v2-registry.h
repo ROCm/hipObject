@@ -5,7 +5,7 @@
 
 /* Per-token connection registry for the v2 protocol.
  *
- * Ownership model (approved design): the shared DeviceHandle owns
+ * Ownership model: the shared DeviceHandle owns
  * ctx/pd plus topology; each RcConnV2 owns exactly one qp/cq pair.
  * The registry serializes every mutation behind the library-wide
  * apiLock, so entries, capacity accounting, and the retired ring are
@@ -174,8 +174,10 @@ public:
 
 #ifdef HIPOBJ_UNIT_TESTS
   /* Test-only direct insertion bypassing reserveSlot() and
-   * retiredReserve(); used to construct defensive-path states that
-   * production sequencing cannot reach (T23). */
+   * retiredReserve(); used to construct states the normal
+   * sequencing cannot reach (for example a live qp without a
+   * retired-ring reservation, to exercise the defensive busy
+   * path). */
   ConnId insertRawForTest(ConnectionEntryV2&& entry);
 #endif
 

@@ -5,7 +5,7 @@
 
 /* hipobj-rc-v2 client state machine.
  *
- * Tracks the per-transfer phases described by the v2 design:
+ * Tracks the per-transfer phases:
  *
  *   Idle -> Negotiating (PREPARE sent)
  *        -> Connecting  (PREPARE ok, QP transition in progress)

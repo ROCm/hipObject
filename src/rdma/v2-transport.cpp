@@ -250,12 +250,14 @@ int releaseConnection(ConnId id) {
     entry.reservationId = 0; /* local ownership during destroy */
   });
   if (hasQp && rid == 0) {
-    /* Defensive: unreachable in the current creation sequence
-     * (insert always carries a live reservation); kept so the Busy
-     * path stays total. Unit-tested via T23. */
+    /* Defensive: the normal creation sequence always inserts an
+     * entry with a live reservation, so a live qp without one is
+     * not expected. Keep the handling anyway so the teardown path
+     * stays complete: reserve a slot now, and report busy when the
+     * retired ring is exhausted so the caller can retry later. */
     rid = reg.retired().reserve();
     if (rid == 0) {
-      abortClaim(id); /* pre-destroy cancel; Poisoned stays claimable */
+      abortClaim(id); /* pre-destroy cancel; stays reclaimable */
       return kReleaseBusy;
     }
     reg.withEntry(id, [&](ConnectionEntryV2& entry) {
@@ -266,7 +268,7 @@ int releaseConnection(ConnId id) {
   bool cqOk = true;
   uint32_t psn = 0;
   reg.withEntry(id, [&](ConnectionEntryV2& entry) {
-    psn = entry.clientPsn; /* policy commit fills this at PREPARE */
+    psn = entry.clientPsn; /* recorded into the retired ring below */
     if (entry.conn.qp) {
       qpOk = ibv.destroy_qp(entry.conn.qp) == 0;
       if (qpOk) {

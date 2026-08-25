@@ -66,6 +66,7 @@ struct FinalReply {
   bool protocolEcho = false;
   uint64_t bytes = 0;
   uint32_t cookieEcho = 0;
+  bool cookiePresent = false; /* cookie echo header seen */
   std::string etag;
   std::string versionId;
   std::string checksumB64; /* 12-char canonical base64 text */
