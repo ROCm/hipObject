@@ -31,6 +31,9 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
   if (entries_.find(key) != entries_.end()) {
     return -1;
   }
+  if (entries_.size() >= kMaxEntries) {
+    return -1;
+  }
   int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
                IBV_ACCESS_LOCAL_WRITE;
   struct ibv_mr* mr = ibv.reg_mr(pd, devPtr, size, access);
@@ -58,6 +61,9 @@ int BufferMap::deregisterBuffer(void* devPtr) {
   auto it = entries_.find(key);
   if (it == entries_.end()) {
     return -1;
+  }
+  if (it->second.refCount > 0) {
+    return -1; /* pinned by a live v2 connection */
   }
   BufEntry& ent = it->second;
   void* hostBuf = (!ent.isDmabuf) ? ent.mr->addr : nullptr;
@@ -103,4 +109,42 @@ bool BufferMap::isRegistered(void* devPtr) const {
   return entries_.find(key) != entries_.end();
 }
 
+bool BufferMap::acquireMrRef(void* devPtr) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  if (it == entries_.end()) {
+    return false;
+  }
+  ++it->second.refCount;
+  return true;
+}
+
+bool BufferMap::releaseMrRef(void* devPtr) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  if (it == entries_.end() || it->second.refCount == 0) {
+    return false;
+  }
+  --it->second.refCount;
+  return true;
+}
+
+size_t BufferMap::mrRefCount(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  return it == entries_.end() ? 0 : it->second.refCount;
+}
+
+bool BufferMap::anyPinned() const {
+  for (const auto& [key, ent] : entries_) {
+    if (ent.refCount > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+size_t BufferMap::size() const {
+  return entries_.size();
+}
 } // namespace hipObj

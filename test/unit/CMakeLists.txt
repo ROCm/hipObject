@@ -72,5 +72,8 @@ hipobj_add_test(test-v2-wire
 hipobj_add_test(test-v2-state
   test-v2-state.cpp)
 
+hipobj_add_test(test-v2-registry
+  test-v2-registry.cpp)
+
 hipobj_add_test(test-seams
   test-seams.cpp)

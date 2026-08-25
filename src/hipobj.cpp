@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -20,6 +22,8 @@
 #include "state.h"
 #include "token.h"
 #include "transport.h"
+#include "v2-registry.h"
+#include "v2-transport.h"
 
 namespace hipObj {
 
@@ -201,6 +205,25 @@ hipObjError_t hipObjShutdown(void) try {
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
     return HIPOBJ_SUCCESS;
+  }
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  /* v2 first: release every connection (destroy retries included);
+   * leftover poison must stop the teardown so the failure is
+   * visible instead of violating the PD/context lifetime rule. */
+  bool poisonLeft = false;
+  hipObj::v2::ConnectionRegistry& reg = hipObj::v2::registry();
+  std::vector<hipObj::v2::ConnId> ids;
+  reg.forEachId([&ids](hipObj::v2::ConnId id) {
+    ids.push_back(id);
+  });
+  for (auto id : ids) {
+    int rc = hipObj::v2::releaseConnection(id);
+    if (rc == hipObj::v2::kReleaseLeftover) {
+      poisonLeft = true;
+    }
+  }
+  if (poisonLeft || reg.size() > 0) {
+    return {hipObjRdmaError, 0};
   }
   hipObj::g_bufferMap.deregisterAll();
   hipObj::closeRdmaDevice(hipObj::g_conn);

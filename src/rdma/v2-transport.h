@@ -1,0 +1,73 @@
+/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/* v2 transport: device/qp ownership split and release procedure.
+ *
+ * DeviceHandle is the shared half (context, protection domain,
+ * topology) with a connection reference count; RcConnV2 owns one
+ * qp/cq pair. v2 entry points route through these helpers so the
+ * registry, capacity accounting, and the retired ring stay
+ * consistent. Everything runs under v2::apiLock(). */
+
+#pragma once
+
+#include <cstdint>
+
+#include "ibv-core.h"
+#include "v2-registry.h"
+
+namespace hipObj {
+
+struct DeviceHandle {
+  struct ibv_context* ctx = nullptr;
+  struct ibv_pd* pd = nullptr;
+  uint8_t portNum = 1;
+  int gidIndex = -1;
+  union ibv_gid localGid = {};
+  uint32_t connRefs = 0;
+};
+
+namespace v2 {
+
+/* Creates the qp/cq pair on dh. On success conn holds both objects,
+ * conn.qpNum is captured, and dh->connRefs was incremented. On
+ * failure every partially created object was rolled back (rollback
+ * failures are reported via *rollbackFailed so the caller can raise
+ * a poisoned tombstone). */
+int createRcConnV2(DeviceHandle* dh, RcConnV2& conn,
+                   bool* rollbackFailed = nullptr);
+
+/* Destroys conn's qp and cq. Reflects per-object success through
+ * the out flags; the caller feeds them to commitDestroy(). */
+void destroyRcConnV2(RcConnV2& conn, bool* qpOk, bool* cqOk);
+
+/* QP state transitions taking the device topology from dh. The v1
+ * signatures (RcConnection&) remain unchanged. */
+int transitionQpToInitV2(DeviceHandle* dh, RcConnV2& conn);
+int transitionQpToRtrV2(DeviceHandle* dh, RcConnV2& conn, uint32_t destQpNum,
+                        uint16_t destLid, union ibv_gid destGid,
+                        uint32_t rqPsn);
+int transitionQpToRtsV2(RcConnV2& conn, DeviceHandle* dh, uint32_t sqPsn);
+
+/* Creates only a qp on an existing cq (conflict-discard retry uses
+ * this so the original cq survives). */
+int createRcQpOnly(DeviceHandle* dh, struct ibv_cq* cq, RcConnV2& conn);
+
+/* Decrements dh->connRefs after a successful releaseRcConnV2 and
+ * closes ctx/pd when no MR and no connection remain. */
+void releaseDevice(DeviceHandle* dh);
+
+/* Full v2 release procedure for one registry entry: claim, reserve
+ * a retired slot for a live qp, destroy, commit, record, erase.
+ * Returns a hipObj error code (0 = success, busy = deferred,
+ * rdma = leftover/poison). */
+int releaseConnection(ConnId id);
+
+/* Posts the zero-SGE receive work request (wr_id = kRecvImm). */
+constexpr uint64_t kRecvImm = 0x5245435632494d4dULL; /* "RECV2IMM" */
+int postRecvImm(DeviceHandle* dh, RcConnV2& conn);
+
+} // namespace v2
+} // namespace hipObj
