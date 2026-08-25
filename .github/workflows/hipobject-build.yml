@@ -35,6 +35,7 @@ jobs:
           apt-get install -y \
             cmake \
             git \
+            libcurl4-openssl-dev \
             libibverbs-dev \
             libnuma-dev
 
