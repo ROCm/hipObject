@@ -47,9 +47,6 @@ FakeIbv g_fake;
 struct FakeCq {
   int magic = 0xC0;
 };
-struct FakeQp {
-  uint32_t qp_num = 0;
-};
 struct FakePd {
   int alive = 1;
 };
@@ -86,9 +83,10 @@ struct ibv_qp* fakeCreateQp(struct ibv_pd*, struct ibv_qp_init_attr*) {
     errno = ENOMEM;
     return nullptr;
   }
-  auto* qp = new FakeQp();
+  auto* qp = new struct ibv_qp();
+  std::memset(qp, 0, sizeof(*qp));
   qp->qp_num = 1000 + g_fake.createQpCalls;
-  return reinterpret_cast<struct ibv_qp*>(qp);
+  return qp;
 }
 
 int fakeDestroyQp(struct ibv_qp* qp) {
@@ -98,7 +96,7 @@ int fakeDestroyQp(struct ibv_qp* qp) {
     errno = EBUSY;
     return 1;
   }
-  delete reinterpret_cast<FakeQp*>(qp);
+  delete qp;
   return 0;
 }
 
@@ -380,7 +378,10 @@ TEST_F(V2RegistryTest, QpCreateFailureCleanRollback) {
 TEST_F(V2RegistryTest, DefensiveBusyPath) {
   auto& reg = hipObj::v2::registry();
   hipObj::v2::ConnectionEntryV2 entry;
-  entry.conn.qp = reinterpret_cast<struct ibv_qp*>(new FakeQp{7});
+  auto* rawQp = new struct ibv_qp();
+  std::memset(rawQp, 0, sizeof(*rawQp));
+  rawQp->qp_num = 7;
+  entry.conn.qp = rawQp;
   entry.conn.qpNum = 7;
   entry.device = &dh_;
   entry.reservationId = 0;

@@ -55,6 +55,13 @@ int transitionQpToRtsV2(RcConnV2& conn, DeviceHandle* dh, uint32_t sqPsn);
  * this so the original cq survives). */
 int createRcQpOnly(DeviceHandle* dh, struct ibv_cq* cq, RcConnV2& conn);
 
+/* Retires a live qp whose (qpn, psn) was already used by a peer:
+ * reserves a fresh ring slot, destroys the old qp, records the
+ * tuple, and recreates the qp on the existing cq. On any failure
+ * the entry keeps its live qp and reservation (callers surface the
+ * error); the busy return means the retired ring is exhausted. */
+int discardAndRecreateQp(ConnId id);
+
 /* Decrements dh->connRefs after a successful releaseRcConnV2 and
  * closes ctx/pd when no MR and no connection remain. */
 void releaseDevice(DeviceHandle* dh);
@@ -68,6 +75,23 @@ int releaseConnection(ConnId id);
 /* Posts the zero-SGE receive work request (wr_id = kRecvImm). */
 constexpr uint64_t kRecvImm = 0x5245435632494d4dULL; /* "RECV2IMM" */
 int postRecvImm(DeviceHandle* dh, RcConnV2& conn);
+
+/* Completion validation for the data phase. A GET consumes one
+ * RECV_RDMA_WITH_IMM completion; a PUT consumes one RECV completion
+ * carrying the immediate (flags & IBV_WC_WITH_IMM). Both carry the
+ * transferred byte count in imm_data as uint32 network order. */
+enum class WcKind { kGet, kPut };
+
+struct WcExpectation {
+  WcKind kind;
+  uint64_t wrId; /* expected wr_id (kRecvImm for receives) */
+  uint32_t imm;  /* expected immediate value */
+};
+
+/* Validates one work completion against the expectation; returns
+ * false and fills *reason on mismatch. */
+bool validateDataCompletion(const struct ibv_wc& wc,
+                            const WcExpectation& expect, const char** reason);
 
 } // namespace v2
 } // namespace hipObj

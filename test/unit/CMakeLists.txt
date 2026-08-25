@@ -78,5 +78,8 @@ hipobj_add_test(test-v2-registry
 hipobj_add_test(test-v2-random
   test-v2-random.cpp)
 
+hipobj_add_test(test-v2-conflict
+  test-v2-conflict.cpp)
+
 hipobj_add_test(test-seams
   test-seams.cpp)

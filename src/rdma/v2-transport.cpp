@@ -7,6 +7,8 @@
 
 #include <cstring>
 
+#include <arpa/inet.h>
+
 #include "ibv-wrapper.h"
 #include "transport.h"
 #include "vendor-ops.h"
@@ -299,6 +301,110 @@ int releaseConnection(ConnId id) {
     return 0;
   }
   return kReleaseLeftover;
+}
+
+int discardAndRecreateQp(ConnId id) {
+  ConnectionRegistry& reg = registry();
+
+  /* Local slot B guards the tuple we are about to retire. */
+  uint64_t slotB = reg.retired().reserve();
+  if (slotB == 0) {
+    return kReleaseBusy;
+  }
+
+  struct Captured {
+    struct ibv_qp* qp = nullptr;
+    struct ibv_cq* cq = nullptr;
+    DeviceHandle* device = nullptr;
+    uint64_t rid = 0;
+    uint32_t qpn = 0;
+    uint32_t psn = 0;
+  } cap;
+
+  bool found = reg.withEntry(id, [&](ConnectionEntryV2& entry) {
+    cap.qp = entry.conn.qp;
+    cap.cq = entry.conn.cq;
+    cap.device = entry.device;
+    cap.rid = entry.reservationId;
+    cap.qpn = entry.conn.qpNum;
+    cap.psn = entry.clientPsn;
+  });
+  if (!found || !cap.qp || !cap.cq || cap.rid == 0) {
+    /* Nothing to discard or the entry is mid-teardown. */
+    reg.retired().unreserve(slotB);
+    return kReleaseLeftover;
+  }
+
+  /* Destroy the old qp; on failure keep the live qp and return. */
+  if (ibv.destroy_qp(cap.qp) != 0) {
+    reg.retired().unreserve(slotB);
+    return kReleaseLeftover;
+  }
+  reg.retired().record(slotB, cap.qpn, cap.psn);
+
+  /* The old reservation A is released back: the tuple it guarded is
+   * now recorded through slot B, tied to the destroyed qp. */
+  reg.retired().unreserve(cap.rid);
+
+  /* Move ownership of A's slot to the caller and clear the fields
+   * before the recreate attempt, so the entry never holds a live
+   * reservationId without a qp. */
+  reg.withEntry(id, [&](ConnectionEntryV2& entry) {
+    entry.reservationId = 0;
+    entry.conn.qp = nullptr;
+    entry.conn.qpNum = 0;
+  });
+
+  RcConnV2 fresh;
+  if (createRcQpOnly(cap.device, cap.cq, fresh) != 0) {
+    /* No qp: release through the normal teardown path (the cq is
+     * destroyed there) and report the failure. */
+    int rc = releaseConnection(id);
+    if (rc != 0) {
+      return rc;
+    }
+    return kReleaseLeftover;
+  }
+
+  reg.withEntry(id, [&](ConnectionEntryV2& entry) {
+    entry.conn.qp = fresh.qp;
+    entry.conn.qpNum = fresh.qpNum;
+    entry.reservationId = cap.rid;
+  });
+  return 0;
+}
+
+bool validateDataCompletion(const struct ibv_wc& wc,
+                            const WcExpectation& expect, const char** reason) {
+  if (wc.status != IBV_WC_SUCCESS) {
+    *reason = "completion status is not success";
+    return false;
+  }
+  if (wc.wr_id != expect.wrId) {
+    *reason = "unexpected wr_id";
+    return false;
+  }
+  if (expect.kind == WcKind::kGet) {
+    if (wc.opcode != IBV_WC_RECV_RDMA_WITH_IMM) {
+      *reason = "expected RECV_RDMA_WITH_IMM";
+      return false;
+    }
+  } else {
+    if (wc.opcode != IBV_WC_RECV) {
+      *reason = "expected RECV";
+      return false;
+    }
+    if (!(wc.wc_flags & IBV_WC_WITH_IMM)) {
+      *reason = "immediate flag missing";
+      return false;
+    }
+  }
+  if (ntohl(wc.imm_data) != expect.imm) {
+    *reason = "immediate byte count mismatch";
+    return false;
+  }
+  *reason = "";
+  return true;
 }
 
 } // namespace v2
