@@ -10,7 +10,7 @@ https://github.com/minio/minio-rs/blob/master/examples/get_put_rdma.rs
 
 ## MinIO Server-Side Install Deb
 
-https://dl.minio.io/aistor/minio/edge/linux-amd64/minio.rdma_20260606035505.0.0_amd64.deb
+https://dl.minio.io/aistor/minio/release/linux-amd64/minio.rdma_20260807183435.0.0_amd64.deb
 
 ### Licence (single node is free)
 
