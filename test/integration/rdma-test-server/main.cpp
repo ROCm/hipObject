@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 #include "http_server.h"
 #include "rdma_server.h"
 #include "v2_handlers.h"
@@ -37,6 +39,7 @@ std::string objectKey(const std::string& path) {
 int main(int argc, char* argv[]) {
   int port = 9000;
   bool v2Mode = false;
+  bool hangAfterPrepare = false;
   std::string accessKey = "hipobj-test-key";
   std::string secretKey = "hipobj-test-secret";
   for (int i = 1; i < argc; ++i) {
@@ -47,6 +50,8 @@ int main(int argc, char* argv[]) {
       accessKey = argv[++i];
     } else if (arg == "--v2-secret-key" && i + 1 < argc) {
       secretKey = argv[++i];
+    } else if (arg == "--hang-after-prepare") {
+      hangAfterPrepare = true;
     } else {
       port = std::atoi(arg.c_str());
     }
@@ -75,6 +80,13 @@ int main(int argc, char* argv[]) {
           auto r = handlers.onPrepare(*parsed);
           resp.status = r.status;
           resp.headers = r.headers;
+          if (r.status == 200 && hangAfterPrepare) {
+            /* Deliberate stall for the supervisor-reclaim E2E
+             * gate; no watchdog inside the process. */
+            for (;;) {
+              sleep(1);
+            }
+          }
           if (r.status == 200) {
             /* Publishing -> Prepared when the bytes leave. */
             std::string sid = r.headers.count("X-Amz-Rdma-Session")

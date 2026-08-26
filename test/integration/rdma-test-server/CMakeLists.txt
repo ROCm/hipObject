@@ -62,5 +62,12 @@ if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj-rdma-test-server PRIVATE HIPOBJ_IONIC)
 endif()
 
+add_executable(v2-client-harness v2_client_harness.cpp v2_sigv4.cpp)
+target_compile_features(v2-client-harness PRIVATE cxx_std_17)
+target_include_directories(v2-client-harness PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR})
+find_package(OpenSSL REQUIRED)
+target_link_libraries(v2-client-harness PRIVATE OpenSSL::Crypto)
+
 install(TARGETS hipobj-rdma-test-server
   RUNTIME DESTINATION bin/hipobj-test)
