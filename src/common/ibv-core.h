@@ -656,17 +656,48 @@ struct ibv_cq {
 
 /* -------------------------------------------------------------------------
  * 28. ibv_context_ops struct
+ *    Mirrors the layout of struct ibv_context_ops from libibverbs verbs.h.
+ *    poll_cq, post_send and post_recv are static inline functions in
+ *    verbs.h that delegate to these ops entries; rdma-core does not
+ *    export them as dynamic symbols.
  * ------------------------------------------------------------------------- */
 
 struct ibv_context_ops {
-  void* _compat[22];
+  void* _compat_query_device;
+  void* _compat_query_port;
+  void* _compat_alloc_pd;
+  void* _compat_dealloc_pd;
+  void* _compat_reg_mr;
+  void* _compat_rereg_mr;
+  void* _compat_dereg_mr;
+  void* alloc_mw;
+  void* bind_mw;
+  void* dealloc_mw;
+  void* _compat_create_cq;
+  int (*poll_cq)(struct ibv_cq* cq, int num_entries, struct ibv_wc* wc);
+  void* req_notify_cq;
+  void* _compat_cq_event;
+  void* _compat_resize_cq;
+  void* _compat_destroy_cq;
+  void* _compat_create_srq;
+  void* _compat_modify_srq;
+  void* _compat_query_srq;
+  void* _compat_destroy_srq;
+  void* post_srq_recv;
+  void* _compat_create_qp;
+  void* _compat_query_qp;
+  void* _compat_modify_qp;
+  void* _compat_destroy_qp;
   int (*post_send)(struct ibv_qp* qp, struct ibv_send_wr* wr,
                    struct ibv_send_wr** bad_wr);
   int (*post_recv)(struct ibv_qp* qp, struct ibv_recv_wr* wr,
                    struct ibv_recv_wr** bad_wr);
-  void* _compat_tail[5];
+  void* _compat_create_ah;
+  void* _compat_destroy_ah;
+  void* _compat_attach_mcast;
+  void* _compat_detach_mcast;
+  void* _compat_async_event;
 };
-
 /* -------------------------------------------------------------------------
  * 29. ibv_context struct
  * ------------------------------------------------------------------------- */

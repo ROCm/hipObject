@@ -19,6 +19,8 @@
 #include "hipobj.h"
 
 #if defined(HIPOBJ_HAVE_CURL)
+#include <curl/curl.h>
+
 #include "s3_curl_ops.h"
 #endif
 
