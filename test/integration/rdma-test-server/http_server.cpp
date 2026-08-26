@@ -6,6 +6,7 @@
 #include "http_server.h"
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 
@@ -39,6 +40,69 @@ std::string trim(const std::string& s) {
   return s.substr(start, end - start);
 }
 
+const char* reasonPhrase(int status) {
+  switch (status) {
+    case 200:
+      return "OK";
+    case 204:
+      return "No Content";
+    case 400:
+      return "Bad Request";
+    case 403:
+      return "Forbidden";
+    case 408:
+      return "Request Timeout";
+    case 409:
+      return "Conflict";
+    case 413:
+      return "Content Too Large";
+    case 500:
+      return "Internal Server Error";
+    case 501:
+      return "Not Implemented";
+    case 503:
+      return "Service Unavailable";
+    default:
+      return "Status";
+  }
+}
+
+/* Sends the whole buffer honoring the absolute deadline; MSG_NOSIGNAL
+ * keeps a vanished peer from killing the process. Returns false on
+ * failure or deadline expiry. */
+bool sendAll(int fd, const std::string& data, uint64_t deadlineMs) {
+  size_t sent = 0;
+  while (sent < data.size()) {
+    auto now = std::chrono::steady_clock::now().time_since_epoch();
+    uint64_t nowMs = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+    if (nowMs >= deadlineMs) {
+      return false;
+    }
+    uint64_t remain = deadlineMs - nowMs;
+    if (remain > 5000) {
+      remain = 5000; /* per-syscall cap; the loop re-checks */
+    }
+    timeval tv{};
+    tv.tv_sec = static_cast<long>(remain / 1000);
+    tv.tv_usec = static_cast<long>((remain % 1000) * 1000);
+    if (remain == 0) {
+      tv.tv_usec = 1000; /* at least 1ms */
+    }
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    ssize_t n = ::send(fd, data.data() + sent, data.size() - sent,
+                       MSG_NOSIGNAL);
+    if (n < 0) {
+      if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+        continue;
+      }
+      return false;
+    }
+    sent += static_cast<size_t>(n);
+  }
+  return true;
+}
+
 } // namespace
 
 HttpServer::HttpServer(int port) {
@@ -61,9 +125,7 @@ HttpServer::HttpServer(int port) {
 }
 
 HttpServer::~HttpServer() {
-  if (listen_fd_ >= 0) {
-    close(listen_fd_);
-  }
+  stop();
 }
 
 void HttpServer::setHandler(HttpHandler handler) {
@@ -98,9 +160,159 @@ int HttpServer::runOnce(int timeoutMs) {
   HttpRequest req = parseRequest(buf);
   HttpResponse resp = handler_(req);
   std::string out = serializeResponse(resp);
-  send(client, out.data(), out.size(), 0);
+  send(client, out.data(), out.size(), MSG_NOSIGNAL);
   close(client);
   return 1;
+}
+
+void HttpServer::runThreaded() {
+  while (!stopping_.load()) {
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(listen_fd_, &fds);
+    timeval tv{};
+    tv.tv_sec = 0;
+    tv.tv_usec = 200 * 1000; /* wake for stop checks */
+    int ready = select(listen_fd_ + 1, &fds, nullptr, nullptr, &tv);
+    if (ready <= 0) {
+      continue;
+    }
+    int client = accept(listen_fd_, nullptr, nullptr);
+    if (client < 0) {
+      continue;
+    }
+    /* Linger off is the server-wide invariant: close/shutdown never
+     * block and buffered response bytes are delivered gracefully. */
+    linger ling{};
+    ling.l_onoff = 0;
+    ling.l_linger = 0;
+    if (setsockopt(client, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) != 0) {
+      close(client);
+      continue;
+    }
+    {
+      std::lock_guard<std::mutex> guard(workersMtx_);
+      workers_.emplace_back([this, client] {
+        handleConnection(client);
+      });
+    }
+  }
+}
+
+void HttpServer::stop() {
+  if (stopping_.exchange(true)) {
+    return;
+  }
+  if (listen_fd_ >= 0) {
+    shutdown(listen_fd_, SHUT_RDWR);
+  }
+  if (acceptThread_.joinable()) {
+    acceptThread_.join();
+  }
+  std::vector<std::thread> toJoin;
+  {
+    std::lock_guard<std::mutex> guard(workersMtx_);
+    toJoin.swap(workers_);
+  }
+  for (auto& t : toJoin) {
+    if (t.joinable()) {
+      t.join();
+    }
+  }
+}
+
+void HttpServer::handleConnection(int client) {
+  /* Absolute receive deadline (request bytes only). */
+  auto now = std::chrono::steady_clock::now().time_since_epoch();
+  uint64_t deadlineMs =
+    static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(now).count()) +
+    5000;
+  std::string raw;
+  char buf[65536];
+  size_t headerEnd = std::string::npos;
+  while (headerEnd == std::string::npos) {
+    auto now2 = std::chrono::steady_clock::now().time_since_epoch();
+    uint64_t now2Ms = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(now2).count());
+    if (now2Ms >= deadlineMs) {
+      close(client);
+      return;
+    }
+    uint64_t remain = deadlineMs - now2Ms;
+    if (remain > 5000) {
+      remain = 5000;
+    }
+    timeval tv{};
+    tv.tv_sec = static_cast<long>(remain / 1000);
+    tv.tv_usec = static_cast<long>((remain % 1000) * 1000);
+    if (remain == 0) {
+      tv.tv_usec = 1000;
+    }
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ssize_t n = recv(client, buf, sizeof(buf), 0);
+    if (n <= 0) {
+      if (n < 0 &&
+          (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+        continue;
+      }
+      close(client);
+      return;
+    }
+    raw.append(buf, static_cast<size_t>(n));
+    headerEnd = raw.find("\r\n\r\n");
+  }
+  /* Body per Content-Length (control requests carry zero). */
+  size_t headerLen = headerEnd + 4;
+  size_t contentLen = 0;
+  {
+    HttpRequest head = parseRequest(raw.substr(0, headerLen));
+    auto it = head.headers.find("content-length");
+    if (it != head.headers.end()) {
+      contentLen = static_cast<size_t>(
+        strtoull(it->second.c_str(), nullptr, 10));
+    }
+  }
+  while (raw.size() - headerLen < contentLen) {
+    ssize_t n = recv(client, buf, sizeof(buf), 0);
+    if (n <= 0) {
+      if (n < 0 &&
+          (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+        continue;
+      }
+      break;
+    }
+    raw.append(buf, static_cast<size_t>(n));
+  }
+
+  HttpRequest req = parseRequest(raw.substr(0, headerLen));
+  req.body = raw.substr(headerLen);
+  HttpResponse resp = handler_(req);
+
+  /* Response transmission deadline: 5s from handler completion. */
+  auto now3 = std::chrono::steady_clock::now().time_since_epoch();
+  uint64_t txDeadline =
+    static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(now3).count()) +
+    5000;
+  bool sentOk = false;
+  try {
+    std::string out = serializeResponse(resp);
+    sentOk = sendAll(client, out, txDeadline);
+  } catch (...) {
+    sentOk = false;
+  }
+  /* Finalizer: exactly once, exceptions contained. */
+  auto fin = std::move(resp.afterSend);
+  resp.afterSend = nullptr;
+  if (fin) {
+    try {
+      fin(sentOk);
+    } catch (...) {
+      /* logged upstream if needed */
+    }
+  }
+  close(client);
 }
 
 HttpRequest parseRequest(const std::string& raw) {
@@ -114,6 +326,9 @@ HttpRequest parseRequest(const std::string& raw) {
     std::istringstream ls(line);
     ls >> req.method >> req.path;
   }
+  size_t blockEnd = raw.find("\r\n\r\n");
+  req.rawHeaders = blockEnd == std::string::npos ? raw
+                                                 : raw.substr(0, blockEnd);
   while (std::getline(iss, line) && line != "\r" && !line.empty()) {
     if (line.back() == '\r') {
       line.pop_back();
@@ -134,7 +349,8 @@ HttpRequest parseRequest(const std::string& raw) {
 
 std::string serializeResponse(const HttpResponse& resp) {
   std::ostringstream oss;
-  oss << "HTTP/1.1 " << resp.status << " OK\r\n";
+  oss << "HTTP/1.1 " << resp.status << " " << reasonPhrase(resp.status)
+      << "\r\n";
   oss << "Content-Length: " << resp.body.size() << "\r\n";
   for (const auto& [k, v] : resp.headers) {
     oss << k << ": " << v << "\r\n";

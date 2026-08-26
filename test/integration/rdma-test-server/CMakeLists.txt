@@ -8,10 +8,15 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   rdma_server.cpp
   v2_request.cpp
   v2_session.cpp
+  v2_sigv4.cpp
+  v2_backend.cpp
+  v2_handlers.cpp
   ${CMAKE_SOURCE_DIR}/src/common/ibv-wrapper.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/transport.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/v2-clock.cpp
+  ${CMAKE_SOURCE_DIR}/src/rdma/v2-random.cpp
+  ${CMAKE_SOURCE_DIR}/src/rdma/v2-registry.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/v2-wire.cpp
   ${CMAKE_SOURCE_DIR}/src/common/hip-seam.cpp
   ${CMAKE_SOURCE_DIR}/src/common/rdma-topology.cpp
@@ -44,6 +49,11 @@ target_link_libraries(hipobj-rdma-test-server PRIVATE
   numa
   hip::host
   hsa-runtime64::hsa-runtime64)
+
+find_package(OpenSSL REQUIRED)
+target_link_libraries(hipobj-rdma-test-server PRIVATE OpenSSL::Crypto)
+find_package(Threads REQUIRED)
+target_link_libraries(hipobj-rdma-test-server PRIVATE Threads::Threads)
 
 if(HIPOBJ_BNXT)
   target_compile_definitions(hipobj-rdma-test-server PRIVATE HIPOBJ_BNXT)

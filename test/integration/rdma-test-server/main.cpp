@@ -19,6 +19,9 @@
 
 #include "http_server.h"
 #include "rdma_server.h"
+#include "v2_handlers.h"
+#include "v2_request.h"
+#include "v2_sigv4.h"
 
 namespace {
 
@@ -33,8 +36,98 @@ std::string objectKey(const std::string& path) {
 
 int main(int argc, char* argv[]) {
   int port = 9000;
-  if (argc > 1) {
-    port = std::atoi(argv[1]);
+  bool v2Mode = false;
+  std::string accessKey = "hipobj-test-key";
+  std::string secretKey = "hipobj-test-secret";
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--v2") {
+      v2Mode = true;
+    } else if (arg == "--v2-access-key" && i + 1 < argc) {
+      accessKey = argv[++i];
+    } else if (arg == "--v2-secret-key" && i + 1 < argc) {
+      secretKey = argv[++i];
+    } else {
+      port = std::atoi(arg.c_str());
+    }
+  }
+
+  if (v2Mode) {
+    /* v2 reference mode: control protocol on the threaded server.
+     * RDMA objects are attached per session by the transport layer;
+     * this mode only needs the control plane. */
+    hipObj::v2::BuiltinVerifier verifier(accessKey, secretKey, "us-east-1");
+    hipObj::v2::MemoryBackend backend;
+    hipObj::v2::ServerConfig cfg;
+    hipObj::v2::ControlHandlers handlers(&verifier, &backend, cfg);
+
+    hipobj::test::HttpServer server(port);
+    server.setHandler(
+      [&](const hipobj::test::HttpRequest& req) -> hipobj::test::HttpResponse {
+        hipobj::test::HttpResponse resp;
+        if (req.path == "/.hipobj-rc/prepare") {
+          auto parsed = hipObj::v2::parsePrepareRequest(req.headers,
+                                                        req.rawHeaders);
+          if (!parsed.has_value()) {
+            resp.status = 400;
+            return resp;
+          }
+          auto r = handlers.onPrepare(*parsed);
+          resp.status = r.status;
+          resp.headers = r.headers;
+          if (r.status == 200) {
+            /* Publishing -> Prepared when the bytes leave. */
+            std::string sid = r.headers.count("X-Amz-Rdma-Session")
+                                ? r.headers["X-Amz-Rdma-Session"]
+                                : std::string();
+            resp.afterSend = [&handlers, sid, cfg](bool ok) {
+              if (ok) {
+                handlers.table().finishPublishing(sid, cfg.tPrepMs);
+              } else {
+                handlers.table().toReaping(sid);
+              }
+            };
+          }
+          return resp;
+        }
+        if (req.path == "/.hipobj-rc/ready") {
+          auto parsed = hipObj::v2::parseReadyRequest(req.headers,
+                                                      req.rawHeaders);
+          if (!parsed.has_value()) {
+            resp.status = 400;
+            return resp;
+          }
+          auto r = handlers.onReady(*parsed);
+          resp.status = r.status;
+          resp.headers = r.headers;
+          if (r.status == 200 || r.status == 204) {
+            std::string sid = parsed->session;
+            resp.afterSend = [&handlers, sid](bool) {
+              handlers.table().toReaping(sid);
+            };
+          }
+          return resp;
+        }
+        if (req.path == "/.hipobj-rc/cancel") {
+          auto parsed = hipObj::v2::parseCancelRequest(req.headers,
+                                                       req.rawHeaders);
+          if (!parsed.has_value()) {
+            resp.status = 400;
+            return resp;
+          }
+          auto r = handlers.onCancel(*parsed);
+          resp.status = r.status;
+          return resp;
+        }
+        /* Object paths with an rdma token: v1 sequences fail
+         * structurally in v2 mode - explicit unsupported marker. */
+        resp.status = 501;
+        resp.headers["X-Amz-Rdma-Protocol-Status"] = "unsupported";
+        return resp;
+      });
+    fprintf(stdout, "hipobj-rdma-test-server v2 listening on port %d\n", port);
+    server.runThreaded();
+    return 0;
   }
 
   hipobj::test::RdmaTestServer rdma;
