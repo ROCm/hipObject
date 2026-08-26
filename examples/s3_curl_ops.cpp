@@ -25,6 +25,15 @@ size_t headerCallback(char* buffer, size_t size, size_t nitems,
   size_t total = size * nitems;
   auto* state = static_cast<HeaderState*>(userdata);
   std::string line(buffer, total);
+  // HTTP header names are case-insensitive.
+  for (char& c : line) {
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+    if (c == ':') {
+      break;
+    }
+  }
   const char* prefix = "x-amz-rdma-reply:";
   if (line.rfind(prefix, 0) == 0) {
     std::string val = line.substr(std::strlen(prefix));
@@ -90,13 +99,26 @@ int hipObjS3CurlSendRequest(void* ctx, const char* token, size_t tokenLen) {
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &state);
 
   CURLcode rc = curl_easy_perform(curl);
+  long httpCode = 0;
+  if (rc == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+  }
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
   if (rc != CURLE_OK) {
     return -1;
   }
+  if (httpCode < 200 || httpCode >= 300) {
+    std::fprintf(stderr, "hipObjS3CurlSendRequest: HTTP %ld\n", httpCode);
+    return -1;
+  }
+  // A 2xx response without an RDMA reply header means the server did not
+  // offload the transfer to RDMA. Report the failure instead of treating
+  // the missing header as success.
   if (cfg->lastReply[0] == '\0') {
-    std::snprintf(cfg->lastReply, sizeof(cfg->lastReply), "ok");
+    std::fprintf(stderr,
+                 "hipObjS3CurlSendRequest: missing x-amz-rdma-reply header\n");
+    return -1;
   }
   return 0;
 }
