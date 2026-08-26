@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [develop]
 
+permissions:
+  contents: read
+
 env:
   MINIO_DEB_URL: https://dl.minio.io/aistor/minio/release/linux-amd64/minio.rdma_20260807183435.0.0_amd64.deb
   MINIO_ROOT_USER: minioadmin
