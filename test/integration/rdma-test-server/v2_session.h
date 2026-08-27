@@ -38,6 +38,7 @@
 
 #include "ibv-core.h"
 #include "v2-clock.h"
+#include "v2-registry.h"
 
 namespace hipObj {
 
@@ -144,11 +145,26 @@ public:
   /* Snapshot ids for iteration (reaper, shutdown drain). */
   std::vector<std::string> ids() const;
 
+  /* Retired-ring operations, all serialized under the table lock
+   * so concurrent workers and the reaper cannot interleave ring
+   * mutations with session state changes. */
+  uint64_t ringReserve();
+  void ringUnreserve(uint64_t reservationId);
+  void ringRecord(uint64_t reservationId, uint32_t qpn, uint32_t psn);
+  void ringCollectExpired(uint64_t nowMs);
+
+  /* Acquires (ioActive++) and releases the handler reference for a
+   * session. Release returns the post-decrement count. */
+  bool acquireIo(const std::string& id);
+  int releaseIo(const std::string& id);
+
 private:
   mutable std::mutex mtx_;
   std::map<std::string, V2Session> entries_;
   /* Table-scoped CV: safe against entry erase. */
   std::condition_variable cv_;
+  /* (qpn, psn) reuse guard ring; guarded by mtx_. */
+  RetiredRing ring_;
 };
 
 } // namespace v2

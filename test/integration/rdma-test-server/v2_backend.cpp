@@ -57,7 +57,9 @@ bool MemoryBackend::read(const std::string& target, uint64_t offset, size_t len,
                          void* dst) {
   std::lock_guard<std::mutex> guard(mtx_);
   auto it = objects_.find(target);
-  if (it == objects_.end() || offset + len > it->second.size()) {
+  if (it == objects_.end() ||
+      offset > static_cast<uint64_t>(it->second.size()) ||
+      len > it->second.size() - static_cast<size_t>(offset)) {
     return false;
   }
   std::memcpy(dst, it->second.data() + offset, len);

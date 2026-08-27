@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -66,6 +67,10 @@ private:
   std::thread acceptThread_;
   std::mutex workersMtx_;
   std::vector<std::thread> workers_;
+  /* Client fds with a live worker; guarded by workersMtx_. stop()
+   * shutdowns these (via dup'd handles) to unblock workers. */
+  std::set<int> activeFds_;
+  uint64_t doneCount_ = 0;
 };
 
 HttpRequest parseRequest(const std::string& raw);

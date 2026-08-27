@@ -54,7 +54,11 @@ bool parseU64Dec(const std::string& s, uint64_t& out) {
     if (!std::isdigit(static_cast<unsigned char>(c))) {
       return false;
     }
-    v = v * 10 + static_cast<uint64_t>(c - '0');
+    uint64_t d = static_cast<uint64_t>(c - '0');
+    if (v > (UINT64_MAX - d) / 10) {
+      return false; /* would overflow */
+    }
+    v = v * 10 + d;
   }
   out = v;
   return true;

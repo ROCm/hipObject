@@ -190,11 +190,28 @@ void HttpServer::runThreaded() {
       close(client);
       continue;
     }
+    std::thread worker([this, client] {
+      handleConnection(client);
+      /* Mark completion so the accept loop can reclaim the
+       * thread object. */
+      {
+        std::lock_guard<std::mutex> guard(workersMtx_);
+        activeFds_.erase(client);
+        doneCount_++;
+      }
+    });
     {
       std::lock_guard<std::mutex> guard(workersMtx_);
-      workers_.emplace_back([this, client] {
-        handleConnection(client);
-      });
+      activeFds_.insert(client);
+      /* Reclaim finished workers: swap out joinable ones. */
+      std::vector<std::thread> stillRunning;
+      for (auto& t : workers_) {
+        if (t.joinable()) {
+          stillRunning.push_back(std::move(t));
+        }
+      }
+      workers_.swap(stillRunning);
+      workers_.push_back(std::move(worker));
     }
   }
 }
@@ -208,6 +225,25 @@ void HttpServer::stop() {
   }
   if (acceptThread_.joinable()) {
     acceptThread_.join();
+  }
+  /* Wake every blocked worker: a dup'd handle stays valid even if
+   * the worker closes the original first, so shutdown cannot hit
+   * a recycled fd. */
+  std::vector<int> dups;
+  {
+    std::lock_guard<std::mutex> guard(workersMtx_);
+    for (int fd : activeFds_) {
+      int d = dup(fd);
+      if (d >= 0) {
+        dups.push_back(d);
+      } else {
+        shutdown(fd, SHUT_RDWR); /* linger-off: never blocks */
+      }
+    }
+  }
+  for (int d : dups) {
+    shutdown(d, SHUT_RDWR);
+    close(d);
   }
   std::vector<std::thread> toJoin;
   {
@@ -273,7 +309,28 @@ void HttpServer::handleConnection(int client) {
         strtoull(it->second.c_str(), nullptr, 10));
     }
   }
+  /* Body receive honors the same absolute deadline as the header:
+   * a slow trickle cannot extend it, and a short body is rejected
+   * rather than half-delivered. */
+  bool bodyComplete = false;
   while (raw.size() - headerLen < contentLen) {
+    auto nowB = std::chrono::steady_clock::now().time_since_epoch();
+    uint64_t nowBMs = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(nowB).count());
+    if (nowBMs >= deadlineMs) {
+      break;
+    }
+    uint64_t remain = deadlineMs - nowBMs;
+    if (remain > 5000) {
+      remain = 5000;
+    }
+    timeval tv{};
+    tv.tv_sec = static_cast<long>(remain / 1000);
+    tv.tv_usec = static_cast<long>((remain % 1000) * 1000);
+    if (remain == 0) {
+      tv.tv_usec = 1000;
+    }
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     ssize_t n = recv(client, buf, sizeof(buf), 0);
     if (n <= 0) {
       if (n < 0 &&
@@ -283,6 +340,11 @@ void HttpServer::handleConnection(int client) {
       break;
     }
     raw.append(buf, static_cast<size_t>(n));
+  }
+  bodyComplete = raw.size() - headerLen >= contentLen;
+  if (!bodyComplete) {
+    close(client);
+    return;
   }
 
   HttpRequest req = parseRequest(raw.substr(0, headerLen));

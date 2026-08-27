@@ -184,5 +184,45 @@ std::vector<std::string> SessionTable::ids() const {
   return out;
 }
 
+uint64_t SessionTable::ringReserve() {
+  std::lock_guard<std::mutex> guard(mtx_);
+  return ring_.reserve();
+}
+
+void SessionTable::ringUnreserve(uint64_t reservationId) {
+  std::lock_guard<std::mutex> guard(mtx_);
+  ring_.unreserve(reservationId);
+}
+
+void SessionTable::ringRecord(uint64_t reservationId, uint32_t qpn,
+                              uint32_t psn) {
+  std::lock_guard<std::mutex> guard(mtx_);
+  ring_.record(reservationId, qpn, psn);
+}
+
+void SessionTable::ringCollectExpired(uint64_t nowMs) {
+  std::lock_guard<std::mutex> guard(mtx_);
+  ring_.collectExpired(nowMs);
+}
+
+bool SessionTable::acquireIo(const std::string& id) {
+  std::lock_guard<std::mutex> guard(mtx_);
+  auto it = entries_.find(id);
+  if (it == entries_.end()) {
+    return false;
+  }
+  ++it->second.ioActive;
+  return true;
+}
+
+int SessionTable::releaseIo(const std::string& id) {
+  std::lock_guard<std::mutex> guard(mtx_);
+  auto it = entries_.find(id);
+  if (it == entries_.end() || it->second.ioActive <= 0) {
+    return -1;
+  }
+  return --it->second.ioActive;
+}
+
 } // namespace v2
 } // namespace hipObj

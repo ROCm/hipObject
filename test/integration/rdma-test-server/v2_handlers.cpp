@@ -16,18 +16,7 @@
 namespace hipObj {
 namespace v2 {
 
-namespace {
-
-/* Server-local retired ring. Every access happens under the
- * session table lock (the handlers serialize ring operations with
- * session mutations), so the ring itself needs no internal lock.
- * The expiry sweep runs on the reaper tick. */
-RetiredRing& serverRing() {
-  static RetiredRing ring;
-  return ring;
-}
-
-} // namespace
+namespace {} // namespace
 
 HandlerResult error(int status) {
   HandlerResult r;
@@ -56,9 +45,24 @@ std::string hex24(uint32_t v) {
 
 /* All rdma headers present in the raw request must appear in the
  * signed-headers list (unsigned protocol fields would let a proxy
- * strip them invisibly). */
+ * strip them invisibly). Membership is an exact token match on
+ * the semicolon-separated list, not a substring test. */
 bool rdmaHeadersSigned(const std::string& signedList,
                        const std::string& rawHeaders) {
+  auto isSigned = [&signedList](const std::string& name) {
+    size_t pos = 0;
+    while (pos < signedList.size()) {
+      size_t end = signedList.find(';', pos);
+      if (end == std::string::npos) {
+        end = signedList.size();
+      }
+      if (signedList.compare(pos, end - pos, name) == 0) {
+        return true;
+      }
+      pos = end + 1;
+    }
+    return false;
+  };
   std::string lower;
   lower.reserve(rawHeaders.size());
   for (char c : rawHeaders) {
@@ -75,8 +79,7 @@ bool rdmaHeadersSigned(const std::string& signedList,
     size_t colon = line.find(':');
     if (colon != std::string::npos) {
       std::string name = line.substr(0, colon);
-      if (name.rfind("x-amz-rdma-", 0) == 0 &&
-          signedList.find(name) == std::string::npos) {
+      if (name.rfind("x-amz-rdma-", 0) == 0 && !isSigned(name)) {
         return false;
       }
     }
@@ -132,23 +135,30 @@ void ControlHandlers::reapSession(const std::string& id) {
     qpn = s.serverQpn;
     psn = s.serverPsn;
     published = s.published;
+    /* The transport layer owns real qp/cq handles; null pointers
+     * mean nothing to destroy yet and the commit erases the
+     * entry. A non-null handle without a wired destroy reports
+     * failure so the entry stays poisoned for the transport
+     * follow-up. */
     if (s.qp != nullptr) {
-      qpOk = false; /* real destroy wired by the transport layer */
+      qpOk = false;
     }
     if (s.cq != nullptr) {
       cqOk = false;
     }
   });
-  /* With no transport objects attached both flags stay true and
-   * the commit erases the entry; retire the slot accordingly. */
-  if (qpOk) {
-    if (res != 0) {
-      if (published) {
-        serverRing().record(res, qpn, psn);
-      } else {
-        serverRing().unreserve(res);
-      }
+  /* Retire the slot exactly once: a QP that was destroyed (or
+   * never had one wired) settles the reservation now; a failed
+   * destroy keeps the reservation for the retry. */
+  if (qpOk && res != 0) {
+    if (published) {
+      table_.ringRecord(res, qpn, psn);
+    } else {
+      table_.ringUnreserve(res);
     }
+    table_.withSession(id, [&](V2Session& s) {
+      s.reservationId = 0; /* settled; retries see no slot */
+    });
   }
   table_.commitDestroy(id, qpOk, cqOk);
 }
@@ -159,28 +169,20 @@ void ControlHandlers::finishPrepareSend(const std::string& id, bool sentOk) {
   } else {
     table_.toReaping(id);
   }
-  table_.withSession(id, [&](V2Session& s) {
-    if (s.ioActive > 0) {
-      --s.ioActive;
-    }
-  });
+  table_.releaseIo(id);
   reapSession(id);
 }
 
 void ControlHandlers::finishFinalSend(const std::string& id) {
   table_.toReaping(id);
-  table_.withSession(id, [&](V2Session& s) {
-    if (s.ioActive > 0) {
-      --s.ioActive;
-    }
-  });
+  table_.releaseIo(id);
   reapSession(id);
 }
 
 void ControlHandlers::reaperLoop() {
   while (!reaperStop_.load()) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
-    serverRing().collectExpired(clockSource().nowMs());
+    table_.ringCollectExpired(clockSource().nowMs());
     uint64_t now = clockSource().nowMs();
     for (const auto& id : table_.ids()) {
       table_.withSession(id, [&](V2Session& s) {
@@ -222,7 +224,7 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
 
   /* Slot-first: the retired ring must have room before the session
    * or any object exists. */
-  uint64_t slot = serverRing().reserve();
+  uint64_t slot = table_.ringReserve();
   if (slot == 0) {
     return error(503);
   }
@@ -234,7 +236,7 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
     uint32_t w[4] = {0, 0, 0, 0};
     if (!randomSource().next32(w[0]) || !randomSource().next32(w[1]) ||
         !randomSource().next32(w[2]) || !randomSource().next32(w[3])) {
-      serverRing().unreserve(slot);
+      table_.ringUnreserve(slot);
       return error(500);
     }
     char buf[33];
@@ -254,7 +256,7 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
     inserted = table_.insert(std::move(s));
   }
   if (!inserted) {
-    serverRing().unreserve(slot);
+    table_.ringUnreserve(slot);
     return error(503);
   }
 
@@ -262,7 +264,8 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
   uint32_t serverPsn = 0;
   if (!nextClientPsn(serverPsn)) {
     table_.toReaping(id);
-    serverRing().unreserve(slot);
+    table_.releaseIo(id);
+    table_.ringUnreserve(slot);
     return error(500);
   }
   table_.withSession(id, [&](V2Session& s) {
@@ -274,7 +277,8 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
    * presence check gates session creation. */
   if (req.op == "GET" && !backend_->has(req.target)) {
     table_.toReaping(id);
-    serverRing().unreserve(slot);
+    table_.releaseIo(id);
+    table_.ringUnreserve(slot);
     return error(500);
   }
 
@@ -282,7 +286,8 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
    * beginPublishing; published=true marks the tuple as exposed. */
   if (!table_.beginPublishing(id)) {
     table_.toReaping(id);
-    serverRing().unreserve(slot);
+    table_.releaseIo(id);
+    table_.ringUnreserve(slot);
     return error(500);
   }
   table_.withSession(id, [&](V2Session& s) {
@@ -344,21 +349,30 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
     return error(403);
   }
 
+  /* Hold the handler reference for the whole READY: the reaper
+   * cannot claim the session while the data phase runs. The
+   * response finalizer (finishFinalSend) releases it. */
+  if (!table_.acquireIo(req.session)) {
+    return error(409);
+  }
   if (!table_.beginTransferring(req.session, cfg_.tExecMs)) {
+    table_.releaseIo(req.session);
     return error(409); /* expired under the lock */
   }
 
   /* Data phase: the transport commit wires WRITE/READ posts here.
    * For the session/handler layer, finalize the flow now - the
-   * result reflects a completed transfer. */
-  table_.beginCompleting(req.session);
+   * result reflects a completed transfer. A failed transition
+   * means the session was reaped mid-flight: report failure and
+   * release the reference here (no finalizer runs for errors). */
+  if (!table_.beginCompleting(req.session)) {
+    table_.releaseIo(req.session);
+    return error(500);
+  }
 
   uint64_t bytes = 0;
-  std::string etag;
   table_.withSession(req.session, [&](V2Session& s) {
     bytes = s.size;
-  });
-  table_.withSession(req.session, [&](V2Session& s) {
     s.txDeadlineAt = clockSource().nowMs() + 5000;
   });
 

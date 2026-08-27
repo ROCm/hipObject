@@ -69,5 +69,15 @@ target_include_directories(v2-client-harness PRIVATE
 find_package(OpenSSL REQUIRED)
 target_link_libraries(v2-client-harness PRIVATE OpenSSL::Crypto)
 
+# Control-plane end-to-end run (no RDMA hardware required).
+find_program(BASH_BIN bash)
+if(BASH_BIN)
+  add_test(NAME v2-control-e2e
+    COMMAND ${BASH_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/run-v2-e2e.sh)
+  set_tests_properties(v2-control-e2e PROPERTIES TIMEOUT 180
+    ENVIRONMENT
+      "SERVER=$<TARGET_FILE:hipobj-rdma-test-server>;HARNESS=$<TARGET_FILE:v2-client-harness>;LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}")
+endif()
+
 install(TARGETS hipobj-rdma-test-server
   RUNTIME DESTINATION bin/hipobj-test)

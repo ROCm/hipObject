@@ -12,8 +12,8 @@ set -u
 
 PORT="${PORT:-9443}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SERVER="${SERVER:-$HERE/../../build/hipobj-rdma-test-server}"
-HARNESS="${HARNESS:-$HERE/../../build/v2-client-harness}"
+SERVER="${SERVER:-$HERE/hipobj-rdma-test-server}"
+HARNESS="${HARNESS:-$HERE/v2-client-harness}"
 
 if [ ! -x "$SERVER" ]; then
     echo "server binary missing: $SERVER" >&2
@@ -26,7 +26,16 @@ fi
 
 mode="${1:-run}"
 if [ "$mode" = "--hang-check" ]; then
-    timeout --kill-after=10 120 "$SERVER" "$PORT" --v2 --hang-after-prepare
+    # Start the hanging server, then actually drive a PREPARE so
+    # the stall is reached; the supervisor must reclaim it.
+    timeout --kill-after=10 120 "$SERVER" "$PORT" --v2 \
+        --hang-after-prepare &
+    server_pid=$!
+    sleep 1
+    # Best effort: trigger the hang (outcome decided by timeout).
+    "$HARNESS" 127.0.0.1 "$PORT" GET /bucket/seed64k 65536 \
+        --expect 200 >/dev/null 2>&1 || true
+    wait $server_pid
     rc=$?
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
         echo "hang reclaimed by supervisor (rc=$rc)"
@@ -40,12 +49,13 @@ timeout --kill-after=10 120 "$SERVER" "$PORT" --v2 &
 server_pid=$!
 trap 'kill $server_pid 2>/dev/null; wait $server_pid 2>/dev/null' EXIT
 
-# Wait for the listener.
+# Wait for the listener (quiet probe; refused = not yet up).
 for _ in $(seq 1 50); do
-    if grep -q "" < /dev/tcp/127.0.0.1/"$PORT" 2>/dev/null; then
+    if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+        exec 3>&- 3<&- 2>/dev/null
         break
     fi
-    sleep 0.1
+    sleep 0.2
 done
 
 fail=0
