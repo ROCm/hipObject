@@ -204,6 +204,18 @@ void HttpServer::runThreaded() {
      * OUTSIDE the lock, so no path can hold workersMtx_ while
      * waiting on a thread that needs it. */
     auto done = std::make_shared<std::atomic<bool>>(false);
+    /* Register the fd and reserve the entry BEFORE the thread
+     * exists: the worker's first action cannot precede its own
+     * registration. The entry starts detached-less (thread not
+     * joinable) and is armed right after creation under the same
+     * lock - stop() drains only joinable entries, and a worker
+     * whose thread handle is not yet attached holds done=false,
+     * so stop's FD shutdown still wakes it. */
+    {
+      std::lock_guard<std::mutex> guard(workersMtx_);
+      activeFds_.insert(client);
+      workers_.push_back({std::thread(), done});
+    }
     std::thread worker([this, client, done] {
       handleConnection(client, /*closeFd=*/false);
       done->store(true);
@@ -216,12 +228,18 @@ void HttpServer::runThreaded() {
       }
       ::close(client);
     });
-    /* Publish the fully-built entry in one step: stop() either
-     * sees it in the swap or not at all - no placeholder window. */
     {
       std::lock_guard<std::mutex> guard(workersMtx_);
-      activeFds_.insert(client);
-      workers_.push_back({std::move(worker), done});
+      /* The reserved entry is still ours (identified by done);
+       * attach the thread handle. stop() cannot have drained it:
+       * it drains only entries with joinable threads, and ours
+       * was not joinable until now. */
+      for (auto& entry : workers_) {
+        if (entry.done == done) {
+          entry.thread = std::move(worker);
+          break;
+        }
+      }
     }
     /* Reclaim pass outside the lock: collect finished entries. */
     std::vector<WorkerEntry> finished;
@@ -280,6 +298,18 @@ void HttpServer::stop() {
   for (auto& entry : toJoin) {
     if (entry.thread.joinable()) {
       entry.thread.join();
+    }
+  }
+  /* Stragglers: entries whose thread handle was not yet attached
+   * at drain time cannot be joined here - their workers close
+   * their own fds and exit; the entry objects were destroyed with
+   * the vector, but std::thread default-constructed handles are
+   * safely destructible. Wait for their done flags so the process
+   * does not exit with live workers (bounded by the FD shutdown
+   * above and the receive deadline). */
+  for (auto& entry : toJoin) {
+    while (!entry.done->load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
   }
 }

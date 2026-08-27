@@ -405,7 +405,6 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
   uint64_t bytes = 0;
   table_.withSession(req.session, [&](V2Session& s) {
     bytes = s.size;
-    s.txDeadlineAt = clockSource().nowMs() + 5000;
   });
 
   HandlerResult r;

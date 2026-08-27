@@ -68,6 +68,11 @@ bool SessionTable::beginTransferring(const std::string& id, uint64_t tExecMs) {
   }
   it->second.state = SessState::Transferring;
   it->second.clientDeadlineAt = clockSource().nowMs() + tExecMs;
+  /* The PREPARE response bound no longer applies; the FINAL
+   * response arms a fresh one at beginCompleting. Clearing here
+   * keeps the reaper's forced release from firing on a stale
+   * bound during the data phase. */
+  it->second.txDeadlineAt = 0;
   notifyAll(cv_);
   return true;
 }
@@ -75,6 +80,10 @@ bool SessionTable::beginTransferring(const std::string& id, uint64_t tExecMs) {
 bool SessionTable::beginCompleting(const std::string& id) {
   std::lock_guard<std::mutex> guard(mtx_);
   auto it = entries_.find(id);
+  if (it != entries_.end() && it->second.state == SessState::Transferring) {
+    /* Fresh response bound for the FINAL transmission. */
+    it->second.txDeadlineAt = clockSource().nowMs() + 5000;
+  }
   if (it == entries_.end() || it->second.state != SessState::Transferring) {
     return false;
   }
