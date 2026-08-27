@@ -44,9 +44,11 @@ public:
 
   /* Each handler receives the parsed request plus the raw header
    * block (already part of the request struct through headers). */
-  HandlerResult onPrepare(const PrepareRequest& req);
-  HandlerResult onReady(const ReadyRequest& req);
-  HandlerResult onCancel(const CancelRequest& req);
+  HandlerResult onPrepare(const PrepareRequest& req,
+                          const std::string& rawHeaders);
+  HandlerResult onReady(const ReadyRequest& req, const std::string& rawHeaders);
+  HandlerResult onCancel(const CancelRequest& req,
+                         const std::string& rawHeaders);
 
   SessionTable& table();
 

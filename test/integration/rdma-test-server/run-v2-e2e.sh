@@ -64,10 +64,10 @@ run_case() {
 run_case "prepare+ready GET 200 + cookie echo" \
     "$HARNESS" 127.0.0.1 "$PORT" GET /bucket/seed64k 65536 --expect 200
 
-# Preserve-error: wrong cookie still answers 403 on READY.
-run_case "ready bad cookie 403" \
+# Preserve-error: mismatched READY cookie answers 403.
+run_case "ready mismatched cookie 403" \
     "$HARNESS" 127.0.0.1 "$PORT" GET /bucket/seed64k 65536 \
-    --cookie-hex deadbeef --expect 403
+    --ready-cookie-hex deadbeef --expect 403
 
 # Over-cap size rejected at PREPARE.
 run_case "prepare 2GiB cap 413" \

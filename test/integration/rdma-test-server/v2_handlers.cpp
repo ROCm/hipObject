@@ -72,17 +72,21 @@ SessionTable& ControlHandlers::table() {
   return table_;
 }
 
-HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req) {
+HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
+                                         const std::string& rawHeaders) {
   /* Protocol echo is mandatory: without it the client is speaking
    * something else, answer with the explicit unsupported marker. */
   if (req.protocol != "hipobj-rc-v2") {
     return unsupported();
   }
 
-  auto cred = verifier_->verify("POST", "/.hipobj-rc/prepare",
-                                req.authorization, "");
+  auto cred = verifier_->verify("POST", "/.hipobj-rc/prepare", rawHeaders, "");
   if (!cred.has_value()) {
     return error(403);
+  }
+  /* Size cap: syntactically valid but over the transfer limit. */
+  if (req.size > 0x7fffffff) {
+    return error(413);
   }
   /* Every rdma header carried by the request must be signed. */
   if (!rdmaHeadersSigned(cred->signedHeaders, {}, "")) {
@@ -138,20 +142,13 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req) {
     s.serverPsn = serverPsn;
   });
 
-  /* GET: stage the object data before answering. */
-  if (req.op == "GET") {
-    if (!backend_->has(req.target) ||
-        !backend_->read(req.target, req.offset, static_cast<size_t>(req.size),
-                        nullptr)) {
-      /* Object absent: the read check with a null buffer only
-       * validates presence/size; do a real staging copy when the
-       * transport layer is wired in the follow-up commit. */
-      if (!backend_->has(req.target)) {
-        table_.toReaping(id);
-        serverRing().unreserve(slot);
-        return error(500);
-      }
-    }
+  /* GET: the object must exist and cover the requested range.
+   * Staging into an MR happens in the transport layer; here the
+   * presence check gates session creation. */
+  if (req.op == "GET" && !backend_->has(req.target)) {
+    table_.toReaping(id);
+    serverRing().unreserve(slot);
+    return error(500);
   }
 
   /* Publish: response confirmed under the table lock below via
@@ -176,9 +173,9 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req) {
   return r;
 }
 
-HandlerResult ControlHandlers::onReady(const ReadyRequest& req) {
-  auto cred = verifier_->verify("POST", "/.hipobj-rc/ready", req.authorization,
-                                "");
+HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
+                                       const std::string& rawHeaders) {
+  auto cred = verifier_->verify("POST", "/.hipobj-rc/ready", rawHeaders, "");
   if (!cred.has_value()) {
     return error(403);
   }
@@ -242,9 +239,9 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req) {
   return r;
 }
 
-HandlerResult ControlHandlers::onCancel(const CancelRequest& req) {
-  auto cred = verifier_->verify("POST", "/.hipobj-rc/cancel", req.authorization,
-                                "");
+HandlerResult ControlHandlers::onCancel(const CancelRequest& req,
+                                        const std::string& rawHeaders) {
+  auto cred = verifier_->verify("POST", "/.hipobj-rc/cancel", rawHeaders, "");
   if (!cred.has_value()) {
     return error(403);
   }

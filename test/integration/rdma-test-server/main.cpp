@@ -63,6 +63,10 @@ int main(int argc, char* argv[]) {
      * this mode only needs the control plane. */
     hipObj::v2::BuiltinVerifier verifier(accessKey, secretKey, "us-east-1");
     hipObj::v2::MemoryBackend backend;
+    /* Deterministic seed objects for the E2E harness cases. */
+    backend.seed("/bucket/seed64k", 65536);
+    backend.seed("/bucket/seed4m", 4 * 1024 * 1024);
+    backend.seed("/b/k1", 65536);
     hipObj::v2::ServerConfig cfg;
     hipObj::v2::ControlHandlers handlers(&verifier, &backend, cfg);
 
@@ -77,7 +81,7 @@ int main(int argc, char* argv[]) {
             resp.status = 400;
             return resp;
           }
-          auto r = handlers.onPrepare(*parsed);
+          auto r = handlers.onPrepare(*parsed, req.rawHeaders);
           resp.status = r.status;
           resp.headers = r.headers;
           if (r.status == 200 && hangAfterPrepare) {
@@ -109,7 +113,7 @@ int main(int argc, char* argv[]) {
             resp.status = 400;
             return resp;
           }
-          auto r = handlers.onReady(*parsed);
+          auto r = handlers.onReady(*parsed, req.rawHeaders);
           resp.status = r.status;
           resp.headers = r.headers;
           if (r.status == 200 || r.status == 204) {
@@ -127,7 +131,7 @@ int main(int argc, char* argv[]) {
             resp.status = 400;
             return resp;
           }
-          auto r = handlers.onCancel(*parsed);
+          auto r = handlers.onCancel(*parsed, req.rawHeaders);
           resp.status = r.status;
           return resp;
         }

@@ -235,11 +235,12 @@ TEST(V2RequestParser, PrepareRejectsBadFields) {
   h2["x-amz-rdma-protocol"] = "hipobj-rc-v2";
   h2["x-amz-rdma-psn"] = "000000";
   EXPECT_FALSE(hipObj::v2::parsePrepareRequest(h2, raw).has_value());
-  /* Size over the 2GiB cap. */
+  /* Size over the 2GiB cap parses fine; the handler rejects it
+   * with 413 (covered by the handler-level tests). */
   auto h3 = h2;
   h3["x-amz-rdma-psn"] = "000001";
   h3["x-amz-rdma-size"] = "2147483648";
-  EXPECT_FALSE(hipObj::v2::parsePrepareRequest(h3, raw).has_value());
+  EXPECT_TRUE(hipObj::v2::parsePrepareRequest(h3, raw).has_value());
 }
 
 TEST(V2RequestParser, ReadyAndCancel) {

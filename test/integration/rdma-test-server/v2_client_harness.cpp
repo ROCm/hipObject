@@ -144,12 +144,18 @@ int main(int argc, char* argv[]) {
   const uint64_t size = std::strtoull(argv[5], nullptr, 10);
   int expect = 200;
   uint32_t cookie = 0x11223344;
+  uint32_t readyCookie = 0;
+  bool overrideReadyCookie = false;
   bool doCancel = false;
   for (int i = 6; i < argc; ++i) {
     if (std::strcmp(argv[i], "--expect") == 0 && i + 1 < argc) {
       expect = std::atoi(argv[++i]);
     } else if (std::strcmp(argv[i], "--cookie-hex") == 0 && i + 1 < argc) {
       cookie = static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 16));
+    } else if (std::strcmp(argv[i], "--ready-cookie-hex") == 0 &&
+               i + 1 < argc) {
+      readyCookie = static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 16));
+      overrideReadyCookie = true;
     } else if (std::strcmp(argv[i], "--cancel") == 0) {
       doCancel = true;
     }
@@ -207,7 +213,7 @@ int main(int argc, char* argv[]) {
     {"x-amz-date", "20260825T000000Z"},
     {"x-amz-rdma-protocol", "hipobj-rc-v2"},
     {"x-amz-rdma-session", session},
-    {"x-amz-rdma-cookie", hex32(cookie)},
+    {"x-amz-rdma-cookie", hex32(overrideReadyCookie ? readyCookie : cookie)},
   };
   std::string rauth = signer.sign("POST", "/.hipobj-rc/ready", rhdrs, "",
                                   "20260825T000000Z");

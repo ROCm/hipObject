@@ -160,7 +160,7 @@ std::optional<PrepareRequest> parsePrepareRequest(
 
   it = headers.find("x-amz-rdma-size");
   if (it == headers.end() || !parseU64Dec(it->second, out.size) ||
-      out.size == 0 || out.size > 0x7fffffff) {
+      out.size == 0) {
     return std::nullopt;
   }
 
