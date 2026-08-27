@@ -170,11 +170,17 @@ int HttpServer::runOnce(int timeoutMs) {
   return 1;
 }
 
+void HttpServer::startThreaded() {
+  acceptLoop_ = std::thread([this] {
+    runThreaded();
+  });
+}
+
 void HttpServer::runThreaded() {
-  /* The caller's thread IS the accept thread; stop() relies on
-   * stopping_ + listen shutdown to end this loop, and drain only
-   * happens after it exits - so worker production has ceased
-   * before stop() swaps the vector. */
+  /* Runs the accept loop on the caller's thread. Call via
+   * startThreaded() to get a joinable handle stop() can use as
+   * the production barrier; calling directly means the caller
+   * must not return before calling stop(). */
   while (!stopping_.load()) {
     fd_set fds;
     FD_ZERO(&fds);
@@ -237,9 +243,6 @@ void HttpServer::stop() {
   if (listen_fd_ >= 0) {
     shutdown(listen_fd_, SHUT_RDWR);
   }
-  if (acceptThread_.joinable()) {
-    acceptThread_.join();
-  }
   /* Wake every blocked worker: a dup'd handle stays valid even if
    * the worker closes the original first, so shutdown cannot hit
    * a recycled fd. */
@@ -258,6 +261,15 @@ void HttpServer::stop() {
   for (int d : dups) {
     shutdown(d, SHUT_RDWR);
     close(d);
+  }
+  /* Worker production barrier: if the accept loop is still
+   * running on another thread (stop called concurrently), join
+   * its tracked handle first - after the join no registration can
+   * follow the live-count wait. runThreaded-on-caller-thread has
+   * no joinable handle here; in that case the loop already exited
+   * before stop() was called. */
+  if (acceptLoop_.joinable()) {
+    acceptLoop_.join();
   }
   /* All workers are detached: wait for the live count to reach
    * zero. The FD shutdown above unblocks any worker stuck in a

@@ -10,11 +10,13 @@
  * client-side RC handshake.
  */
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <unistd.h>
@@ -137,7 +139,12 @@ int main(int argc, char* argv[]) {
         return resp;
       });
     fprintf(stdout, "hipobj-rdma-test-server v2 listening on port %d\n", port);
-    server.runThreaded();
+    server.startThreaded();
+    /* Block until external termination; the destructor stops the
+     * accept loop and drains workers. */
+    for (;;) {
+      std::this_thread::sleep_for(std::chrono::seconds(3600));
+    }
     return 0;
   }
 

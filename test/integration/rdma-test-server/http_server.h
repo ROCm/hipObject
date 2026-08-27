@@ -50,7 +50,10 @@ public:
 
   /* v2 threaded mode: accepts connections until stop(), handling
    * each on its own thread. Responses are completed with the
-   * afterSend finalizer contract. */
+   * afterSend finalizer contract. startThreaded() runs the loop
+   * on a tracked thread so stop() can join it (production
+   * barrier); runThreaded() runs it on the caller's thread. */
+  void startThreaded();
   void runThreaded();
   void stop();
 
@@ -64,7 +67,9 @@ private:
   int listen_fd_ = -1;
   HttpHandler handler_;
   std::atomic<bool> stopping_{false};
-  std::thread acceptThread_;
+  /* The accept loop runs on its own thread when started via
+   * startThreaded(); stop() joins it as the production barrier. */
+  std::thread acceptLoop_;
   std::mutex workersMtx_;
   /* Detached workers: stop() waits for this count to reach zero
    * after shutting down the registered fds. */
