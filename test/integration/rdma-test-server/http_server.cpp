@@ -177,10 +177,9 @@ void HttpServer::startThreaded() {
 }
 
 void HttpServer::runThreaded() {
-  /* Runs the accept loop on the caller's thread. Call via
-   * startThreaded() to get a joinable handle stop() can use as
-   * the production barrier; calling directly means the caller
-   * must not return before calling stop(). */
+  /* Accept loop; runs on the tracked thread created by
+   * startThreaded() so stop() can join it as the production
+   * barrier. */
   while (!stopping_.load()) {
     fd_set fds;
     FD_ZERO(&fds);
@@ -269,12 +268,9 @@ void HttpServer::stop() {
     shutdown(d, SHUT_RDWR);
     close(d);
   }
-  /* Worker production barrier: if the accept loop is still
-   * running on another thread (stop called concurrently), join
-   * its tracked handle first - after the join no registration can
-   * follow the live-count wait. runThreaded-on-caller-thread has
-   * no joinable handle here; in that case the loop already exited
-   * before stop() was called. */
+  /* Worker production barrier: joining the accept-loop thread
+   * guarantees no registration can follow the live-count wait
+   * below. */
   if (acceptLoop_.joinable()) {
     acceptLoop_.join();
   }
