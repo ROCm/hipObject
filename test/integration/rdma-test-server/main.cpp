@@ -140,8 +140,9 @@ int main(int argc, char* argv[]) {
       });
     fprintf(stdout, "hipobj-rdma-test-server v2 listening on port %d\n", port);
     server.startThreaded();
-    /* Block until external termination; the destructor stops the
-     * accept loop and drains workers. */
+    /* Block until external termination. Signals terminate the
+     * process without unwinding (no destructor runs); a graceful
+     * return would drain via the HttpServer destructor. */
     for (;;) {
       std::this_thread::sleep_for(std::chrono::seconds(3600));
     }

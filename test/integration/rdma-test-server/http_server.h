@@ -50,11 +50,10 @@ public:
 
   /* v2 threaded mode: accepts connections until stop(), handling
    * each on its own thread. Responses are completed with the
-   * afterSend finalizer contract. startThreaded() runs the loop
-   * on a tracked thread so stop() can join it (production
-   * barrier); runThreaded() runs it on the caller's thread. */
+   * afterSend finalizer contract. The loop always runs on the
+   * tracked thread created here, so stop() has a join barrier
+   * before waiting on the worker count. */
   void startThreaded();
-  void runThreaded();
   void stop();
 
   int fd() const {
@@ -62,6 +61,7 @@ public:
   }
 
 private:
+  void runThreaded();
   void handleConnection(int client, bool closeFd);
 
   int listen_fd_ = -1;

@@ -205,25 +205,33 @@ void HttpServer::runThreaded() {
       close(client);
       continue;
     }
-    /* Shared completion flag: the accept loop joins finished
-     * workers without blocking on running ones. Joins happen
-     * OUTSIDE the lock, so no path can hold workersMtx_ while
-     * waiting on a thread that needs it. */
-    /* Detach-based workers: each worker owns its lifetime and
-     * signals completion through a shared flag. No thread handles
-     * are stored, so there is no joinable-object destruction
-     * window and stop() only needs to wait for the flags. The fd
-     * is registered before the thread starts (worker actions
-     * follow registration) and removed before close (no number
-     * recycling window). */
-    auto done = std::make_shared<std::atomic<bool>>(false);
+    /* Detached workers: each owns its lifetime and unregisters
+     * its fd before closing it, so accept never recycles a live
+     * registration. stop() waits on the live count (the join
+     * barrier above guarantees no late registration follows). */
     {
       std::lock_guard<std::mutex> guard(workersMtx_);
+      if (stopping_.load()) {
+        ::close(client);
+        break;
+      }
       activeFds_.insert(client);
       liveWorkers_++;
     }
-    std::thread([this, client, done] {
-      handleConnection(client, /*closeFd=*/false);
+    try {
+      std::thread([this, client] {
+        handleConnection(client, /*closeFd=*/false);
+        {
+          std::lock_guard<std::mutex> guard(workersMtx_);
+          activeFds_.erase(client);
+          liveWorkers_--;
+          workerDoneCv_.notify_all();
+        }
+        ::close(client);
+      }).detach();
+    } catch (...) {
+      /* Thread creation failed: roll the registration back so
+       * stop()'s live-count wait never blocks on a ghost. */
       {
         std::lock_guard<std::mutex> guard(workersMtx_);
         activeFds_.erase(client);
@@ -231,8 +239,7 @@ void HttpServer::runThreaded() {
         workerDoneCv_.notify_all();
       }
       ::close(client);
-    }).detach();
-    (void)done;
+    }
   }
 }
 
