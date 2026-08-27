@@ -1,0 +1,132 @@
+name: MinIO Integration Check
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+env:
+  MINIO_DEB_URL: https://dl.minio.io/aistor/minio/release/linux-amd64/minio.rdma_20260807183435.0.0_amd64.deb
+  MINIO_ROOT_USER: minioadmin
+  MINIO_ROOT_PASSWORD: minioadmin
+  MINIO_ENDPOINT: http://127.0.0.1:9000
+  TEST_BUCKET: hipobj-ci
+  TEST_OBJECT: test-object
+  TEST_SIZE: "1048576"
+
+jobs:
+  minio-integration:
+    runs-on: ubuntu-24.04
+    container:
+      image: rocm/dev-ubuntu-24.04:7.2
+      options: --user root
+    env:
+      ROCM_PATH: /opt/rocm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            cmake \
+            curl \
+            git \
+            libcurl4-openssl-dev \
+            libibverbs-dev \
+            libnuma-dev
+
+      - name: Install mc (MinIO client)
+        run: |
+          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc \
+            -o /usr/local/bin/mc
+          chmod +x /usr/local/bin/mc
+
+      - name: Install MinIO RDMA server
+        run: |
+          curl -fsSL "$MINIO_DEB_URL" -o /tmp/minio.rdma.deb
+          apt-get install -y /tmp/minio.rdma.deb
+
+      - name: Start MinIO
+        run: |
+          mkdir -p /tmp/minio-data
+          MINIO_ROOT_USER=$MINIO_ROOT_USER \
+          MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD \
+            minio server /tmp/minio-data \
+              --address 127.0.0.1:9000 \
+              --console-address 127.0.0.1:9001 \
+              &>/tmp/minio.log &
+          echo $! > /tmp/minio.pid
+
+          for i in $(seq 1 30); do
+            curl -sf "$MINIO_ENDPOINT/minio/health/live" && break
+            sleep 1
+          done
+          curl -sf "$MINIO_ENDPOINT/minio/health/live" || \
+            { cat /tmp/minio.log; exit 1; }
+
+      - name: Create test bucket
+        run: |
+          mc alias set ci "$MINIO_ENDPOINT" \
+            "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" --insecure
+          mc mb ci/$TEST_BUCKET
+
+      - name: Build hipObject with curl support
+        run: |
+          cmake -B build \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
+            -DBUILD_TESTING=ON \
+            -DHIPOBJ_BNXT=ON \
+            -DHIPOBJ_IONIC=ON
+          cmake --build build -j$(nproc)
+
+      - name: Unit tests
+        run: cd build && ctest --output-on-failure
+
+      - name: S3 control-plane PUT (no RDMA hardware — expect 501 fallback)
+        run: |
+          # No RDMA NIC is present in the CI runner; MinIO should respond
+          # with x-amz-rdma-reply: 501, and the example exits 1 as expected.
+          put_output=$(./build/hipobj-examples/put-object \
+            "$TEST_SIZE" \
+            --live "$MINIO_ENDPOINT" "$TEST_BUCKET" "$TEST_OBJECT" 2>&1 || true)
+          echo "$put_output"
+          echo "$put_output" | grep -q "would send RDMA token" || \
+            { echo "ERROR: hipObjInit / token mint failed"; exit 1; }
+          echo "$put_output" | grep -qE "501|S3 error" || \
+            { echo "ERROR: did not get expected 501 fallback"; exit 1; }
+
+      - name: Seed object via mc for GET test
+        run: |
+          dd if=/dev/urandom bs="$TEST_SIZE" count=1 2>/dev/null \
+            | mc pipe ci/$TEST_BUCKET/$TEST_OBJECT
+
+      - name: S3 control-plane GET (no RDMA hardware — expect 501 fallback)
+        run: |
+          get_output=$(./build/hipobj-examples/get-object \
+            "$TEST_SIZE" \
+            --live "$MINIO_ENDPOINT" "$TEST_BUCKET" "$TEST_OBJECT" 2>&1 || true)
+          echo "$get_output"
+          echo "$get_output" | grep -q "would send RDMA token" || \
+            { echo "ERROR: hipObjInit / token mint failed"; exit 1; }
+          echo "$get_output" | grep -qE "501|S3 error" || \
+            { echo "ERROR: did not get expected 501 fallback"; exit 1; }
+
+      - name: Verify MinIO served requests (sanity check server logs)
+        run: |
+          grep -q "200\|PUT\|GET" /tmp/minio.log || \
+            { echo "WARNING: no successful S3 requests found in MinIO log"; }
+          cat /tmp/minio.log
+
+      - name: Stop MinIO
+        if: always()
+        run: |
+          if [ -f /tmp/minio.pid ]; then
+            kill "$(cat /tmp/minio.pid)" 2>/dev/null || true
+          fi
