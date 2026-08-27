@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <map>
 #include <string>
 
@@ -127,6 +128,16 @@ std::string hex24(uint32_t v) {
   return buf;
 }
 
+/* Current UTC time in SigV4 format. */
+std::string nowAmzDate() {
+  std::time_t t = std::time(nullptr);
+  struct tm tmv;
+  gmtime_r(&t, &tmv);
+  char buf[24];
+  std::strftime(buf, sizeof(buf), "%Y%m%dT%H%M%SZ", &tmv);
+  return buf;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -163,11 +174,12 @@ int main(int argc, char* argv[]) {
 
   hipObj::v2::BuiltinVerifier signer("hipobj-test-key", "hipobj-test-secret",
                                      "us-east-1");
+  const std::string amzDate = nowAmzDate();
 
   /* --- PREPARE --- */
   std::map<std::string, std::string> hdrs = {
     {"host", host + ":" + std::to_string(port)},
-    {"x-amz-date", "20260825T000000Z"},
+    {"x-amz-date", amzDate},
     {"x-amz-rdma-protocol", "hipobj-rc-v2"},
     {"x-amz-rdma-token", std::string(88, '1')},
     {"x-amz-rdma-psn", "00a1b2c"},
@@ -179,7 +191,7 @@ int main(int argc, char* argv[]) {
   /* Client PSN must be 6 hex digits: 0x0a1b2c. */
   hdrs["x-amz-rdma-psn"] = "0a1b2c";
   std::string auth = signer.sign("POST", "/.hipobj-rc/prepare", hdrs, "",
-                                 "20260825T000000Z");
+                                 amzDate);
 
   std::string req = "POST /.hipobj-rc/prepare HTTP/1.1\r\n";
   for (const auto& [k, v] : hdrs) {
@@ -210,13 +222,13 @@ int main(int argc, char* argv[]) {
   /* --- READY --- */
   std::map<std::string, std::string> rhdrs = {
     {"host", host + ":" + std::to_string(port)},
-    {"x-amz-date", "20260825T000000Z"},
+    {"x-amz-date", amzDate},
     {"x-amz-rdma-protocol", "hipobj-rc-v2"},
     {"x-amz-rdma-session", session},
     {"x-amz-rdma-cookie", hex32(overrideReadyCookie ? readyCookie : cookie)},
   };
   std::string rauth = signer.sign("POST", "/.hipobj-rc/ready", rhdrs, "",
-                                  "20260825T000000Z");
+                                  amzDate);
   std::string rreq = "POST /.hipobj-rc/ready HTTP/1.1\r\n";
   for (const auto& [k, v] : rhdrs) {
     rreq += k + ": " + v + "\r\n";
@@ -250,12 +262,12 @@ int main(int argc, char* argv[]) {
   if (doCancel) {
     std::map<std::string, std::string> chdrs = {
       {"host", host + ":" + std::to_string(port)},
-      {"x-amz-date", "20260825T000000Z"},
+      {"x-amz-date", amzDate},
       {"x-amz-rdma-protocol", "hipobj-rc-v2"},
       {"x-amz-rdma-session", session},
     };
     std::string cauth = signer.sign("POST", "/.hipobj-rc/cancel", chdrs, "",
-                                    "20260825T000000Z");
+                                    amzDate);
     std::string creq = "POST /.hipobj-rc/cancel HTTP/1.1\r\n";
     for (const auto& [k, v] : chdrs) {
       creq += k + ": " + v + "\r\n";

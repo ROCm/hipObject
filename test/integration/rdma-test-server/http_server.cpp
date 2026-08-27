@@ -196,39 +196,50 @@ void HttpServer::runThreaded() {
       continue;
     }
     /* Shared completion flag: the accept loop joins finished
-     * workers without blocking on running ones. */
+     * workers without blocking on running ones. The worker marks
+     * done BEFORE taking the lock, and joins happen OUTSIDE the
+     * lock, so no path can hold workersMtx_ while waiting on a
+     * thread that needs it. */
     auto done = std::make_shared<std::atomic<bool>>(false);
     {
-      /* Register the fd before the worker starts so its erase
-       * cannot race the insert. */
       std::lock_guard<std::mutex> guard(workersMtx_);
       activeFds_.insert(client);
       workers_.push_back({{}, done});
     }
     std::thread worker([this, client, done] {
-      handleConnection(client);
+      handleConnection(client, /*closeFd=*/false);
       done->store(true);
       {
+        /* Remove the fd number while the descriptor is still
+         * open, then close: accept cannot recycle a number that
+         * is still registered. */
         std::lock_guard<std::mutex> guard(workersMtx_);
         activeFds_.erase(client);
       }
+      ::close(client);
     });
-    /* The thread handle lives in the entry; move it in place. */
+    /* Detach-style ownership: the thread object moves into the
+     * entry; the accept loop reclaims finished entries below. */
     {
       std::lock_guard<std::mutex> guard(workersMtx_);
       workers_.back().thread = std::move(worker);
-      /* Reclaim entries whose worker finished. */
+    }
+    /* Reclaim pass outside the lock: collect finished entries. */
+    std::vector<WorkerEntry> finished;
+    {
+      std::lock_guard<std::mutex> guard(workersMtx_);
       std::vector<WorkerEntry> keep;
       for (auto& entry : workers_) {
-        if (entry.done->load()) {
-          if (entry.thread.joinable()) {
-            entry.thread.join();
-          }
+        if (entry.done->load() && entry.thread.joinable()) {
+          finished.push_back(std::move(entry));
         } else {
           keep.push_back(std::move(entry));
         }
       }
       workers_.swap(keep);
+    }
+    for (auto& entry : finished) {
+      entry.thread.join(); /* worker already done: no block */
     }
   }
 }
@@ -274,7 +285,7 @@ void HttpServer::stop() {
   }
 }
 
-void HttpServer::handleConnection(int client) {
+void HttpServer::handleConnection(int client, bool closeFd) {
   /* Absolute receive deadline (request bytes only). */
   auto now = std::chrono::steady_clock::now().time_since_epoch();
   uint64_t deadlineMs =
@@ -289,7 +300,9 @@ void HttpServer::handleConnection(int client) {
     uint64_t now2Ms = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(now2).count());
     if (now2Ms >= deadlineMs) {
-      close(client);
+      if (closeFd) {
+        close(client);
+      }
       return;
     }
     uint64_t remain = deadlineMs - now2Ms;
@@ -309,12 +322,16 @@ void HttpServer::handleConnection(int client) {
           (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
         continue;
       }
-      close(client);
+      if (closeFd) {
+        close(client);
+      }
       return;
     }
     raw.append(buf, static_cast<size_t>(n));
     if (raw.size() > kMaxHeaderBytes) {
-      close(client);
+      if (closeFd) {
+        close(client);
+      }
       return;
     }
     headerEnd = raw.find("\r\n\r\n");
@@ -329,7 +346,9 @@ void HttpServer::handleConnection(int client) {
       contentLen = static_cast<size_t>(
         strtoull(it->second.c_str(), nullptr, 10));
       if (contentLen > kMaxBodyBytes) {
-        close(client);
+        if (closeFd) {
+          close(client);
+        }
         return;
       }
     }
@@ -368,7 +387,9 @@ void HttpServer::handleConnection(int client) {
   }
   bodyComplete = raw.size() - headerLen >= contentLen;
   if (!bodyComplete) {
-    close(client);
+    if (closeFd) {
+      close(client);
+    }
     return;
   }
 
@@ -399,7 +420,9 @@ void HttpServer::handleConnection(int client) {
       /* logged upstream if needed */
     }
   }
-  close(client);
+  if (closeFd) {
+    close(client);
+  }
 }
 
 HttpRequest parseRequest(const std::string& raw) {

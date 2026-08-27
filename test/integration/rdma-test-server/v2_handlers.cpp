@@ -213,13 +213,17 @@ void ControlHandlers::reaperLoop() {
           return;
         }
         /* Response-bound expiry: the worker never finished sending
-         * the confirmed response. Reclaim the session (ioActive
-         * stays - a later finalizer's release on an erased id is a
-         * no-op) and let the claim gate handle the rest. */
+         * the confirmed response. Force the reference release so
+         * the claim gate below can reclaim the session and its
+         * ring slot; a later cooperative finalizer releasing an
+         * erased id is a no-op. */
         if ((s.state == SessState::Publishing ||
              s.state == SessState::Completing) &&
             now > s.txDeadlineAt) {
           s.state = SessState::Reaping;
+          if (s.ioActive > 0) {
+            --s.ioActive;
+          }
         }
       });
       reapSession(id);

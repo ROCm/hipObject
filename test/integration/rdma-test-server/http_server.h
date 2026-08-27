@@ -59,7 +59,7 @@ public:
   }
 
 private:
-  void handleConnection(int client);
+  void handleConnection(int client, bool closeFd);
 
   /* A spawned worker plus its shared completion flag; the accept
    * loop reclaims finished entries without blocking. */

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <ctime>
 #include <sstream>
 #include <vector>
 
@@ -300,8 +301,32 @@ std::optional<VerifiedCredential> BuiltinVerifier::verify(
     }
     amzDate = it->second;
   }
-  if (amzDate.size() < 8 || amzDate.compare(0, 8, date.substr(0, 8)) != 0) {
-    return std::nullopt; /* credential/x-amz-date mismatch */
+  if (date.size() != 8 || amzDate.size() < 8 ||
+      amzDate.compare(0, 8, date) != 0) {
+    return std::nullopt; /* malformed date / credential mismatch */
+  }
+  for (char c : date) {
+    if (!std::isdigit(static_cast<unsigned char>(c))) {
+      return std::nullopt;
+    }
+  }
+  /* Freshness: reject captures older than 24h. The reference
+   * server has no wall-clock skew handling; a generous window
+   * keeps replay of stale captures bounded. */
+  {
+    uint64_t nowSec = static_cast<uint64_t>(std::time(nullptr));
+    uint64_t credSec = 0;
+    struct tm tmv = {};
+    std::string iso = date.substr(0, 4) + "-" + date.substr(4, 2) + "-" +
+                      date.substr(6, 2) + " 00:00:00";
+    if (strptime(iso.c_str(), "%Y-%m-%d %H:%M:%S", &tmv) != nullptr) {
+      credSec = static_cast<uint64_t>(timegm(&tmv));
+      if (nowSec > credSec + 86400 || credSec > nowSec + 86400) {
+        return std::nullopt; /* stale or far-future capture */
+      }
+    } else {
+      return std::nullopt;
+    }
   }
   std::string payloadHash = sha256Hex(body);
   std::string scope = date + "/" + region_ + "/hipobj/aws4_request";
