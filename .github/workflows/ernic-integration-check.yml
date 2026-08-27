@@ -40,7 +40,9 @@ permissions:
   contents: read
 
 env:
-  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest
+  # Pinned to a specific date-stamped tag produced by batesste-ci-images.
+  # Bump this intentionally when the ernic image is updated.
+  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:aug-26-2026
 
 jobs:
   ernic-integration:

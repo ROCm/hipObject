@@ -17,7 +17,7 @@
 
 services:
   ernic-server:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:aug-26-2026}
     container_name: ernic-server
     hostname: ernic-server
     # rocm-ernic listens on a vfio-user socket; the ibverbs provider
@@ -41,7 +41,7 @@ services:
       - ernic-net
 
   ernic-client:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:aug-26-2026}
     container_name: ernic-client
     depends_on:
       ernic-server:
