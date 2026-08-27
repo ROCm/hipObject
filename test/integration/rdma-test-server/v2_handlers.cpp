@@ -5,7 +5,9 @@
 
 #include "v2_handlers.h"
 
+#include <chrono>
 #include <cstdio>
+#include <thread>
 
 #include "v2-clock.h"
 #include "v2-random.h"
@@ -16,12 +18,16 @@ namespace v2 {
 
 namespace {
 
-/* Server-local retired ring guarding (qpn, psn) reuse on the
- * server side (separate instance from the client's). */
+/* Server-local retired ring. Every access happens under the
+ * session table lock (the handlers serialize ring operations with
+ * session mutations), so the ring itself needs no internal lock.
+ * The expiry sweep runs on the reaper tick. */
 RetiredRing& serverRing() {
   static RetiredRing ring;
   return ring;
 }
+
+} // namespace
 
 HandlerResult error(int status) {
   HandlerResult r;
@@ -48,26 +54,147 @@ std::string hex24(uint32_t v) {
   return buf;
 }
 
-/* All rdma headers present in the request must be signed. */
+/* All rdma headers present in the raw request must appear in the
+ * signed-headers list (unsigned protocol fields would let a proxy
+ * strip them invisibly). */
 bool rdmaHeadersSigned(const std::string& signedList,
-                       const std::map<std::string, std::string>& hdrs,
-                       const std::string& except) {
-  for (const auto& [k, v] : hdrs) {
-    if (k.rfind("x-amz-rdma-", 0) == 0 && k != except &&
-        signedList.find(k) == std::string::npos) {
-      return false;
+                       const std::string& rawHeaders) {
+  std::string lower;
+  lower.reserve(rawHeaders.size());
+  for (char c : rawHeaders) {
+    lower.push_back(
+      static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+  }
+  size_t pos = 0;
+  while (pos < lower.size()) {
+    size_t lineEnd = lower.find("\r\n", pos);
+    if (lineEnd == std::string::npos) {
+      lineEnd = lower.size();
     }
+    std::string line = lower.substr(pos, lineEnd - pos);
+    size_t colon = line.find(':');
+    if (colon != std::string::npos) {
+      std::string name = line.substr(0, colon);
+      if (name.rfind("x-amz-rdma-", 0) == 0 &&
+          signedList.find(name) == std::string::npos) {
+        return false;
+      }
+    }
+    pos = lineEnd + 2;
   }
   return true;
 }
 
-} // namespace
-
 ControlHandlers::ControlHandlers(SigV4Verifier* verifier,
                                  MemoryBackend* backend, ServerConfig cfg)
   : verifier_(verifier), backend_(backend), cfg_(cfg) {
+  reaper_ = std::thread([this] {
+    reaperLoop();
+  });
 }
 
+ControlHandlers::~ControlHandlers() {
+  reaperStop_.store(true);
+  if (reaper_.joinable()) {
+    reaper_.join();
+  }
+  /* Final drain: reap every remaining session so nothing leaks
+   * when the server object goes away. */
+  for (const auto& id : table_.ids()) {
+    table_.toReaping(id);
+    reapSession(id);
+  }
+}
+
+void ControlHandlers::reapSession(const std::string& id) {
+  /* Skip sessions with in-flight handler work; their worker's
+   * finalizer performs the transition and calls back here. */
+  int io = 0;
+  table_.withSession(id, [&](V2Session& s) {
+    io = s.ioActive;
+  });
+  if (io > 0) {
+    return;
+  }
+  if (!table_.claimDestroy(id)) {
+    return;
+  }
+  /* Destroy owned transport objects. The transport layer owns
+   * real qp/cq handles; null pointers mean nothing to destroy. */
+  bool qpOk = true;
+  bool cqOk = true;
+  uint64_t res = 0;
+  uint32_t qpn = 0;
+  uint32_t psn = 0;
+  bool published = false;
+  table_.withSession(id, [&](V2Session& s) {
+    res = s.reservationId;
+    qpn = s.serverQpn;
+    psn = s.serverPsn;
+    published = s.published;
+    if (s.qp != nullptr) {
+      qpOk = false; /* real destroy wired by the transport layer */
+    }
+    if (s.cq != nullptr) {
+      cqOk = false;
+    }
+  });
+  /* With no transport objects attached both flags stay true and
+   * the commit erases the entry; retire the slot accordingly. */
+  if (qpOk) {
+    if (res != 0) {
+      if (published) {
+        serverRing().record(res, qpn, psn);
+      } else {
+        serverRing().unreserve(res);
+      }
+    }
+  }
+  table_.commitDestroy(id, qpOk, cqOk);
+}
+
+void ControlHandlers::finishPrepareSend(const std::string& id, bool sentOk) {
+  if (sentOk) {
+    table_.finishPublishing(id, cfg_.tPrepMs);
+  } else {
+    table_.toReaping(id);
+  }
+  table_.withSession(id, [&](V2Session& s) {
+    if (s.ioActive > 0) {
+      --s.ioActive;
+    }
+  });
+  reapSession(id);
+}
+
+void ControlHandlers::finishFinalSend(const std::string& id) {
+  table_.toReaping(id);
+  table_.withSession(id, [&](V2Session& s) {
+    if (s.ioActive > 0) {
+      --s.ioActive;
+    }
+  });
+  reapSession(id);
+}
+
+void ControlHandlers::reaperLoop() {
+  while (!reaperStop_.load()) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    serverRing().collectExpired(clockSource().nowMs());
+    uint64_t now = clockSource().nowMs();
+    for (const auto& id : table_.ids()) {
+      table_.withSession(id, [&](V2Session& s) {
+        if (s.state != SessState::Reaping &&
+            (s.state == SessState::Prepared ||
+             s.state == SessState::Transferring) &&
+            now > s.clientDeadlineAt) {
+          s.state = SessState::Reaping;
+        }
+      });
+      reapSession(id);
+    }
+  }
+}
 SessionTable& ControlHandlers::table() {
   return table_;
 }
@@ -89,7 +216,7 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
     return error(413);
   }
   /* Every rdma header carried by the request must be signed. */
-  if (!rdmaHeadersSigned(cred->signedHeaders, {}, "")) {
+  if (!rdmaHeadersSigned(cred->signedHeaders, rawHeaders)) {
     return error(403);
   }
 
@@ -175,8 +302,12 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
 
 HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
                                        const std::string& rawHeaders) {
+  if (req.protocol != "hipobj-rc-v2") {
+    return unsupported();
+  }
   auto cred = verifier_->verify("POST", "/.hipobj-rc/ready", rawHeaders, "");
-  if (!cred.has_value()) {
+  if (!cred.has_value() ||
+      !rdmaHeadersSigned(cred->signedHeaders, rawHeaders)) {
     return error(403);
   }
 
@@ -241,8 +372,12 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
 
 HandlerResult ControlHandlers::onCancel(const CancelRequest& req,
                                         const std::string& rawHeaders) {
+  if (req.protocol != "hipobj-rc-v2") {
+    return unsupported();
+  }
   auto cred = verifier_->verify("POST", "/.hipobj-rc/cancel", rawHeaders, "");
-  if (!cred.has_value()) {
+  if (!cred.has_value() ||
+      !rdmaHeadersSigned(cred->signedHeaders, rawHeaders)) {
     return error(403);
   }
   bool exists = table_.withSession(req.session, [](V2Session&) {

@@ -35,6 +35,8 @@ bool SessionTable::beginPublishing(const std::string& id) {
     return false;
   }
   it->second.state = SessState::Publishing;
+  /* Response transmission bound: 5s from confirmation. */
+  it->second.txDeadlineAt = clockSource().nowMs() + 5000;
   notifyAll(cv_);
   return true;
 }
@@ -118,7 +120,9 @@ bool SessionTable::claimDestroy(const std::string& id) {
     return false;
   }
   V2Session& s = it->second;
-  if (s.state != SessState::Reaping || s.destroying ||
+  /* Active handler work is never preempted: the worker's
+   * finalizer performs the transition and re-enters the gate. */
+  if (s.state != SessState::Reaping || s.ioActive > 0 || s.destroying ||
       (s.destroyClaimed && !s.poisoned)) {
     return false;
   }

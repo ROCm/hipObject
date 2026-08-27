@@ -121,7 +121,7 @@ HttpServer::HttpServer(int port) {
     listen_fd_ = -1;
     return;
   }
-  listen(listen_fd_, 8);
+  listen(listen_fd_, 64);
 }
 
 HttpServer::~HttpServer() {

@@ -135,6 +135,7 @@ TEST_F(V2SessionTest, DestroyGateLifecycle) {
   table_.withSession("ii", [](hipObj::v2::V2Session& s) {
     s.qp = reinterpret_cast<struct ibv_qp*>(0x11);
     s.cq = reinterpret_cast<struct ibv_cq*>(0x22);
+    s.ioActive = 0; /* finalizer already released */
   });
   EXPECT_TRUE(table_.claimDestroy("ii"));
   /* Second claim while destroying is rejected. */
@@ -153,11 +154,15 @@ TEST_F(V2SessionTest, DestroyGateLifecycle) {
   EXPECT_EQ(table_.size(), 0u);
 }
 
-/* claimDestroy requires Reaping state. */
-TEST_F(V2SessionTest, ClaimRequiresReaping) {
+/* claimDestroy requires Reaping state and quiesced I/O. */
+TEST_F(V2SessionTest, ClaimRequiresReapingAndQuiesced) {
   table_.insert(makeSession("jj"));
-  EXPECT_FALSE(table_.claimDestroy("jj"));
+  /* ioActive=1 (fresh insert) blocks the claim even in Reaping. */
   table_.toReaping("jj");
+  EXPECT_FALSE(table_.claimDestroy("jj"));
+  table_.withSession("jj", [](hipObj::v2::V2Session& s) {
+    s.ioActive = 0;
+  });
   EXPECT_TRUE(table_.claimDestroy("jj"));
 }
 
@@ -179,6 +184,7 @@ TEST_F(V2SessionTest, AwaitOnErasedId) {
   table_.withSession("ll", [](hipObj::v2::V2Session& s) {
     s.qp = nullptr;
     s.cq = nullptr;
+    s.ioActive = 0;
   });
   table_.claimDestroy("ll");
   table_.commitDestroy("ll", true, true);

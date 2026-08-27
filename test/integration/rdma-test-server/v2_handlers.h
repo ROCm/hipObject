@@ -14,9 +14,11 @@
 
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "v2_backend.h"
 #include "v2_request.h"
@@ -41,6 +43,7 @@ class ControlHandlers {
 public:
   ControlHandlers(SigV4Verifier* verifier, MemoryBackend* backend,
                   ServerConfig cfg);
+  ~ControlHandlers();
 
   /* Each handler receives the parsed request plus the raw header
    * block (already part of the request struct through headers). */
@@ -52,11 +55,29 @@ public:
 
   SessionTable& table();
 
+  /* Runs one destruction pass over a session: claim under the
+   * table lock, destroy owned objects, commit. Sessions whose
+   * ioActive > 0 are skipped (the worker finishes them). Exposed
+   * for afterSend finalizers and the reaper. */
+  void reapSession(const std::string& id);
+
+  /* Response finalizer for a confirmed PREPARE: transitions the
+   * session and releases the ioActive reference. */
+  void finishPrepareSend(const std::string& id, bool sentOk);
+
+  /* Response finalizer for a confirmed FINAL: transitions to
+   * Reaping and releases the ioActive reference. */
+  void finishFinalSend(const std::string& id);
+
 private:
+  void reaperLoop();
+
   SigV4Verifier* verifier_;
   MemoryBackend* backend_;
   ServerConfig cfg_;
   SessionTable table_;
+  std::thread reaper_;
+  std::atomic<bool> reaperStop_{false};
 };
 
 } // namespace v2

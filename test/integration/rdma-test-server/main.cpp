@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
      * this mode only needs the control plane. */
     hipObj::v2::BuiltinVerifier verifier(accessKey, secretKey, "us-east-1");
     hipObj::v2::MemoryBackend backend;
-    /* Deterministic seed objects for the E2E harness cases. */
+    /* Deterministic seed objects for the harness cases. */
     backend.seed("/bucket/seed64k", 65536);
     backend.seed("/bucket/seed4m", 4 * 1024 * 1024);
     backend.seed("/b/k1", 65536);
@@ -85,23 +85,18 @@ int main(int argc, char* argv[]) {
           resp.status = r.status;
           resp.headers = r.headers;
           if (r.status == 200 && hangAfterPrepare) {
-            /* Deliberate stall for the supervisor-reclaim E2E
-             * gate; no watchdog inside the process. */
+            /* Deliberate stall for the external supervisor
+             * reclaim check; no watchdog inside the process. */
             for (;;) {
               sleep(1);
             }
           }
           if (r.status == 200) {
-            /* Publishing -> Prepared when the bytes leave. */
             std::string sid = r.headers.count("X-Amz-Rdma-Session")
                                 ? r.headers["X-Amz-Rdma-Session"]
                                 : std::string();
-            resp.afterSend = [&handlers, sid, cfg](bool ok) {
-              if (ok) {
-                handlers.table().finishPublishing(sid, cfg.tPrepMs);
-              } else {
-                handlers.table().toReaping(sid);
-              }
+            resp.afterSend = [&handlers, sid](bool ok) {
+              handlers.finishPrepareSend(sid, ok);
             };
           }
           return resp;
@@ -119,7 +114,7 @@ int main(int argc, char* argv[]) {
           if (r.status == 200 || r.status == 204) {
             std::string sid = parsed->session;
             resp.afterSend = [&handlers, sid](bool) {
-              handlers.table().toReaping(sid);
+              handlers.finishFinalSend(sid);
             };
           }
           return resp;

@@ -9,7 +9,7 @@
  * variable covers state changes so waiters never hold references to
  * erased entries (predicates re-look-up by session id).
  *
- * Lifecycle (see the approved design):
+ * Lifecycle:
  *
  *   Prepared --PREPARE 200 confirmed--> Publishing --send ok-->
  *     Prepared (deadline re-armed to T_prep)
