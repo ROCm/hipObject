@@ -203,61 +203,30 @@ void HttpServer::runThreaded() {
      * workers without blocking on running ones. Joins happen
      * OUTSIDE the lock, so no path can hold workersMtx_ while
      * waiting on a thread that needs it. */
+    /* Detach-based workers: each worker owns its lifetime and
+     * signals completion through a shared flag. No thread handles
+     * are stored, so there is no joinable-object destruction
+     * window and stop() only needs to wait for the flags. The fd
+     * is registered before the thread starts (worker actions
+     * follow registration) and removed before close (no number
+     * recycling window). */
     auto done = std::make_shared<std::atomic<bool>>(false);
-    /* Register the fd and reserve the entry BEFORE the thread
-     * exists: the worker's first action cannot precede its own
-     * registration. The entry starts detached-less (thread not
-     * joinable) and is armed right after creation under the same
-     * lock - stop() drains only joinable entries, and a worker
-     * whose thread handle is not yet attached holds done=false,
-     * so stop's FD shutdown still wakes it. */
     {
       std::lock_guard<std::mutex> guard(workersMtx_);
       activeFds_.insert(client);
-      workers_.push_back({std::thread(), done});
+      liveWorkers_++;
     }
-    std::thread worker([this, client, done] {
+    std::thread([this, client, done] {
       handleConnection(client, /*closeFd=*/false);
-      done->store(true);
       {
-        /* Remove the fd number while the descriptor is still
-         * open, then close: accept cannot recycle a number that
-         * is still registered. */
         std::lock_guard<std::mutex> guard(workersMtx_);
         activeFds_.erase(client);
+        liveWorkers_--;
+        workerDoneCv_.notify_all();
       }
       ::close(client);
-    });
-    {
-      std::lock_guard<std::mutex> guard(workersMtx_);
-      /* The reserved entry is still ours (identified by done);
-       * attach the thread handle. stop() cannot have drained it:
-       * it drains only entries with joinable threads, and ours
-       * was not joinable until now. */
-      for (auto& entry : workers_) {
-        if (entry.done == done) {
-          entry.thread = std::move(worker);
-          break;
-        }
-      }
-    }
-    /* Reclaim pass outside the lock: collect finished entries. */
-    std::vector<WorkerEntry> finished;
-    {
-      std::lock_guard<std::mutex> guard(workersMtx_);
-      std::vector<WorkerEntry> keep;
-      for (auto& entry : workers_) {
-        if (entry.done->load() && entry.thread.joinable()) {
-          finished.push_back(std::move(entry));
-        } else {
-          keep.push_back(std::move(entry));
-        }
-      }
-      workers_.swap(keep);
-    }
-    for (auto& entry : finished) {
-      entry.thread.join(); /* worker already done: no block */
-    }
+    }).detach();
+    (void)done;
   }
 }
 
@@ -290,27 +259,16 @@ void HttpServer::stop() {
     shutdown(d, SHUT_RDWR);
     close(d);
   }
-  std::vector<WorkerEntry> toJoin;
+  /* All workers are detached: wait for the live count to reach
+   * zero. The FD shutdown above unblocks any worker stuck in a
+   * socket call, and each worker decrements the count only after
+   * removing its fd - so stop() returns with the registry empty
+   * and no thread touching server state. */
   {
-    std::lock_guard<std::mutex> guard(workersMtx_);
-    toJoin.swap(workers_);
-  }
-  for (auto& entry : toJoin) {
-    if (entry.thread.joinable()) {
-      entry.thread.join();
-    }
-  }
-  /* Stragglers: entries whose thread handle was not yet attached
-   * at drain time cannot be joined here - their workers close
-   * their own fds and exit; the entry objects were destroyed with
-   * the vector, but std::thread default-constructed handles are
-   * safely destructible. Wait for their done flags so the process
-   * does not exit with live workers (bounded by the FD shutdown
-   * above and the receive deadline). */
-  for (auto& entry : toJoin) {
-    while (!entry.done->load()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    std::unique_lock<std::mutex> lock(workersMtx_);
+    workerDoneCv_.wait(lock, [this] {
+      return liveWorkers_ == 0;
+    });
   }
 }
 

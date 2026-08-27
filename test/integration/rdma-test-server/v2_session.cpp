@@ -49,6 +49,10 @@ bool SessionTable::finishPublishing(const std::string& id, uint64_t tPrepMs) {
   }
   it->second.state = SessState::Prepared;
   it->second.clientDeadlineAt = clockSource().nowMs() + tPrepMs;
+  /* The PREPARE response left: its bound must stop applying so a
+   * READY acquiring a reference afterwards can never be hit by a
+   * stale forced release. */
+  it->second.txDeadlineAt = 0;
   notifyAll(cv_);
   return true;
 }
