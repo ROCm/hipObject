@@ -1,0 +1,74 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# Two-container ernic integration test.
+#
+# ernic-server: runs the rocm-ernic emulated NIC daemon then the
+#   hipobj-rdma-test-server S3+RDMA endpoint on port 9000.
+# ernic-client: builds hipobject against the same ernic image
+#   (which provides libibverbs + the ionic provider) and runs
+#   the put-object / get-object examples end-to-end.
+#
+# When an emulated GPU is available, add to ernic-client:
+#   devices:
+#     - /dev/kfd
+#     - /dev/dri
+
+services:
+  ernic-server:
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
+    container_name: ernic-server
+    hostname: ernic-server
+    # rocm-ernic listens on a vfio-user socket; the ibverbs provider
+    # connects to it within the same container.  No extra ports needed.
+    # hipobj-rdma-test-server speaks S3 on 9000.
+    expose:
+      - "9000"
+    volumes:
+      - hipobj-src:/hipobject:ro
+      - ernic-build-server:/hipobject-build-server
+    environment:
+      ROCM_PATH: /opt/rocm
+    entrypoint: ["/bin/bash", "/hipobject/ci/ernic/server-entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    networks:
+      - ernic-net
+
+  ernic-client:
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
+    container_name: ernic-client
+    depends_on:
+      ernic-server:
+        condition: service_healthy
+    volumes:
+      - hipobj-src:/hipobject:ro
+      - ernic-build-client:/hipobject-build-client
+    environment:
+      ROCM_PATH: /opt/rocm
+      SERVER_ENDPOINT: http://ernic-server:9000
+      TEST_SIZE: "1048576"
+    entrypoint: ["/bin/bash", "/hipobject/ci/ernic/client-entrypoint.sh"]
+    networks:
+      - ernic-net
+
+volumes:
+  # Bind-mount the hipobject source tree read-only into both containers.
+  # When run locally, set HIPOBJ_SRC to the repo root.  In CI the checkout
+  # action populates it first.
+  hipobj-src:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${HIPOBJ_SRC:-./../..}
+  ernic-build-server:
+  ernic-build-client:
+
+networks:
+  ernic-net:
