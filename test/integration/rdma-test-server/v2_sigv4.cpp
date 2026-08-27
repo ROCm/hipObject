@@ -310,22 +310,21 @@ std::optional<VerifiedCredential> BuiltinVerifier::verify(
       return std::nullopt;
     }
   }
-  /* Freshness: reject captures older than 24h. The reference
-   * server has no wall-clock skew handling; a generous window
-   * keeps replay of stale captures bounded. */
+  /* Freshness: the signed timestamp must fall within +/- 15
+   * minutes of the server clock. Parse the full x-amz-date. */
+  if (amzDate.size() != 16) {
+    return std::nullopt;
+  }
   {
-    uint64_t nowSec = static_cast<uint64_t>(std::time(nullptr));
-    uint64_t credSec = 0;
     struct tm tmv = {};
-    std::string iso = date.substr(0, 4) + "-" + date.substr(4, 2) + "-" +
-                      date.substr(6, 2) + " 00:00:00";
-    if (strptime(iso.c_str(), "%Y-%m-%d %H:%M:%S", &tmv) != nullptr) {
-      credSec = static_cast<uint64_t>(timegm(&tmv));
-      if (nowSec > credSec + 86400 || credSec > nowSec + 86400) {
-        return std::nullopt; /* stale or far-future capture */
-      }
-    } else {
+    if (strptime(amzDate.c_str(), "%Y%m%dT%H%M%SZ", &tmv) == nullptr) {
       return std::nullopt;
+    }
+    uint64_t nowSec = static_cast<uint64_t>(std::time(nullptr));
+    uint64_t signedSec = static_cast<uint64_t>(timegm(&tmv));
+    constexpr uint64_t kWindowSec = 15 * 60;
+    if (nowSec + kWindowSec < signedSec || signedSec + kWindowSec < nowSec) {
+      return std::nullopt; /* stale or far-future capture */
     }
   }
   std::string payloadHash = sha256Hex(body);

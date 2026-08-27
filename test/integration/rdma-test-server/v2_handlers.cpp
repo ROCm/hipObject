@@ -201,9 +201,6 @@ void ControlHandlers::reaperLoop() {
     uint64_t now = clockSource().nowMs();
     for (const auto& id : table_.ids()) {
       table_.withSession(id, [&](V2Session& s) {
-        if (s.state == SessState::Reaping) {
-          return;
-        }
         /* Client-lifetime expiry: no READY arrived in time, or the
          * transfer outlived T_exec. */
         if ((s.state == SessState::Prepared ||
@@ -213,17 +210,19 @@ void ControlHandlers::reaperLoop() {
           return;
         }
         /* Response-bound expiry: the worker never finished sending
-         * the confirmed response. Force the reference release so
-         * the claim gate below can reclaim the session and its
-         * ring slot; a later cooperative finalizer releasing an
-         * erased id is a no-op. */
+         * the confirmed response - including sessions moved to
+         * Reaping by a concurrent CANCEL before this sweep. Force
+         * the reference release so the claim gate below can
+         * reclaim the session and its ring slot; a later
+         * cooperative finalizer releasing an erased id is a
+         * no-op. */
+        if (s.txDeadlineAt != 0 && now > s.txDeadlineAt && s.ioActive > 0) {
+          --s.ioActive;
+        }
         if ((s.state == SessState::Publishing ||
              s.state == SessState::Completing) &&
             now > s.txDeadlineAt) {
           s.state = SessState::Reaping;
-          if (s.ioActive > 0) {
-            --s.ioActive;
-          }
         }
       });
       reapSession(id);

@@ -171,6 +171,10 @@ int HttpServer::runOnce(int timeoutMs) {
 }
 
 void HttpServer::runThreaded() {
+  /* The caller's thread IS the accept thread; stop() relies on
+   * stopping_ + listen shutdown to end this loop, and drain only
+   * happens after it exits - so worker production has ceased
+   * before stop() swaps the vector. */
   while (!stopping_.load()) {
     fd_set fds;
     FD_ZERO(&fds);
@@ -196,16 +200,10 @@ void HttpServer::runThreaded() {
       continue;
     }
     /* Shared completion flag: the accept loop joins finished
-     * workers without blocking on running ones. The worker marks
-     * done BEFORE taking the lock, and joins happen OUTSIDE the
-     * lock, so no path can hold workersMtx_ while waiting on a
-     * thread that needs it. */
+     * workers without blocking on running ones. Joins happen
+     * OUTSIDE the lock, so no path can hold workersMtx_ while
+     * waiting on a thread that needs it. */
     auto done = std::make_shared<std::atomic<bool>>(false);
-    {
-      std::lock_guard<std::mutex> guard(workersMtx_);
-      activeFds_.insert(client);
-      workers_.push_back({{}, done});
-    }
     std::thread worker([this, client, done] {
       handleConnection(client, /*closeFd=*/false);
       done->store(true);
@@ -218,11 +216,12 @@ void HttpServer::runThreaded() {
       }
       ::close(client);
     });
-    /* Detach-style ownership: the thread object moves into the
-     * entry; the accept loop reclaims finished entries below. */
+    /* Publish the fully-built entry in one step: stop() either
+     * sees it in the swap or not at all - no placeholder window. */
     {
       std::lock_guard<std::mutex> guard(workersMtx_);
-      workers_.back().thread = std::move(worker);
+      activeFds_.insert(client);
+      workers_.push_back({std::move(worker), done});
     }
     /* Reclaim pass outside the lock: collect finished entries. */
     std::vector<WorkerEntry> finished;
