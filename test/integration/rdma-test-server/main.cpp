@@ -50,6 +50,12 @@ int main(int argc, char* argv[]) {
   server.setHandler(
     [&](const hipobj::test::HttpRequest& req) -> hipobj::test::HttpResponse {
       hipobj::test::HttpResponse resp;
+      if (req.method == "GET" && req.path == "/health") {
+        resp.status = 200;
+        resp.body = "ok";
+        return resp;
+      }
+
       const std::string key = objectKey(req.path);
       auto tokenIt = req.headers.find("x-amz-rdma-token");
       if (tokenIt == req.headers.end()) {
