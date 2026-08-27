@@ -43,6 +43,19 @@ std::string hex24(uint32_t v) {
   return buf;
 }
 
+/* Strips spaces/tabs around a header name (mirrors the parser). */
+std::string trimName(const std::string& s) {
+  size_t b = 0;
+  while (b < s.size() && (s[b] == ' ' || s[b] == '\t')) {
+    ++b;
+  }
+  size_t e = s.size();
+  while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t')) {
+    --e;
+  }
+  return s.substr(b, e - b);
+}
+
 /* All rdma headers present in the raw request must appear in the
  * signed-headers list (unsigned protocol fields would let a proxy
  * strip them invisibly). Membership is an exact token match on
@@ -78,7 +91,9 @@ bool rdmaHeadersSigned(const std::string& signedList,
     std::string line = lower.substr(pos, lineEnd - pos);
     size_t colon = line.find(':');
     if (colon != std::string::npos) {
-      std::string name = line.substr(0, colon);
+      /* Trim like the HTTP parser does: a leading-space name must
+       * not slip past the signed-header check. */
+      std::string name = trimName(line.substr(0, colon));
       if (name.rfind("x-amz-rdma-", 0) == 0 && !isSigned(name)) {
         return false;
       }
@@ -186,10 +201,24 @@ void ControlHandlers::reaperLoop() {
     uint64_t now = clockSource().nowMs();
     for (const auto& id : table_.ids()) {
       table_.withSession(id, [&](V2Session& s) {
-        if (s.state != SessState::Reaping &&
-            (s.state == SessState::Prepared ||
+        if (s.state == SessState::Reaping) {
+          return;
+        }
+        /* Client-lifetime expiry: no READY arrived in time, or the
+         * transfer outlived T_exec. */
+        if ((s.state == SessState::Prepared ||
              s.state == SessState::Transferring) &&
             now > s.clientDeadlineAt) {
+          s.state = SessState::Reaping;
+          return;
+        }
+        /* Response-bound expiry: the worker never finished sending
+         * the confirmed response. Reclaim the session (ioActive
+         * stays - a later finalizer's release on an erased id is a
+         * no-op) and let the claim gate handle the rest. */
+        if ((s.state == SessState::Publishing ||
+             s.state == SessState::Completing) &&
+            now > s.txDeadlineAt) {
           s.state = SessState::Reaping;
         }
       });
@@ -394,19 +423,18 @@ HandlerResult ControlHandlers::onCancel(const CancelRequest& req,
       !rdmaHeadersSigned(cred->signedHeaders, rawHeaders)) {
     return error(403);
   }
-  bool exists = table_.withSession(req.session, [](V2Session&) {
+  /* Existence and credential match in one look-up: a session
+   * erased between the two reads must still answer 204 (the work
+   * is done), never 403. */
+  bool owned = false;
+  table_.withSession(req.session, [&](V2Session& s) {
+    owned = s.accessKey == cred->accessKey;
   });
-  if (exists) {
-    bool authOk = false;
-    table_.withSession(req.session, [&](V2Session& s) {
-      authOk = s.accessKey == cred->accessKey;
-    });
-    if (!authOk) {
-      return error(403);
-    }
+  if (owned) {
     table_.toReaping(req.session);
   }
-  /* Idempotent either way. */
+  /* Idempotent either way: absent, foreign (still 204 to avoid
+   * probing), or reaped. */
   HandlerResult r;
   r.status = 204;
   return r;

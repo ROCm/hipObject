@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <memory>
 #include <sstream>
 
 #include <arpa/inet.h>
@@ -39,6 +40,10 @@ std::string trim(const std::string& s) {
   }
   return s.substr(start, end - start);
 }
+
+/* Receive caps: headers and declared body length. */
+constexpr size_t kMaxHeaderBytes = 64 * 1024;
+constexpr size_t kMaxBodyBytes = 1024 * 1024;
 
 const char* reasonPhrase(int status) {
   switch (status) {
@@ -190,28 +195,40 @@ void HttpServer::runThreaded() {
       close(client);
       continue;
     }
-    std::thread worker([this, client] {
+    /* Shared completion flag: the accept loop joins finished
+     * workers without blocking on running ones. */
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    {
+      /* Register the fd before the worker starts so its erase
+       * cannot race the insert. */
+      std::lock_guard<std::mutex> guard(workersMtx_);
+      activeFds_.insert(client);
+      workers_.push_back({{}, done});
+    }
+    std::thread worker([this, client, done] {
       handleConnection(client);
-      /* Mark completion so the accept loop can reclaim the
-       * thread object. */
+      done->store(true);
       {
         std::lock_guard<std::mutex> guard(workersMtx_);
         activeFds_.erase(client);
-        doneCount_++;
       }
     });
+    /* The thread handle lives in the entry; move it in place. */
     {
       std::lock_guard<std::mutex> guard(workersMtx_);
-      activeFds_.insert(client);
-      /* Reclaim finished workers: swap out joinable ones. */
-      std::vector<std::thread> stillRunning;
-      for (auto& t : workers_) {
-        if (t.joinable()) {
-          stillRunning.push_back(std::move(t));
+      workers_.back().thread = std::move(worker);
+      /* Reclaim entries whose worker finished. */
+      std::vector<WorkerEntry> keep;
+      for (auto& entry : workers_) {
+        if (entry.done->load()) {
+          if (entry.thread.joinable()) {
+            entry.thread.join();
+          }
+        } else {
+          keep.push_back(std::move(entry));
         }
       }
-      workers_.swap(stillRunning);
-      workers_.push_back(std::move(worker));
+      workers_.swap(keep);
     }
   }
 }
@@ -245,14 +262,14 @@ void HttpServer::stop() {
     shutdown(d, SHUT_RDWR);
     close(d);
   }
-  std::vector<std::thread> toJoin;
+  std::vector<WorkerEntry> toJoin;
   {
     std::lock_guard<std::mutex> guard(workersMtx_);
     toJoin.swap(workers_);
   }
-  for (auto& t : toJoin) {
-    if (t.joinable()) {
-      t.join();
+  for (auto& entry : toJoin) {
+    if (entry.thread.joinable()) {
+      entry.thread.join();
     }
   }
 }
@@ -296,6 +313,10 @@ void HttpServer::handleConnection(int client) {
       return;
     }
     raw.append(buf, static_cast<size_t>(n));
+    if (raw.size() > kMaxHeaderBytes) {
+      close(client);
+      return;
+    }
     headerEnd = raw.find("\r\n\r\n");
   }
   /* Body per Content-Length (control requests carry zero). */
@@ -307,6 +328,10 @@ void HttpServer::handleConnection(int client) {
     if (it != head.headers.end()) {
       contentLen = static_cast<size_t>(
         strtoull(it->second.c_str(), nullptr, 10));
+      if (contentLen > kMaxBodyBytes) {
+        close(client);
+        return;
+      }
     }
   }
   /* Body receive honors the same absolute deadline as the header:

@@ -67,7 +67,8 @@ std::string hmacSha256(const std::string& key, const std::string& msg) {
 
 /* Splits "Credential=AKID/date/region/service/aws4_request". */
 bool parseCredential(const std::string& auth, std::string& accessKey,
-                     std::string& date, std::string& region) {
+                     std::string& date, std::string& region,
+                     std::string& service, std::string& terminator) {
   const std::string needle = "Credential=";
   size_t pos = auth.find(needle);
   if (pos == std::string::npos) {
@@ -78,7 +79,7 @@ bool parseCredential(const std::string& auth, std::string& accessKey,
   std::string cred = auth.substr(start, end == std::string::npos
                                           ? std::string::npos
                                           : end - start);
-  /* AKID/date/region/service/terminator */
+  /* AKID/date/region/service/terminator - exactly four slashes. */
   size_t p1 = cred.find('/');
   if (p1 == std::string::npos) {
     return false;
@@ -91,9 +92,18 @@ bool parseCredential(const std::string& auth, std::string& accessKey,
   if (p3 == std::string::npos) {
     return false;
   }
+  size_t p4 = cred.find('/', p3 + 1);
+  if (p4 == std::string::npos) {
+    return false;
+  }
   accessKey = cred.substr(0, p1);
   date = cred.substr(p1 + 1, p2 - p1 - 1);
   region = cred.substr(p2 + 1, p3 - p2 - 1);
+  service = cred.substr(p3 + 1, p4 - p3 - 1);
+  terminator = cred.substr(p4 + 1);
+  if (cred.find('/', p4 + 1) != std::string::npos) {
+    return false; /* trailing garbage */
+  }
   return !accessKey.empty();
 }
 
@@ -249,7 +259,11 @@ std::optional<VerifiedCredential> BuiltinVerifier::verify(
   std::string key;
   std::string date;
   std::string region;
-  if (!parseCredential(auth, key, date, region) || key != accessKey_) {
+  std::string service;
+  std::string terminator;
+  if (!parseCredential(auth, key, date, region, service, terminator) ||
+      key != accessKey_ || region != region_ || service != "hipobj" ||
+      terminator != "aws4_request") {
     return std::nullopt;
   }
   std::string signedList = parseSignedHeaders(auth);
@@ -285,6 +299,9 @@ std::optional<VerifiedCredential> BuiltinVerifier::verify(
       return std::nullopt;
     }
     amzDate = it->second;
+  }
+  if (amzDate.size() < 8 || amzDate.compare(0, 8, date.substr(0, 8)) != 0) {
+    return std::nullopt; /* credential/x-amz-date mismatch */
   }
   std::string payloadHash = sha256Hex(body);
   std::string scope = date + "/" + region_ + "/hipobj/aws4_request";

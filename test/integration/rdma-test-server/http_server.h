@@ -61,16 +61,22 @@ public:
 private:
   void handleConnection(int client);
 
+  /* A spawned worker plus its shared completion flag; the accept
+   * loop reclaims finished entries without blocking. */
+  struct WorkerEntry {
+    std::thread thread;
+    std::shared_ptr<std::atomic<bool>> done;
+  };
+
   int listen_fd_ = -1;
   HttpHandler handler_;
   std::atomic<bool> stopping_{false};
   std::thread acceptThread_;
   std::mutex workersMtx_;
-  std::vector<std::thread> workers_;
+  std::vector<WorkerEntry> workers_;
   /* Client fds with a live worker; guarded by workersMtx_. stop()
    * shutdowns these (via dup'd handles) to unblock workers. */
   std::set<int> activeFds_;
-  uint64_t doneCount_ = 0;
 };
 
 HttpRequest parseRequest(const std::string& raw);
