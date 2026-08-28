@@ -1,4 +1,5 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,6 +22,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define HIPOBJ_REAL_VERBS 1
+#include "../../../src/rdma/token.h"
 #include "v2_sigv4.h"
 
 namespace {
@@ -212,11 +215,20 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
   char qpnHex[12];
   std::snprintf(qpnHex, sizeof(qpnHex), "%x", qp->qp_num);
 
+  /* Real peer token: this client's QPN and GID so the server
+   * pairs back through the token-carried endpoint. */
+  hipObj::RdmaToken clientTok{};
+  clientTok.qpNum = qp->qp_num;
+  std::memcpy(clientTok.gid, &gid, sizeof(clientTok.gid));
+  clientTok.transport = hipObj::TRANSPORT_RC;
+  clientTok.portNum = 1;
+  const std::string clientTokHex = hipObj::encodeRdmaToken(clientTok);
+
   std::map<std::string, std::string> phdrs = {
     {"host", std::string(host)},
     {"x-amz-date", amzDate},
     {"x-amz-rdma-protocol", "hipobj-rc-v2"},
-    {"x-amz-rdma-token", std::string(88, '1')},
+    {"x-amz-rdma-token", clientTokHex},
     {"x-amz-rdma-psn", psnHex},
     {"x-amz-rdma-cookie", cookieHex},
     {"x-amz-rdma-op", op},
@@ -261,6 +273,41 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
   uint32_t sqpn = sqpnS.empty() ? 0
                                 : static_cast<uint32_t>(
                                     std::strtoul(sqpnS.c_str(), nullptr, 16));
+
+  hipObj::RdmaToken replyTok{};
+  union ibv_gid serverGid = {};
+  bool haveServerGid = false;
+  static const uint8_t kZeroGid16[16] = {0};
+  /* The reply token is mandatory: "200:" + exactly 88 hex that
+   * decodes and carries the same server QPN as the dedicated
+   * header. Its absence or any malformation fails the transfer. */
+  {
+    std::string sreply = headerValue(presp, "x-amz-rdma-reply");
+    size_t cpos = sreply.find(':');
+    if (cpos == std::string::npos || sreply.substr(0, cpos) != "200") {
+      std::fprintf(stderr, "dp: reply token missing/invalid code\n");
+      return 1;
+    }
+    std::string tokHex = sreply.substr(cpos + 1);
+    if (tokHex.size() != 88 ||
+        !hipObj::decodeRdmaTokenHex(tokHex.c_str(), replyTok)) {
+      std::fprintf(stderr, "dp: reply token does not decode\n");
+      return 1;
+    }
+    if (replyTok.qpNum != sqpn) {
+      std::fprintf(stderr, "dp: reply token qpn mismatch\n");
+      return 1;
+    }
+    /* Route by the server GID the token carries; RC transport with
+     * a real GID is mandatory. */
+    if (replyTok.transport != hipObj::TRANSPORT_RC ||
+        std::memcmp(replyTok.gid, kZeroGid16, 16) == 0) {
+      std::fprintf(stderr, "dp: reply token unusable endpoint\n");
+      return 1;
+    }
+    std::memcpy(&serverGid, replyTok.gid, 16);
+    haveServerGid = true;
+  }
   uint32_t spsn = spsnS.empty() ? 1
                                 : static_cast<uint32_t>(
                                     std::strtoul(spsnS.c_str(), nullptr, 16));
@@ -281,9 +328,11 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
     attr.max_dest_rd_atomic = 1;
     attr.min_rnr_timer = 12;
     /* hipObject targets RoCEv2: the GRH with the peer GID is
-     * the only routing path. */
+     * the only routing path - the server's GID from the reply
+     * token when it carries one, our own GID only for same-HCA
+     * loopback. */
     attr.ah_attr.is_global = 1;
-    attr.ah_attr.grh.dgid = gid;
+    attr.ah_attr.grh.dgid = haveServerGid ? serverGid : gid;
     attr.ah_attr.grh.sgid_index = 0;
     attr.ah_attr.grh.hop_limit = 1;
     attr.ah_attr.port_num = 1;

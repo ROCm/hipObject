@@ -64,12 +64,17 @@ if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj-rdma-test-server PRIVATE HIPOBJ_IONIC)
 endif()
 
-add_executable(v2-client-harness v2_client_harness.cpp v2_sigv4.cpp)
+add_executable(v2-client-harness v2_client_harness.cpp v2_sigv4.cpp
+  ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
+target_include_directories(v2-client-harness PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/common)
 
 add_executable(v2-data-client v2_data_client.cpp v2_sigv4.cpp)
 target_compile_features(v2-data-client PRIVATE cxx_std_17)
 target_include_directories(v2-data-client PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR})
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src/common)
+target_sources(v2-data-client PRIVATE ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
 target_link_libraries(v2-data-client PRIVATE OpenSSL::Crypto)
 
 find_library(IBVERBS_LIB ibverbs)

@@ -1,4 +1,5 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,6 +28,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "../../../src/rdma/token.h"
 #include "v2_sigv4.h"
 
 namespace {
@@ -89,6 +91,17 @@ int statusOf(const std::string& raw) {
     return -1;
   }
   return std::atoi(raw.c_str() + sp + 1);
+}
+
+static std::string harnessTokenHex() {
+  /* Real encoded token (RC, nonzero GID) accepted by the server's
+   * semantic checks. */
+  hipObj::RdmaToken t{};
+  t.qpNum = 0x4321;
+  std::memset(t.gid, 0xcd, sizeof(t.gid));
+  t.transport = hipObj::TRANSPORT_RC;
+  t.portNum = 1;
+  return hipObj::encodeRdmaToken(t);
 }
 
 std::string headerValue(const std::string& raw, const char* name) {
@@ -181,7 +194,7 @@ int main(int argc, char* argv[]) {
     {"host", host + ":" + std::to_string(port)},
     {"x-amz-date", amzDate},
     {"x-amz-rdma-protocol", "hipobj-rc-v2"},
-    {"x-amz-rdma-token", std::string(88, '1')},
+    {"x-amz-rdma-token", harnessTokenHex()},
     {"x-amz-rdma-psn", "00a1b2c"},
     {"x-amz-rdma-cookie", hex32(cookie)},
     {"x-amz-rdma-op", op},

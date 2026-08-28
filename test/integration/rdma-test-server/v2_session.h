@@ -1,4 +1,5 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -97,6 +98,10 @@ struct V2Session {
   uint64_t clientMrAddr = 0; /* client MR address (PUT dest / GET src) */
   uint32_t clientMrRkey = 0; /* client MR rkey */
   uint32_t clientQpn = 0;    /* client QP to pair against */
+  /* Peer endpoint decoded from the 88-hex token: routes the RTR
+   * address handle to the real client GID instead of our own. */
+  union ibv_gid peerGid;
+  bool hasPeerGid = false;
   /* PUT staging (host buffer + MR owned by the session). */
   void* staging = nullptr;
   struct ibv_mr* stagingMr = nullptr;

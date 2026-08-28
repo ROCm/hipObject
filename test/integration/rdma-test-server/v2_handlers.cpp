@@ -1,4 +1,5 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -8,11 +9,13 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <thread>
 
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "token.h"
 #include "v2-clock.h"
 #include "v2-random.h"
 #include "v2-registry.h"
@@ -27,6 +30,8 @@ namespace {
  * the first PREPARE. The shared handle carries the context,
  * protection domain, and local GID that per-session connections
  * and memory registrations both use. */
+const uint8_t kZeroGid[16] = {0};
+
 hipObj::DeviceHandle* serverDevice() {
   /* Threaded PREPARE handlers race this lazy init; the once flag
    * serializes the device open and GID query. */
@@ -355,6 +360,26 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
     s.offset = req.offset;
     s.cookie = req.cookie;
     s.clientPsn = req.clientPsn;
+    /* Decode the client's 88-hex token. The all-zero token is the
+     * explicit same-HCA loopback marker (keep the local GID
+     * fallback); any other token must decode, and its GID becomes
+     * the RTR routing target. */
+    const std::string tokBase = req.token.substr(0, 88);
+    if (tokBase == std::string(88, '0')) {
+      s.hasPeerGid = false;
+    } else {
+      hipObj::RdmaToken peerTok;
+      if (!hipObj::decodeRdmaTokenHex(tokBase.c_str(), peerTok) ||
+          /* Semantic checks: this server pairs RC transports only,
+           * and a nonzero token must carry a real peer GID. */
+          peerTok.transport != hipObj::TRANSPORT_RC ||
+          std::memcmp(peerTok.gid, kZeroGid, sizeof(kZeroGid)) == 0) {
+        table_.ringUnreserve(slot);
+        return error(400);
+      }
+      std::memcpy(&s.peerGid, peerTok.gid, 16);
+      s.hasPeerGid = true;
+    }
     s.accessKey = cred->accessKey;
     s.reservationId = slot;
     s.clientDeadlineAt = clockSource().nowMs() + cfg_.tPrepMs;
@@ -534,9 +559,28 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
   HandlerResult r;
   r.status = 200;
   r.headers["X-Amz-Rdma-Protocol"] = "hipobj-rc-v2";
-  /* Reply token: server side placeholder until the transport
-   * commit fills the real 88-hex value. */
-  r.headers["X-Amz-Rdma-Reply"] = "200:" + std::string(88, '0');
+  /* Reply token carrying this server's endpoint so a remote
+   * peer can route back: QPN/GID from the paired session. */
+  {
+    hipObj::RdmaToken replyTok{};
+    uint32_t replyQpn = 0;
+    hipObj::DeviceHandle* replyDev = serverDevice();
+    table_.withSession(id, [&](V2Session& s) {
+      replyQpn = s.serverQpn;
+      replyDev = s.device != nullptr ? s.device : replyDev;
+    });
+    if (replyQpn != 0 && replyDev != nullptr) {
+      replyTok.qpNum = replyQpn;
+      std::memcpy(replyTok.gid, &replyDev->localGid, 16);
+      replyTok.transport = hipObj::TRANSPORT_RC;
+      replyTok.portNum = replyDev->portNum;
+      r.headers["X-Amz-Rdma-Reply"] = "200:" +
+                                      hipObj::encodeRdmaToken(replyTok);
+    } else {
+      /* Control-plane-only exchange: no transport to describe. */
+      r.headers["X-Amz-Rdma-Reply"] = "200:" + std::string(88, '0');
+    }
+  }
   r.headers["X-Amz-Rdma-Session"] = id;
   r.headers["X-Amz-Rdma-Psn"] = hex24(serverPsn);
   uint32_t exposedQpn = 0;
@@ -647,7 +691,9 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
       conn.qpNum = s.serverQpn;
       /* Same-HCA pairing: the server's own GID routes the
        * loopback path on RoCE devices. */
-      union ibv_gid peer = dh.localGid;
+      /* Route to the real peer when the token carried its GID;
+       * same-HCA loopback (zero token) keeps the local GID. */
+      union ibv_gid peer = s.hasPeerGid ? s.peerGid : dh.localGid;
       paired = hipObj::v2::transitionQpToRtrV2(&dh, conn, req.qpn, 0, peer,
                                                s.clientPsn) == 0 &&
                hipObj::v2::transitionQpToRtsV2(conn, &dh, s.serverPsn) == 0;

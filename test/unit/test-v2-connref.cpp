@@ -1,3 +1,9 @@
+/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 /* Connection-reference fault test through the real handler path:
  * onPrepare() fails INIT, the first destroy fails, the session
  * keeps the surviving QP with its reference, and reapSession()
@@ -10,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include "../../../src/common/ibv-wrapper.h"
+#include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "../../../src/rdma/v2-transport.h"
 #include "v2_handlers.h"
@@ -197,7 +204,14 @@ TEST_F(ConnRefFaultTest, InitAndDestroyFailureKeepsOwnership) {
 
   hipObj::v2::PrepareRequest req;
   req.protocol = "hipobj-rc-v2";
-  req.token = std::string(88, '1');
+  /* Real encoded token: RC transport, nonzero GID, so the server's
+     semantic checks accept it. */
+  hipObj::RdmaToken peerTokEnc{};
+  peerTokEnc.qpNum = 0x1234;
+  std::memset(peerTokEnc.gid, 0xab, sizeof(peerTokEnc.gid));
+  peerTokEnc.transport = hipObj::TRANSPORT_RC;
+  peerTokEnc.portNum = 1;
+  req.token = hipObj::encodeRdmaToken(peerTokEnc);
   req.clientPsn = 0x0a1b2c;
   req.cookie = 0x1a2b3c4d;
   req.op = "PUT";

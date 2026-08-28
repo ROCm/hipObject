@@ -1,4 +1,5 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -211,16 +212,29 @@ std::optional<ReadyRequest> parseReadyRequest(
    * the server stages itself, required for PUT delivery and the
    * GET READ pull. Parsed as bare hex without a 0x prefix. */
   it = headers.find("x-amz-rdma-mr-addr");
-  if (it != headers.end() && !it->second.empty()) {
+  if (it != headers.end()) {
+    /* Strict hex, and present-but-empty fails too: a field that
+     * exists must carry a valid value. Bare strtoull would also
+     * accept prefixes, whitespace and trailing garbage, which
+     * would poison the remote address. */
+    if (!isHexDigits(it->second, 1, 16)) {
+      return std::nullopt;
+    }
     out.mrAddr = std::strtoull(it->second.c_str(), nullptr, 16);
   }
   it = headers.find("x-amz-rdma-mr-rkey");
-  if (it != headers.end() && !it->second.empty()) {
+  if (it != headers.end()) {
+    if (!isHexDigits(it->second, 1, 8)) {
+      return std::nullopt;
+    }
     out.mrRkey = static_cast<uint32_t>(
       std::strtoull(it->second.c_str(), nullptr, 16));
   }
   it = headers.find("x-amz-rdma-qpn");
-  if (it != headers.end() && !it->second.empty()) {
+  if (it != headers.end()) {
+    if (!isHexDigits(it->second, 1, 8)) {
+      return std::nullopt;
+    }
     out.qpn = static_cast<uint32_t>(
       std::strtoull(it->second.c_str(), nullptr, 16));
   }
