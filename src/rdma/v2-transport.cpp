@@ -5,6 +5,7 @@
 
 #include "v2-transport.h"
 
+#include <cerrno>
 #include <cstring>
 
 #include <arpa/inet.h>
@@ -119,7 +120,30 @@ int modifyQpToRtr(struct ibv_context* ctx, struct ibv_qp* qp,
   attr.ah_attr.src_path_bits = 0;
   int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-  return ibv.modify_qp(qp, &attr, mask);
+  fprintf(stderr,
+          "RTR attr: state=%d mtu=%d dqpn=%u rq_psn=%u gid_idx=%d "
+          "is_global=%d dlid=%u gid=%02x%02x:%02x%02x:%02x%02x:%02x%02x "
+          "pkey_idx=%u port=%u\n",
+          (int)attr.qp_state, (int)attr.path_mtu, attr.dest_qp_num,
+          attr.rq_psn, attr.ah_attr.grh.sgid_index,
+          (int)attr.ah_attr.is_global, attr.ah_attr.dlid,
+          attr.ah_attr.grh.dgid.raw[0], attr.ah_attr.grh.dgid.raw[1],
+          attr.ah_attr.grh.dgid.raw[2], attr.ah_attr.grh.dgid.raw[3],
+          attr.ah_attr.grh.dgid.raw[4], attr.ah_attr.grh.dgid.raw[5],
+          attr.ah_attr.grh.dgid.raw[6], attr.ah_attr.grh.dgid.raw[7],
+          attr.pkey_index, attr.port_num);
+  fprintf(stderr, "RTR dgid full: %02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
+          attr.ah_attr.grh.dgid.raw[8], attr.ah_attr.grh.dgid.raw[9],
+          attr.ah_attr.grh.dgid.raw[10], attr.ah_attr.grh.dgid.raw[11],
+          attr.ah_attr.grh.dgid.raw[12], attr.ah_attr.grh.dgid.raw[13],
+          attr.ah_attr.grh.dgid.raw[14], attr.ah_attr.grh.dgid.raw[15],
+          attr.ah_attr.grh.dgid.raw[0], attr.ah_attr.grh.dgid.raw[1],
+          attr.ah_attr.grh.dgid.raw[2], attr.ah_attr.grh.dgid.raw[3],
+          attr.ah_attr.grh.dgid.raw[4], attr.ah_attr.grh.dgid.raw[5],
+          attr.ah_attr.grh.dgid.raw[6], attr.ah_attr.grh.dgid.raw[7]);
+  int rc = ibv.modify_qp(qp, &attr, mask);
+  fprintf(stderr, "RTR rc=%d errno=%d\n", rc, errno);
+  return rc;
 }
 
 int modifyQpToRts(struct ibv_context* ctx, struct ibv_qp* qp, uint32_t sqPsn) {
