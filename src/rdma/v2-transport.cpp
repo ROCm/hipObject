@@ -80,7 +80,7 @@ int modifyQpToInit(DeviceHandle* dh, struct ibv_qp* qp) {
 
 int modifyQpToRtr(struct ibv_context* ctx, struct ibv_qp* qp,
                   uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid,
-                  int gidIndex, uint32_t rqPsn) {
+                  int gidIndex, uint32_t rqPsn, uint8_t portNum) {
   struct ibv_qp_attr attr;
   std::memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
@@ -90,7 +90,8 @@ int modifyQpToRtr(struct ibv_context* ctx, struct ibv_qp* qp,
   {
     struct ibv_port_attr pa;
     std::memset(&pa, 0, sizeof(pa));
-    if (ibv.query_port(ctx, 1, &pa) == 0 && pa.active_mtu >= IBV_MTU_512) {
+    if (ibv.query_port(ctx, portNum, &pa) == 0 &&
+        pa.active_mtu >= IBV_MTU_512) {
       attr.path_mtu = static_cast<enum ibv_mtu>(pa.active_mtu);
     } else {
       attr.path_mtu = IBV_MTU_1024;
@@ -121,30 +122,9 @@ int modifyQpToRtr(struct ibv_context* ctx, struct ibv_qp* qp,
   /* Service type needs the port in the address handle; leaving
    * it zero fails the transition on providers that validate it
    * (the emulated NIC rejects port 0 with EINVAL). */
-  attr.ah_attr.port_num = 1;
+  attr.ah_attr.port_num = portNum;
   int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-  fprintf(stderr,
-          "is_global=%d dlid=%u gid=%02x%02x:%02x%02x:%02x%02x:%02x%02x "
-          "pkey_idx=%u port=%u\n",
-          (int)attr.qp_state, (int)attr.path_mtu, attr.dest_qp_num, attr.rq_psn,
-          attr.ah_attr.grh.sgid_index, (int)attr.ah_attr.is_global,
-          attr.ah_attr.dlid, attr.ah_attr.grh.dgid.raw[0],
-          attr.ah_attr.grh.dgid.raw[1], attr.ah_attr.grh.dgid.raw[2],
-          attr.ah_attr.grh.dgid.raw[3], attr.ah_attr.grh.dgid.raw[4],
-          attr.ah_attr.grh.dgid.raw[5], attr.ah_attr.grh.dgid.raw[6],
-          attr.ah_attr.grh.dgid.raw[7], attr.pkey_index, attr.port_num);
-  fprintf(
-    stderr,
-    "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
-    attr.ah_attr.grh.dgid.raw[8], attr.ah_attr.grh.dgid.raw[9],
-    attr.ah_attr.grh.dgid.raw[10], attr.ah_attr.grh.dgid.raw[11],
-    attr.ah_attr.grh.dgid.raw[12], attr.ah_attr.grh.dgid.raw[13],
-    attr.ah_attr.grh.dgid.raw[14], attr.ah_attr.grh.dgid.raw[15],
-    attr.ah_attr.grh.dgid.raw[0], attr.ah_attr.grh.dgid.raw[1],
-    attr.ah_attr.grh.dgid.raw[2], attr.ah_attr.grh.dgid.raw[3],
-    attr.ah_attr.grh.dgid.raw[4], attr.ah_attr.grh.dgid.raw[5],
-    attr.ah_attr.grh.dgid.raw[6], attr.ah_attr.grh.dgid.raw[7]);
   return ibv.modify_qp(qp, &attr, mask);
 }
 
@@ -252,7 +232,7 @@ int transitionQpToRtrV2(DeviceHandle* dh, RcConnV2& conn, uint32_t destQpNum,
                         uint16_t destLid, union ibv_gid destGid,
                         uint32_t rqPsn) {
   return modifyQpToRtr(dh->ctx, conn.qp, destQpNum, destLid, destGid,
-                       dh->gidIndex, rqPsn);
+                       dh->gidIndex, rqPsn, dh->portNum);
 }
 
 int transitionQpToRtsV2(RcConnV2& conn, DeviceHandle* dh, uint32_t sqPsn) {

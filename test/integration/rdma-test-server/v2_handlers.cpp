@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <mutex>
 #include <thread>
 
 #include "../../../src/common/ibv-wrapper.h"
@@ -27,26 +28,28 @@ namespace {
  * protection domain, and local GID that per-session connections
  * and memory registrations both use. */
 hipObj::DeviceHandle* serverDevice() {
+  /* Threaded PREPARE handlers race this lazy init; the once flag
+   * serializes the device open and GID query. */
   static hipObj::DeviceHandle* dh = nullptr;
-  static bool tried = false;
-  if (dh == nullptr && !tried) {
-    tried = true;
+  static std::once_flag once;
+  std::call_once(once, [] {
     int n = 0;
     struct ibv_device** devs = hipObj::ibv.get_device_list(&n);
     if (devs != nullptr && n > 0) {
       struct ibv_context* ctx = hipObj::ibv.open_device(devs[0]);
       if (ctx != nullptr) {
         struct ibv_pd* pd = hipObj::ibv.alloc_pd(ctx);
-        dh = new hipObj::DeviceHandle();
-        dh->ctx = ctx;
-        dh->pd = pd;
-        dh->portNum = 1;
-        dh->gidIndex = 0;
-        hipObj::ibv.query_gid(ctx, 1, 0, &dh->localGid);
+        hipObj::DeviceHandle* opened = new hipObj::DeviceHandle();
+        opened->ctx = ctx;
+        opened->pd = pd;
+        opened->portNum = 1;
+        opened->gidIndex = 0;
+        hipObj::ibv.query_gid(ctx, 1, 0, &opened->localGid);
+        dh = opened;
       }
       hipObj::ibv.free_device_list(devs);
     }
-  }
+  });
   return dh;
 }
 
@@ -204,9 +207,12 @@ void ControlHandlers::reapSession(const std::string& id) {
     qpn = s.serverQpn;
     psn = s.serverPsn;
     published = s.published;
-    /* Safe now: the QP is gone (or was never wired), so nothing
-     * can reference the staging MR anymore. */
-    releaseStaging(s);
+    /* Safe only when the QP is gone: a live QP can still hold
+     * work requests referencing the staging MR. A failed destroy
+     * leaves the MR and buffer on the session for the retry. */
+    if (qpOk) {
+      releaseStaging(s);
+    }
   });
   /* Retire the slot exactly once: a QP that was destroyed (or
    * never had one wired) settles the reservation now; a failed
@@ -358,10 +364,18 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
   if (dh != nullptr && dh->pd != nullptr) {
     hipObj::RcConnV2 conn;
     bool rollbackFailed = false;
-    if (hipObj::v2::createRcConnV2(dh, conn, &rollbackFailed) == 0 &&
+    bool created = hipObj::v2::createRcConnV2(dh, conn, &rollbackFailed) == 0;
+    if (created &&
         /* The pair starts in RESET; move it to INIT so the READY
          * RTR/RTS transitions are valid. */
-        hipObj::v2::transitionQpToInitV2(dh, conn) == 0) {
+        hipObj::v2::transitionQpToInitV2(dh, conn) != 0) {
+      /* INIT failed: destroy the pair here or its handles leak
+       * on every PREPARE. */
+      bool qOk = true, cOk = true;
+      hipObj::v2::destroyRcConnV2(conn, &qOk, &cOk);
+      created = false;
+    }
+    if (created) {
       table_.withSession(id, [&](V2Session& s) {
         s.qp = conn.qp;
         s.cq = conn.cq;
@@ -401,24 +415,27 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
       table_.ringUnreserve(slot);
       return error(500);
     }
-    bool staged = false;
-    bool copied = false;
+    /* Stage the object into the session buffer. The backend copy
+     * runs on local state - holding the table lock across it
+     * would serialize every other request behind this one. */
     struct ibv_pd* pd = (dh != nullptr && dh->pd != nullptr) ? dh->pd : nullptr;
+    bool staged = false;
+    void* staging = nullptr;
     table_.withSession(id, [&](V2Session& s) {
       staged = stagePutBuffer(s, static_cast<size_t>(req.size), pd);
-      if (staged) {
-        copied = backend_->read(req.target, req.offset,
-                                static_cast<size_t>(req.size), s.staging);
-      }
+      staging = s.staging;
     });
+    bool copied = staged && staging != nullptr &&
+                  backend_->read(req.target, req.offset,
+                                 static_cast<size_t>(req.size), staging);
     /* A missing range on an existing object is a client error;
      * staging without a PD is fine on transport-free hosts where
      * the data phase is a no-op. */
-    if (!staged || !copied) {
+    if (!staged || (!copied && req.size > 0)) {
       table_.toReaping(id);
       table_.releaseIo(id);
       table_.ringUnreserve(slot);
-      return error(copied || !staged ? 500 : 416);
+      return error(staged ? 416 : 500);
     }
   }
 
@@ -614,10 +631,14 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
     return dpr == DataPhaseResult::Timeout ? error(408) : error(500);
   }
   if (op == "PUT") {
-    /* Persist the uploaded bytes: the staging buffer holds
-     * exactly the received object now. */
+    /* Persist the uploaded bytes. A control-plane-only exchange
+     * (no client QP advertised) never transferred anything, so
+     * there is nothing valid to store - the staged buffer is
+     * either null or uninitialized. */
     table_.withSession(req.session, [&](V2Session& s) {
-      backend_->write(s.target, s.staging, static_cast<size_t>(stats.bytes));
+      if (s.clientQpn != 0 && s.staging != nullptr) {
+        backend_->write(s.target, s.staging, static_cast<size_t>(stats.bytes));
+      }
     });
   }
 

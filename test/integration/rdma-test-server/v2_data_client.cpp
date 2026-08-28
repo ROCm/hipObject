@@ -169,7 +169,7 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
     std::fprintf(stderr, "dp: reg_mr failed\n");
     return 2;
   }
-  std::memset(buf, 0, sizeof(buf));
+  std::memset(buf, 0, 4096);
   if (std::strcmp(op, "PUT") == 0) {
     std::memcpy(buf, "dp-put-payload", 14);
   }
