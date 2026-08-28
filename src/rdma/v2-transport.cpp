@@ -83,7 +83,18 @@ int modifyQpToRtr(struct ibv_context* ctx, struct ibv_qp* qp,
   struct ibv_qp_attr attr;
   std::memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
-  attr.path_mtu = IBV_MTU_4096;
+  /* The path MTU must not exceed the port's active MTU: emulated
+   * devices commonly report 1024 while HCAs run 4096, and a
+   * larger value fails the transition with EINVAL. */
+  {
+    struct ibv_port_attr pa;
+    std::memset(&pa, 0, sizeof(pa));
+    if (ibv.query_port(ctx, 1, &pa) == 0 && pa.active_mtu >= IBV_MTU_512) {
+      attr.path_mtu = static_cast<enum ibv_mtu>(pa.active_mtu);
+    } else {
+      attr.path_mtu = IBV_MTU_1024;
+    }
+  }
   applyVendorQpAttrs(ctx, &attr);
   attr.dest_qp_num = destQpNum;
   attr.rq_psn = rqPsn;
