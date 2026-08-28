@@ -43,9 +43,9 @@ ctest --test-dir "${BUILD_DIR}" \
 
 # Layer 2: RDMA PUT against hipobj-rdma-test-server
 #
-# Command substitution under set -e: if the binary exits non-zero,
-# bash aborts before we can print output or grep for diagnostics.
-# Capture exit status separately with ||: so -e does not fire.
+# With the v2 protocol a complete PUT ends with "PUT ok" logged by the example.
+# Accepting "would send RDMA token" without "PUT ok" is no longer a pass — that
+# only means the client reached the token stage but the transfer did not complete.
 echo "--- RDMA PUT ---"
 put_out=""
 put_rc=0
@@ -55,14 +55,13 @@ put_out=$("${BUILD_DIR}/hipobj-examples/put-object" \
     "${BUCKET}" "${OBJECT}" 2>&1) || put_rc=$?
 echo "${put_out}"
 
-# The token line proves the RC QP came up; a non-zero exit without it
-# indicates a failure before RDMA was attempted.
-echo "${put_out}" | grep -q "would send RDMA token\|PUT ok" || {
-    echo "ERROR: PUT did not reach RDMA token stage (exit ${put_rc})"
+echo "${put_out}" | grep -q "PUT ok\|succeeded" || {
+    echo "ERROR: PUT did not complete successfully (exit ${put_rc})"
+    echo "Output: ${put_out}"
     exit 1
 }
 
-# Layer 2: RDMA GET
+# Layer 2: RDMA GET — seed object is already present from the PUT above.
 echo "--- RDMA GET ---"
 get_out=""
 get_rc=0
@@ -72,8 +71,9 @@ get_out=$("${BUILD_DIR}/hipobj-examples/get-object" \
     "${BUCKET}" "${OBJECT}" 2>&1) || get_rc=$?
 echo "${get_out}"
 
-echo "${get_out}" | grep -q "would send RDMA token\|GET ok\|Data integrity" || {
-    echo "ERROR: GET did not reach RDMA token stage (exit ${get_rc})"
+echo "${get_out}" | grep -q "GET ok\|succeeded\|Data integrity" || {
+    echo "ERROR: GET did not complete successfully (exit ${get_rc})"
+    echo "Output: ${get_out}"
     exit 1
 }
 

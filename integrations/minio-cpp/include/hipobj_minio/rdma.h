@@ -18,6 +18,7 @@ inline constexpr const char* kUnsignedPayload = "UNSIGNED-PAYLOAD";
 
 inline constexpr const char* kAmzRdmaToken = "x-amz-rdma-token";
 inline constexpr const char* kAmzRdmaReply = "x-amz-rdma-reply";
+inline constexpr const char* kAmzRdmaSession = "x-amz-rdma-session";
 inline constexpr const char* kAmzRdmaBytesTransferred =
   "x-amz-rdma-bytes-transferred";
 

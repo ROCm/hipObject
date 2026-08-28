@@ -223,6 +223,17 @@ int connectRcPeer(RcConnection& conn, const RdmaToken& peerToken) {
   return transitionQpToRts(conn);
 }
 
+int resetQp(RcConnection& conn, int cqSize, int maxSendWr, int maxRecvWr) {
+  if (conn.qp) {
+    ibv.destroy_qp(conn.qp);
+    conn.qp = nullptr;
+  }
+  if (createRcQp(conn, cqSize, maxSendWr, maxRecvWr) != 0) {
+    return -1;
+  }
+  return transitionQpToInit(conn);
+}
+
 int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs) {
   if (!conn.cq) {
     return -1;

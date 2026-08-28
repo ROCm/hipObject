@@ -48,6 +48,15 @@ std::string formatRdmaHeaderValue(const char* tokenHex, const void* buf,
 bool parsePeerTokenFromReply(const char* reply, size_t replyLen,
                              RdmaToken& peerToken, int& httpCode);
 
+// v2 protocol: parse PREPARE reply that carries both the server token and a
+// session ID used to correlate the subsequent READY request.
+// Reply format: "<httpCode>:<tokenHex>:<sessionId>"
+bool parsePrepareReply(const char* reply, size_t replyLen, RdmaToken& peerToken,
+                       int& httpCode, std::string& sessionId);
+
 std::string encodeReplyWithPeerToken(int httpCode, const RdmaToken& peerToken);
+std::string encodeReplyWithPeerTokenAndSession(int httpCode,
+                                               const RdmaToken& peerToken,
+                                               const std::string& sessionId);
 
 } // namespace hipObj

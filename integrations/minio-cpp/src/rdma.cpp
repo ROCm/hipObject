@@ -44,6 +44,51 @@ std::string clientNicFromToken(const char* token) {
   return std::string(nicIp);
 }
 
+// Issue the READY request carrying the session ID.  Returns the FINAL HTTP
+// status code on success, -1 on transport error.
+int sendReadyRequest(S3RdmaContext* sctx, const std::string& sessionId,
+                     minio::http::Method method) {
+  minio::utils::UtcTime date = minio::utils::UtcTime::Now();
+  minio::creds::Credentials creds = sctx->provider->Fetch();
+  minio::utils::Multimap query_params;
+  minio::http::Url url;
+  const std::string& region = sctx->region;
+
+  if (minio::error::Error err =
+        sctx->url.BuildUrl(url, method, region, query_params, sctx->bucket,
+                           sctx->object)) {
+    return -1;
+  }
+
+  std::string host = url.HostHeaderValue();
+  minio::utils::Multimap sign_headers;
+  sign_headers.Add("Host", host);
+  sign_headers.Add("x-amz-date", date.ToAmzDate());
+  sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
+  sign_headers.Add(kAmzRdmaSession, sessionId);
+  sign_headers.Add("Content-Length", "0");
+
+  if (!creds.session_token.empty()) {
+    sign_headers.Add("X-Amz-Security-Token", creds.session_token);
+  }
+
+  minio::signer::SignV4S3(method, url.path, region, sign_headers, query_params,
+                          creds.access_key, creds.secret_key, kUnsignedPayload,
+                          date);
+  url.query_string = query_params.ToQueryString();
+
+  minio::http::Request req(method, url);
+  req.headers = sign_headers;
+  req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
+  req.timeout_secs = kRdmaTimeoutSecs;
+
+  minio::http::Response res = req.Execute();
+  if (!res.error.empty()) {
+    return -1;
+  }
+  return res.status_code;
+}
+
 } // namespace
 
 ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
@@ -107,6 +152,7 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
     req.nic_interface = client_nic;
   }
 
+  // --- PREPARE phase ---
   minio::http::Response res = req.Execute();
   if (!res.error.empty()) {
     return -1;
@@ -114,15 +160,42 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
 
   std::string etag = res.headers.GetFront("etag");
   if (res.status_code == 200 && !etag.empty()) {
+    // Server completed immediately without RDMA (plain S3 path).
     sctx->etag = minio::utils::Trim(etag, '"');
     return static_cast<ssize_t>(size);
   }
 
-  int reply_code = parseRdmaReply(res.headers.GetFront(kAmzRdmaReply));
+  std::string prepare_reply = res.headers.GetFront(kAmzRdmaReply);
+  int reply_code = parseRdmaReply(prepare_reply);
   if (reply_code == static_cast<int>(kRdmaNotSupported)) {
     return kRdmaNotSupported;
   }
   if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyNoContent) {
+    return -1;
+  }
+
+  // Connect our QP to the server now that we have the peer token (fixes
+  // defect 4: QP was never connected, so the server's RDMA op couldn't land).
+  char sessionIdBuf[64] = {};
+  hipObjError_t herr = hipObjConnectRdmaPeer(prepare_reply.c_str(),
+                                             prepare_reply.size(),
+                                             sessionIdBuf, sizeof(sessionIdBuf));
+  if (herr.opError != hipObjSuccess) {
+    return -1;
+  }
+
+  std::string sessionId = res.headers.GetFront(kAmzRdmaSession);
+  if (sessionId.empty() && sessionIdBuf[0] != '\0') {
+    sessionId = sessionIdBuf;
+  }
+  if (sessionId.empty()) {
+    return -1;
+  }
+
+  // --- READY phase: signal the server to post the RDMA READ ---
+  int final_code = sendReadyRequest(sctx, sessionId, minio::http::Method::kPut);
+  if (final_code < 200 || final_code >= 300) {
+    hipObjResetRdmaQp();
     return -1;
   }
 
@@ -132,6 +205,7 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
   }
 
   sctx->etag = minio::utils::Trim(etag, '"');
+  hipObjResetRdmaQp();
   return static_cast<ssize_t>(size);
 }
 
@@ -180,12 +254,14 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
     req.nic_interface = client_nic;
   }
 
+  // --- PREPARE phase ---
   minio::http::Response res = req.Execute();
   if (!res.error.empty()) {
     return -1;
   }
 
-  int reply_code = parseRdmaReply(res.headers.GetFront(kAmzRdmaReply));
+  std::string prepare_reply = res.headers.GetFront(kAmzRdmaReply);
+  int reply_code = parseRdmaReply(prepare_reply);
   if (reply_code == static_cast<int>(kRdmaNotSupported)) {
     return kRdmaNotSupported;
   }
@@ -194,7 +270,31 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
     return -1;
   }
 
+  char sessionIdBuf[64] = {};
+  hipObjError_t herr = hipObjConnectRdmaPeer(prepare_reply.c_str(),
+                                             prepare_reply.size(),
+                                             sessionIdBuf, sizeof(sessionIdBuf));
+  if (herr.opError != hipObjSuccess) {
+    return -1;
+  }
+
+  std::string sessionId = res.headers.GetFront(kAmzRdmaSession);
+  if (sessionId.empty() && sessionIdBuf[0] != '\0') {
+    sessionId = sessionIdBuf;
+  }
+  if (sessionId.empty()) {
+    return -1;
+  }
+
+  // --- READY phase: signal the server to post the RDMA WRITE ---
+  int final_code = sendReadyRequest(sctx, sessionId, minio::http::Method::kGet);
+  if (final_code < 200 || final_code >= 300) {
+    hipObjResetRdmaQp();
+    return -1;
+  }
+
   std::string bytes_hdr = res.headers.GetFront(kAmzRdmaBytesTransferred);
+  hipObjResetRdmaQp();
   if (!bytes_hdr.empty()) {
     try {
       long long n = std::stoll(bytes_hdr);

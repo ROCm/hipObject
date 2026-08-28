@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* RC-native S3-over-RDMA integration test server.
+/* RC-native S3-over-RDMA integration test server — hipobj-rc-v2 protocol.
  *
- * Accepts GET/PUT with x-amz-rdma-token, performs RC RDMA transfers,
- * and returns x-amz-rdma-reply with an optional peer token for the
- * client-side RC handshake.
+ * PREPARE: PUT/GET with x-amz-rdma-token
+ *   Server connects QP, returns server token + session ID in x-amz-rdma-reply.
+ *
+ * READY: PUT/GET with x-amz-rdma-session
+ *   Server posts the RDMA operation, polls CQE, returns final status.
  */
 
 #include <cstdio>
@@ -50,6 +52,7 @@ int main(int argc, char* argv[]) {
   server.setHandler(
     [&](const hipobj::test::HttpRequest& req) -> hipobj::test::HttpResponse {
       hipobj::test::HttpResponse resp;
+
       if (req.method == "GET" && req.path == "/health") {
         resp.status = 200;
         resp.body = "ok";
@@ -57,32 +60,66 @@ int main(int argc, char* argv[]) {
       }
 
       const std::string key = objectKey(req.path);
+      auto sessionIt = req.headers.find("x-amz-rdma-session");
       auto tokenIt = req.headers.find("x-amz-rdma-token");
+
+      // --- READY phase: client QP is up, post the RDMA operation ---
+      if (sessionIt != req.headers.end()) {
+        const std::string& sid = sessionIt->second;
+        if (req.method == "PUT") {
+          std::vector<uint8_t> payload;
+          if (rdma.completeReadFromClient(sid, payload) != 0) {
+            resp.status = 500;
+            resp.body = "RDMA PUT complete failed";
+            return resp;
+          }
+          objects[key] = std::move(payload);
+          resp.status = 200;
+          resp.headers["etag"] = "\"test\"";
+          return resp;
+        }
+        if (req.method == "GET") {
+          std::vector<uint8_t> data;
+          if (rdma.completeWriteToClient(sid, data) != 0) {
+            resp.status = 500;
+            resp.body = "RDMA GET complete failed";
+            return resp;
+          }
+          resp.status = 200;
+          resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(
+            data.size());
+          return resp;
+        }
+        resp.status = 405;
+        resp.body = "method not allowed";
+        return resp;
+      }
+
+      // --- PREPARE phase: connect QP, stage data, return server token ---
       if (tokenIt == req.headers.end()) {
         resp.status = 400;
-        resp.body = "missing x-amz-rdma-token";
+        resp.body = "missing x-amz-rdma-token or x-amz-rdma-session";
         return resp;
       }
 
       if (req.method == "PUT") {
-        std::vector<uint8_t> payload;
-        std::string replyHeader;
         size_t contentLen = 0;
         auto clIt = req.headers.find("content-length");
         if (clIt != req.headers.end()) {
           contentLen = static_cast<size_t>(
             std::strtoull(clIt->second.c_str(), nullptr, 10));
         }
-        if (rdma.rdmaReadFromClient(tokenIt->second, contentLen, payload,
-                                    replyHeader) != 0) {
+        std::string replyHeader;
+        std::string sid;
+        if (rdma.prepareReadFromClient(tokenIt->second, contentLen, replyHeader,
+                                       sid) != 0) {
           resp.status = 500;
-          resp.body = "RDMA PUT failed";
+          resp.body = "RDMA PUT prepare failed";
           return resp;
         }
-        objects[key] = std::move(payload);
         resp.status = 200;
         resp.headers["x-amz-rdma-reply"] = replyHeader;
-        resp.headers["etag"] = "\"test\"";
+        resp.headers["x-amz-rdma-session"] = sid;
         return resp;
       }
 
@@ -94,16 +131,16 @@ int main(int argc, char* argv[]) {
           return resp;
         }
         std::string replyHeader;
-        if (rdma.rdmaWriteToClient(tokenIt->second, it->second, replyHeader) !=
-            0) {
+        std::string sid;
+        if (rdma.prepareWriteToClient(tokenIt->second, it->second, replyHeader,
+                                      sid) != 0) {
           resp.status = 500;
-          resp.body = "RDMA GET failed";
+          resp.body = "RDMA GET prepare failed";
           return resp;
         }
         resp.status = 200;
         resp.headers["x-amz-rdma-reply"] = replyHeader;
-        resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(
-          it->second.size());
+        resp.headers["x-amz-rdma-session"] = sid;
         return resp;
       }
 

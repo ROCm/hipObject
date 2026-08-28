@@ -33,5 +33,6 @@ int transitionQpToRtr(RcConnection& conn, uint32_t destQpNum, uint16_t destLid,
 int transitionQpToRts(RcConnection& conn);
 int connectRcPeer(RcConnection& conn, const RdmaToken& peerToken);
 int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs);
+int resetQp(RcConnection& conn, int cqSize, int maxSendWr, int maxRecvWr);
 
 } // namespace hipObj

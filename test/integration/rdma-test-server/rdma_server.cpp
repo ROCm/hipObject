@@ -5,8 +5,10 @@
 
 #include "rdma_server.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 
 #include "ibv-wrapper.h"
 #include "token.h"
@@ -109,7 +111,26 @@ int postRdmaRead(hipObj::RcConnection& conn, struct ibv_mr* localMr,
   return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, 10000);
 }
 
+std::string makeSessionId() {
+  static std::atomic<uint64_t> counter{1};
+  return std::to_string(counter.fetch_add(1));
+}
+
 } // namespace
+
+// Pending GET session: server has connected QP and staged data; waiting for
+// READY before posting the RDMA WRITE.
+struct PendingGet {
+  hipObj::RdmaToken clientToken{};
+  std::vector<uint8_t> data;
+};
+
+// Pending PUT session: server has connected QP; waiting for READY before
+// posting the RDMA READ.
+struct PendingPut {
+  hipObj::RdmaToken clientToken{};
+  size_t xferSize = 0;
+};
 
 struct RdmaTestServer::Impl {
   hipObj::RcConnection conn{};
@@ -117,6 +138,9 @@ struct RdmaTestServer::Impl {
   void* stagingBuf = nullptr;
   size_t stagingSize = 64 * 1024 * 1024;
   bool ready = false;
+
+  std::map<std::string, PendingGet> pendingGets;
+  std::map<std::string, PendingPut> pendingPuts;
 
   ~Impl() {
     if (stagingMr) {
@@ -170,9 +194,12 @@ bool RdmaTestServer::isReady() const {
   return impl_ && impl_->ready;
 }
 
-int RdmaTestServer::rdmaWriteToClient(const std::string& tokenHeader,
-                                      const std::vector<uint8_t>& data,
-                                      std::string& replyHeader) {
+// --- v2 PREPARE phase ---
+
+int RdmaTestServer::prepareWriteToClient(const std::string& tokenHeader,
+                                         const std::vector<uint8_t>& data,
+                                         std::string& replyHeader,
+                                         std::string& sessionId) {
   if (!isReady()) {
     return -1;
   }
@@ -189,29 +216,30 @@ int RdmaTestServer::rdmaWriteToClient(const std::string& tokenHeader,
     return -1;
   }
 
-  std::memcpy(impl_->stagingBuf, data.data(), xferSize);
+  // Connect QP to the client so our QP is RTS — the client will do the same
+  // after receiving this reply (fixing defect 1).
   if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
     return -1;
   }
-  if (postRdmaWrite(impl_->conn, impl_->stagingMr, xferSize, clientToken) !=
-      0) {
-    return -1;
-  }
+
   hipObj::RdmaToken serverToken = buildServerToken(impl_->conn,
                                                    impl_->stagingMr, xferSize);
-  replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken);
-  if (impl_->conn.qp) {
-    hipObj::ibv.destroy_qp(impl_->conn.qp);
-    impl_->conn.qp = nullptr;
-    hipObj::createRcQp(impl_->conn, 256, 128, 128);
-    hipObj::transitionQpToInit(impl_->conn);
-  }
+  sessionId = makeSessionId();
+  replyHeader = hipObj::encodeReplyWithPeerTokenAndSession(200, serverToken,
+                                                           sessionId);
+
+  // Stage the GET data for the READY phase.
+  PendingGet pg;
+  pg.clientToken = clientToken;
+  pg.data.assign(data.begin(), data.begin() + xferSize);
+  impl_->pendingGets[sessionId] = std::move(pg);
   return 0;
 }
 
-int RdmaTestServer::rdmaReadFromClient(const std::string& tokenHeader,
-                                       size_t size, std::vector<uint8_t>& data,
-                                       std::string& replyHeader) {
+int RdmaTestServer::prepareReadFromClient(const std::string& tokenHeader,
+                                          size_t size,
+                                          std::string& replyHeader,
+                                          std::string& sessionId) {
   if (!isReady()) {
     return -1;
   }
@@ -234,21 +262,65 @@ int RdmaTestServer::rdmaReadFromClient(const std::string& tokenHeader,
   if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
     return -1;
   }
-  if (postRdmaRead(impl_->conn, impl_->stagingMr, xferSize, clientToken) != 0) {
-    return -1;
-  }
-  data.assign(static_cast<uint8_t*>(impl_->stagingBuf),
-              static_cast<uint8_t*>(impl_->stagingBuf) + xferSize);
+
   hipObj::RdmaToken serverToken = buildServerToken(impl_->conn,
                                                    impl_->stagingMr, xferSize);
-  replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken);
-  if (impl_->conn.qp) {
-    hipObj::ibv.destroy_qp(impl_->conn.qp);
-    impl_->conn.qp = nullptr;
-    hipObj::createRcQp(impl_->conn, 256, 128, 128);
-    hipObj::transitionQpToInit(impl_->conn);
-  }
+  sessionId = makeSessionId();
+  replyHeader = hipObj::encodeReplyWithPeerTokenAndSession(200, serverToken,
+                                                           sessionId);
+
+  PendingPut pp;
+  pp.clientToken = clientToken;
+  pp.xferSize = xferSize;
+  impl_->pendingPuts[sessionId] = pp;
   return 0;
+}
+
+// --- v2 READY phase ---
+
+int RdmaTestServer::completeWriteToClient(const std::string& sessionId,
+                                          std::vector<uint8_t>& data) {
+  if (!isReady()) {
+    return -1;
+  }
+  auto it = impl_->pendingGets.find(sessionId);
+  if (it == impl_->pendingGets.end()) {
+    return -1;
+  }
+  PendingGet pg = std::move(it->second);
+  impl_->pendingGets.erase(it);
+
+  std::memcpy(impl_->stagingBuf, pg.data.data(), pg.data.size());
+  int ret = postRdmaWrite(impl_->conn, impl_->stagingMr, pg.data.size(),
+                          pg.clientToken);
+  data = std::move(pg.data);
+
+  // Recycle QP for the next transfer.
+  hipObj::resetQp(impl_->conn, 256, 128, 128);
+  return ret;
+}
+
+int RdmaTestServer::completeReadFromClient(const std::string& sessionId,
+                                           std::vector<uint8_t>& outData) {
+  if (!isReady()) {
+    return -1;
+  }
+  auto it = impl_->pendingPuts.find(sessionId);
+  if (it == impl_->pendingPuts.end()) {
+    return -1;
+  }
+  PendingPut pp = it->second;
+  impl_->pendingPuts.erase(it);
+
+  int ret = postRdmaRead(impl_->conn, impl_->stagingMr, pp.xferSize,
+                         pp.clientToken);
+  if (ret == 0) {
+    outData.assign(static_cast<uint8_t*>(impl_->stagingBuf),
+                   static_cast<uint8_t*>(impl_->stagingBuf) + pp.xferSize);
+  }
+
+  hipObj::resetQp(impl_->conn, 256, 128, 128);
+  return ret;
 }
 
 } // namespace hipobj::test

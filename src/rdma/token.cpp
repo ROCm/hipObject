@@ -237,9 +237,46 @@ bool parsePeerTokenFromReply(const char* reply, size_t replyLen,
   return decodeRdmaTokenHex(tokenCopy, peerToken);
 }
 
+bool parsePrepareReply(const char* reply, size_t replyLen, RdmaToken& peerToken,
+                       int& httpCode, std::string& sessionId) {
+  if (!parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
+    return false;
+  }
+  // Locate the third colon that separates tokenHex from sessionId.
+  // Format: "<httpCode>:<tokenHex>:<sessionId>"
+  // parsePeerTokenFromReply already validated the first two fields.
+  size_t len = replyLen;
+  while (len > 0 && (reply[len - 1] == '\0' || reply[len - 1] == '\n' ||
+                     reply[len - 1] == '\r')) {
+    --len;
+  }
+  const char* firstColon = static_cast<const char*>(std::memchr(reply, ':', len));
+  if (!firstColon) {
+    return false;
+  }
+  size_t afterFirst = static_cast<size_t>(firstColon - reply) + 1;
+  // tokenHex is kTokenHexLen characters long.
+  size_t sessionStart = afterFirst + kTokenHexLen;
+  if (sessionStart >= len || reply[sessionStart] != ':') {
+    // No session ID field — v1 reply; leave sessionId empty.
+    sessionId.clear();
+    return true;
+  }
+  sessionId.assign(reply + sessionStart + 1, len - sessionStart - 1);
+  return true;
+}
+
 std::string encodeReplyWithPeerToken(int httpCode, const RdmaToken& peerToken) {
   std::ostringstream oss;
   oss << httpCode << ':' << encodeRdmaToken(peerToken);
+  return oss.str();
+}
+
+std::string encodeReplyWithPeerTokenAndSession(int httpCode,
+                                               const RdmaToken& peerToken,
+                                               const std::string& sessionId) {
+  std::ostringstream oss;
+  oss << httpCode << ':' << encodeRdmaToken(peerToken) << ':' << sessionId;
   return oss.str();
 }
 

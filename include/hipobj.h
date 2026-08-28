@@ -303,6 +303,33 @@ HIPOBJ_API hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
                                               size_t nicIpLen);
 
 /*!
+ * @brief Parse the PREPARE reply and connect the internal RC QP to the peer.
+ *
+ * Callers that drive the v2 protocol manually (e.g. the minio-cpp bridge) call
+ * this after receiving the PREPARE HTTP response.  The function extracts the
+ * server's RDMA token from @p reply (format "200:<tokenHex>[:<sessionId>]"),
+ * transitions the library's RC QP to RTR/RTS, and writes the session ID into
+ * @p sessionIdBuf (NUL-terminated, at most @p sessionIdBufLen bytes).
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjConnectRdmaPeer(const char* reply,
+                                               size_t replyLen,
+                                               char* sessionIdBuf,
+                                               size_t sessionIdBufLen);
+
+/*!
+ * @brief Reset the internal RC QP back to INIT after a completed transfer.
+ *
+ * Must be called by callers that drive the v2 protocol manually (e.g. the
+ * minio-cpp bridge) once the READY phase has completed, so the next transfer
+ * can start from a clean INIT state (fixes defect 2).
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjResetRdmaQp(void);
+
+/*!
  * @brief Return the library version as a string
  * @ingroup core
  */

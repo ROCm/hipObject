@@ -22,12 +22,22 @@ public:
 
   bool isReady() const;
 
-  int rdmaWriteToClient(const std::string& tokenHeader,
-                        const std::vector<uint8_t>& data,
-                        std::string& replyHeader);
+  // v2 protocol — PREPARE phase: connect QP to client, stage data for GET or
+  // record transfer size for PUT. Returns a session ID in replyHeader and
+  // encodes the server token so the client can complete the QP handshake.
+  int prepareWriteToClient(const std::string& tokenHeader,
+                           const std::vector<uint8_t>& data,
+                           std::string& replyHeader,
+                           std::string& sessionId);
+  int prepareReadFromClient(const std::string& tokenHeader, size_t size,
+                            std::string& replyHeader, std::string& sessionId);
 
-  int rdmaReadFromClient(const std::string& tokenHeader, size_t size,
-                         std::vector<uint8_t>& data, std::string& replyHeader);
+  // v2 protocol — READY phase: post the RDMA operation for a previously
+  // prepared session and poll for completion.
+  int completeWriteToClient(const std::string& sessionId,
+                            std::vector<uint8_t>& data);
+  int completeReadFromClient(const std::string& sessionId,
+                             std::vector<uint8_t>& outData);
 
 private:
   struct Impl;

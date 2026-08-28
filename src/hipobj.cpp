@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <hip/hip_runtime.h>
 
@@ -57,25 +58,6 @@ static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
   return true;
 }
 
-static int finishTransferAfterReply(const char* reply, size_t replyLen) {
-  RdmaToken peerToken;
-  int httpCode = 0;
-  if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
-    if (connectRcPeer(g_conn, peerToken) != 0) {
-      return -1;
-    }
-  }
-  // A poll timeout or error completion is a failure: the transfer outcome
-  // is unknown. With the current one-sided protocol the responder side
-  // may not observe a completion at all (see issue #22), so this check
-  // reports "no evidence of failure" rather than "transfer verified".
-  if (pollCompletion(g_conn, -1, 5000) != 0) {
-    return -1;
-  }
-  hipError_t err = hipDeviceSynchronize();
-  return (err == hipSuccess) ? 0 : -1;
-}
-
 static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
                                      off_t offset, hipObjOps_t* ops,
                                      void* ctx) {
@@ -83,21 +65,54 @@ static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
   if (!buildRdmaToken(devPtr, size, offset, token)) {
     return {hipObjRdmaError, 0};
   }
+
+  // --- PREPARE phase: send our token, receive server token + session ID ---
   std::string encoded = encodeRdmaToken(token);
   if (injectRdmaToken(ops, ctx, encoded) != 0) {
     return {hipObjS3Error, 0};
   }
-  char replyBuf[512];
+  char replyBuf[640];
   size_t replyLen = sizeof(replyBuf);
   int rdmaStatus = 0;
-  if (receiveRdmaReplyRaw(ops, ctx, replyBuf, &replyLen, rdmaStatus) != 0 ||
-      rdmaStatus != 0) {
+  if (receiveRdmaReplyRaw(ops, ctx, replyBuf, &replyLen, rdmaStatus) != 0) {
     return {hipObjS3Error, 0};
   }
-  if (finishTransferAfterReply(replyBuf, replyLen) != 0) {
+  // rdmaStatus == -2 means server replied 501 (RDMA not supported).
+  if (rdmaStatus == -2) {
+    return {hipObjS3Error, 0};
+  }
+
+  RdmaToken peerToken;
+  int httpCode = 0;
+  std::string sessionId;
+  if (!parsePrepareReply(replyBuf, replyLen, peerToken, httpCode, sessionId)) {
     return {hipObjRdmaError, 0};
   }
-  return HIPOBJ_SUCCESS;
+
+  // Transition our QP to RTR/RTS now that we have the peer's identity.
+  // This resolves defect 1: the client QP was still in INIT when the server
+  // tried to post the RDMA operation.
+  if (connectRcPeer(g_conn, peerToken) != 0) {
+    return {hipObjRdmaError, 0};
+  }
+
+  // --- READY phase: signal the server that our QP is up, await FINAL reply ---
+  // Use the session ID from the PREPARE reply so the server can locate the
+  // pending transfer. If the server sent no session ID (v1 fallback), use a
+  // fixed sentinel so the READY request is still well-formed.
+  const std::string& readyPayload = sessionId.empty() ? std::string("ready")
+                                                       : sessionId;
+  int finalStatus = 0;
+  if (sendRdmaReady(ops, ctx, readyPayload, finalStatus) != 0 ||
+      finalStatus != 0) {
+    resetQp(g_conn, 256, 128, 128);
+    return {hipObjRdmaError, 0};
+  }
+
+  hipError_t err = hipDeviceSynchronize();
+  // Recycle the QP so subsequent transfers start from INIT (fixes defect 2).
+  resetQp(g_conn, 256, 128, 128);
+  return (err == hipSuccess) ? HIPOBJ_SUCCESS : hipObjError_t{hipObjRdmaError, 0};
 }
 
 } // namespace hipObj
@@ -347,6 +362,45 @@ hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
   }
   if (!hipObj::parseClientNicFromTokenHex(token, nicIp, nicIpLen)) {
     return {hipObjInvalidValue, 0};
+  }
+  return HIPOBJ_SUCCESS;
+} catch (...) {
+  return hipObj::handleException();
+}
+
+hipObjError_t hipObjConnectRdmaPeer(const char* reply, size_t replyLen,
+                                    char* sessionIdBuf,
+                                    size_t sessionIdBufLen) try {
+  if (!reply || !sessionIdBuf || sessionIdBufLen == 0) {
+    return {hipObjInvalidValue, 0};
+  }
+  hipObj::DriverState& state = hipObj::getState();
+  if (!state.initialized) {
+    return {hipObjNotInitialized, 0};
+  }
+  hipObj::RdmaToken peerToken;
+  int httpCode = 0;
+  std::string sessionId;
+  if (!hipObj::parsePrepareReply(reply, replyLen, peerToken, httpCode,
+                                 sessionId)) {
+    return {hipObjRdmaError, 0};
+  }
+  if (hipObj::connectRcPeer(hipObj::g_conn, peerToken) != 0) {
+    return {hipObjRdmaError, 0};
+  }
+  std::snprintf(sessionIdBuf, sessionIdBufLen, "%s", sessionId.c_str());
+  return HIPOBJ_SUCCESS;
+} catch (...) {
+  return hipObj::handleException();
+}
+
+hipObjError_t hipObjResetRdmaQp(void) try {
+  hipObj::DriverState& state = hipObj::getState();
+  if (!state.initialized) {
+    return {hipObjNotInitialized, 0};
+  }
+  if (hipObj::resetQp(hipObj::g_conn, 256, 128, 128) != 0) {
+    return {hipObjRdmaError, 0};
   }
   return HIPOBJ_SUCCESS;
 } catch (...) {

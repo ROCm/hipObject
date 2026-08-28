@@ -23,6 +23,7 @@ on:
       - "include/**"
       - "test/**"
       - "examples/**"
+      - "integrations/**"
       - "ci/ernic/**"
       - ".github/workflows/ernic-integration-check.yml"
   pull_request:
@@ -32,6 +33,7 @@ on:
       - "include/**"
       - "test/**"
       - "examples/**"
+      - "integrations/**"
       - "ci/ernic/**"
       - ".github/workflows/ernic-integration-check.yml"
   workflow_dispatch:
