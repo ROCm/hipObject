@@ -178,23 +178,34 @@ void ControlHandlers::reapSession(const std::string& id) {
   uint32_t qpn = 0;
   uint32_t psn = 0;
   bool published = false;
+  /* Destroy the QP/CQ first: a posted work request can still
+   * reference the staging MR, so releasing memory before the QP
+   * is gone would let the NIC touch freed buffers. */
+  hipObj::RcConnV2 conn;
+  table_.withSession(id, [&](V2Session& s) {
+    conn.qp = s.qp;
+    conn.qpNum = s.serverQpn;
+    conn.cq = s.cq;
+  });
+  if (conn.qp != nullptr || conn.cq != nullptr) {
+    hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
+    table_.withSession(id, [&](V2Session& s) {
+      if (qpOk) {
+        s.qp = nullptr;
+      }
+      if (cqOk) {
+        s.cq = nullptr;
+      }
+    });
+  }
   table_.withSession(id, [&](V2Session& s) {
     res = s.reservationId;
     qpn = s.serverQpn;
     psn = s.serverPsn;
     published = s.published;
+    /* Safe now: the QP is gone (or was never wired), so nothing
+     * can reference the staging MR anymore. */
     releaseStaging(s);
-    /* The transport layer owns real qp/cq handles; null pointers
-     * mean nothing to destroy yet and the commit erases the
-     * entry. A non-null handle without a wired destroy reports
-     * failure so the entry stays poisoned for the transport
-     * follow-up. */
-    if (s.qp != nullptr) {
-      qpOk = false;
-    }
-    if (s.cq != nullptr) {
-      cqOk = false;
-    }
   });
   /* Retire the slot exactly once: a QP that was destroyed (or
    * never had one wired) settles the reservation now; a failed
@@ -387,19 +398,23 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
       return error(500);
     }
     bool staged = false;
+    bool copied = false;
+    struct ibv_pd* pd = (dh != nullptr && dh->pd != nullptr) ? dh->pd : nullptr;
     table_.withSession(id, [&](V2Session& s) {
-      staged = stagePutBuffer(s, static_cast<size_t>(req.size),
-                              serverDevice()->pd);
+      staged = stagePutBuffer(s, static_cast<size_t>(req.size), pd);
       if (staged) {
-        backend_->read(req.target, req.offset, static_cast<size_t>(req.size),
-                       s.staging);
+        copied = backend_->read(req.target, req.offset,
+                                static_cast<size_t>(req.size), s.staging);
       }
     });
-    if (!staged) {
+    /* A missing range on an existing object is a client error;
+     * staging without a PD is fine on transport-free hosts where
+     * the data phase is a no-op. */
+    if (!staged || !copied) {
       table_.toReaping(id);
       table_.releaseIo(id);
       table_.ringUnreserve(slot);
-      return error(500);
+      return error(copied || !staged ? 500 : 416);
     }
   }
 
@@ -518,6 +533,7 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
     s.clientMrAddr = req.mrAddr;
     s.clientMrRkey = req.mrRkey;
     s.clientQpn = req.qpn;
+    s.clientLid = static_cast<uint16_t>(req.lid);
     if (s.qp != nullptr && req.qpn != 0) {
       hipObj::DeviceHandle dh;
       dh.ctx = s.device ? s.device->ctx : nullptr;
@@ -529,7 +545,9 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
       hipObj::RcConnV2 conn;
       conn.qp = s.qp;
       conn.qpNum = s.serverQpn;
-      union ibv_gid peer = {};
+      /* Same-HCA pairing: the server's own GID routes the
+       * loopback path on RoCE devices. */
+      union ibv_gid peer = dh.localGid;
       paired = hipObj::v2::transitionQpToRtrV2(&dh, conn, req.qpn, 0, peer,
                                                s.clientPsn) == 0 &&
                hipObj::v2::transitionQpToRtsV2(conn, &dh, s.serverPsn) == 0;
@@ -547,17 +565,56 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
   DataPhaseStats stats;
   DataPhaseResult dpr;
   uint64_t deadline = 0;
+  struct ibv_qp* qp = nullptr;
+  struct ibv_cq* cq = nullptr;
+  struct ibv_mr* stagingMr = nullptr;
+  uint64_t clientMrAddr = 0;
+  uint32_t clientMrRkey = 0;
+  uint32_t clientQpn = 0;
+  uint32_t cookie = 0;
+  uint64_t size = 0;
+  std::string op;
   table_.withSession(req.session, [&](V2Session& s) {
     deadline = s.clientDeadlineAt;
+    qp = s.qp;
+    cq = s.cq;
+    stagingMr = s.stagingMr;
+    clientMrAddr = s.clientMrAddr;
+    clientMrRkey = s.clientMrRkey;
+    clientQpn = s.clientQpn;
+    cookie = s.cookie;
+    size = s.size;
+    op = s.op;
   });
-  dpr = DataPhaseResult::WireFail;
-  table_.withSession(req.session, [&](V2Session& s) {
-    dpr = runDataPhase(s, deadline, stats);
-  });
+  /* The transfer runs on a local snapshot: polling the CQ can
+   * block for the whole T_exec window, and holding the session
+   * table lock for that would stall every other request and the
+   * reaper. The io reference taken above keeps the session (and
+   * these objects) alive for the duration. */
+  {
+    V2Session snap;
+    snap.op = op;
+    snap.size = size;
+    snap.cookie = cookie;
+    snap.qp = qp;
+    snap.cq = cq;
+    snap.stagingMr = stagingMr;
+    snap.clientMrAddr = clientMrAddr;
+    snap.clientMrRkey = clientMrRkey;
+    snap.clientQpn = clientQpn;
+    dpr = runDataPhase(snap, deadline, stats);
+  }
   if (dpr != DataPhaseResult::Ok) {
     table_.toReaping(req.session);
     table_.releaseIo(req.session);
     return dpr == DataPhaseResult::Timeout ? error(408) : error(500);
+  }
+  if (op == "PUT") {
+    /* Persist the uploaded bytes: the staging buffer holds
+     * exactly the received object now. */
+    table_.withSession(req.session, [&](V2Session& s) {
+      backend_->write(s.target, s.staging, static_cast<size_t>(stats.bytes));
+    });
   }
 
   if (!table_.beginCompleting(req.session)) {

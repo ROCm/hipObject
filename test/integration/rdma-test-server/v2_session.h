@@ -87,6 +87,7 @@ struct V2Session {
   uint64_t clientMrAddr = 0; /* client MR address (PUT dest / GET src) */
   uint32_t clientMrRkey = 0; /* client MR rkey */
   uint32_t clientQpn = 0;    /* client QP to pair against */
+  uint16_t clientLid = 0;    /* client LID (IB links; 0 on RoCE) */
   /* PUT staging (host buffer + MR owned by the session). */
   void* staging = nullptr;
   struct ibv_mr* stagingMr = nullptr;

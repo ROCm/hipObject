@@ -45,6 +45,7 @@ struct ReadyRequest {
   uint64_t mrAddr = 0; /* client MR address (hex 0x...) */
   uint32_t mrRkey = 0; /* client MR rkey (hex) */
   uint32_t qpn = 0;    /* client QP number (hex) */
+  uint32_t lid = 0;    /* client LID (hex; 0 on RoCE links) */
   std::string authorization;
 };
 

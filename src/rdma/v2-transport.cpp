@@ -89,14 +89,23 @@ int modifyQpToRtr(struct ibv_context* ctx, struct ibv_qp* qp,
   attr.rq_psn = rqPsn;
   attr.max_dest_rd_atomic = 1;
   attr.min_rnr_timer = 12;
-  attr.ah_attr.is_global = 1;
-  attr.ah_attr.dlid = destLid;
+  /* Addressing follows the link layer: an InfiniBand port
+   * (destLid != 0) routes by LID without a GRH; a RoCE or
+   * emulated port (destLid == 0) requires global routing with
+   * the peer GID. */
+  if (destLid != 0) {
+    attr.ah_attr.is_global = 0;
+    attr.ah_attr.dlid = destLid;
+  } else {
+    attr.ah_attr.is_global = 1;
+    attr.ah_attr.dlid = 0;
+    attr.ah_attr.grh.dgid = destGid;
+    attr.ah_attr.grh.hop_limit = 64;
+    attr.ah_attr.grh.sgid_index = gidIndex;
+    attr.ah_attr.grh.traffic_class = 0;
+  }
   attr.ah_attr.sl = 0;
   attr.ah_attr.src_path_bits = 0;
-  attr.ah_attr.grh.dgid = destGid;
-  attr.ah_attr.grh.hop_limit = 64;
-  attr.ah_attr.grh.sgid_index = gidIndex;
-  attr.ah_attr.grh.traffic_class = 0;
   int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
   return ibv.modify_qp(qp, &attr, mask);

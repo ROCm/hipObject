@@ -21,6 +21,10 @@ namespace {
 constexpr int kAccess = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                         IBV_ACCESS_REMOTE_READ;
 
+/* Completion markers posted with every work request. */
+constexpr uint64_t kWrRecv = 0x5245435632494d4dULL;  /* RECV2IMM */
+constexpr uint64_t kWrWrite = 0x57524954454d4d47ULL; /* WRITEMM */
+
 uint64_t clockNowMs() {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -31,20 +35,22 @@ uint64_t clockNowMs() {
 } // namespace
 
 bool stagePutBuffer(V2Session& s, size_t size, struct ibv_pd* pd) {
-  if (s.staging != nullptr && s.stagingMr != nullptr) {
-    return true; /* already staged */
+  if (s.staging != nullptr) {
+    return s.stagingMr != nullptr || pd == nullptr;
   }
   void* buf = std::malloc(size ? size : 1);
   if (buf == nullptr) {
     return false;
   }
-  /* Host memory: plain registration, no dmabuf export. The
-   * client's GPU buffers use their own MRs on the client side;
-   * the server only accesses them remotely. */
-  struct ibv_mr* mr = ibv.reg_mr_host(pd, buf, size, kAccess);
-  if (mr == nullptr) {
-    std::free(buf);
-    return false;
+  /* Without a PD (transport-free host) the buffer stages without
+   * an MR; the data phase is a no-op there anyway. */
+  struct ibv_mr* mr = nullptr;
+  if (pd != nullptr) {
+    mr = ibv.reg_mr_host(pd, buf, size, kAccess);
+    if (mr == nullptr) {
+      std::free(buf);
+      return false;
+    }
   }
   s.staging = buf;
   s.stagingMr = mr;
@@ -52,8 +58,15 @@ bool stagePutBuffer(V2Session& s, size_t size, struct ibv_pd* pd) {
 }
 
 void releaseStaging(V2Session& s) {
+  /* The caller must have quiesced or destroyed the session QP
+   * first: a posted work request can still reference the MR
+   * until the QP is gone. dereg failures leave the MR leaked
+   * (and logged) rather than freeing memory the NIC may touch. */
   if (s.stagingMr != nullptr) {
-    ibv.dereg_mr(s.stagingMr);
+    if (ibv.dereg_mr(s.stagingMr) != 0) {
+      fprintf(stderr, "v2: staging dereg failed; leaking buffer\n");
+      s.staging = nullptr; /* MR is dead to us either way */
+    }
     s.stagingMr = nullptr;
   }
   if (s.staging != nullptr) {
@@ -62,7 +75,6 @@ void releaseStaging(V2Session& s) {
   }
 }
 
-/* Posts one receive that consumes the client's WRITE_WITH_IMM. */
 bool postRecvForImm(struct ibv_qp* qp, struct ibv_mr* mr, size_t len) {
   struct ibv_sge sge;
   std::memset(&sge, 0, sizeof(sge));
@@ -72,7 +84,7 @@ bool postRecvForImm(struct ibv_qp* qp, struct ibv_mr* mr, size_t len) {
 
   struct ibv_recv_wr wr;
   std::memset(&wr, 0, sizeof(wr));
-  wr.wr_id = 0x5245435632494d4dULL; /* "RECV2IMM" marker */
+  wr.wr_id = kWrRecv;
   wr.sg_list = &sge;
   wr.num_sge = 1;
 
@@ -80,19 +92,23 @@ bool postRecvForImm(struct ibv_qp* qp, struct ibv_mr* mr, size_t len) {
   return ibv.post_recv(qp, &wr, &bad) == 0;
 }
 
-/* Posts one RDMA READ pulling the object from the client MR. */
-bool postRdmaRead(struct ibv_qp* qp, struct ibv_mr* dst, uint64_t remoteAddr,
-                  uint32_t rkey, size_t len) {
+bool postWriteWithImm(struct ibv_qp* qp, struct ibv_mr* src,
+                      uint64_t remoteAddr, uint32_t rkey, size_t len,
+                      uint32_t immData) {
+  /* GET delivery: server pushes the object into the client MR
+   * with the session cookie as the immediate. */
   struct ibv_sge sge;
   std::memset(&sge, 0, sizeof(sge));
-  sge.addr = reinterpret_cast<uintptr_t>(dst->addr);
+  sge.addr = reinterpret_cast<uintptr_t>(src->addr);
   sge.length = static_cast<uint32_t>(len);
-  sge.lkey = dst->lkey;
+  sge.lkey = src->lkey;
 
   struct ibv_send_wr wr;
   std::memset(&wr, 0, sizeof(wr));
-  wr.wr_id = 0x5245414432444154ULL; /* "READ2DAT" marker */
-  wr.opcode = IBV_WR_RDMA_READ;
+  wr.wr_id = kWrWrite;
+  wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+  wr.send_flags = IBV_SEND_SIGNALED;
+  wr.imm_data = htonl(immData);
   wr.wr.rdma.remote_addr = remoteAddr;
   wr.wr.rdma.rkey = rkey;
   wr.sg_list = &sge;
@@ -102,17 +118,24 @@ bool postRdmaRead(struct ibv_qp* qp, struct ibv_mr* dst, uint64_t remoteAddr,
   return ibv.post_send(qp, &wr, &bad) == 0;
 }
 
-/* Polls the session CQ for one completion, bounded by an
- * absolute deadline on the monotonic clock. */
-static int pollCqUntil(struct ibv_cq* cq, uint64_t deadlineMs,
-                       struct ibv_wc* out) {
+/* Polls the CQ for one completion matching `expectWr`, bounded by
+ * an absolute deadline on the monotonic clock. */
+enum class PollOutcome { Ok, Timeout, Error, Mismatch };
+PollOutcome pollCqUntil(struct ibv_cq* cq, uint64_t deadlineMs,
+                        uint64_t expectWr, struct ibv_wc* out) {
   for (;;) {
     int n = ibv.poll_cq(cq, 1, out);
     if (n > 0) {
-      return 0;
+      if (out->wr_id != expectWr) {
+        return PollOutcome::Mismatch;
+      }
+      return PollOutcome::Ok;
+    }
+    if (n < 0) {
+      return PollOutcome::Error;
     }
     if (clockNowMs() >= deadlineMs) {
-      return -1;
+      return PollOutcome::Timeout;
     }
     struct timespec ts = {0, 2 * 1000 * 1000};
     nanosleep(&ts, nullptr);
@@ -121,41 +144,36 @@ static int pollCqUntil(struct ibv_cq* cq, uint64_t deadlineMs,
 
 DataPhaseResult runDataPhase(V2Session& s, uint64_t deadlineMs,
                              DataPhaseStats& stats) {
-  if (s.qp == nullptr || s.cq == nullptr) {
-    /* No transport objects on the session: the wire layer was
-     * never wired (unit-test sessions). Treat as a verified
-     * no-op so the control flow stays testable. */
+  const bool noTransport = s.qp == nullptr && s.cq == nullptr;
+  if (noTransport || s.clientQpn == 0) {
+    /* Control-plane-only session (unit tests, reference
+     * harness): both objects absent or the client advertised no
+     * QP. A half-wired session is not accepted here. */
     stats.bytes = s.size;
     stats.cookie = s.cookie;
     return DataPhaseResult::Ok;
   }
-  if (s.clientQpn == 0) {
-    /* Control-plane-only request: the client advertised no QP,
-     * so nothing can be posted. Mirror the no-op path so the
-     * reference harness (control-only) keeps passing against a
-     * server with real transport. */
-    stats.bytes = s.size;
-    stats.cookie = s.cookie;
-    return DataPhaseResult::Ok;
+  if (s.qp == nullptr || s.cq == nullptr || s.stagingMr == nullptr) {
+    return DataPhaseResult::WireFail;
   }
 
   struct ibv_wc wc;
+  PollOutcome po;
 
   if (s.op == "PUT") {
-    if (s.stagingMr == nullptr) {
-      return DataPhaseResult::WireFail;
-    }
+    /* The client writes into the server staging MR and signals
+     * the session cookie. */
     if (!postRecvForImm(s.qp, s.stagingMr, static_cast<size_t>(s.size))) {
       return DataPhaseResult::WireFail;
     }
-    /* The client's WRITE_WITH_IMM completes on our receive CQ
-     * with the session cookie as the immediate. */
-    if (pollCqUntil(s.cq, deadlineMs, &wc) != 0) {
+    po = pollCqUntil(s.cq, deadlineMs, kWrRecv, &wc);
+    if (po == PollOutcome::Timeout) {
       return DataPhaseResult::Timeout;
     }
-    if (wc.status != IBV_WC_SUCCESS || wc.opcode != IBV_WC_RECV_RDMA_WITH_IMM ||
+    if (po != PollOutcome::Ok || wc.status != IBV_WC_SUCCESS ||
+        wc.opcode != IBV_WC_RECV_RDMA_WITH_IMM ||
         (wc.wc_flags & IBV_WC_WITH_IMM) == 0 ||
-        ntohl(wc.imm_data) != s.cookie) {
+        ntohl(wc.imm_data) != s.cookie || wc.byte_len != s.size) {
       return DataPhaseResult::VerifyFail;
     }
     stats.bytes = wc.byte_len;
@@ -163,23 +181,24 @@ DataPhaseResult runDataPhase(V2Session& s, uint64_t deadlineMs,
     return DataPhaseResult::Ok;
   }
 
-  /* GET: the client posted a receive and exposes its MR; we
-   * RDMA READ the object from it and wait for our READ
-   * completion. */
-  if (s.stagingMr == nullptr || s.clientMrAddr == 0 || s.clientMrRkey == 0) {
+  /* GET: push the staged object to the client MR with the
+   * cookie as the immediate; the client's receive consumes it. */
+  if (s.clientMrAddr == 0 || s.clientMrRkey == 0) {
     return DataPhaseResult::WireFail;
   }
-  if (!postRdmaRead(s.qp, s.stagingMr, s.clientMrAddr, s.clientMrRkey,
-                    static_cast<size_t>(s.size))) {
+  if (!postWriteWithImm(s.qp, s.stagingMr, s.clientMrAddr, s.clientMrRkey,
+                        static_cast<size_t>(s.size), s.cookie)) {
     return DataPhaseResult::WireFail;
   }
-  if (pollCqUntil(s.cq, deadlineMs, &wc) != 0) {
+  po = pollCqUntil(s.cq, deadlineMs, kWrWrite, &wc);
+  if (po == PollOutcome::Timeout) {
     return DataPhaseResult::Timeout;
   }
-  if (wc.status != IBV_WC_SUCCESS || wc.opcode != IBV_WC_RDMA_READ) {
+  if (po != PollOutcome::Ok || wc.status != IBV_WC_SUCCESS ||
+      wc.opcode != IBV_WC_RDMA_WRITE) {
     return DataPhaseResult::VerifyFail;
   }
-  stats.bytes = wc.byte_len;
+  stats.bytes = s.size;
   stats.cookie = s.cookie;
   return DataPhaseResult::Ok;
 }

@@ -65,6 +65,19 @@ if(HIPOBJ_IONIC)
 endif()
 
 add_executable(v2-client-harness v2_client_harness.cpp v2_sigv4.cpp)
+
+add_executable(v2-data-client v2_data_client.cpp v2_sigv4.cpp)
+target_compile_features(v2-data-client PRIVATE cxx_std_17)
+target_include_directories(v2-data-client PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(v2-data-client PRIVATE OpenSSL::Crypto)
+
+find_library(IBVERBS_LIB ibverbs)
+if(IBVERBS_LIB)
+  target_link_libraries(v2-data-client PRIVATE ${IBVERBS_LIB})
+else()
+  message(FATAL_ERROR "libibverbs not found - v2-data-client needs it")
+endif()
 target_compile_features(v2-client-harness PRIVATE cxx_std_17)
 target_include_directories(v2-client-harness PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR})

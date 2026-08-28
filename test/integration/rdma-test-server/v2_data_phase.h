@@ -6,10 +6,11 @@
 /* Server-side data phase for the v2 protocol.
  *
  * A READY answer performs the RDMA transfer described by the
- * session: a PUT stages the object into a server-registered MR and
- * receives the client WRITE_WITH_IMM carrying the session cookie;
- * a GET posts the object MR to the client via RDMA READ. The wire
- * parameters (client QPN, PSN, addresses) arrive in the PREPARE
+ * session: a PUT receives the client's WRITE_WITH_IMM into a
+ * server-registered staging MR, validating the session cookie in
+ * the immediate; a GET pushes the staged object into the client
+ * MR with the cookie as the immediate. The wire parameters
+ * (client QP, PSN, MR endpoint) arrive in the PREPARE and READY
  * headers and are staged on the session.
  *
  * Everything goes through the same ibverbs wrapper the client
@@ -56,9 +57,11 @@ bool stagePutBuffer(V2Session& s, size_t size, struct ibv_pd* pd);
  * carrying the session cookie. */
 bool postRecvForImm(struct ibv_qp* qp, struct ibv_mr* mr, size_t len);
 
-/* Posts one RDMA READ pulling the object from the client MR. */
-bool postRdmaRead(struct ibv_qp* qp, struct ibv_mr* dst, uint64_t remoteAddr,
-                  uint32_t rkey, size_t len);
+/* Posts one RDMA WRITE_WITH_IMM pushing `src` into the client MR
+ * with the session cookie as the immediate (GET delivery). */
+bool postWriteWithImm(struct ibv_qp* qp, struct ibv_mr* src,
+                      uint64_t remoteAddr, uint32_t rkey, size_t len,
+                      uint32_t immData);
 
 /* Releases the session's staging MR (if any). Safe to call on a
  * session that never staged. */
