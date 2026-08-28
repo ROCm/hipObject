@@ -5,6 +5,7 @@
 
 #include "v2-transport.h"
 
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 
@@ -102,21 +103,14 @@ int modifyQpToRtr(struct ibv_context* ctx, struct ibv_qp* qp,
   attr.rq_psn = rqPsn;
   attr.max_dest_rd_atomic = 1;
   attr.min_rnr_timer = 12;
-  /* Addressing follows the link layer: an InfiniBand port
-   * (destLid != 0) routes by LID without a GRH; a RoCE or
-   * emulated port (destLid == 0) requires global routing with
-   * the peer GID. */
-  if (destLid != 0) {
-    attr.ah_attr.is_global = 0;
-    attr.ah_attr.dlid = destLid;
-  } else {
-    attr.ah_attr.is_global = 1;
-    attr.ah_attr.dlid = 0;
-    attr.ah_attr.grh.dgid = destGid;
-    attr.ah_attr.grh.hop_limit = 64;
-    attr.ah_attr.grh.sgid_index = gidIndex;
-    attr.ah_attr.grh.traffic_class = 0;
-  }
+  /* hipObject targets RoCEv2: the GRH with the peer GID is
+   * the routing path; the LID stays unused on RoCE links. */
+  attr.ah_attr.is_global = 1;
+  attr.ah_attr.dlid = 0;
+  attr.ah_attr.grh.dgid = destGid;
+  attr.ah_attr.grh.hop_limit = 64;
+  attr.ah_attr.grh.sgid_index = gidIndex;
+  attr.ah_attr.grh.traffic_class = 0;
   attr.ah_attr.sl = 0;
   attr.ah_attr.src_path_bits = 0;
   /* Service type needs the port in the address handle; leaving
@@ -169,8 +163,11 @@ int createRcConnV2(DeviceHandle* dh, RcConnV2& conn, bool* rollbackFailed) {
     bool cqOk = true;
     if (ibv.destroy_cq(conn.cq) != 0) {
       cqOk = false;
+      /* Keep conn.cq when the destroy failed: clearing it would
+       * lose the handle the caller needs for the reaper retry. */
+    } else {
+      conn.cq = nullptr;
     }
-    conn.cq = nullptr;
     if (!cqOk) {
       if (rollbackFailed) {
         *rollbackFailed = true;
@@ -180,7 +177,9 @@ int createRcConnV2(DeviceHandle* dh, RcConnV2& conn, bool* rollbackFailed) {
     return -1;
   }
   conn.qpNum = conn.qp->qp_num;
-  ++dh->connRefs;
+  /* Threaded callers share the device handle; the counter must
+   * be atomic to avoid a data race on concurrent PREPAREs. */
+  dh->connRefs.fetch_add(1, std::memory_order_relaxed);
   return 0;
 }
 
@@ -191,13 +190,19 @@ void destroyRcConnV2(RcConnV2& conn, bool* qpOk, bool* cqOk) {
   if (cqOk) {
     *cqOk = true;
   }
+  /* A successful destroy clears the handle so callers storing
+   * the surviving pointers never re-destroy them. */
   if (conn.qp) {
-    if (ibv.destroy_qp(conn.qp) != 0 && qpOk) {
+    if (ibv.destroy_qp(conn.qp) == 0) {
+      conn.qp = nullptr;
+    } else if (qpOk) {
       *qpOk = false;
     }
   }
   if (conn.cq) {
-    if (ibv.destroy_cq(conn.cq) != 0 && cqOk) {
+    if (ibv.destroy_cq(conn.cq) == 0) {
+      conn.cq = nullptr;
+    } else if (cqOk) {
       *cqOk = false;
     }
   }
@@ -243,8 +248,10 @@ void releaseDevice(DeviceHandle* dh) {
   if (!dh) {
     return;
   }
-  if (dh->connRefs > 0) {
-    --dh->connRefs;
+  uint32_t cur = dh->connRefs.load(std::memory_order_relaxed);
+  while (cur > 0 &&
+         !dh->connRefs.compare_exchange_weak(cur, cur - 1,
+                                             std::memory_order_relaxed)) {
   }
   /* PD/context close happens only when the buffer map is empty too;
    * the caller (hipObjShutdown stage) checks both. */

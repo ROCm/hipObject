@@ -211,10 +211,6 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
   }
   char qpnHex[12];
   std::snprintf(qpnHex, sizeof(qpnHex), "%x", qp->qp_num);
-  struct ibv_port_attr pattr = {};
-  ibv_query_port(ctx, 1, &pattr);
-  char lidHex[10];
-  std::snprintf(lidHex, sizeof(lidHex), "%x", pattr.lid);
 
   std::map<std::string, std::string> phdrs = {
     {"host", std::string(host)},
@@ -254,6 +250,13 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
   }
   std::string session = headerValue(presp, "x-amz-rdma-session");
   std::string sqpnS = headerValue(presp, "x-amz-rdma-qpn");
+  /* The data E2E is meaningless without a server transport: a
+   * missing QPN means the control plane answered without a QP
+   * (device-less host), which must fail loudly here. */
+  if (sqpnS.empty()) {
+    std::fprintf(stderr, "dp: no server qpn exposed - refusing\n");
+    return 1;
+  }
   std::string spsnS = headerValue(presp, "x-amz-rdma-psn");
   uint32_t sqpn = sqpnS.empty() ? 0
                                 : static_cast<uint32_t>(
@@ -277,6 +280,8 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
     attr.rq_psn = spsn;
     attr.max_dest_rd_atomic = 1;
     attr.min_rnr_timer = 12;
+    /* hipObject targets RoCEv2: the GRH with the peer GID is
+     * the only routing path. */
     attr.ah_attr.is_global = 1;
     attr.ah_attr.grh.dgid = gid;
     attr.ah_attr.grh.sgid_index = 0;
@@ -408,7 +413,16 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
     }
     if (wc.status == IBV_WC_SUCCESS && wc.opcode == IBV_WC_RECV_RDMA_WITH_IMM &&
         (wc.wc_flags & IBV_WC_WITH_IMM) != 0 && ntohl(wc.imm_data) == cookie) {
-      std::printf("dp: GET ok cookie echoed, payload[0..7]=%.8s\n", buf);
+      /* The GET must return the object bytes, not just a
+       * completion: verify the seeded marker arrived. */
+      const char expect[9] = "dp-put-p";
+      if (std::memcmp(buf, expect, 8) == 0) {
+        std::printf("dp: GET ok cookie echoed, payload verified\n");
+      } else {
+        std::fprintf(stderr, "dp: GET payload mismatch: got %.8s want %s\n",
+                     buf, expect);
+        rc = 1;
+      }
     } else {
       std::fprintf(stderr,
                    "dp: GET completion bad (status=%d op=%d "

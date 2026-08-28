@@ -224,11 +224,6 @@ std::optional<ReadyRequest> parseReadyRequest(
     out.qpn = static_cast<uint32_t>(
       std::strtoull(it->second.c_str(), nullptr, 16));
   }
-  it = headers.find("x-amz-rdma-lid");
-  if (it != headers.end() && !it->second.empty()) {
-    out.lid = static_cast<uint16_t>(
-      std::strtoul(it->second.c_str(), nullptr, 16));
-  }
 
   out.authorization = rawAuthorization(rawHeaders);
   if (out.authorization.empty()) {

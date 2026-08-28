@@ -20,7 +20,10 @@ add_library(hipobj_test_objects OBJECT ${HIPOBJ_TEST_SOURCES})
 # Server-side v2 sources for the session/handler unit tests.
 set(HIPOBJ_V2_SERVER_SOURCES
   ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_request.cpp
-  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_session.cpp)
+  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_session.cpp
+  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_handlers.cpp
+  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_data_phase.cpp
+  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_backend.cpp)
 
 target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 
@@ -99,6 +102,9 @@ hipobj_add_test(test-v2-conflict
 
 hipobj_add_test(test-v2-server
   test-v2-server.cpp)
+
+hipobj_add_test(test-v2-connref
+  test-v2-connref.cpp)
 
 hipobj_add_test(test-seams
   test-seams.cpp)

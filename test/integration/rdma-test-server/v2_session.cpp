@@ -92,6 +92,12 @@ bool SessionTable::beginCompleting(const std::string& id) {
     return false;
   }
   it->second.state = SessState::Completing;
+  /* Mark the reference origin atomically with the transition:
+   * from here the io reference guards live staging data and the
+   * reaper must not force-release it. Setting this outside the
+   * lock would leave a window where the reaper still treats the
+   * reference as a Publishing orphan. */
+  it->second.ioFromCompleting = true;
   notifyAll(cv_);
   return true;
 }

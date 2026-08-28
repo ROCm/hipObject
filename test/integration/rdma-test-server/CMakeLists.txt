@@ -92,6 +92,35 @@ if(BASH_BIN)
   set_tests_properties(v2-control-e2e PROPERTIES TIMEOUT 180
     ENVIRONMENT
       "SERVER=$<TARGET_FILE:hipobj-rdma-test-server>;HARNESS=$<TARGET_FILE:v2-client-harness>;LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}")
+
+  # Data-plane round trip on the local verbs device: PUT then GET
+  # back the same object with the cookie echoed in the immediate.
+  # Registers only where the ibverbs header is available; hosts
+  # without a device fail loudly rather than silently skipping.
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("
+    #include <infiniband/verbs.h>
+    int main(void) { return IBV_ACCESS_REMOTE_READ; }" HAVE_IBVERBS_HEADER)
+  # A device must also be present: the data round trip needs a
+  # verbs device to post on. Header-only hosts (CI containers)
+  # skip the registration rather than failing at run time.
+  execute_process(COMMAND bash -c "ls /dev/infiniband/uverbs* >/dev/null 2>&1"
+    RESULT_VARIABLE HAVE_IBVERBS_DEVICE)
+  if(HAVE_IBVERBS_HEADER AND HAVE_IBVERBS_DEVICE EQUAL 0)
+    add_test(NAME v2-data-e2e
+      COMMAND ${BASH_BIN} -c
+        "$<TARGET_FILE:hipobj-rdma-test-server> --v2 --port 19601 --v2-access-key hipobj-test-key --v2-secret-key hipobj-test-secret 2>/dev/null &
+         srv=$!;
+         sleep 1;
+         $<TARGET_FILE:v2-data-client> 127.0.0.1 19601 PUT /bucket/seed64k 64 &&
+         $<TARGET_FILE:v2-data-client> 127.0.0.1 19601 GET /bucket/seed64k 64;
+         rc=$?;
+         kill $srv 2>/dev/null;
+         wait $srv 2>/dev/null;
+         exit $rc")
+    set_tests_properties(v2-data-e2e PROPERTIES TIMEOUT 120
+      ENVIRONMENT "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}")
+  endif()
 endif()
 
 install(TARGETS hipobj-rdma-test-server

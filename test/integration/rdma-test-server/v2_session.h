@@ -74,8 +74,18 @@ struct V2Session {
   uint64_t clientDeadlineAt = 0; /* ms, absolute (clockSource) */
   uint64_t txDeadlineAt = 0;     /* response transmission bound */
   int ioActive = 0;
-  bool published = false;
+  /* Origin of the outstanding io reference: true while the
+   * worker holds it from READY entry to the final send. The
+   * reaper force-releases only references still awaiting a
+   * Publishing response; a Completing reference (live staging
+   * data) is released by the cooperative finalizer. */
+  bool ioFromCompleting = false;
+  /* This session holds one device connection reference (set
+   * when a QP was created for it, consumed exactly once when
+   * that QP destroys successfully). Guards the CQ-only retry
+   * and INIT-failure paths from double or missing releases. */
   bool connRefHeld = false;
+  bool published = false;
   bool destroyClaimed = false;
   bool destroying = false;
   bool poisoned = false;
@@ -87,7 +97,6 @@ struct V2Session {
   uint64_t clientMrAddr = 0; /* client MR address (PUT dest / GET src) */
   uint32_t clientMrRkey = 0; /* client MR rkey */
   uint32_t clientQpn = 0;    /* client QP to pair against */
-  uint16_t clientLid = 0;    /* client LID (IB links; 0 on RoCE) */
   /* PUT staging (host buffer + MR owned by the session). */
   void* staging = nullptr;
   struct ibv_mr* stagingMr = nullptr;

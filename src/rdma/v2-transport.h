@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 #include "ibv-core.h"
@@ -26,7 +27,7 @@ struct DeviceHandle {
   uint8_t portNum = 1;
   int gidIndex = -1;
   union ibv_gid localGid = {};
-  uint32_t connRefs = 0;
+  std::atomic<uint32_t> connRefs{0};
 };
 
 namespace v2 {
