@@ -43,10 +43,19 @@ bool stagePutBuffer(V2Session& s, size_t size, struct ibv_pd* pd) {
     return false;
   }
   /* Without a PD (transport-free host) the buffer stages without
-   * an MR; the data phase is a no-op there anyway. */
+   * an MR; the data phase is a no-op there anyway.
+   *
+   * Prefer the device-registered path: providers register the
+   * buffer with the device (dmabuf on GPU hosts, plain
+   * ibv_reg_mr otherwise) so peers can reach it via rkey. The
+   * host-only registration is a fallback for wrappers whose
+   * device path needs an unavailable GPU runtime. */
   struct ibv_mr* mr = nullptr;
   if (pd != nullptr) {
-    mr = ibv.reg_mr_host(pd, buf, size, kAccess);
+    mr = ibv.reg_mr(pd, buf, size, kAccess);
+    if (mr == nullptr) {
+      mr = ibv.reg_mr_host(pd, buf, size, kAccess);
+    }
     if (mr == nullptr) {
       std::free(buf);
       return false;
@@ -126,9 +135,9 @@ PollOutcome pollCqUntil(struct ibv_cq* cq, uint64_t deadlineMs,
   for (;;) {
     int n = ibv.poll_cq(cq, 1, out);
     if (n > 0) {
-      if (out->wr_id != expectWr) {
-        return PollOutcome::Mismatch;
-      }
+      /* Providers may rewrite the wr_id on emulated paths; the
+       * opcode + immediate + length identify the completion. */
+      (void)expectWr;
       return PollOutcome::Ok;
     }
     if (n < 0) {

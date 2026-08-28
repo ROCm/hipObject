@@ -358,7 +358,10 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
   if (dh != nullptr && dh->pd != nullptr) {
     hipObj::RcConnV2 conn;
     bool rollbackFailed = false;
-    if (hipObj::v2::createRcConnV2(dh, conn, &rollbackFailed) == 0) {
+    if (hipObj::v2::createRcConnV2(dh, conn, &rollbackFailed) == 0 &&
+        /* The pair starts in RESET; move it to INIT so the READY
+         * RTR/RTS transitions are valid. */
+        hipObj::v2::transitionQpToInitV2(dh, conn) == 0) {
       table_.withSession(id, [&](V2Session& s) {
         s.qp = conn.qp;
         s.cq = conn.cq;
@@ -549,25 +552,15 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
       /* Same-HCA pairing: the server's own GID routes the
        * loopback path on RoCE devices. */
       union ibv_gid peer = dh.localGid;
-      int rtrRc = hipObj::v2::transitionQpToRtrV2(
-          &dh, conn, req.qpn, s.clientLid, peer, s.clientPsn);
-      if (rtrRc != 0) {
-        fprintf(stderr, "R500 rtr errno=%d\n", errno);
-      }
-      int rtsRc =
-          rtrRc == 0
-              ? hipObj::v2::transitionQpToRtsV2(conn, &dh, s.serverPsn)
-              : -1;
-      if (rtrRc == 0 && rtsRc != 0) {
-        fprintf(stderr, "R500 rts errno=%d\n", errno);
-      }
-      paired = rtrRc == 0 && rtsRc == 0;
+      paired = hipObj::v2::transitionQpToRtrV2(&dh, conn, req.qpn, s.clientLid,
+                                               peer, s.clientPsn) == 0 &&
+               hipObj::v2::transitionQpToRtsV2(conn, &dh, s.serverPsn) == 0;
     }
   });
   if (!paired) {
     table_.toReaping(req.session);
     table_.releaseIo(req.session);
-    fprintf(stderr, "R500 s=1\n"); return error(500);
+    return error(500);
   }
 
   /* Data phase bounded by the transition deadline. The result
@@ -618,7 +611,7 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
   if (dpr != DataPhaseResult::Ok) {
     table_.toReaping(req.session);
     table_.releaseIo(req.session);
-    fprintf(stderr, "R500 dp=%d\n", (int)dpr); return dpr == DataPhaseResult::Timeout ? error(408) : error(500);
+    return dpr == DataPhaseResult::Timeout ? error(408) : error(500);
   }
   if (op == "PUT") {
     /* Persist the uploaded bytes: the staging buffer holds
@@ -630,7 +623,7 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
 
   if (!table_.beginCompleting(req.session)) {
     table_.releaseIo(req.session);
-    fprintf(stderr, "R500 s=2\n"); return error(500);
+    return error(500);
   }
 
   uint64_t bytes = stats.bytes;

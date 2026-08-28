@@ -110,6 +110,14 @@ int fakeModifyQp(struct ibv_qp*, struct ibv_qp_attr* attr, int) {
   return 0;
 }
 
+int fakeQueryPort(struct ibv_context*, uint8_t, struct ibv_port_attr* a) {
+  /* Mirror a healthy port: active MTU 4096 so the RTR transition
+   * under test keeps a full-size path MTU. */
+  std::memset(a, 0, sizeof(*a));
+  a->active_mtu = IBV_MTU_4096;
+  return 0;
+}
+
 int fakeQueryDevice(struct ibv_context*, struct ibv_device_attr*) {
   return 0;
 }
@@ -131,6 +139,7 @@ public:
     funcs.destroy_qp = fakeDestroyQp;
     funcs.modify_qp = fakeModifyQp;
     funcs.query_device = fakeQueryDevice;
+    funcs.query_port = fakeQueryPort;
     funcs.dealloc_pd = fakeDeallocPd;
   }
   ~IbvFakeInstall() {

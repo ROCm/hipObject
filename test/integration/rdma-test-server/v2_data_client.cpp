@@ -152,8 +152,16 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
     return 2;
   }
 
-  char buf[4096];
-  struct ibv_mr* mr = ibv_reg_mr(pd, buf, sizeof(buf),
+  /* Page-aligned transfer buffer: the emulated NIC maps user MRs
+   * page by page and rejects a region whose chunk count does not
+   * divide the length, which a stack buffer crossing a page
+   * boundary triggers. */
+  char* buf = static_cast<char*>(std::aligned_alloc(4096, 4096));
+  if (buf == nullptr) {
+    std::fprintf(stderr, "dp: alloc failed\n");
+    return 2;
+  }
+  struct ibv_mr* mr = ibv_reg_mr(pd, buf, 4096,
                                  IBV_ACCESS_LOCAL_WRITE |
                                    IBV_ACCESS_REMOTE_READ |
                                    IBV_ACCESS_REMOTE_WRITE);
@@ -317,44 +325,6 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
 
   /* ---- data plane while the server processes READY ---- */
   if (sqpn != 0) {
-    if (std::strcmp(op, "PUT") == 0) {
-      /* Receive the server's READ request first? No - the v2 PUT
-       * direction is client->server WRITE_WITH_IMM. The server
-       * posted a receive; we write and signal the cookie. */
-      struct ibv_sge sge = {};
-      sge.addr = reinterpret_cast<uintptr_t>(buf);
-      sge.length = static_cast<uint32_t>(size < sizeof(buf) ? size
-                                                            : sizeof(buf));
-      sge.lkey = mr->lkey;
-      struct ibv_send_wr wr = {};
-      wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
-      wr.send_flags = IBV_SEND_SIGNALED;
-      wr.imm_data = htonl(cookie);
-      /* remote endpoint: the server staging MR, exposed via the
-       * PREPARE reply when transport is wired. */
-      std::string saddrS = headerValue(presp, "x-amz-rdma-mr-addr");
-      std::string srkeyS = headerValue(presp, "x-amz-rdma-mr-rkey");
-      if (!saddrS.empty() && !srkeyS.empty()) {
-        wr.wr.rdma.remote_addr = std::strtoull(saddrS.c_str(), nullptr, 16);
-        wr.wr.rdma.rkey = static_cast<uint32_t>(
-          std::strtoul(srkeyS.c_str(), nullptr, 16));
-        wr.sg_list = &sge;
-        wr.num_sge = 1;
-        struct ibv_send_wr* bad = nullptr;
-        if (ibv_post_send(qp, &wr, &bad) != 0) {
-          std::fprintf(stderr, "dp: post WRITE_WITH_IMM failed\n");
-        }
-        struct ibv_wc wc = {};
-        for (int i = 0; i < 2000; ++i) {
-          if (ibv_poll_cq(cq, 1, &wc) > 0) {
-            break;
-          }
-          usleep(1000);
-        }
-      } else {
-        std::fprintf(stderr, "dp: server staging not exposed; skip write\n");
-      }
-    }
     if (std::strcmp(op, "GET") == 0) {
       struct ibv_sge rsge = {};
       rsge.addr = reinterpret_cast<uintptr_t>(buf);
@@ -371,7 +341,55 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
       }
     }
   }
-
+  /* PUT: the server posts its receive while handling the READY
+   * request and only answers after the transfer completes, so the
+   * write must go out before waiting for the response. A short
+   * grace keeps it clear of the receive-post race. */
+  int rc = 0;
+  if (std::strcmp(op, "PUT") == 0 && sqpn != 0) {
+    usleep(100 * 1000);
+    struct ibv_sge sge = {};
+    sge.addr = reinterpret_cast<uintptr_t>(buf);
+    sge.length = static_cast<uint32_t>(size < 4096 ? size : 4096);
+    sge.lkey = mr->lkey;
+    struct ibv_send_wr wr = {};
+    wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+    wr.send_flags = IBV_SEND_SIGNALED;
+    wr.imm_data = htonl(cookie);
+    /* Remote endpoint: the server staging MR from the PREPARE
+     * reply. */
+    std::string saddrS = headerValue(presp, "x-amz-rdma-mr-addr");
+    std::string srkeyS = headerValue(presp, "x-amz-rdma-mr-rkey");
+    if (!saddrS.empty() && !srkeyS.empty()) {
+      wr.wr.rdma.remote_addr = std::strtoull(saddrS.c_str(), nullptr, 16);
+      wr.wr.rdma.rkey = static_cast<uint32_t>(
+        std::strtoul(srkeyS.c_str(), nullptr, 16));
+      wr.sg_list = &sge;
+      wr.num_sge = 1;
+      struct ibv_send_wr* bad = nullptr;
+      if (ibv_post_send(qp, &wr, &bad) != 0) {
+        std::fprintf(stderr, "dp: post WRITE_WITH_IMM failed\n");
+        rc = 1;
+      } else {
+        struct ibv_wc wc = {};
+        for (int i = 0; i < 2000; ++i) {
+          if (ibv_poll_cq(cq, 1, &wc) > 0) {
+            break;
+          }
+          usleep(1000);
+        }
+        if (wc.status != IBV_WC_SUCCESS) {
+          std::fprintf(stderr, "dp: PUT completion status=%d\n", wc.status);
+          rc = 1;
+        } else {
+          std::printf("dp: PUT ok cookie=%08x posted\n", cookie);
+        }
+      }
+    } else {
+      std::fprintf(stderr, "dp: server staging not exposed\n");
+      rc = 1;
+    }
+  }
   std::string rresp = readResponse(fd);
   close(fd);
   int rst = statusOf(rresp);
@@ -380,7 +398,6 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
   if (rst != 200) {
     return 1;
   }
-  int rc = 0;
   if (std::strcmp(op, "GET") == 0 && sqpn != 0 && rst == 200) {
     struct ibv_wc wc = {};
     for (int i = 0; i < 2000; ++i) {
@@ -402,6 +419,7 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
   }
 
   ibv_dereg_mr(mr);
+  std::free(buf);
   ibv_destroy_qp(qp);
   ibv_destroy_cq(cq);
   ibv_dealloc_pd(pd);

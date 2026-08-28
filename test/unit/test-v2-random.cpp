@@ -101,6 +101,12 @@ protected:
       }
       return 0;
     };
+    funcs.query_port = [](struct ibv_context*, uint8_t,
+                          struct ibv_port_attr* a) -> int {
+      std::memset(a, 0, sizeof(*a));
+      a->active_mtu = IBV_MTU_4096;
+      return 0;
+    };
     g_rqPsn.clear();
     g_sqPsn.clear();
   }
