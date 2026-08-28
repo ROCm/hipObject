@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "../../../src/common/ibv-wrapper.h"
+#include "../../../src/rdma/v2-transport.h"
 #include "v2-clock.h"
 #include "v2-random.h"
 #include "v2-registry.h"
@@ -20,24 +21,32 @@ namespace v2 {
 
 namespace {
 
-/* The reference server owns one RDMA device; the PD is opened
- * lazily on the first PREPARE that needs to register memory. */
-struct ibv_pd* serverPd() {
-  static struct ibv_pd* pd = nullptr;
+/* The reference server owns one RDMA device, opened lazily on
+ * the first PREPARE. The shared handle carries the context,
+ * protection domain, and local GID that per-session connections
+ * and memory registrations both use. */
+hipObj::DeviceHandle* serverDevice() {
+  static hipObj::DeviceHandle* dh = nullptr;
   static bool tried = false;
-  if (pd == nullptr && !tried) {
+  if (dh == nullptr && !tried) {
     tried = true;
     int n = 0;
     struct ibv_device** devs = hipObj::ibv.get_device_list(&n);
     if (devs != nullptr && n > 0) {
       struct ibv_context* ctx = hipObj::ibv.open_device(devs[0]);
       if (ctx != nullptr) {
-        pd = hipObj::ibv.alloc_pd(ctx);
+        struct ibv_pd* pd = hipObj::ibv.alloc_pd(ctx);
+        dh = new hipObj::DeviceHandle();
+        dh->ctx = ctx;
+        dh->pd = pd;
+        dh->portNum = 1;
+        dh->gidIndex = 0;
+        hipObj::ibv.query_gid(ctx, 1, 0, &dh->localGid);
       }
       hipObj::ibv.free_device_list(devs);
     }
   }
-  return pd;
+  return dh;
 }
 
 } // namespace
@@ -329,6 +338,44 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
     s.serverPsn = serverPsn;
   });
 
+  /* Per-session connection on the shared device: one qp/cq pair
+   * the client pairs against using the qpn/psn in the reply. A
+   * device-less host keeps the session transport-free and the
+   * data phase degrades to the verified no-op. */
+  hipObj::DeviceHandle* dh = serverDevice();
+  if (dh != nullptr && dh->pd != nullptr) {
+    hipObj::RcConnV2 conn;
+    bool rollbackFailed = false;
+    if (hipObj::v2::createRcConnV2(dh, conn, &rollbackFailed) == 0) {
+      table_.withSession(id, [&](V2Session& s) {
+        s.qp = conn.qp;
+        s.cq = conn.cq;
+        s.serverQpn = conn.qpNum;
+        s.device = dh;
+      });
+    } else {
+      table_.toReaping(id);
+      table_.releaseIo(id);
+      table_.ringUnreserve(slot);
+      return error(500);
+    }
+  }
+
+  /* PUT: stage an empty buffer the client writes into; the
+   * endpoint is exposed in the PREPARE reply. */
+  if (req.op == "PUT" && dh != nullptr && dh->pd != nullptr) {
+    bool staged = false;
+    table_.withSession(id, [&](V2Session& s) {
+      staged = stagePutBuffer(s, static_cast<size_t>(req.size), dh->pd);
+    });
+    if (!staged) {
+      table_.toReaping(id);
+      table_.releaseIo(id);
+      table_.ringUnreserve(slot);
+      return error(500);
+    }
+  }
+
   /* GET: the object must exist and cover the requested range.
    * The object data is staged into a registered MR here so the
    * READY data phase can READ straight out of it. */
@@ -341,7 +388,8 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
     }
     bool staged = false;
     table_.withSession(id, [&](V2Session& s) {
-      staged = stagePutBuffer(s, static_cast<size_t>(req.size), serverPd());
+      staged = stagePutBuffer(s, static_cast<size_t>(req.size),
+                              serverDevice()->pd);
       if (staged) {
         backend_->read(req.target, req.offset, static_cast<size_t>(req.size),
                        s.staging);
@@ -375,6 +423,34 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
   r.headers["X-Amz-Rdma-Reply"] = "200:" + std::string(88, '0');
   r.headers["X-Amz-Rdma-Session"] = id;
   r.headers["X-Amz-Rdma-Psn"] = hex24(serverPsn);
+  uint32_t exposedQpn = 0;
+  table_.withSession(id, [&](V2Session& s) {
+    exposedQpn = s.serverQpn;
+  });
+  if (exposedQpn != 0) {
+    char qpnHex[12];
+    std::snprintf(qpnHex, sizeof(qpnHex), "%x", exposedQpn);
+    r.headers["X-Amz-Rdma-Qpn"] = qpnHex;
+    /* Staging endpoint for the client's WRITE (PUT) or the READ
+     * pull confirmation (GET). */
+    uint64_t saddr = 0;
+    uint32_t srkey = 0;
+    table_.withSession(id, [&](V2Session& s) {
+      if (s.stagingMr != nullptr) {
+        saddr = reinterpret_cast<uintptr_t>(s.stagingMr->addr);
+        srkey = s.stagingMr->rkey;
+      }
+    });
+    if (saddr != 0) {
+      char addrHex[32];
+      std::snprintf(addrHex, sizeof(addrHex), "%lx",
+                    static_cast<unsigned long>(saddr));
+      char rkeyHex[12];
+      std::snprintf(rkeyHex, sizeof(rkeyHex), "%x", srkey);
+      r.headers["X-Amz-Rdma-Mr-Addr"] = addrHex;
+      r.headers["X-Amz-Rdma-Mr-Rkey"] = rkeyHex;
+    }
+  }
   return r;
 }
 
@@ -433,11 +509,37 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
     return error(409); /* expired under the lock */
   }
 
-  /* Record the client wire endpoint from the READY headers. */
+  /* Record the client wire endpoint from the READY headers and
+   * pair the session QP to the client QP (INIT was done at
+   * creation; RTR/RTS complete the handshake using the client
+   * PSN recorded at PREPARE). */
+  bool paired = true;
   table_.withSession(req.session, [&](V2Session& s) {
     s.clientMrAddr = req.mrAddr;
     s.clientMrRkey = req.mrRkey;
+    s.clientQpn = req.qpn;
+    if (s.qp != nullptr && req.qpn != 0) {
+      hipObj::DeviceHandle dh;
+      dh.ctx = s.device ? s.device->ctx : nullptr;
+      dh.pd = s.device ? s.device->pd : nullptr;
+      dh.portNum = s.device ? s.device->portNum : 1;
+      dh.gidIndex = s.device ? s.device->gidIndex : 0;
+      union ibv_gid emptyGid = {};
+      dh.localGid = s.device ? s.device->localGid : emptyGid;
+      hipObj::RcConnV2 conn;
+      conn.qp = s.qp;
+      conn.qpNum = s.serverQpn;
+      union ibv_gid peer = {};
+      paired = hipObj::v2::transitionQpToRtrV2(&dh, conn, req.qpn, 0, peer,
+                                               s.clientPsn) == 0 &&
+               hipObj::v2::transitionQpToRtsV2(conn, &dh, s.serverPsn) == 0;
+    }
   });
+  if (!paired) {
+    table_.toReaping(req.session);
+    table_.releaseIo(req.session);
+    return error(500);
+  }
 
   /* Data phase bounded by the transition deadline. The result
    * feeds FINAL directly; failures release the io reference here

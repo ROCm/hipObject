@@ -83,9 +83,10 @@ struct V2Session {
   struct ibv_qp* qp = nullptr;
   struct ibv_cq* cq = nullptr;
   DeviceHandle* device = nullptr;
-  /* Client wire endpoints from the PREPARE headers. */
+  /* Client wire endpoints from the READY headers. */
   uint64_t clientMrAddr = 0; /* client MR address (PUT dest / GET src) */
   uint32_t clientMrRkey = 0; /* client MR rkey */
+  uint32_t clientQpn = 0;    /* client QP to pair against */
   /* PUT staging (host buffer + MR owned by the session). */
   void* staging = nullptr;
   struct ibv_mr* stagingMr = nullptr;

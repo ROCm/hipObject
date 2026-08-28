@@ -219,6 +219,11 @@ std::optional<ReadyRequest> parseReadyRequest(
     out.mrRkey = static_cast<uint32_t>(
       std::strtoull(it->second.c_str(), nullptr, 16));
   }
+  it = headers.find("x-amz-rdma-qpn");
+  if (it != headers.end() && !it->second.empty()) {
+    out.qpn = static_cast<uint32_t>(
+      std::strtoull(it->second.c_str(), nullptr, 16));
+  }
 
   out.authorization = rawAuthorization(rawHeaders);
   if (out.authorization.empty()) {

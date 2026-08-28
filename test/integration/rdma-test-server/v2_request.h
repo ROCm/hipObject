@@ -44,6 +44,7 @@ struct ReadyRequest {
   uint32_t cookie = 0;
   uint64_t mrAddr = 0; /* client MR address (hex 0x...) */
   uint32_t mrRkey = 0; /* client MR rkey (hex) */
+  uint32_t qpn = 0;    /* client QP number (hex) */
   std::string authorization;
 };
 

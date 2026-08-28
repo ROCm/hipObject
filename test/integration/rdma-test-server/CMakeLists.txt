@@ -18,6 +18,7 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   ${CMAKE_SOURCE_DIR}/src/rdma/v2-clock.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/v2-random.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/v2-registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/rdma/v2-transport.cpp
   ${CMAKE_SOURCE_DIR}/src/rdma/v2-wire.cpp
   ${CMAKE_SOURCE_DIR}/src/common/hip-seam.cpp
   ${CMAKE_SOURCE_DIR}/src/common/rdma-topology.cpp

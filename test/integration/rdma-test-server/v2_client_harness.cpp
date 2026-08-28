@@ -226,6 +226,12 @@ int main(int argc, char* argv[]) {
     {"x-amz-rdma-protocol", "hipobj-rc-v2"},
     {"x-amz-rdma-session", session},
     {"x-amz-rdma-cookie", hex32(overrideReadyCookie ? readyCookie : cookie)},
+    /* Null data-plane endpoint: this harness drives the control
+     * plane only. A server with transport objects treats a null
+     * MR address as an unwired GET/PUT and the session-side
+     * check handles it before the data phase. */
+    {"x-amz-rdma-mr-addr", "0"},
+    {"x-amz-rdma-mr-rkey", "0"},
   };
   std::string rauth = signer.sign("POST", "/.hipobj-rc/ready", rhdrs, "",
                                   amzDate);

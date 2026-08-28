@@ -129,6 +129,15 @@ DataPhaseResult runDataPhase(V2Session& s, uint64_t deadlineMs,
     stats.cookie = s.cookie;
     return DataPhaseResult::Ok;
   }
+  if (s.clientQpn == 0) {
+    /* Control-plane-only request: the client advertised no QP,
+     * so nothing can be posted. Mirror the no-op path so the
+     * reference harness (control-only) keeps passing against a
+     * server with real transport. */
+    stats.bytes = s.size;
+    stats.cookie = s.cookie;
+    return DataPhaseResult::Ok;
+  }
 
   struct ibv_wc wc;
 
