@@ -9,14 +9,38 @@
 #include <cstdio>
 #include <thread>
 
+#include "../../../src/common/ibv-wrapper.h"
 #include "v2-clock.h"
 #include "v2-random.h"
 #include "v2-registry.h"
+#include "v2_data_phase.h"
 
 namespace hipObj {
 namespace v2 {
 
-namespace {} // namespace
+namespace {
+
+/* The reference server owns one RDMA device; the PD is opened
+ * lazily on the first PREPARE that needs to register memory. */
+struct ibv_pd* serverPd() {
+  static struct ibv_pd* pd = nullptr;
+  static bool tried = false;
+  if (pd == nullptr && !tried) {
+    tried = true;
+    int n = 0;
+    struct ibv_device** devs = hipObj::ibv.get_device_list(&n);
+    if (devs != nullptr && n > 0) {
+      struct ibv_context* ctx = hipObj::ibv.open_device(devs[0]);
+      if (ctx != nullptr) {
+        pd = hipObj::ibv.alloc_pd(ctx);
+      }
+      hipObj::ibv.free_device_list(devs);
+    }
+  }
+  return pd;
+}
+
+} // namespace
 
 HandlerResult error(int status) {
   HandlerResult r;
@@ -150,6 +174,7 @@ void ControlHandlers::reapSession(const std::string& id) {
     qpn = s.serverQpn;
     psn = s.serverPsn;
     published = s.published;
+    releaseStaging(s);
     /* The transport layer owns real qp/cq handles; null pointers
      * mean nothing to destroy yet and the commit erases the
      * entry. A non-null handle without a wired destroy reports
@@ -305,13 +330,29 @@ HandlerResult ControlHandlers::onPrepare(const PrepareRequest& req,
   });
 
   /* GET: the object must exist and cover the requested range.
-   * Staging into an MR happens in the transport layer; here the
-   * presence check gates session creation. */
-  if (req.op == "GET" && !backend_->has(req.target)) {
-    table_.toReaping(id);
-    table_.releaseIo(id);
-    table_.ringUnreserve(slot);
-    return error(500);
+   * The object data is staged into a registered MR here so the
+   * READY data phase can READ straight out of it. */
+  if (req.op == "GET") {
+    if (!backend_->has(req.target)) {
+      table_.toReaping(id);
+      table_.releaseIo(id);
+      table_.ringUnreserve(slot);
+      return error(500);
+    }
+    bool staged = false;
+    table_.withSession(id, [&](V2Session& s) {
+      staged = stagePutBuffer(s, static_cast<size_t>(req.size), serverPd());
+      if (staged) {
+        backend_->read(req.target, req.offset, static_cast<size_t>(req.size),
+                       s.staging);
+      }
+    });
+    if (!staged) {
+      table_.toReaping(id);
+      table_.releaseIo(id);
+      table_.ringUnreserve(slot);
+      return error(500);
+    }
   }
 
   /* Publish: response confirmed under the table lock below via
@@ -392,20 +433,37 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
     return error(409); /* expired under the lock */
   }
 
-  /* Data phase: the transport commit wires WRITE/READ posts here.
-   * For the session/handler layer, finalize the flow now - the
-   * result reflects a completed transfer. A failed transition
-   * means the session was reaped mid-flight: report failure and
-   * release the reference here (no finalizer runs for errors). */
+  /* Record the client wire endpoint from the READY headers. */
+  table_.withSession(req.session, [&](V2Session& s) {
+    s.clientMrAddr = req.mrAddr;
+    s.clientMrRkey = req.mrRkey;
+  });
+
+  /* Data phase bounded by the transition deadline. The result
+   * feeds FINAL directly; failures release the io reference here
+   * because no response finalizer will run for them. */
+  DataPhaseStats stats;
+  DataPhaseResult dpr;
+  uint64_t deadline = 0;
+  table_.withSession(req.session, [&](V2Session& s) {
+    deadline = s.clientDeadlineAt;
+  });
+  dpr = DataPhaseResult::WireFail;
+  table_.withSession(req.session, [&](V2Session& s) {
+    dpr = runDataPhase(s, deadline, stats);
+  });
+  if (dpr != DataPhaseResult::Ok) {
+    table_.toReaping(req.session);
+    table_.releaseIo(req.session);
+    return dpr == DataPhaseResult::Timeout ? error(408) : error(500);
+  }
+
   if (!table_.beginCompleting(req.session)) {
     table_.releaseIo(req.session);
     return error(500);
   }
 
-  uint64_t bytes = 0;
-  table_.withSession(req.session, [&](V2Session& s) {
-    bytes = s.size;
-  });
+  uint64_t bytes = stats.bytes;
 
   HandlerResult r;
   r.status = 200;

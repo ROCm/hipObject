@@ -42,6 +42,8 @@ struct ReadyRequest {
   std::string protocol;
   std::string session; /* 32-hex session id */
   uint32_t cookie = 0;
+  uint64_t mrAddr = 0; /* client MR address (hex 0x...) */
+  uint32_t mrRkey = 0; /* client MR rkey (hex) */
   std::string authorization;
 };
 

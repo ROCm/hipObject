@@ -207,6 +207,19 @@ std::optional<ReadyRequest> parseReadyRequest(
   parseU32Hex(it->second, cookie);
   out.cookie = cookie;
 
+  /* Client MR endpoint for the data phase. Optional on a GET that
+   * the server stages itself, required for PUT delivery and the
+   * GET READ pull. Parsed as bare hex without a 0x prefix. */
+  it = headers.find("x-amz-rdma-mr-addr");
+  if (it != headers.end() && !it->second.empty()) {
+    out.mrAddr = std::strtoull(it->second.c_str(), nullptr, 16);
+  }
+  it = headers.find("x-amz-rdma-mr-rkey");
+  if (it != headers.end() && !it->second.empty()) {
+    out.mrRkey = static_cast<uint32_t>(
+      std::strtoull(it->second.c_str(), nullptr, 16));
+  }
+
   out.authorization = rawAuthorization(rawHeaders);
   if (out.authorization.empty()) {
     return std::nullopt;

@@ -8,6 +8,7 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   rdma_server.cpp
   v2_request.cpp
   v2_session.cpp
+  v2_data_phase.cpp
   v2_sigv4.cpp
   v2_backend.cpp
   v2_handlers.cpp
