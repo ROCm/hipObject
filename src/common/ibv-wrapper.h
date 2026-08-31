@@ -13,6 +13,36 @@
 
 namespace hipObj {
 
+/* ibverbs function table. Public so the unit-test accessor can name
+ * the type; production code goes through the wrapper methods and
+ * never touches it directly. */
+struct IbvFuncs {
+  struct ibv_device** (*get_device_list)(int*);
+  void (*free_device_list)(struct ibv_device**);
+  struct ibv_context* (*open_device)(struct ibv_device*);
+  int (*close_device)(struct ibv_context*);
+  const char* (*get_device_name)(struct ibv_device*);
+  int (*query_device)(struct ibv_context*, struct ibv_device_attr*);
+  int (*query_port)(struct ibv_context*, uint8_t, struct ibv_port_attr*);
+  int (*query_gid)(struct ibv_context*, uint8_t, int, union ibv_gid*);
+  struct ibv_pd* (*alloc_pd)(struct ibv_context*);
+  int (*dealloc_pd)(struct ibv_pd*);
+  struct ibv_mr* (*reg_mr)(struct ibv_pd*, void*, size_t, int);
+  struct ibv_mr* (*reg_dmabuf_mr)(struct ibv_pd*, uint64_t, size_t, uint64_t,
+                                  int, int);
+  struct ibv_mr* (*reg_mr_iova2)(struct ibv_pd*, void*, size_t, uintptr_t, int);
+  int (*dereg_mr)(struct ibv_mr*);
+  struct ibv_cq* (*create_cq)(struct ibv_context*, int, void*,
+                              struct ibv_comp_channel*, int);
+  int (*destroy_cq)(struct ibv_cq*);
+  struct ibv_qp* (*create_qp)(struct ibv_pd*, struct ibv_qp_init_attr*);
+  int (*modify_qp)(struct ibv_qp*, struct ibv_qp_attr*, int);
+  int (*destroy_qp)(struct ibv_qp*);
+  int (*poll_cq)(struct ibv_cq*, int, struct ibv_wc*);
+  int (*post_send)(struct ibv_qp*, struct ibv_send_wr*, struct ibv_send_wr**);
+  int (*post_recv)(struct ibv_qp*, struct ibv_recv_wr*, struct ibv_recv_wr**);
+};
+
 class IBVWrapper {
 public:
   IBVWrapper();
@@ -57,39 +87,23 @@ private:
   void init_dmabuf_support_flag();
   int init_function_table();
 
-  struct IbvFuncs {
-    struct ibv_device** (*get_device_list)(int*);
-    void (*free_device_list)(struct ibv_device**);
-    struct ibv_context* (*open_device)(struct ibv_device*);
-    int (*close_device)(struct ibv_context*);
-    const char* (*get_device_name)(struct ibv_device*);
-    int (*query_device)(struct ibv_context*, struct ibv_device_attr*);
-    int (*query_port)(struct ibv_context*, uint8_t, struct ibv_port_attr*);
-    int (*query_gid)(struct ibv_context*, uint8_t, int, union ibv_gid*);
-    struct ibv_pd* (*alloc_pd)(struct ibv_context*);
-    int (*dealloc_pd)(struct ibv_pd*);
-    struct ibv_mr* (*reg_mr)(struct ibv_pd*, void*, size_t, int);
-    struct ibv_mr* (*reg_dmabuf_mr)(struct ibv_pd*, uint64_t, size_t, uint64_t,
-                                    int, int);
-    struct ibv_mr* (*reg_mr_iova2)(struct ibv_pd*, void*, size_t, uintptr_t,
-                                   int);
-    int (*dereg_mr)(struct ibv_mr*);
-    struct ibv_cq* (*create_cq)(struct ibv_context*, int, void*,
-                                struct ibv_comp_channel*, int);
-    int (*destroy_cq)(struct ibv_cq*);
-    struct ibv_qp* (*create_qp)(struct ibv_pd*, struct ibv_qp_init_attr*);
-    int (*modify_qp)(struct ibv_qp*, struct ibv_qp_attr*, int);
-    int (*destroy_qp)(struct ibv_qp*);
-    int (*poll_cq)(struct ibv_cq*, int, struct ibv_wc*);
-    int (*post_send)(struct ibv_qp*, struct ibv_send_wr*, struct ibv_send_wr**);
-    int (*post_recv)(struct ibv_qp*, struct ibv_recv_wr*, struct ibv_recv_wr**);
-  };
-
   void* ibv_handle_ = nullptr;
   IbvFuncs funcs_ = {};
   int dmabuf_enabled_ = 1;
   int dmabuf_is_supported_ = 0;
   std::map<uintptr_t, int> dmabuf_fd_map_;
+
+#ifdef HIPOBJ_UNIT_TESTS
+public:
+  /* Test accessor for the internal function table. Compiled out of
+   * the shipped library because the macro is only set for the
+   * unit-test object build (see test/unit/CMakeLists.txt). */
+  IbvFuncs& funcsForTest() {
+    return funcs_;
+  }
+
+private:
+#endif
 };
 
 extern IBVWrapper ibv;

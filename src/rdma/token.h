@@ -11,7 +11,12 @@
 #include <cstdint>
 #include <string>
 
+/* Consumers that already include the real verbs.h (test clients
+ * linking libibverbs) get the ibv types from there; the shipped
+ * library uses the vendored core definitions. */
+#if !defined(HIPOBJ_REAL_VERBS)
 #include "ibv-core.h"
+#endif
 
 namespace hipObj {
 

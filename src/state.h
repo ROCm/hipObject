@@ -22,6 +22,14 @@ struct DriverState {
   uint32_t flags = 0;
 };
 
+/* Returns the library's driver state. Tests can install a substitute
+ * (setStateForTest) to observe or reset the global without touching
+ * the real singleton. */
 DriverState& getState();
+
+/* Installs a state override and returns the previously installed one
+ * (nullptr when the real singleton was active). Passing nullptr
+ * restores the singleton. Unit tests only; production never calls it. */
+DriverState* setStateForTest(DriverState* state);
 
 } // namespace hipObj

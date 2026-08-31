@@ -8,17 +8,22 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
 #include "buffer.h"
 #include "control.h"
+#include "hip-seam.h"
 #include "hipobj-private.h"
 #include "ibv-wrapper.h"
 #include "rdma-topology.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
+#include "v2-registry.h"
+#include "v2-transport.h"
 
 namespace hipObj {
 
@@ -72,7 +77,7 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen) {
   if (pollCompletion(g_conn, -1, 5000) != 0) {
     return -1;
   }
-  hipError_t err = hipDeviceSynchronize();
+  hipError_t err = hipObj::hipOps().hipDeviceSynchronize();
   return (err == hipSuccess) ? 0 : -1;
 }
 
@@ -131,6 +136,10 @@ const char* hipObjGetErrorString(hipObjOpError_t err) {
         return "Size too large";
       case hipObjInternalError:
         return "Internal error";
+      case hipObjNotSupported:
+        return "hipobj-rc-v2 not supported by server";
+      case hipObjBusy:
+        return "Server busy (backpressure)";
       default:
         return "Unknown error";
     }
@@ -152,7 +161,7 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   }
   int gpuDevice = config->gpuDevice;
   if (gpuDevice < 0) {
-    hipError_t err = hipGetDevice(&gpuDevice);
+    hipError_t err = hipObj::hipOps().hipGetDevice(&gpuDevice);
     if (err != hipSuccess) {
       return {hipObjRdmaError, static_cast<int>(err)};
     }
@@ -196,6 +205,25 @@ hipObjError_t hipObjShutdown(void) try {
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
     return HIPOBJ_SUCCESS;
+  }
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  /* v2 first: release every connection (destroy retries included);
+   * leftover poison must stop the teardown so the failure is
+   * visible instead of violating the PD/context lifetime rule. */
+  bool poisonLeft = false;
+  hipObj::v2::ConnectionRegistry& reg = hipObj::v2::registry();
+  std::vector<hipObj::v2::ConnId> ids;
+  reg.forEachId([&ids](hipObj::v2::ConnId id) {
+    ids.push_back(id);
+  });
+  for (auto id : ids) {
+    int rc = hipObj::v2::releaseConnection(id);
+    if (rc == hipObj::v2::kReleaseLeftover) {
+      poisonLeft = true;
+    }
+  }
+  if (poisonLeft || reg.size() > 0) {
+    return {hipObjRdmaError, 0};
   }
   hipObj::g_bufferMap.deregisterAll();
   hipObj::closeRdmaDevice(hipObj::g_conn);

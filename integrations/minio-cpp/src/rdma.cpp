@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <hipobj.h>
 #include <miniocpp/http.h>
@@ -42,6 +43,251 @@ std::string clientNicFromToken(const char* token) {
     return {};
   }
   return std::string(nicIp);
+}
+
+// ---------------------------------------------------------------------------
+// v2 callback context — carries the per-transfer minio credentials and
+// endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
+// ---------------------------------------------------------------------------
+
+struct V2CallbackCtx {
+  S3RdmaContext* sctx;
+  std::string clientNic; // NIC hint derived from the client token
+};
+
+minio::http::Response executeV2Request(
+  S3RdmaContext* sctx, minio::http::Method method, const std::string& nic,
+  minio::utils::Multimap& extra_headers, const std::string& bucket,
+  const std::string& key, const std::string& query_str) {
+  minio::utils::UtcTime date = minio::utils::UtcTime::Now();
+  minio::creds::Credentials creds = sctx->provider->Fetch();
+  minio::utils::Multimap query_params;
+  minio::http::Url url;
+  const std::string& region = sctx->region;
+
+  if (minio::error::Error err = sctx->url.BuildUrl(url, method, region,
+                                                   query_params, bucket, key)) {
+    minio::http::Response bad;
+    bad.status_code = -1;
+    return bad;
+  }
+
+  if (!query_str.empty()) {
+    url.query_string = query_str;
+  }
+
+  std::string host = url.HostHeaderValue();
+  minio::utils::Multimap sign_headers;
+  sign_headers.Add("Host", host);
+  sign_headers.Add("x-amz-date", date.ToAmzDate());
+  sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
+  sign_headers.Add("Content-Length", "0");
+
+  for (const auto& [k, vals] : extra_headers.map) {
+    for (const auto& v : vals) {
+      sign_headers.Add(k, v);
+    }
+  }
+
+  if (!creds.session_token.empty()) {
+    sign_headers.Add("X-Amz-Security-Token", creds.session_token);
+  }
+
+  minio::signer::SignV4S3(method, url.path, region, sign_headers, query_params,
+                          creds.access_key, creds.secret_key, kUnsignedPayload,
+                          date);
+
+  if (!query_str.empty()) {
+    url.query_string = query_str;
+  } else {
+    url.query_string = query_params.ToQueryString();
+  }
+
+  minio::http::Request req(method, url);
+  req.headers = sign_headers;
+  req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
+  req.timeout_secs = kRdmaTimeoutSecs;
+
+  if (!nic.empty()) {
+    req.nic_interface = nic;
+  }
+
+  return req.Execute();
+}
+
+// hipObjOpsV2_t callbacks -------------------------------------------------
+
+int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
+                  hipObjPrepareReplyV2_t* out) {
+  auto* c = static_cast<V2CallbackCtx*>(ctx);
+  const bool isPut = (req->method && req->method[0] == 'P');
+  minio::http::Method method = isPut ? minio::http::Method::kPut
+                                     : minio::http::Method::kGet;
+
+  minio::utils::Multimap extra;
+  extra.Add(kAmzRdmaToken, req->token ? req->token : "");
+  extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+
+  std::string query = req->query ? req->query : "";
+  minio::http::Response res = executeV2Request(c->sctx, method, c->clientNic,
+                                               extra,
+                                               req->bucket ? req->bucket : "",
+                                               req->key ? req->key : "", query);
+
+  if (!res.error.empty() || res.status_code <= 0) {
+    return -1;
+  }
+
+  std::memset(out, 0, sizeof(*out));
+  out->httpStatus = res.status_code;
+  out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
+  out->unsupportedMarker = (res.status_code == kRdmaReplyNotImplemented) ? 1
+                                                                         : 0;
+
+  std::string srv_token = res.headers.GetFront(kAmzRdmaToken);
+  if (!srv_token.empty()) {
+    std::snprintf(out->serverToken, sizeof(out->serverToken), "%s",
+                  srv_token.c_str());
+  }
+  std::string session = res.headers.GetFront(kAmzRdmaSession);
+  if (!session.empty()) {
+    std::snprintf(out->session, sizeof(out->session), "%s", session.c_str());
+  }
+  return 0;
+}
+
+int v2SendReady(void* ctx, const hipObjTransferReqV2_t* req,
+                hipObjFinalReplyV2_t* out) {
+  auto* c = static_cast<V2CallbackCtx*>(ctx);
+  const bool isPut = (req->method && req->method[0] == 'P');
+  minio::http::Method method = isPut ? minio::http::Method::kPut
+                                     : minio::http::Method::kGet;
+
+  minio::utils::Multimap extra;
+  extra.Add(kAmzRdmaSession, req->session ? req->session : "");
+  extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+
+  std::string query = req->query ? req->query : "";
+  minio::http::Response res = executeV2Request(c->sctx, method, c->clientNic,
+                                               extra,
+                                               req->bucket ? req->bucket : "",
+                                               req->key ? req->key : "", query);
+
+  if (!res.error.empty() || res.status_code <= 0) {
+    return -1;
+  }
+
+  std::memset(out, 0, sizeof(*out));
+  out->httpStatus = res.status_code;
+  out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
+
+  std::string bytes_hdr = res.headers.GetFront(kAmzRdmaBytesTransferred);
+  if (!bytes_hdr.empty()) {
+    try {
+      long long n = std::stoll(bytes_hdr);
+      out->bytes = (n >= 0) ? static_cast<uint64_t>(n) : 0;
+    } catch (const std::exception&) {
+    }
+  }
+
+  std::string etag = res.headers.GetFront("etag");
+  if (!etag.empty()) {
+    std::string trimmed = minio::utils::Trim(etag, '"');
+    std::snprintf(out->etag, sizeof(out->etag), "%s", trimmed.c_str());
+  }
+
+  std::string csum = res.headers.GetFront("x-amz-checksum-crc64nvme");
+  if (!csum.empty()) {
+    std::snprintf(out->checksumB64, sizeof(out->checksumB64), "%s",
+                  csum.c_str());
+    c->sctx->checksum = csum;
+  }
+
+  if (!etag.empty()) {
+    c->sctx->etag = minio::utils::Trim(etag, '"');
+  }
+
+  return 0;
+}
+
+int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
+  auto* c = static_cast<V2CallbackCtx*>(ctx);
+  const bool isPut = (req->method && req->method[0] == 'P');
+  minio::http::Method method = isPut ? minio::http::Method::kPut
+                                     : minio::http::Method::kGet;
+
+  minio::utils::Multimap extra;
+  extra.Add(kAmzRdmaSession, req->session ? req->session : "");
+  extra.Add(kAmzRdmaCancel, "1");
+
+  std::string query = req->query ? req->query : "";
+  executeV2Request(c->sctx, method, c->clientNic, extra,
+                   req->bucket ? req->bucket : "", req->key ? req->key : "",
+                   query);
+  return 0;
+}
+
+// v2 entry points ---------------------------------------------------------
+
+ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
+  char* token = nullptr;
+  hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT,
+                                          &token);
+  if (terr.opError != hipObjSuccess || !token) {
+    return -1;
+  }
+
+  V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
+  hipObjOpsV2_t ops{};
+  ops.sendPrepare = v2SendPrepare;
+  ops.sendReady = v2SendReady;
+  ops.sendCancel = v2SendCancel;
+
+  std::string query;
+  if (!sctx->uploadId.empty()) {
+    if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
+      hipObjPutRdmaToken(token);
+      return -1;
+    }
+    query = "uploadId=" + sctx->uploadId +
+            "&partNumber=" + std::to_string(sctx->partNumber);
+  }
+
+  hipObjError_t err = hipObjPutV2(sctx->bucket.c_str(), sctx->object.c_str(),
+                                  buf, static_cast<uint64_t>(size), 0,
+                                  query.empty() ? nullptr : query.c_str(), &ops,
+                                  &cbctx);
+  hipObjPutRdmaToken(token);
+
+  if (err.opError == hipObjNotSupported) {
+    return kRdmaNotSupported;
+  }
+  return (err.opError == hipObjSuccess) ? static_cast<ssize_t>(size) : -1;
+}
+
+ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
+  char* token = nullptr;
+  hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET,
+                                          &token);
+  if (terr.opError != hipObjSuccess || !token) {
+    return -1;
+  }
+
+  V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
+  hipObjOpsV2_t ops{};
+  ops.sendPrepare = v2SendPrepare;
+  ops.sendReady = v2SendReady;
+  ops.sendCancel = v2SendCancel;
+
+  hipObjError_t err = hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(),
+                                  buf, static_cast<uint64_t>(size), 0, nullptr,
+                                  &ops, &cbctx);
+  hipObjPutRdmaToken(token);
+
+  if (err.opError == hipObjNotSupported) {
+    return kRdmaNotSupported;
+  }
+  return (err.opError == hipObjSuccess) ? static_cast<ssize_t>(size) : -1;
 }
 
 } // namespace
@@ -211,7 +457,14 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
 }
 
 ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
-  ssize_t ret = -1;
+  // Try the v2 protocol first; fall back to v1 only when the server
+  // explicitly signals it does not support hipobj-rc-v2.
+  ssize_t ret = rdmaPutV2(ctx, buf, size);
+  if (ret != kRdmaNotSupported) {
+    return ret;
+  }
+
+  ret = -1;
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
     hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT,
@@ -229,7 +482,12 @@ ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
-  ssize_t ret = -1;
+  ssize_t ret = rdmaGetV2(ctx, buf, size);
+  if (ret != kRdmaNotSupported) {
+    return ret;
+  }
+
+  ret = -1;
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
     hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET,

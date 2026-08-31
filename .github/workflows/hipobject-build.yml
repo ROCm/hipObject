@@ -37,7 +37,8 @@ jobs:
             git \
             libcurl4-openssl-dev \
             libibverbs-dev \
-            libnuma-dev
+            libnuma-dev \
+            libssl-dev
 
       - name: Configure
         run: |

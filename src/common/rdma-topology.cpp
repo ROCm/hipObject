@@ -22,19 +22,14 @@
 
 #include <unistd.h>
 
+#include "hip-seam.h"
 #include "ibv-wrapper.h"
+#include "nic-seam.h"
 #include "rdma-numa-wrapper.h"
 
 namespace hipObj {
 
 namespace {
-
-struct IbvDeviceInfo {
-  std::string dev_name;
-  std::string pcie_bus_id;
-  int numa_node = -1;
-  int port_num = 1;
-};
 
 bool IsConfiguredGid(const uint8_t gid[16]) {
   for (int i = 0; i < 16; ++i) {
@@ -131,98 +126,120 @@ int GetBusIdDistance(const std::string& bus_a, const std::string& bus_b) {
   return static_cast<int>(a.size() - i) + static_cast<int>(b.size() - i);
 }
 
-std::vector<IbvDeviceInfo> GetIbvDeviceList(const char* hca_list) {
-  std::vector<IbvDeviceInfo> result;
-  int num_devs = 0;
-  ibv_device** dev_list = ibv.get_device_list(&num_devs);
-  if (!dev_list || num_devs <= 0)
-    return result;
+// Production NIC enumerator: ibverbs device list filtered by the
+// optional HCA list, with PCIe bus id and NUMA node read from sysfs.
+class SysfsNicEnumerator : public NicEnumerator {
+public:
+  std::vector<NicInfo> Enumerate(const char* hca_list) override {
+    std::vector<NicInfo> result;
+    int num_devs = 0;
+    ibv_device** dev_list = ibv.get_device_list(&num_devs);
+    if (!dev_list || num_devs <= 0)
+      return result;
 
-  for (int i = 0; i < num_devs && dev_list[i]; ++i) {
-    ibv_device* dev = dev_list[i];
-    const char* dev_name = ibv.get_device_name(dev);
-    if (!dev_name)
-      continue;
-    if (hca_list && *hca_list) {
-      bool match = false;
-      std::istringstream iss(hca_list);
-      std::string hca;
-      while (std::getline(iss, hca, ',')) {
-        size_t pos = hca.find_first_not_of(" \t");
-        if (pos != std::string::npos)
-          hca = hca.substr(pos);
-        if (hca == dev_name) {
-          match = true;
-          break;
+    for (int i = 0; i < num_devs && dev_list[i]; ++i) {
+      ibv_device* dev = dev_list[i];
+      const char* dev_name = ibv.get_device_name(dev);
+      if (!dev_name)
+        continue;
+      if (hca_list && *hca_list) {
+        bool match = false;
+        std::istringstream iss(hca_list);
+        std::string hca;
+        while (std::getline(iss, hca, ',')) {
+          size_t pos = hca.find_first_not_of(" \t");
+          if (pos != std::string::npos)
+            hca = hca.substr(pos);
+          if (hca == dev_name) {
+            match = true;
+            break;
+          }
         }
+        if (!match)
+          continue;
       }
-      if (!match)
+
+      ibv_context* ctx = ibv.open_device(dev);
+      if (!ctx)
         continue;
-    }
 
-    ibv_context* ctx = ibv.open_device(dev);
-    if (!ctx)
-      continue;
+      ibv_device_attr attr;
+      if (ibv.query_device(ctx, &attr) != 0) {
+        ibv.close_device(ctx);
+        continue;
+      }
 
-    ibv_device_attr attr;
-    if (ibv.query_device(ctx, &attr) != 0) {
+      for (uint8_t p = 1; p <= attr.phys_port_cnt; ++p) {
+        ibv_port_attr port_attr;
+        if (ibv.query_port(ctx, p, &port_attr) != 0)
+          continue;
+        if (port_attr.state != IBV_PORT_ACTIVE &&
+            port_attr.state != IBV_PORT_ACTIVE_DEFER)
+          continue;
+
+        NicInfo info;
+        info.dev_name = dev_name;
+        info.port_num = static_cast<int>(p);
+
+        std::string device_path = "/sys/class/infiniband/";
+        device_path += dev_name;
+        device_path += "/device";
+        char resolved[PATH_MAX];
+        if (realpath(device_path.c_str(), resolved)) {
+          std::string r(resolved);
+          size_t slash = r.rfind('/');
+          if (slash != std::string::npos)
+            info.pcie_bus_id = r.substr(slash + 1);
+        }
+
+        std::string numa_path = device_path;
+        numa_path += "/numa_node";
+        std::ifstream numa_file(numa_path);
+        if (numa_file) {
+          numa_file >> info.numa_node;
+          if (info.numa_node < 0)
+            info.numa_node = 0;
+        }
+
+        result.push_back(info);
+        break;
+      }
       ibv.close_device(ctx);
-      continue;
     }
-
-    for (uint8_t p = 1; p <= attr.phys_port_cnt; ++p) {
-      ibv_port_attr port_attr;
-      if (ibv.query_port(ctx, p, &port_attr) != 0)
-        continue;
-      if (port_attr.state != IBV_PORT_ACTIVE &&
-          port_attr.state != IBV_PORT_ACTIVE_DEFER)
-        continue;
-
-      IbvDeviceInfo info;
-      info.dev_name = dev_name;
-      info.port_num = static_cast<int>(p);
-
-      std::string device_path = "/sys/class/infiniband/";
-      device_path += dev_name;
-      device_path += "/device";
-      char resolved[PATH_MAX];
-      if (realpath(device_path.c_str(), resolved)) {
-        std::string r(resolved);
-        size_t slash = r.rfind('/');
-        if (slash != std::string::npos)
-          info.pcie_bus_id = r.substr(slash + 1);
-      }
-
-      std::string numa_path = device_path;
-      numa_path += "/numa_node";
-      std::ifstream numa_file(numa_path);
-      if (numa_file) {
-        numa_file >> info.numa_node;
-        if (info.numa_node < 0)
-          info.numa_node = 0;
-      }
-
-      result.push_back(info);
-      break;
-    }
-    ibv.close_device(ctx);
+    ibv.free_device_list(dev_list);
+    return result;
   }
-  ibv.free_device_list(dev_list);
-  return result;
-}
+};
 
 } // namespace
+
+// Override installed by tests via setNicEnumerator(); null means the
+// production sysfs walker is active. The library has a single global
+// topology and no threads install overrides (tests do, single-threaded).
+static NicEnumerator* g_nic_override = nullptr;
+
+NicEnumerator& nicEnumerator() {
+  static SysfsNicEnumerator default_enumerator;
+  return g_nic_override ? *g_nic_override : default_enumerator;
+}
+
+NicEnumerator* setNicEnumerator(NicEnumerator* enumerator) {
+  NicEnumerator* previous = g_nic_override;
+  g_nic_override = enumerator;
+  return previous;
+}
 
 int GetClosestNicToGpu(int gpuIndex, const char* hca_list,
                        const char** dev_name) {
   char gpu_bus_id[32];
-  hipError_t err = hipDeviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id),
-                                        gpuIndex);
+  hipError_t err = hipObj::hipOps().hipDeviceGetPCIBusId(gpu_bus_id,
+                                                         sizeof(gpu_bus_id),
+                                                         gpuIndex);
   if (err != hipSuccess)
     return -1;
 
   std::string gpu_bus(gpu_bus_id);
-  auto devices = GetIbvDeviceList(hca_list);
+  auto devices = nicEnumerator().Enumerate(hca_list);
   if (devices.empty())
     return -1;
 
