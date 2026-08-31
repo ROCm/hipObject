@@ -85,7 +85,8 @@ int hipObjS3CurlSendRequest(void* ctx, const char* token, size_t tokenLen) {
   }
 
   const bool isReady = (tokenLen >= kSessionPrefixLen &&
-                        std::memcmp(token, kSessionPrefix, kSessionPrefixLen) == 0);
+                        std::memcmp(token, kSessionPrefix, kSessionPrefixLen) ==
+                          0);
 
   CURL* curl = curl_easy_init();
   if (!curl) {
@@ -101,8 +102,8 @@ int hipObjS3CurlSendRequest(void* ctx, const char* token, size_t tokenLen) {
     size_t sessionLen = tokenLen - kSessionPrefixLen;
     char sessionHeader[256];
     std::snprintf(sessionHeader, sizeof(sessionHeader),
-                  "x-amz-rdma-session: %.*s",
-                  static_cast<int>(sessionLen), sessionId);
+                  "x-amz-rdma-session: %.*s", static_cast<int>(sessionLen),
+                  sessionId);
     headers = curl_slist_append(headers, sessionHeader);
   } else {
     // PREPARE phase: send RDMA token in x-amz-rdma-token.
@@ -144,8 +145,8 @@ int hipObjS3CurlSendRequest(void* ctx, const char* token, size_t tokenLen) {
     // PREPARE: the server must echo an x-amz-rdma-reply carrying the server
     // token + session ID. A missing header means RDMA was not offloaded.
     if (cfg->lastReply[0] == '\0') {
-      std::fprintf(stderr,
-                   "hipObjS3CurlSendRequest: missing x-amz-rdma-reply header\n");
+      std::fprintf(
+        stderr, "hipObjS3CurlSendRequest: missing x-amz-rdma-reply header\n");
       return -1;
     }
   } else {

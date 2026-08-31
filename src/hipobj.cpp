@@ -101,7 +101,7 @@ static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
   // pending transfer. If the server sent no session ID (v1 fallback), use a
   // fixed sentinel so the READY request is still well-formed.
   const std::string& readyPayload = sessionId.empty() ? std::string("ready")
-                                                       : sessionId;
+                                                      : sessionId;
   int finalStatus = 0;
   if (sendRdmaReady(ops, ctx, readyPayload, finalStatus) != 0 ||
       finalStatus != 0) {
@@ -112,7 +112,8 @@ static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
   hipError_t err = hipDeviceSynchronize();
   // Recycle the QP so subsequent transfers start from INIT (fixes defect 2).
   resetQp(g_conn, 256, 128, 128);
-  return (err == hipSuccess) ? HIPOBJ_SUCCESS : hipObjError_t{hipObjRdmaError, 0};
+  return (err == hipSuccess) ? HIPOBJ_SUCCESS
+                             : hipObjError_t{hipObjRdmaError, 0};
 }
 
 } // namespace hipObj
@@ -388,7 +389,10 @@ hipObjError_t hipObjConnectRdmaPeer(const char* reply, size_t replyLen,
   if (hipObj::connectRcPeer(hipObj::g_conn, peerToken) != 0) {
     return {hipObjRdmaError, 0};
   }
-  std::snprintf(sessionIdBuf, sessionIdBufLen, "%s", sessionId.c_str());
+  int n = std::snprintf(sessionIdBuf, sessionIdBufLen, "%s", sessionId.c_str());
+  if (n < 0 || static_cast<size_t>(n) >= sessionIdBufLen) {
+    return {hipObjInvalidValue, 0};
+  }
   return HIPOBJ_SUCCESS;
 } catch (...) {
   return hipObj::handleException();

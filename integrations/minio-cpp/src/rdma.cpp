@@ -44,19 +44,21 @@ std::string clientNicFromToken(const char* token) {
   return std::string(nicIp);
 }
 
-// Issue the READY request carrying the session ID.  Returns the FINAL HTTP
-// status code on success, -1 on transport error.
-int sendReadyRequest(S3RdmaContext* sctx, const std::string& sessionId,
-                     minio::http::Method method) {
+// Issue the READY request carrying the session ID.  Returns the FINAL response
+// so callers can read reply headers (e.g. x-amz-rdma-bytes-transferred).
+// On transport error, returns a response with status_code == -1.
+minio::http::Response sendReadyRequest(S3RdmaContext* sctx,
+                                       const std::string& sessionId,
+                                       minio::http::Method method) {
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
   minio::creds::Credentials creds = sctx->provider->Fetch();
   minio::utils::Multimap query_params;
   minio::http::Url url;
   const std::string& region = sctx->region;
 
-  if (minio::error::Error err =
-        sctx->url.BuildUrl(url, method, region, query_params, sctx->bucket,
-                           sctx->object)) {
+  if (minio::error::Error err = sctx->url.BuildUrl(url, method, region,
+                                                   query_params, sctx->bucket,
+                                                   sctx->object)) {
     return -1;
   }
 
@@ -84,9 +86,9 @@ int sendReadyRequest(S3RdmaContext* sctx, const std::string& sessionId,
 
   minio::http::Response res = req.Execute();
   if (!res.error.empty()) {
-    return -1;
+    res.status_code = -1;
   }
-  return res.status_code;
+  return res;
 }
 
 } // namespace
@@ -178,8 +180,8 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
   // defect 4: QP was never connected, so the server's RDMA op couldn't land).
   char sessionIdBuf[64] = {};
   hipObjError_t herr = hipObjConnectRdmaPeer(prepare_reply.c_str(),
-                                             prepare_reply.size(),
-                                             sessionIdBuf, sizeof(sessionIdBuf));
+                                             prepare_reply.size(), sessionIdBuf,
+                                             sizeof(sessionIdBuf));
   if (herr.opError != hipObjSuccess) {
     return -1;
   }
@@ -193,8 +195,9 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
   }
 
   // --- READY phase: signal the server to post the RDMA READ ---
-  int final_code = sendReadyRequest(sctx, sessionId, minio::http::Method::kPut);
-  if (final_code < 200 || final_code >= 300) {
+  minio::http::Response ready_res = sendReadyRequest(sctx, sessionId,
+                                                     minio::http::Method::kPut);
+  if (ready_res.status_code < 200 || ready_res.status_code >= 300) {
     hipObjResetRdmaQp();
     return -1;
   }
@@ -272,8 +275,8 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
 
   char sessionIdBuf[64] = {};
   hipObjError_t herr = hipObjConnectRdmaPeer(prepare_reply.c_str(),
-                                             prepare_reply.size(),
-                                             sessionIdBuf, sizeof(sessionIdBuf));
+                                             prepare_reply.size(), sessionIdBuf,
+                                             sizeof(sessionIdBuf));
   if (herr.opError != hipObjSuccess) {
     return -1;
   }
@@ -287,13 +290,15 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
   }
 
   // --- READY phase: signal the server to post the RDMA WRITE ---
-  int final_code = sendReadyRequest(sctx, sessionId, minio::http::Method::kGet);
-  if (final_code < 200 || final_code >= 300) {
+  minio::http::Response ready_res = sendReadyRequest(sctx, sessionId,
+                                                     minio::http::Method::kGet);
+  if (ready_res.status_code < 200 || ready_res.status_code >= 300) {
     hipObjResetRdmaQp();
     return -1;
   }
 
-  std::string bytes_hdr = res.headers.GetFront(kAmzRdmaBytesTransferred);
+  // bytes-transferred is reported on the READY response, not the PREPARE.
+  std::string bytes_hdr = ready_res.headers.GetFront(kAmzRdmaBytesTransferred);
   hipObjResetRdmaQp();
   if (!bytes_hdr.empty()) {
     try {

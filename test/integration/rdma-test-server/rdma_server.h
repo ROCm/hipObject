@@ -27,8 +27,7 @@ public:
   // encodes the server token so the client can complete the QP handshake.
   int prepareWriteToClient(const std::string& tokenHeader,
                            const std::vector<uint8_t>& data,
-                           std::string& replyHeader,
-                           std::string& sessionId);
+                           std::string& replyHeader, std::string& sessionId);
   int prepareReadFromClient(const std::string& tokenHeader, size_t size,
                             std::string& replyHeader, std::string& sessionId);
 

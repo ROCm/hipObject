@@ -237,8 +237,7 @@ int RdmaTestServer::prepareWriteToClient(const std::string& tokenHeader,
 }
 
 int RdmaTestServer::prepareReadFromClient(const std::string& tokenHeader,
-                                          size_t size,
-                                          std::string& replyHeader,
+                                          size_t size, std::string& replyHeader,
                                           std::string& sessionId) {
   if (!isReady()) {
     return -1;

@@ -250,7 +250,8 @@ bool parsePrepareReply(const char* reply, size_t replyLen, RdmaToken& peerToken,
                      reply[len - 1] == '\r')) {
     --len;
   }
-  const char* firstColon = static_cast<const char*>(std::memchr(reply, ':', len));
+  const char* firstColon = static_cast<const char*>(
+    std::memchr(reply, ':', len));
   if (!firstColon) {
     return false;
   }
