@@ -144,12 +144,10 @@ int createRcConnV2(DeviceHandle* dh, RcConnV2& conn, bool* rollbackFailed) {
   if (rollbackFailed) {
     *rollbackFailed = false;
   }
-  bool sawCq = false;
   conn.cq = ibv.create_cq(dh->ctx, kCqSize, nullptr, nullptr, 0);
   if (!conn.cq) {
     return -1;
   }
-  sawCq = true;
   struct ibv_qp_init_attr init;
   std::memset(&init, 0, sizeof(init));
   init.qp_type = IBV_QPT_RC;

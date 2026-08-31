@@ -135,15 +135,6 @@ int fakeQueryGid(struct ibv_context*, uint8_t, int, union ibv_gid* g) {
   return 0;
 }
 
-/* Counts references the fake device handle accumulated; the
- * DeviceHandle lives inside the server's static serverDevice(). */
-unsigned fakeDeviceRefs() {
-  /* The reference counter is atomic inside DeviceHandle; reach it
-   * through the server accessor once a PREPARE initialized it. */
-  return 0; /* replaced below by direct capture */
-}
-
-hipObj::DeviceHandle* g_devSeen = nullptr;
 
 /* Verifier stub: every request passes with an all-headers signed
  * list so the fault test reaches the transport path. */

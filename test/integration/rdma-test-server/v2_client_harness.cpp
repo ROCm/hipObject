@@ -135,11 +135,6 @@ std::string hex32(uint32_t v) {
   return buf;
 }
 
-std::string hex24(uint32_t v) {
-  char buf[16];
-  std::snprintf(buf, sizeof(buf), "%06x", v);
-  return buf;
-}
 
 /* Current UTC time in SigV4 format. */
 std::string nowAmzDate() {
