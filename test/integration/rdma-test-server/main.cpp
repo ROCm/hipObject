@@ -168,6 +168,20 @@ int main(int argc, char* argv[]) {
         return resp;
       }
 
+      // S3 GetBucketLocation — minio-cpp issues this before every transfer
+      // to resolve the effective region.  Return a minimal XML body so the
+      // bridge can proceed to the RDMA path without a real S3 stack.
+      if (req.method == "GET" &&
+          req.path.find("?location") != std::string::npos) {
+        resp.status = 200;
+        resp.headers["Content-Type"] = "application/xml";
+        resp.body = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    "<LocationConstraint "
+                    "xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+                    "us-east-1</LocationConstraint>";
+        return resp;
+      }
+
       const std::string key = objectKey(req.path);
       auto tokenIt = req.headers.find("x-amz-rdma-token");
       if (tokenIt == req.headers.end()) {

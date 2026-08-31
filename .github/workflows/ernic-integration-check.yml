@@ -2,12 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Two-container ernic integration test.
+# Two-container ernic integration tests.  rocm-ernic provides a
+# software-emulated Pensando/ionic NIC; transfers are functionally
+# equivalent to real RDMA hardware.
 #
-# ernic-server: ubuntu-rocm-ernic image running rocm-ernic (emulated
-#   Pensando/ionic NIC) + hipobj-rdma-test-server on port 9000.
-# ernic-client: same image, builds hipobject with HIPOBJ_IONIC=ON
-#   and runs put-object / get-object against the server.
+# Job 1 — ernic-integration (v2 protocol):
+#   ernic-server: hipobj-rdma-test-server --v2 on port 9000.
+#   ernic-client: builds put-object/get-object/v2-data-client; runs
+#     Layer 2 (control-plane) and Layer 3 (data-plane, payload verified).
+#
+# Job 2 — ernic-minio-v1 (v1 protocol, minio-cpp bridge):
+#   ernic-server-v1: hipobj-rdma-test-server (v1 mode) on port 9000.
+#   ernic-minio-client: builds minio-getput-rdma; runs PUT + GET in
+#     nogpu mode and verifies payload integrity end-to-end.
 #
 # GPU slot: when an emulated GPU runner is available, add
 #   --device /dev/kfd --device /dev/dri to the client compose service
@@ -23,6 +30,7 @@ on:
       - "include/**"
       - "test/**"
       - "examples/**"
+      - "integrations/**"
       - "ci/ernic/**"
       - ".github/workflows/ernic-integration-check.yml"
   pull_request:
@@ -32,6 +40,7 @@ on:
       - "include/**"
       - "test/**"
       - "examples/**"
+      - "integrations/**"
       - "ci/ernic/**"
       - ".github/workflows/ernic-integration-check.yml"
   workflow_dispatch:
@@ -115,3 +124,76 @@ jobs:
           docker rm -f ernic-server 2>/dev/null || true
           docker network rm ernic-net 2>/dev/null || true
           docker volume rm ernic-build-server ernic-build-client 2>/dev/null || true
+
+  ernic-minio-v1:
+    name: rocm-ernic minio-cpp bridge v1 test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make entrypoints executable
+        run: |
+          chmod +x ci/ernic/server-v1-entrypoint.sh \
+                   ci/ernic/minio-v1-client-entrypoint.sh
+
+      - name: Pull ernic image
+        run: docker pull "$ERNIC_IMAGE"
+
+      - name: Create ernic bridge network
+        run: docker network create ernic-minio-net
+
+      - name: Start ernic-server-v1
+        run: |
+          docker run -d \
+            --name ernic-server-v1 \
+            --hostname ernic-server \
+            --network ernic-minio-net \
+            -v "${{ github.workspace }}:/hipobject:ro" \
+            -v ernic-build-server-v1:/hipobject-build-server-v1 \
+            -e ROCM_PATH=/opt/rocm \
+            --entrypoint /hipobject/ci/ernic/server-v1-entrypoint.sh \
+            "$ERNIC_IMAGE"
+
+      - name: Wait for ernic-server-v1 to be healthy
+        run: |
+          echo "Waiting for hipobj-rdma-test-server (v1) on port 9000..."
+          for i in $(seq 1 60); do
+            if docker exec ernic-server-v1 \
+                curl -sf http://localhost:9000/health >/dev/null 2>&1; then
+              echo "Server ready (attempt $i)"
+              break
+            fi
+            sleep 2
+          done
+          docker exec ernic-server-v1 \
+              curl -sf http://localhost:9000/health || {
+            echo "Server did not become healthy"
+            docker logs ernic-server-v1
+            exit 1
+          }
+
+      - name: Run ernic-minio-client
+        run: |
+          docker run --rm \
+            --name ernic-minio-client \
+            --network ernic-minio-net \
+            -v "${{ github.workspace }}:/hipobject:ro" \
+            -v ernic-build-minio-v1:/hipobject-build-minio-v1 \
+            -e ROCM_PATH=/opt/rocm \
+            -e SERVER_ENDPOINT=http://ernic-server:9000 \
+            -e TEST_SIZE=65536 \
+            --entrypoint /hipobject/ci/ernic/minio-v1-client-entrypoint.sh \
+            "$ERNIC_IMAGE"
+
+      - name: Collect server-v1 logs
+        if: always()
+        run: docker logs ernic-server-v1 2>&1 || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f ernic-server-v1 2>/dev/null || true
+          docker network rm ernic-minio-net 2>/dev/null || true
+          docker volume rm ernic-build-server-v1 ernic-build-minio-v1 2>/dev/null || true
