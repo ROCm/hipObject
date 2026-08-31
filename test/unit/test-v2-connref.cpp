@@ -135,7 +135,6 @@ int fakeQueryGid(struct ibv_context*, uint8_t, int, union ibv_gid* g) {
   return 0;
 }
 
-
 /* Verifier stub: every request passes with an all-headers signed
  * list so the fault test reaches the transport path. */
 class PassAllVerifier : public hipObj::v2::SigV4Verifier {

@@ -55,21 +55,18 @@ struct V2CallbackCtx {
   std::string clientNic; // NIC hint derived from the client token
 };
 
-minio::http::Response executeV2Request(S3RdmaContext* sctx,
-                                       minio::http::Method method,
-                                       const std::string& nic,
-                                       minio::utils::Multimap& extra_headers,
-                                       const std::string& bucket,
-                                       const std::string& key,
-                                       const std::string& query_str) {
+minio::http::Response executeV2Request(
+  S3RdmaContext* sctx, minio::http::Method method, const std::string& nic,
+  minio::utils::Multimap& extra_headers, const std::string& bucket,
+  const std::string& key, const std::string& query_str) {
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
   minio::creds::Credentials creds = sctx->provider->Fetch();
   minio::utils::Multimap query_params;
   minio::http::Url url;
   const std::string& region = sctx->region;
 
-  if (minio::error::Error err =
-        sctx->url.BuildUrl(url, method, region, query_params, bucket, key)) {
+  if (minio::error::Error err = sctx->url.BuildUrl(url, method, region,
+                                                   query_params, bucket, key)) {
     minio::http::Response bad;
     bad.status_code = -1;
     return bad;
@@ -133,8 +130,8 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
 
   std::string query = req->query ? req->query : "";
   minio::http::Response res = executeV2Request(c->sctx, method, c->clientNic,
-                                               extra, req->bucket ? req->bucket
-                                                                   : "",
+                                               extra,
+                                               req->bucket ? req->bucket : "",
                                                req->key ? req->key : "", query);
 
   if (!res.error.empty() || res.status_code <= 0) {
@@ -143,10 +140,9 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
 
   std::memset(out, 0, sizeof(*out));
   out->httpStatus = res.status_code;
-  out->protocolEcho =
-    !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
-  out->unsupportedMarker =
-    (res.status_code == kRdmaReplyNotImplemented) ? 1 : 0;
+  out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
+  out->unsupportedMarker = (res.status_code == kRdmaReplyNotImplemented) ? 1
+                                                                         : 0;
 
   std::string srv_token = res.headers.GetFront(kAmzRdmaToken);
   if (!srv_token.empty()) {
@@ -173,8 +169,8 @@ int v2SendReady(void* ctx, const hipObjTransferReqV2_t* req,
 
   std::string query = req->query ? req->query : "";
   minio::http::Response res = executeV2Request(c->sctx, method, c->clientNic,
-                                               extra, req->bucket ? req->bucket
-                                                                   : "",
+                                               extra,
+                                               req->bucket ? req->bucket : "",
                                                req->key ? req->key : "", query);
 
   if (!res.error.empty() || res.status_code <= 0) {
@@ -183,8 +179,7 @@ int v2SendReady(void* ctx, const hipObjTransferReqV2_t* req,
 
   std::memset(out, 0, sizeof(*out));
   out->httpStatus = res.status_code;
-  out->protocolEcho =
-    !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
+  out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
 
   std::string bytes_hdr = res.headers.GetFront(kAmzRdmaBytesTransferred);
   if (!bytes_hdr.empty()) {
@@ -227,8 +222,8 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 
   std::string query = req->query ? req->query : "";
   executeV2Request(c->sctx, method, c->clientNic, extra,
-                   req->bucket ? req->bucket : "",
-                   req->key ? req->key : "", query);
+                   req->bucket ? req->bucket : "", req->key ? req->key : "",
+                   query);
   return 0;
 }
 
@@ -259,9 +254,9 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
   }
 
   hipObjError_t err = hipObjPutV2(sctx->bucket.c_str(), sctx->object.c_str(),
-                                   buf, static_cast<uint64_t>(size), 0,
-                                   query.empty() ? nullptr : query.c_str(),
-                                   &ops, &cbctx);
+                                  buf, static_cast<uint64_t>(size), 0,
+                                  query.empty() ? nullptr : query.c_str(), &ops,
+                                  &cbctx);
   hipObjPutRdmaToken(token);
 
   if (err.opError == hipObjNotSupported) {
@@ -285,8 +280,8 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
   ops.sendCancel = v2SendCancel;
 
   hipObjError_t err = hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(),
-                                   buf, static_cast<uint64_t>(size), 0, nullptr,
-                                   &ops, &cbctx);
+                                  buf, static_cast<uint64_t>(size), 0, nullptr,
+                                  &ops, &cbctx);
   hipObjPutRdmaToken(token);
 
   if (err.opError == hipObjNotSupported) {

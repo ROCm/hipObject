@@ -135,7 +135,6 @@ std::string hex32(uint32_t v) {
   return buf;
 }
 
-
 /* Current UTC time in SigV4 format. */
 std::string nowAmzDate() {
   std::time_t t = std::time(nullptr);
