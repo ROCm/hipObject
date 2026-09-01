@@ -3,33 +3,38 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run the ernic two-container integration test locally.
-# Replicates exactly what GitHub Actions does so you can iterate without
-# pushing to CI.
+# Run the ernic two-container integration test locally using the existing
+# build-v2 binaries. Avoids network issues (ZScaler/FetchContent) by
+# skipping the ROCm container build entirely.
 #
 # Usage:
-#   ci/ernic/run-local.sh          # full build + test
-#   ci/ernic/run-local.sh --no-build  # skip build (reuse previous BUILD_DIR)
+#   ci/ernic/run-local.sh              # use build-v2 (default)
+#   ci/ernic/run-local.sh --rebuild    # force a fresh ROCm container build
 
 set -euo pipefail
 
 REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 ERNIC_IMAGE=sbates130272/batesste-ci-images-ubuntu-rocm-ernic:august-27-2026
 ROCM_IMAGE=rocm/dev-ubuntu-24.04:7.14.0-full
-BUILD_DIR=/tmp/ernic-local-build
-SKIP_BUILD=${1:-}
+AMD_CA_CERT=/home/stebates/Projects/batesste-ci-images/common/amd-root-ca.crt
+BUILD_DIR="${REPO}/build-v2"
+REBUILD=${1:-}
 
-mkdir -p "${BUILD_DIR}/rocm-libs"
-
-if [ "${SKIP_BUILD}" != "--no-build" ]; then
-  echo "=== Building in ROCm container ==="
+if [ "${REBUILD}" = "--rebuild" ]; then
+  BUILD_DIR=/tmp/ernic-rebuild
+  mkdir -p "${BUILD_DIR}/rocm-libs"
+  echo "=== Rebuilding in ROCm container (may need network) ==="
   docker run --rm \
     --user root \
     -v "${REPO}:/hipobject:ro" \
     -v "${BUILD_DIR}:/hipobject-build" \
+    -v "${AMD_CA_CERT}:/tmp/amd-root-ca.crt:ro" \
     -e ROCM_PATH=/opt/rocm \
     "$ROCM_IMAGE" \
     bash -c "
+      cp /tmp/amd-root-ca.crt /usr/local/share/ca-certificates/amd-root-ca.crt && \
+      update-ca-certificates && \
+      export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt && \
       apt-get update -qq && \
       apt-get install -y -qq git cmake ninja-build libibverbs-dev libnuma-dev \
         libcurl4-openssl-dev libssl-dev && \
@@ -45,12 +50,17 @@ if [ "${SKIP_BUILD}" != "--no-build" ]; then
         -DHIPOBJ_BUILD_DOCS=OFF && \
       cmake --build /hipobject-build --parallel \$(nproc) \
         --target hipobj-rdma-test-server put-object get-object v2-data-client && \
-      mkdir -p /hipobject-build/rocm-libs && \
       find /opt/rocm -name '*.so*' \( -type f -o -type l \) \
         -exec cp -P {} /hipobject-build/rocm-libs/ \; 2>/dev/null || true
     "
 else
-  echo "=== Skipping build (--no-build) ==="
+  # Use the existing build-v2 tree — no network needed
+  if [ ! -x "${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server" ]; then
+    echo "ERROR: ${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server not found"
+    echo "Run 'cmake --build build-v2 --target hipobj-rdma-test-server put-object get-object v2-data-client' first"
+    exit 1
+  fi
+  echo "=== Using existing build-v2 binaries ==="
 fi
 
 chmod +x "${REPO}/ci/ernic/server-entrypoint.sh" \
