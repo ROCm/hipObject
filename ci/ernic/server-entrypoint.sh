@@ -3,28 +3,17 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Build hipobj-rdma-test-server inside the ernic image and run it.
-# rocm-ernic is already installed in the image; it registers itself
-# as an ibverbs provider so ibv_get_device_list() sees it.
+# Run the pre-built hipobj-rdma-test-server inside the ernic container.
+# The binary is built on the runner (ROCm container) and mounted read-only
+# at /hipobject-build.  The ernic container provides the rocm-ernic ibverbs
+# device; no compilation happens here.
 
 set -euo pipefail
 
-BUILD_DIR=/hipobject-build-server
+export LD_LIBRARY_PATH=/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
-cmake \
-    -B "${BUILD_DIR}" \
-    -G Ninja \
-    -S /hipobject \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_TESTING=OFF \
-    -DHIPOBJ_IONIC=ON \
-    -DHIPOBJ_BNXT=OFF \
-    -DHIPOBJ_INTEGRATION_TESTS=ON \
-    -DHIPOBJ_MINIO_CLIENT=OFF \
-    -DHIPOBJ_BUILD_DOCS=OFF
+rocm-ernic --backend loopback &
+sleep 1
 
-cmake --build "${BUILD_DIR}" \
-      --target hipobj-rdma-test-server \
-      --parallel "$(nproc)"
-
-exec "${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server" 9000 --v2
+exec /hipobject-build/test/integration/rdma-test-server/hipobj-rdma-test-server \
+    9000 --v2
