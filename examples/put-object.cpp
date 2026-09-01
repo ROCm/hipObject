@@ -82,6 +82,7 @@ int main(int argc, char* argv[]) {
   cfg.endpoint = endpoint;
   cfg.region = "us-east-1";
   cfg.gpuDevice = 0;
+  cfg.nicHint = std::getenv("HIPOBJ_NIC_HINT");
 
   hipObjError_t err = hipObjInit(&cfg);
   if (err.opError != hipObjSuccess) {

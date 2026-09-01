@@ -172,7 +172,15 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
                                                             : nullptr,
                                             &devName);
   if (nicIndex < 0) {
-    return {hipObjNicNotFound, 0};
+    // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
+    // hint is provided, try opening it directly without GPU topology so the
+    // library works in GPU-less environments (e.g. CI with emulated RDMA).
+    if (config->nicHint && config->nicHint[0] != '\0') {
+      devName = config->nicHint;
+      nicIndex = 0;
+    } else {
+      return {hipObjNicNotFound, 0};
+    }
   }
   int ret = (devName) ? hipObj::openRdmaDeviceByName(devName, hipObj::g_conn)
                       : hipObj::openRdmaDevice(nicIndex, hipObj::g_conn);
