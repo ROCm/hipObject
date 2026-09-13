@@ -945,8 +945,6 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
   return (err.opError == hipObjSuccess) ? static_cast<ssize_t>(size) : -1;
 }
 
-} // namespace
-
 ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
                 size_t size) {
   char rdma_token[512];
