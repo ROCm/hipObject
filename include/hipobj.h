@@ -460,6 +460,24 @@ HIPOBJ_API char* hipObjNicV2(void);
 /*! @brief Release a NIC name snapshot from hipObjNicV2 @ingroup init */
 HIPOBJ_API void hipObjFreeNicV2(char* nic);
 
+/*! @brief Port the v2 data plane selected at init @ingroup init
+ *
+ * 1-based RDMA port number; 0 before init or when unavailable. With
+ * hipObjSelectedGidIndexV2 this identifies the exact sysfs ndevs
+ * entry backing the data-plane address handle, so the control plane
+ * can bind the same interface (multi-port or VLAN-GID devices never
+ * silently bind an arbitrary sibling).
+ */
+HIPOBJ_API int hipObjSelectedPortV2(void);
+
+/*! @brief GID index the v2 data plane selected at init @ingroup init
+ *
+ * -1 before init or when unavailable. Pair with
+ * hipObjSelectedPortV2 and the NIC from hipObjNicV2 to read
+ * /sys/class/infiniband/<dev>/ports/<port>/gid_attrs/ndevs/<gid>.
+ */
+HIPOBJ_API int hipObjSelectedGidIndexV2(void);
+
 /*!
  * @brief V2 GET: download an object into a registered buffer
  * @ingroup io
