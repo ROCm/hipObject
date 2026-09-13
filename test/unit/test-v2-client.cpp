@@ -156,6 +156,9 @@ public:
   int finishReadyFail = 0;
   int cancelCalls = 0;
   std::vector<CallRecord> calls;
+  /* Non-zero: finishReady echoes this value instead of the real
+   * cookie (cookie-mismatch test). */
+  uint32_t cookieEchoOverride = 0;
 
   /* When set, sendReadyRequest arms the fake CQ with a data-phase
    * completion (GET receive form) so the data phase succeeds. */
@@ -201,6 +204,14 @@ public:
         return self->finishReadyFail;
       }
       *out = self->fin;
+      /* Echo the cookie the library generated (visible on the
+       * PREPARE snapshot) unless the test overrides the echo. */
+      if (out->cookiePresent) {
+        const CallRecord* prep = self->find(Cb::Prepare);
+        if (prep != nullptr && self->cookieEchoOverride == 0) {
+          out->cookieEcho = prep->req.cookie;
+        }
+      }
       return 0;
     };
     ops->sendCancel = [](void* ctx, const hipObjTransferReqV2_t* req) -> int {
@@ -236,6 +247,10 @@ protected:
   void SetUp() override {
     savedHipOps_ = hipObj::hipOps();
     hipObj::HipOps hops;
+    hops.hipGetDevice = [](int* device) -> hipError_t {
+      *device = 7;
+      return hipSuccess;
+    };
     hops.hipDeviceGetPCIBusId = [](char* bus, int len, int) -> hipError_t {
       snprintf(bus, static_cast<size_t>(len), "0000:42:00.0");
       return hipSuccess;
@@ -465,7 +480,7 @@ TEST_F(V2ClientTransferTest, DataExpiryIssuesSingleCancel) {
  * fails the transfer with RdmaError. */
 TEST_F(V2ClientTransferTest, FinalCookieMismatchFails) {
   consumer_.armGetCompletion = true;
-  consumer_.fin.cookieEcho = 0xdeadbeef; /* will not match */
+  consumer_.cookieEchoOverride = 0xdeadbeef; /* will not match */
 
   const hipObjError_t err =
     hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
