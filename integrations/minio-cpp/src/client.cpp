@@ -37,13 +37,14 @@ public:
       hipObjShutdown();
       initialized_ = false;
     }
-    hipObjConfig_t cfg{};
     endpoint_storage_ = (base_url.https ? "https://" : "http://") +
                         base_url.host;
-    cfg.endpoint = endpoint_storage_.c_str();
-    cfg.region = base_url.region.c_str();
-    cfg.gpuDevice = -1;
-    hipObjError_t err = hipObjInit(&cfg);
+    hipObjConfigV2_t cfg{};
+    cfg.v1.endpoint = endpoint_storage_.c_str();
+    cfg.v1.region = base_url.region.c_str();
+    cfg.v1.gpuDevice = -1;
+    cfg.control.controlEndpoint = endpoint_storage_.c_str();
+    hipObjError_t err = hipObjInitV2(&cfg);
     if (err.opError == hipObjSuccess) {
       initialized_ = true;
       active_key_ = key;

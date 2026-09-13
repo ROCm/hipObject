@@ -26,6 +26,20 @@ inline constexpr const char* kAmzRdmaProtocolV2 = "hipobj-rc-v2";
 inline constexpr const char* kAmzRdmaCancel = "x-amz-rdma-cancel";
 inline constexpr const char* kAmzRdmaBytesTransferred =
   "x-amz-rdma-bytes-transferred";
+inline constexpr const char* kAmzRdmaReplyHdr = "x-amz-rdma-reply";
+inline constexpr const char* kAmzRdmaSessionHdr = "x-amz-rdma-session";
+inline constexpr const char* kAmzRdmaCookieHdr = "x-amz-rdma-cookie";
+inline constexpr const char* kAmzRdmaPsnHdr = "x-amz-rdma-psn";
+inline constexpr const char* kAmzRdmaOpHdr = "x-amz-rdma-op";
+inline constexpr const char* kAmzRdmaSizeHdr = "x-amz-rdma-size";
+inline constexpr const char* kAmzRdmaOffsetHdr = "x-amz-rdma-offset";
+inline constexpr const char* kAmzRdmaTargetHdr = "x-amz-rdma-target";
+inline constexpr const char* kAmzRdmaQpnHdr = "x-amz-rdma-qpn";
+inline constexpr const char* kAmzRdmaMrAddrHdr = "x-amz-rdma-mr-addr";
+inline constexpr const char* kAmzRdmaMrRkeyHdr = "x-amz-rdma-mr-rkey";
+inline constexpr const char* kControlPathPrepare = "/.hipobj-rc/prepare";
+inline constexpr const char* kControlPathReady = "/.hipobj-rc/ready";
+inline constexpr const char* kControlPathCancel = "/.hipobj-rc/cancel";
 
 inline constexpr int kRdmaReplySuccess = 200;
 inline constexpr int kRdmaReplyNoContent = 204;
