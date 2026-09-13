@@ -208,8 +208,13 @@ int acquireSession(void* devPtr, SessionResources& res) {
       entry.pinnedBuffer = devPtr;
       entry.poisoned = true;
       entry.holdsDeviceRef = false;
-      res.id = reg.insert(std::move(entry));
-      if (res.id == 0) {
+      bool cqParkThrew = false;
+      try {
+        res.id = reg.insert(std::move(entry));
+      } catch (...) {
+        cqParkThrew = true;
+      }
+      if (cqParkThrew || res.id == 0) {
         bufferMap().releaseMrRef(devPtr);
         reg.retired().unreserve(parkedRid);
         reg.unreserveSlot();
@@ -245,22 +250,53 @@ int acquireSession(void* devPtr, SessionResources& res) {
   entry.conn = std::move(res.conn);
   entry.device = res.dh;
   entry.clientPsn = 0;
-  entry.reservationId = retire.release();
+  const uint64_t rid = retire.release();
+  entry.reservationId = rid;
   entry.pinnedBuffer = devPtr;
-  res.id = reg.insert(std::move(entry));
-  if (res.id == 0) {
-    /* insert() returns before it moves when the reserve is gone, so
-     * this local still owns the connection and the retirement id. */
-    reg.retired().unreserve(entry.reservationId);
-    entry.reservationId = 0;
-    entry.pinnedBuffer = nullptr;
+  bool insertThrew = false;
+  try {
+    res.id = reg.insert(std::move(entry));
+  } catch (...) {
+    /* The node allocation failed with a live pair still owned here.
+     * Destroy it before releasing the references, and park whatever
+     * the destroy could not reclaim. */
+    insertThrew = true;
+  }
+  if (insertThrew || res.id == 0) {
+    RcConnV2 leftover = std::move(entry.conn);
+    const DestroyResult destroyed = destroyRcConnV2(leftover);
+    if (!destroyed.qpOk || !destroyed.cqOk) {
+      ConnectionEntryV2 poisoned;
+      poisoned.conn = std::move(leftover);
+      poisoned.device = v2State().device;
+      poisoned.reservationId = destroyed.qpOk ? 0 : rid;
+      poisoned.poisoned = true;
+      poisoned.holdsDeviceRef = true;
+      try {
+        res.id = reg.insert(std::move(poisoned));
+      } catch (...) {
+        hipObj::dropOwnership(poisoned.conn.qp);
+        hipObj::dropOwnership(poisoned.conn.cq);
+        res.id = 0;
+      }
+      if (res.id != 0) {
+        res.inserted = true;
+      }
+    }
     bufferMap().releaseMrRef(devPtr);
+    if (res.deviceRefHeld && v2State().device != nullptr) {
+      releaseDevice(*v2State().device);
+      res.deviceRefHeld = false;
+    }
+    if (destroyed.qpOk) {
+      reg.retired().unreserve(rid);
+    }
+    if (res.id == 0) {
+      reg.unreserveSlot();
+    }
     res.qp = nullptr;
     res.cq = nullptr;
-    releaseDevice(*res.dh);
-    res.deviceRefHeld = false;
-    reg.unreserveSlot();
-    return -1;
+    return res.inserted ? -2 : -1;
   }
   res.inserted = true;
   return 0;
@@ -524,6 +560,7 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
   SessionResources res;
   Phase p = Phase::Idle;
   bool wireCancelEligible = false; /* session published on the wire */
+  bool cancelSent = false;         /* one CANCEL attempt, even if it throws */
   std::string sessionId;
 
   const auto cleanup = [&](hipObjError_t wireOutcome) -> int {
@@ -531,7 +568,7 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     /* Post-expiry cancel: one bounded attempt once a session was
      * published. PREPARE-phase expiry has nothing to cancel (the
      * parser requires a 32-hex session). */
-    if (wireCancelEligible && !sessionId.empty() &&
+    if (wireCancelEligible && !sessionId.empty() && !cancelSent &&
         wireOutcome.opError != hipObjSuccess) {
       hipObjTransferReqV2_t creq;
       fillCommonRequest(creq, isPut ? "PUT" : "GET", bucket, key, size,
@@ -540,7 +577,12 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       creq.session = sessionId.c_str();
       creq.target = nullptr;
       creq.endpoint = &epV2;
-      ops->sendCancel(ctx, &creq);
+      cancelSent = true;
+      try {
+        ops->sendCancel(ctx, &creq);
+      } catch (...) {
+        /* Best-effort wire cleanup must not skip the local release. */
+      }
     }
     const ReleaseResult rc = releaseSession(res);
     const hipObjError_t fin0 = finalizeOutcome(wireOutcome, rc);
@@ -692,18 +734,31 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     /* QP RTR/RTS, bounded by the configured connect deadline. */
     const uint64_t connectBudgetMs =
       st.connectDeadlineMs != 0 ? st.connectDeadlineMs : kDefaultConnectDeadlineMs;
+    const uint64_t nowMs0 = steadyNowMs();
     const uint64_t connectDeadline =
-      steadyNowMs() + connectBudgetMs < deadline ? steadyNowMs() + connectBudgetMs : deadline;
+      nowMs0 + connectBudgetMs < deadline ? nowMs0 + connectBudgetMs : deadline;
     if (steadyNowMs() >= connectDeadline) {
       outcome = {hipObjBusy, kDiagDeadlineExpired};
       break;
     }
-    bool verbsOk = false;
+    bool rtrOk = false;
     registry().withEntry(res.id, [&](ConnectionEntryV2& entry) {
-      verbsOk = transitionQpToRtrV2(*res.dh, entry.conn, serverQpn, serverGid, serverPsn) == 0 &&
-                transitionQpToRtsV2(entry.conn, *res.dh, psn) == 0;
+      rtrOk = transitionQpToRtrV2(*res.dh, entry.conn, serverQpn, serverGid, serverPsn) == 0;
     });
-    if (!verbsOk) {
+    if (!rtrOk) {
+      outcome = {hipObjRdmaError, 0};
+      break;
+    }
+    if (steadyNowMs() >= connectDeadline) {
+      /* RTR consumed the allowance. Do not start RTS on an expired budget. */
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
+      break;
+    }
+    bool rtsOk = false;
+    registry().withEntry(res.id, [&](ConnectionEntryV2& entry) {
+      rtsOk = transitionQpToRtsV2(entry.conn, *res.dh, psn) == 0;
+    });
+    if (!rtsOk) {
       outcome = {hipObjRdmaError, 0};
       break;
     }
@@ -822,14 +877,17 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                     : hipObjError_t{hipObjS3Error, 0};
       break;
     }
+    const bool finalExpired = remaining(deadline) == 0;
     const bool finalOk = fin.httpStatus == 200 ||
                          (isPut && fin.httpStatus == 204);
     if (!finalOk) {
-      outcome = {hipObjS3Error, 0};
+      outcome = finalExpired ? hipObjError_t{hipObjS3Error, kDiagDeadlineExpired}
+                             : hipObjError_t{hipObjS3Error, 0};
       break;
     }
     if (!fin.cookiePresent || fin.cookieEcho != cookie || !fin.protocolEcho) {
-      outcome = {hipObjRdmaError, 0};
+      outcome = finalExpired ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
+                             : hipObjError_t{hipObjRdmaError, 0};
       break;
     }
     if (!transferDone(p)) {
