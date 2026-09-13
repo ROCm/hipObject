@@ -494,7 +494,10 @@ namespace {
             req->endpoint->controlEndpoint[0] != '\0') {
             return req->endpoint->controlEndpoint;
         }
-        return sctx->url.HostHeaderValue();
+        const minio::s3::BaseUrl &base = sctx->url;
+        const std::string authority =
+            base.port != 0 ? base.host + ":" + std::to_string(base.port) : base.host;
+        return std::string(base.https ? "https" : "http") + "://" + authority;
     }
 
     std::string hostHeaderFromConn(const ControlConn &conn)
@@ -759,7 +762,7 @@ namespace {
 
     RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic()};
+        V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
@@ -802,7 +805,7 @@ namespace {
 
     RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic()};
+        V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
