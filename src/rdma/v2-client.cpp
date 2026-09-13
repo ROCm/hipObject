@@ -85,9 +85,12 @@ struct V2State {
   std::string nicName;
   int selectedPort = 0;
   int selectedGidIndex = -1;
-  /* Bumped by every successful init and shutdown. A snapshot taken
-   * before the transfer lock carries this generation; admission
-   * rejects it when initialization changed while the caller waited. */
+  /* Bumped by every successful init and shutdown. Public entry points
+   * read the generation after acquiring the API lock and may pass it
+   * to the transfer as an assertion that no shutdown or reinit
+   * happened while they waited; admission rejects a mismatch.
+   * Callback request fields always carry the selection read under the
+   * same lock, so they cannot mix initializations. */
   uint64_t initGeneration = 0;
   /* Shared device handle: created by hipObjInitV2, referenced by every
    * connection. Shutdown reclaims it. */
@@ -657,15 +660,19 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
   if (!st.initialized) {
     return hipObjNotInitialized;
   }
-  if (haveSnapshot && snapshotGeneration != st.initGeneration) {
-    return hipObjNotInitialized;
-  }
-  /* Published on every callback request. Read under the API lock the
-   * public entry points already hold, so it matches the generation
-   * admission just validated. */
+  /* Publish the active interface selection on every callback request.
+   * Read here under the API lock held by the public entry points, it
+   * is coherent by construction with the generation assertion below. */
   const std::string activeNic = st.nicName;
   const int activePort = st.selectedPort;
   const int activeGid = st.selectedGidIndex;
+  if (haveSnapshot && snapshotGeneration != st.initGeneration) {
+    /* Optional caller assertion: the caller read the generation under
+     * the API lock and a shutdown or reinit happened between that
+     * read and this transfer; the caller's view of the initialization
+     * is stale. */
+    return hipObjNotInitialized;
+  }
   if (!ops || !ops->sendPrepare || !ops->sendReadyRequest ||
       !ops->finishReady || !ops->sendCancel || !bucket || !key || !devPtr) {
     return hipObjInvalidValue;
