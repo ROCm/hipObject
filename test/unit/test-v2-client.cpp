@@ -45,11 +45,20 @@ std::map<struct ibv_cq*, FakeCqState> g_cqStates;
 struct ibv_cq* g_lastCq = nullptr;
 uint32_t g_lastQpn = 0;
 
-/* Fake device/context/pd: addresses only, never dereferenced as
- * real verbs objects (all verbs entry points are faked). */
+/* Fake device/context/pd: real struct layouts (field reads like
+ * qp->qp_num and dev->name must see the true offsets). */
 struct ibv_device* g_fakeDevList[2] = {nullptr, nullptr};
 struct ibv_context g_fakeCtx;
 struct ibv_pd g_fakePd;
+
+/* Allocate the single fake device entry with name "fake0" so
+ * openRdmaDeviceByName's name scan matches it. */
+struct ibv_device* allocFakeDevice(const char* name) {
+  auto* dev = new struct ibv_device();
+  std::memset(dev, 0, sizeof(*dev));
+  snprintf(dev->name, sizeof(dev->name), "%s", name);
+  return dev;
+}
 
 int g_postRecvCalls = 0;
 int g_postSendCalls = 0;
@@ -272,11 +281,17 @@ protected:
 
     savedFuncs_ = hipObj::ibv.funcsForTest();
     auto& f = hipObj::ibv.funcsForTest();
+    delete g_fakeDevList[0];
+    g_fakeDevList[0] = allocFakeDevice("fake0");
     f.get_device_list = [](int* n) -> struct ibv_device** {
       *n = 1;
       return g_fakeDevList;
     };
     f.free_device_list = [](struct ibv_device**) {};
+    f.get_device_name = [](struct ibv_device* dev) -> const char* {
+      return dev ? dev->name : nullptr;
+    };
+    f.close_device = [](struct ibv_context*) -> int { return 0; };
     f.open_device = [](struct ibv_device*) -> struct ibv_context* {
       return &g_fakeCtx;
     };
