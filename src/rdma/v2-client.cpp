@@ -498,6 +498,10 @@ InterfaceSnapshot v2InterfaceSnapshot() {
   return out;
 }
 
+uint64_t v2InitGeneration() {
+  return v2State().initGeneration;
+}
+
 int v2Init(hipObjConfigV2_t* config) {
   V2State& st = v2State();
   if (st.initialized) {
@@ -656,6 +660,12 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
   if (haveSnapshot && snapshotGeneration != st.initGeneration) {
     return hipObjNotInitialized;
   }
+  /* Published on every callback request. Read under the API lock the
+   * public entry points already hold, so it matches the generation
+   * admission just validated. */
+  const std::string activeNic = st.nicName;
+  const int activePort = st.selectedPort;
+  const int activeGid = st.selectedGidIndex;
   if (!ops || !ops->sendPrepare || !ops->sendReadyRequest ||
       !ops->finishReady || !ops->sendCancel || !bucket || !key || !devPtr) {
     return hipObjInvalidValue;
@@ -718,6 +728,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       creq.session = sessionId.c_str();
       creq.target = nullptr;
       creq.endpoint = &epV2;
+      creq.nic = activeNic.c_str();
+      creq.nicPort = activePort;
+      creq.nicGidIndex = activeGid;
       cancelSent = true;
       try {
         ops->sendCancel(ctx, &creq);
@@ -790,6 +803,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     preq.token = clientToken.c_str();
     preq.target = target.c_str();
     preq.endpoint = &epV2;
+    preq.nic = activeNic.c_str();
+    preq.nicPort = activePort;
+    preq.nicGidIndex = activeGid;
 
     hipObjPrepareReplyV2_t prep;
     std::memset(&prep, 0, sizeof(prep));
@@ -946,6 +962,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     rreq.session = sessionId.c_str();
     rreq.token = clientToken.c_str();
     rreq.endpoint = &epV2;
+    rreq.nic = activeNic.c_str();
+    rreq.nicPort = activePort;
+    rreq.nicGidIndex = activeGid;
     rreq.clientQpn = res.qpNum;
     rreq.clientMrAddr = reinterpret_cast<uint64_t>(devPtr);
     rreq.clientMrRkey = mr->rkey;

@@ -71,6 +71,9 @@ struct InterfaceSnapshot {
 };
 InterfaceSnapshot v2InterfaceSnapshot();
 
+/* Current init generation. The caller must already hold the API lock. */
+uint64_t v2InitGeneration();
+
 /* entryMs/haveEntryMs: when haveEntryMs is true the public entry
  * point captured the timestamp before waiting on the api lock, so
  * the lock wait counts against the whole-transfer budget; when

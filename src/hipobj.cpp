@@ -1023,25 +1023,18 @@ hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t si
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
     const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
-    hipObj::v2::InterfaceSnapshot snap;
-    {
-        hipObj::ApiGuard snapGuard;
-        if (!snapGuard.owns()) {
-            return hipObj::kReentryError;
-        }
-        snap = hipObj::v2::v2InterfaceSnapshot();
-    }
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
+    const uint64_t generation = hipObj::v2::v2InitGeneration();
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {
         return err;
     }
     int       diag = 0;
     const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops,
-                                          ctx, entryMs, true, snap.generation, true, &diag);
+                                          ctx, entryMs, true, generation, true, &diag);
     return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
@@ -1053,25 +1046,18 @@ hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, ui
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
     const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
-    hipObj::v2::InterfaceSnapshot snap;
-    {
-        hipObj::ApiGuard snapGuard;
-        if (!snapGuard.owns()) {
-            return hipObj::kReentryError;
-        }
-        snap = hipObj::v2::v2InterfaceSnapshot();
-    }
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
+    const uint64_t generation = hipObj::v2::v2InitGeneration();
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {
         return err;
     }
     int       diag = 0;
     const int rc   = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs, true,
-                                            snap.generation, true, &diag);
+                                            generation, true, &diag);
     return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
