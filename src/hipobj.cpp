@@ -622,8 +622,16 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
-        return {hipObjNotInitialized, 0};
+    struct ibv_pd       *pd    = nullptr;
+    if (state.initialized) {
+        pd = hipObj::g_conn->pd.get();
+    }
+    else {
+        /* A v2-only process registers against the shared v2 device. */
+        pd = hipObj::v2::v2ProtectionDomain();
+        if (pd == nullptr) {
+            return {hipObjNotInitialized, 0};
+        }
     }
     hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
     if (err.opError != hipObjSuccess) {
@@ -635,7 +643,7 @@ try {
     if (hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap->registerBuffer(devPtr, size, hipObj::g_conn->pd.get());
+    int ret = hipObj::g_bufferMap->registerBuffer(devPtr, size, pd);
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }

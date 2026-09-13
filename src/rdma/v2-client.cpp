@@ -144,10 +144,13 @@ void fillCommonRequest(hipObjTransferReqV2_t& req, const char* method,
   req.offset = offset;
   req.cookie = cookie;
   req.clientPsn = clientPsn;
+  /* deadlineMs is the remaining whole-transfer budget per the header
+   * contract, not the absolute steady-clock deadline. The absolute
+   * deadline stays a caller-side bound and is not copied into the request. */
+  (void)deadlineMs;
   req.deadlineMs = static_cast<uint32_t>(
-    deadlineMs > 0xffffffff ? 0xffffffff : deadlineMs);
-  req.remainingMs = static_cast<uint32_t>(
     remainingMs > 0xffffffff ? 0xffffffff : remainingMs);
+  req.remainingMs = req.deadlineMs;
 }
 
 struct SessionResources {
@@ -323,6 +326,15 @@ int v2Init(hipObjConfigV2_t* config) {
   return hipObjSuccess;
 }
 
+struct ibv_pd *v2ProtectionDomain()
+{
+  V2State &st = v2State();
+  if (!st.initialized || st.device == nullptr) {
+    return nullptr;
+  }
+  return st.device->pd.get();
+}
+
 int v2Shutdown() {
   V2State& st = v2State();
   if (!st.initialized) {
@@ -342,6 +354,9 @@ int v2Shutdown() {
   if (poisonLeft || reg.size() > 0) {
     return hipObjRdmaError;
   }
+  /* Buffers go before the device: every MR must be deregistered
+   * while the protection domain is still alive. */
+  bufferMap().deregisterAll();
   if (st.device != nullptr) {
     RcConnection raw;
     raw.ctx = std::move(st.device->ctx);
@@ -392,6 +407,8 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
   const uint32_t cancelBudgetMs = st.cancelBudgetMs != 0
                                     ? st.cancelBudgetMs
                                     : kDefaultCancelBudgetMs;
+  /* The stored endpoint string outlives every callback of this init. */
+  hipObjControlEndpointV2_t epV2{st.controlEndpoint.c_str()};
 
   hipObjError_t outcome = {hipObjInternalError, 0};
   SessionResources res;
@@ -454,7 +471,7 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                       query, cookie, psn, deadline, remaining(deadline));
     preq.token = clientToken.c_str();
     preq.target = target.c_str();
-    preq.endpoint = nullptr; /* filled by the caller's endpoint */
+    preq.endpoint = &epV2;
 
     hipObjPrepareReplyV2_t prep;
     std::memset(&prep, 0, sizeof(prep));
@@ -539,6 +556,7 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                       query, cookie, psn, deadline, remaining(deadline));
     rreq.session = sessionId.c_str();
     rreq.token = clientToken.c_str();
+    rreq.endpoint = &epV2;
     rreq.clientQpn = res.qpNum;
     rreq.clientMrAddr = reinterpret_cast<uint64_t>(devPtr);
     rreq.clientMrRkey = mr->rkey;
