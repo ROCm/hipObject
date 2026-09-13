@@ -192,10 +192,11 @@ FrozenClock* g_deadlineJumpClock = nullptr;
 
 class MockConsumer {
 public:
-  /* Scripted PREPARE reply. */
-  hipObjPrepareReplyV2_t prep;
+  /* Scripted PREPARE reply (value-initialized: tests that do not
+   * populate every field must not inherit stack garbage). */
+  hipObjPrepareReplyV2_t prep{};
   /* Scripted FINAL reply. */
-  hipObjFinalReplyV2_t fin;
+  hipObjFinalReplyV2_t fin{};
   /* Non-zero: the callback returns it (consumer-side failure). */
   int prepareFail = 0;
   int readyRequestFail = 0;
@@ -213,6 +214,7 @@ public:
 
   /* Optional observation hooks (set by a test before the transfer). */
   std::function<void(hipObjPrepareReplyV2_t*)> onPrepare;
+  std::function<void()> onReadyRequest;
   std::function<void()> onFinishReady;
 
   /* Deadline advertised on the request the callback last received. */
@@ -237,6 +239,10 @@ public:
                                const hipObjTransferReqV2_t* req) -> int {
       auto* self = static_cast<MockConsumer*>(ctx);
       self->snapshot(Cb::ReadyRequest, req);
+      self->lastSeenDeadlineMs = req->remainingMs;
+      if (self->onReadyRequest) {
+        self->onReadyRequest();
+      }
       if (g_lastCq != nullptr && self->armGetCompletion) {
         auto it = g_cqStates.find(g_lastCq);
         if (it != g_cqStates.end()) {
@@ -245,6 +251,9 @@ public:
         wc.opcode = IBV_WC_RECV_RDMA_WITH_IMM;
         wc.wc_flags = IBV_WC_WITH_IMM;
           wc.imm_data = htonl(req->cookie);
+          /* The server wrote the full request; a short fake write
+           * would now fail the length check. */
+          wc.byte_len = req->size;
           it->second.pending.push_back(wc);
         }
       }
@@ -275,8 +284,10 @@ public:
        * PREPARE snapshot) unless the test overrides the echo. */
       if (out->cookiePresent) {
         const CallRecord* prep = self->find(Cb::Prepare);
-        if (prep != nullptr && self->cookieEchoOverride == 0) {
-          out->cookieEcho = prep->req.cookie;
+        if (prep != nullptr) {
+          out->cookieEcho = self->cookieEchoOverride != 0
+                              ? self->cookieEchoOverride
+                              : prep->req.cookie;
         }
       }
       return 0;
@@ -443,6 +454,9 @@ protected:
     consumer_.fin.httpStatus = 200; /* GET success */
     consumer_.fin.protocolEcho = 1;
     consumer_.fin.cookiePresent = 1;
+    /* Default FINAL byte count: happy-path tests transfer 512 bytes.
+     * Tests using other sizes must update this accordingly. */
+    consumer_.fin.bytes = 512;
 
     std::memset(&ops_, 0, sizeof(ops_));
     consumer_.install(&ops_);
@@ -750,11 +764,18 @@ TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
   FrozenClock frozen;
   frozen.now = 1000;
   hipObj::v2::setClockSourceForTest(&frozen);
-  uint32_t seenPre = 0, seenFinal = 0;
+  uint32_t seenReady = 0, seenFinal = 0;
   consumer_.armGetCompletion = true;
   consumer_.onPrepare = [&](hipObjPrepareReplyV2_t*) {
-    seenPre = consumer_.lastSeenDeadlineMs;
-    /* Spend 5000ms of the 60000ms budget before READY. */
+    /* Spend 5000ms of the 60000ms budget before READY: the READY
+     * request must observe the reduced allowance. */
+    frozen.now += 5000;
+  };
+  consumer_.onReadyRequest = [&]() {
+    seenReady = consumer_.lastSeenDeadlineMs;
+    /* Spend another 5000ms between READY and FINAL: only a FINAL that
+     * refreshes its budget observes this, so a stale implementation
+     * forwards seenReady and fails the comparison. */
     frozen.now += 5000;
   };
   consumer_.onFinishReady = [&]() {
@@ -764,9 +785,10 @@ TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
       hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
   hipObj::v2::setClockSourceForTest(nullptr);
   EXPECT_EQ(e.opError, hipObjSuccess);
+  EXPECT_GT(seenReady, 0u);
   EXPECT_GT(seenFinal, 0u);
-  EXPECT_LT(seenFinal, seenPre)
-    << "FINAL must observe the budget spent between phases";
+  EXPECT_LT(seenFinal, seenReady)
+    << "FINAL must observe the budget spent after the READY request";
 }
 
 TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {

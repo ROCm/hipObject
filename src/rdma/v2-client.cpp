@@ -227,8 +227,13 @@ int acquireSession(void* devPtr, SessionResources& res) {
       cqParkThrew = true;
     }
     if (cqParkThrew || res.id == 0) {
-      /* Registry full or the allocation failed again: nothing can own
-       * the leftover. Surface it. */
+      /* Registry full or the allocation failed again: try to destroy
+       * the surviving CQ directly so the leftover does not outlive
+       * the caller; if that also fails the -2 report is the only
+       * signal left. */
+      bool qpIgnored = false;
+      bool cqOk = false;
+      destroyRcConnV2(res.conn, &qpIgnored, &cqOk);
       g_bufferMap.releaseMrRef(devPtr);
       reg.retired().unreserve(retireRid);
       reg.unreserveSlot();
@@ -265,11 +270,21 @@ int acquireSession(void* devPtr, SessionResources& res) {
      * (recorded only on successful destroy, so keep the reservation
      * with a poisoned entry instead of unreserving). */
     if (!qpOk || !cqOk) {
+      /* Exactly one side survived. The reservation stays with the
+       * surviving QP when the QP destroy failed; when the QP was
+       * destroyed the retirement reservation is settled below. The
+       * device reference is released immediately, so a parked entry
+       * never owns one. */
       ConnectionEntryV2 poisoned;
       poisoned.conn = res.conn;
       poisoned.device = v2State().device;
       poisoned.reservationId = qpOk ? 0 : retireRid;
+      poisoned.pinnedBuffer = nullptr; /* MR ref released below */
       poisoned.poisoned = true;
+      poisoned.holdsDeviceRef = false;
+      if (qpOk) {
+        reg.retired().unreserve(retireRid);
+      }
       try {
         res.id = reg.insert(std::move(poisoned));
       } catch (...) {
@@ -414,6 +429,11 @@ int v2Init(hipObjConfigV2_t* config) {
       return hipObjNicNotFound;
     }
   }
+  /* All allocating state is prepared before the device opens, so a
+   * throw or failure leaves nothing to roll back and a retry starts
+   * from the same clean state. */
+  std::string nicNameOut = (devName != nullptr) ? devName : "";
+  std::string controlEndpoint = config->control.controlEndpoint;
   DeviceHandle* dh = new DeviceHandle();
   RcConnection raw;
   const int ret = (devName != nullptr)
@@ -429,10 +449,8 @@ int v2Init(hipObjConfigV2_t* config) {
   dh->gidIndex = raw.gidIndex;
   dh->localGid = raw.localGid;
   st.device = dh;
-  /* Publish the selected NIC name only after the device opened: a
-   * failed init must not leave a stale name behind. */
-  st.nicName = (devName != nullptr) ? devName : "";
-  st.controlEndpoint = config->control.controlEndpoint;
+  st.nicName = std::move(nicNameOut);
+  st.controlEndpoint = std::move(controlEndpoint);
   st.connectDeadlineMs = config->connectDeadlineMs;
   st.transferDeadlineMs = config->transferDeadlineMs;
   st.cancelBudgetMs = config->cancelCleanupBudgetMs;
@@ -771,7 +789,13 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     }
     if (transitionQpToRtrV2(res.dh, res.conn, serverQpn, 0, serverGid,
                             serverPsn) != 0) {
-      outcome = {hipObjRdmaError, 0};
+      /* A failed transition may also have consumed the allowance;
+       * sample the deadline fact so it survives classification and
+       * release precedence. */
+      const bool rtrExpired = steadyNowMs() >= connectDeadline;
+      outcome = rtrExpired
+                    ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
+                    : hipObjError_t{hipObjRdmaError, 0};
       break;
     }
     if (steadyNowMs() >= connectDeadline) {
@@ -781,7 +805,10 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       break;
     }
     if (transitionQpToRtsV2(res.conn, res.dh, psn) != 0) {
-      outcome = {hipObjRdmaError, 0};
+      const bool rtsExpired = steadyNowMs() >= connectDeadline;
+      outcome = rtsExpired
+                    ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
+                    : hipObjError_t{hipObjRdmaError, 0};
       break;
     }
     if (steadyNowMs() >= connectDeadline) {
@@ -850,7 +877,11 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       dataOk = pollDeadline(res.conn.cq, IBV_WC_RECV_RDMA_WITH_IMM,
                             deadline, wc) &&
                (wc.wc_flags & IBV_WC_WITH_IMM) != 0 &&
-               ntohl(wc.imm_data) == cookie;
+               ntohl(wc.imm_data) == cookie &&
+               /* A posted receive length bounds what the remote may
+                * write, it does not describe what it did write: a
+                * short WRITE_WITH_IMM must not surface as success. */
+               wc.byte_len == rreq.size;
     } else {
       /* PUT staging push: bounded grace so the server's receive post
        * (inside its READY handling) is not raced, then WRITE WITH
@@ -926,6 +957,15 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     if (!fin.protocolEcho) {
       /* The wire parser rejects successful replies without the echo;
        * hold the core to the same contract. */
+      outcome = finalExpired
+                    ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
+                    : hipObjError_t{hipObjRdmaError, 0};
+      break;
+    }
+    if (fin.bytes != rreq.size) {
+      /* The server's own accounting must agree with the request; a
+       * mismatch means a short or over-long transfer never surfaced
+       * as a data-phase error. */
       outcome = finalExpired
                     ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
                     : hipObjError_t{hipObjRdmaError, 0};
