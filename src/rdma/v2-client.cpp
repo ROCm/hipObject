@@ -510,6 +510,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                       query, cookie, psn, deadline, remaining(deadline));
     rreq.session = sessionId.c_str();
     rreq.token = clientToken.c_str();
+    rreq.clientQpn = res.conn.qpNum;
+    rreq.clientMrAddr = reinterpret_cast<uint64_t>(devPtr);
+    rreq.clientMrRkey = mr->rkey;
     if (ops->sendReadyRequest(ctx, &rreq) != 0) {
       outcome = {hipObjS3Error, 0};
       break;

@@ -36,6 +36,20 @@ int parseRdmaReply(const std::string& rdma_reply) {
   return httpCode;
 }
 
+/* Canonical rdma-target fallback: /bucket/key with the sorted query
+ * appended. The library normally supplies req->target already built;
+ * this covers a null target (defensive) without a second encoder. */
+std::string buildObjectTarget(const char* bucket, const char* key,
+                              const char* query) {
+  std::string t = std::string("/") + (bucket ? bucket : "") + "/" +
+                  (key ? key : "");
+  if (query && query[0] != '\0') {
+    t += "?";
+    t += query;
+  }
+  return t;
+}
+
 std::string clientNicFromToken(const char* token) {
   char nicIp[32];
   hipObjError_t err = hipObjTokenClientNic(token, nicIp, sizeof(nicIp));
@@ -53,28 +67,38 @@ std::string clientNicFromToken(const char* token) {
 struct V2CallbackCtx {
   S3RdmaContext* sctx;
   std::string clientNic; // NIC hint derived from the client token
+  /* READY response stash: the HTTP client completes the round trip
+   * inside sendReadyRequest, so the FINAL fields are read here when
+   * the library calls finishReady. */
+  minio::http::Response last_ready;
+  bool ready_sent = false;
 };
 
-minio::http::Response executeV2Request(
-  S3RdmaContext* sctx, minio::http::Method method, const std::string& nic,
-  minio::utils::Multimap& extra_headers, const std::string& bucket,
-  const std::string& key, const std::string& query_str) {
+// hipObjOpsV2_t callbacks -------------------------------------------------
+
+/* Builds and signs a control-plane request against the S3 endpoint.
+ * The control path lives under /.hipobj-rc/{prepare,ready,cancel} on
+ * the same host as the object endpoint; the canonical target (object
+ * path + sorted query) travels in a header so the signed path stays
+ * the fixed control path. */
+minio::http::Response executeControlRequest(
+  S3RdmaContext* sctx, const std::string& control_path,
+  const std::string& nic, minio::utils::Multimap& extra_headers) {
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
   minio::creds::Credentials creds = sctx->provider->Fetch();
   minio::utils::Multimap query_params;
   minio::http::Url url;
   const std::string& region = sctx->region;
 
-  if (minio::error::Error err = sctx->url.BuildUrl(url, method, region,
-                                                   query_params, bucket, key)) {
+  if (sctx->url.BuildUrl(url, minio::http::Method::kPost, region,
+                         query_params, "", "") ||
+      url.host.empty()) {
     minio::http::Response bad;
     bad.status_code = -1;
     return bad;
   }
-
-  if (!query_str.empty()) {
-    url.query_string = query_str;
-  }
+  url.path = control_path;
+  url.query_string.clear();
 
   std::string host = url.HostHeaderValue();
   minio::utils::Multimap sign_headers;
@@ -93,17 +117,11 @@ minio::http::Response executeV2Request(
     sign_headers.Add("X-Amz-Security-Token", creds.session_token);
   }
 
-  minio::signer::SignV4S3(method, url.path, region, sign_headers, query_params,
-                          creds.access_key, creds.secret_key, kUnsignedPayload,
-                          date);
+  minio::signer::SignV4S3(minio::http::Method::kPost, control_path, region,
+                          sign_headers, query_params, creds.access_key,
+                          creds.secret_key, kUnsignedPayload, date);
 
-  if (!query_str.empty()) {
-    url.query_string = query_str;
-  } else {
-    url.query_string = query_params.ToQueryString();
-  }
-
-  minio::http::Request req(method, url);
+  minio::http::Request req(minio::http::Method::kPost, url);
   req.headers = sign_headers;
   req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
   req.timeout_secs = kRdmaTimeoutSecs;
@@ -115,25 +133,58 @@ minio::http::Response executeV2Request(
   return req.Execute();
 }
 
-// hipObjOpsV2_t callbacks -------------------------------------------------
+std::string hex32Bridge(uint32_t v) {
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "%08x", v);
+  return std::string(buf);
+}
+
+std::string hex24Bridge(uint32_t v) {
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "%06x", v);
+  return std::string(buf);
+}
+
+std::string hex64Bridge(uint64_t v) {
+  char buf[24];
+  std::snprintf(buf, sizeof(buf), "%llx",
+                static_cast<unsigned long long>(v));
+  return std::string(buf);
+}
+
+/* The PREPARE reply token arrives as "200:<88-hex>" in
+ * X-Amz-Rdma-Reply; strip the status prefix and keep the payload. */
+std::string replyTokenPayload(const minio::http::Response& res) {
+  std::string v = res.headers.GetFront(kAmzRdmaReplyHdr);
+  const std::string prefix = "200:";
+  if (v.size() > prefix.size() &&
+      v.compare(0, prefix.size(), prefix) == 0) {
+    return v.substr(prefix.size());
+  }
+  return std::string();
+}
 
 int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
                   hipObjPrepareReplyV2_t* out) {
   auto* c = static_cast<V2CallbackCtx*>(ctx);
-  const bool isPut = (req->method && req->method[0] == 'P');
-  minio::http::Method method = isPut ? minio::http::Method::kPut
-                                     : minio::http::Method::kGet;
 
   minio::utils::Multimap extra;
-  extra.Add(kAmzRdmaToken, req->token ? req->token : "");
   extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+  extra.Add(kAmzRdmaToken, req->token ? req->token : "");
+  extra.Add(kAmzRdmaPsnHdr, hex24Bridge(req->clientPsn));
+  extra.Add(kAmzRdmaCookieHdr, hex32Bridge(req->cookie));
+  extra.Add(kAmzRdmaOpHdr, req->method ? req->method : "GET");
+  extra.Add(kAmzRdmaTargetHdr,
+            req->target ? req->target
+                        : buildObjectTarget(req->bucket, req->key,
+                                            req->query));
+  extra.Add(kAmzRdmaSizeHdr, std::to_string(req->size));
+  if (req->offset != 0) {
+    extra.Add(kAmzRdmaOffsetHdr, std::to_string(req->offset));
+  }
 
-  std::string query = req->query ? req->query : "";
-  minio::http::Response res = executeV2Request(c->sctx, method, c->clientNic,
-                                               extra,
-                                               req->bucket ? req->bucket : "",
-                                               req->key ? req->key : "", query);
-
+  minio::http::Response res = executeControlRequest(
+    c->sctx, kControlPathPrepare, c->clientNic, extra);
   if (!res.error.empty() || res.status_code <= 0) {
     return -1;
   }
@@ -144,7 +195,7 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   out->unsupportedMarker = (res.status_code == kRdmaReplyNotImplemented) ? 1
                                                                          : 0;
 
-  std::string srv_token = res.headers.GetFront(kAmzRdmaToken);
+  std::string srv_token = replyTokenPayload(res);
   if (!srv_token.empty()) {
     std::snprintf(out->serverToken, sizeof(out->serverToken), "%s",
                   srv_token.c_str());
@@ -153,29 +204,54 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   if (!session.empty()) {
     std::snprintf(out->session, sizeof(out->session), "%s", session.c_str());
   }
+  std::string psn = res.headers.GetFront(kAmzRdmaPsnHdr);
+  if (!psn.empty()) {
+    out->serverPsn =
+      static_cast<uint32_t>(std::strtoul(psn.c_str(), nullptr, 16));
+  }
+  std::string saddr = res.headers.GetFront(kAmzRdmaMrAddrHdr);
+  std::string srkey = res.headers.GetFront(kAmzRdmaMrRkeyHdr);
+  if (!saddr.empty() && !srkey.empty()) {
+    out->stagingAddr = std::strtoull(saddr.c_str(), nullptr, 16);
+    out->stagingRkey =
+      static_cast<uint32_t>(std::strtoul(srkey.c_str(), nullptr, 16));
+    out->stagingPresent =
+      (out->stagingAddr != 0 || out->stagingRkey != 0) ? 1 : 0;
+  }
   return 0;
 }
 
-int v2SendReady(void* ctx, const hipObjTransferReqV2_t* req,
-                hipObjFinalReplyV2_t* out) {
+int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
   auto* c = static_cast<V2CallbackCtx*>(ctx);
-  const bool isPut = (req->method && req->method[0] == 'P');
-  minio::http::Method method = isPut ? minio::http::Method::kPut
-                                     : minio::http::Method::kGet;
 
   minio::utils::Multimap extra;
-  extra.Add(kAmzRdmaSession, req->session ? req->session : "");
   extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+  extra.Add(kAmzRdmaSessionHdr, req->session ? req->session : "");
+  extra.Add(kAmzRdmaCookieHdr, hex32Bridge(req->cookie));
+  extra.Add(kAmzRdmaQpnHdr, hex64Bridge(req->clientQpn));
+  extra.Add(kAmzRdmaMrAddrHdr, hex64Bridge(req->clientMrAddr));
+  extra.Add(kAmzRdmaMrRkeyHdr, hex32Bridge(req->clientMrRkey));
 
-  std::string query = req->query ? req->query : "";
-  minio::http::Response res = executeV2Request(c->sctx, method, c->clientNic,
-                                               extra,
-                                               req->bucket ? req->bucket : "",
-                                               req->key ? req->key : "", query);
-
-  if (!res.error.empty() || res.status_code <= 0) {
+  /* The READY round trip completes synchronously here (the HTTP
+   * client has no half-close split). The library calls this after
+   * RTR/RTS so the server can pair immediately; the response is
+   * consumed below in v2FinishReady from the stashed context. */
+  c->last_ready = executeControlRequest(c->sctx, kControlPathReady,
+                                        c->clientNic, extra);
+  c->ready_sent = true;
+  if (!c->last_ready.error.empty() || c->last_ready.status_code <= 0) {
     return -1;
   }
+  return 0;
+}
+
+int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
+                  hipObjFinalReplyV2_t* out) {
+  auto* c = static_cast<V2CallbackCtx*>(ctx);
+  if (!c->ready_sent) {
+    return -1;
+  }
+  const minio::http::Response& res = c->last_ready;
 
   std::memset(out, 0, sizeof(*out));
   out->httpStatus = res.status_code;
@@ -190,10 +266,18 @@ int v2SendReady(void* ctx, const hipObjTransferReqV2_t* req,
     }
   }
 
+  std::string echo = res.headers.GetFront(kAmzRdmaCookieHdr);
+  if (!echo.empty()) {
+    out->cookieEcho =
+      static_cast<uint32_t>(std::strtoul(echo.c_str(), nullptr, 16));
+    out->cookiePresent = 1;
+  }
+
   std::string etag = res.headers.GetFront("etag");
   if (!etag.empty()) {
     std::string trimmed = minio::utils::Trim(etag, '"');
     std::snprintf(out->etag, sizeof(out->etag), "%s", trimmed.c_str());
+    c->sctx->etag = trimmed;
   }
 
   std::string csum = res.headers.GetFront("x-amz-checksum-crc64nvme");
@@ -202,28 +286,17 @@ int v2SendReady(void* ctx, const hipObjTransferReqV2_t* req,
                   csum.c_str());
     c->sctx->checksum = csum;
   }
-
-  if (!etag.empty()) {
-    c->sctx->etag = minio::utils::Trim(etag, '"');
-  }
-
   return 0;
 }
 
 int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
   auto* c = static_cast<V2CallbackCtx*>(ctx);
-  const bool isPut = (req->method && req->method[0] == 'P');
-  minio::http::Method method = isPut ? minio::http::Method::kPut
-                                     : minio::http::Method::kGet;
 
   minio::utils::Multimap extra;
-  extra.Add(kAmzRdmaSession, req->session ? req->session : "");
-  extra.Add(kAmzRdmaCancel, "1");
+  extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+  extra.Add(kAmzRdmaSessionHdr, req->session ? req->session : "");
 
-  std::string query = req->query ? req->query : "";
-  executeV2Request(c->sctx, method, c->clientNic, extra,
-                   req->bucket ? req->bucket : "", req->key ? req->key : "",
-                   query);
+  executeControlRequest(c->sctx, kControlPathCancel, c->clientNic, extra);
   return 0;
 }
 
@@ -240,7 +313,8 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
   V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
-  ops.sendReady = v2SendReady;
+  ops.sendReadyRequest = v2SendReadyRequest;
+  ops.finishReady = v2FinishReady;
   ops.sendCancel = v2SendCancel;
 
   std::string query;
@@ -276,7 +350,8 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
   V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
-  ops.sendReady = v2SendReady;
+  ops.sendReadyRequest = v2SendReadyRequest;
+  ops.finishReady = v2FinishReady;
   ops.sendCancel = v2SendCancel;
 
   hipObjError_t err = hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(),
