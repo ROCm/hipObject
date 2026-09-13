@@ -283,6 +283,7 @@ ReleaseResult releaseSession(SessionResources& res) {
   }
   return rc;
 }
+} // namespace
 
 /* Maps an internal failure code to the public error with the
  * non-quiesced-release policy applied. releaseRc is the outcome of
@@ -296,7 +297,9 @@ hipObjError_t finalizeOutcome(hipObjError_t wireOutcome, ReleaseResult releaseRc
   return {hipObjInternalError, 0};
 }
 
-} // namespace
+bool v2IsInitialized() { return v2State().initialized; }
+
+const char* v2NicName() { return v2State().nicName.c_str(); }
 
 bool v2IsInitialized() {
   return v2State().initialized;
