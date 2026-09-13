@@ -258,8 +258,17 @@ private:
     CallRecord r;
     r.cb = cb;
     r.req = *req; /* string fields alias library-owned storage */
+    ownedSession = req->session ? req->session : "";
+    r.req.session = ownedSession.c_str();
+    ownedTarget = req->target ? req->target : "";
+    r.req.target = ownedTarget.c_str();
     calls.push_back(r);
   }
+
+  /* Owns the storage the latest snapshot's string fields point into,
+   * so assertions after the transfer returns stay valid. */
+  std::string ownedSession;
+  std::string ownedTarget;
 };
 
 /* ---- fixture ------------------------------------------------------------ */
