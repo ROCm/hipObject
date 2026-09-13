@@ -554,7 +554,8 @@ TEST_F(V2ClientTransferTest, MissingProtocolEchoFailsPrepare) {
   EXPECT_EQ(err.opError, hipObjRdmaError);
   /* No READY may follow a rejected PREPARE. */
   for (const auto& c : consumer_.calls) {
-    EXPECT_NE(c.cb, Cb::Ready);
+    EXPECT_NE(c.cb, Cb::ReadyRequest);
+    EXPECT_NE(c.cb, Cb::FinishReady);
   }
 }
 
