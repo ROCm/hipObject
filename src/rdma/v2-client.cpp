@@ -101,20 +101,50 @@ struct EmergencySlot {
   RcConnV2 conn;
   uint64_t reservationId = 0;
   bool used = false;
+  /* Reserved before verbs creation so a later parking failure can
+   * never find the owner full: admission refuses new transfers
+   * instead of stranding survivors. */
+  bool reserved = false;
 };
 constexpr size_t kEmergencySlots = 8;
 EmergencySlot g_emergencySlots[kEmergencySlots];
 
-static bool parkEmergency(RcConnV2& conn, uint64_t reservationId) {
-  for (auto& slot : g_emergencySlots) {
-    if (!slot.used) {
-      slot.conn = conn;
-      slot.reservationId = reservationId;
-      slot.used = true;
-      return true;
+/* Claim one emergency slot for the transfer about to create verbs
+ * objects. Returns a handle (index + 1) or 0 when all are taken. */
+static size_t reserveEmergencySlot() {
+  for (size_t i = 0; i < kEmergencySlots; ++i) {
+    if (!g_emergencySlots[i].used && !g_emergencySlots[i].reserved) {
+      g_emergencySlots[i].reserved = true;
+      return i + 1;
     }
   }
-  return false;
+  return 0;
+}
+
+static void releaseEmergencyReservation(size_t handle) {
+  if (handle == 0 || handle > kEmergencySlots) {
+    return;
+  }
+  auto& slot = g_emergencySlots[handle - 1];
+  if (slot.reserved && !slot.used) {
+    slot.reserved = false;
+  }
+}
+
+static bool parkEmergency(size_t handle, RcConnV2& conn,
+                          uint64_t reservationId) {
+  if (handle == 0 || handle > kEmergencySlots) {
+    return false;
+  }
+  auto& slot = g_emergencySlots[handle - 1];
+  if (!slot.reserved || slot.used) {
+    return false;
+  }
+  slot.conn = conn;
+  slot.reservationId = reservationId;
+  slot.used = true;
+  slot.reserved = false;
+  return true;
 }
 
 static void drainEmergencySlots() {
@@ -125,7 +155,10 @@ static void drainEmergencySlots() {
     bool qpOk = false;
     bool cqOk = false;
     destroyRcConnV2(slot.conn, &qpOk, &cqOk);
-    if (qpOk && cqOk) {
+    if (qpOk) {
+      /* The reservation guards a (qpn, psn) pair; with the QP gone
+       * the pair can never reach the wire, so settle it now instead
+       * of waiting for the CQ recovery too. */
       if (slot.reservationId != 0) {
         registry().retired().unreserve(slot.reservationId);
       }
@@ -222,7 +255,8 @@ struct SessionResources {
  * verbs object (rollbackFailed), reported as -2 and still owned here:
  * those are recorded below as a poisoned registry entry so the reaper
  * path owns them. */
-int acquireSession(void* devPtr, SessionResources& res) {
+int acquireSession(void* devPtr, SessionResources& res,
+                   size_t emergencyHandle) {
   ConnectionRegistry& reg = registry();
   /* Retire stale (qpn, psn) records first: a full ring would turn
    * every teardown Busy otherwise, and expired records are free to
@@ -282,16 +316,16 @@ int acquireSession(void* devPtr, SessionResources& res) {
       bool qpIgnored = false;
       bool cqOk = false;
       destroyRcConnV2(res.conn, &qpIgnored, &cqOk);
-      bool settled = cqOk || parkEmergency(res.conn, retireRid);
+      bool settled = cqOk || parkEmergency(emergencyHandle, res.conn, retireRid);
       g_bufferMap.releaseMrRef(devPtr);
       if (cqOk) {
         reg.retired().unreserve(retireRid);
       }
       reg.unreserveSlot();
       if (!settled) {
-        /* Even the emergency owner is exhausted: the reservation
-         * cannot be settled without a retry owner, so it must expire
-         * through the ring rather than be dropped silently. */
+        /* Should be unreachable: admission reserves an emergency
+         * slot before verbs creation, so parking always has a home.
+         * Report the failure rather than dropping the survivor. */
         return -2;
       }
       return -2;
@@ -351,7 +385,8 @@ int acquireSession(void* devPtr, SessionResources& res) {
       if (res.id == 0) {
         /* Allocation failed twice: give the survivor to the emergency
          * owner so shutdown still reclaims it. */
-        parkedOk = parkEmergency(res.conn, qpOk ? 0 : retireRid);
+        parkedOk = parkEmergency(emergencyHandle, res.conn,
+                                 qpOk ? 0 : retireRid);
       }
       releaseDevice(v2State().device);
       g_bufferMap.releaseMrRef(devPtr);
@@ -580,6 +615,10 @@ int v2Shutdown() {
       }
     }
   }
+  /* Attempt emergency-slot recovery even when ordinary entries
+   * survive: their poison must not starve independently recoverable
+   * objects. */
+  drainEmergencySlots();
   if (poisonLeft || reg.size() > 0) {
     return hipObjRdmaError;
   }
@@ -608,6 +647,8 @@ int v2Shutdown() {
   st.initialized = false;
   st.controlEndpoint.clear();
   st.nicName.clear();
+  st.selectedPort = 0;
+  st.selectedGidIndex = -1;
   return hipObjSuccess;
 }
 
@@ -711,7 +752,16 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     }
 
     /* ---- verbs setup (per-transfer QP/CQ, MR pin) ---- */
-    const int arc = acquireSession(devPtr, res);
+    const size_t emergencyHandle = reserveEmergencySlot();
+    if (emergencyHandle == 0) {
+      /* All emergency recovery slots are outstanding: refuse the
+       * transfer rather than create verbs objects whose parking
+       * failure would strand them. */
+      outcome = {hipObjBusy, 0};
+      break;
+    }
+    const int arc = acquireSession(devPtr, res, emergencyHandle);
+    releaseEmergencyReservation(emergencyHandle);
     if (arc != 0) {
       /* acquireSession rolled back its own QP/CQ/slot work on every
        * failure path, but the MR pin survives in res.pinnedBuffer

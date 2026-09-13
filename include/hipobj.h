@@ -409,6 +409,14 @@ typedef struct {
  * library-wide lock is not recursive). All callbacks are required
  * for v2 transfers. The v1 member is unused by the v2 entry points
  * and is kept for structural forward compatibility.
+ *
+ * Time budget: the transfer deadline covers everything a callback
+ * does, including credential acquisition and DNS resolution. The
+ * reference bridge caches signed exchanges and bounds its resolver
+ * by the deadline; integrations must supply a credential provider
+ * that is already cached or otherwise bounded, because the library
+ * cannot interrupt a synchronous provider fetch from inside the
+ * callback.
  */
 typedef struct hipObjOpsV2 {
   hipObjOps_t v1;

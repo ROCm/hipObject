@@ -133,11 +133,36 @@ public:
   std::vector<NicInfo> Enumerate(const char* hca_list) override {
     std::vector<NicInfo> result;
     int num_devs = 0;
-    ibv_device** dev_list = ibv.get_device_list(&num_devs);
+    /* Keep the device list and open contexts owned across allocating
+     * operations. */
+    struct DeviceListOwner {
+      ibv_device** list = nullptr;
+      ~DeviceListOwner() {
+        if (list) {
+          ibv.free_device_list(list);
+        }
+      }
+    } devOwner{ibv.get_device_list(&num_devs)};
+    ibv_device** dev_list = devOwner.list;
     if (!dev_list || num_devs <= 0)
       return result;
+    struct CtxOwner {
+      ibv_context* ctx = nullptr;
+      ~CtxOwner() {
+        if (ctx) {
+          ibv.close_device(ctx);
+        }
+      }
+      void reset(ibv_context* next) {
+        if (ctx) {
+          ibv.close_device(ctx);
+        }
+        ctx = next;
+      }
+    } ctxOwner;
 
     for (int i = 0; i < num_devs && dev_list[i]; ++i) {
+      ctxOwner.reset(nullptr);
       ibv_device* dev = dev_list[i];
       const char* dev_name = ibv.get_device_name(dev);
       if (!dev_name)
@@ -162,10 +187,11 @@ public:
       ibv_context* ctx = ibv.open_device(dev);
       if (!ctx)
         continue;
+      ctxOwner.reset(ctx);
 
       ibv_device_attr attr;
       if (ibv.query_device(ctx, &attr) != 0) {
-        ibv.close_device(ctx);
+        ctxOwner.reset(nullptr);
         continue;
       }
 
@@ -204,9 +230,7 @@ public:
         result.push_back(info);
         break;
       }
-      ibv.close_device(ctx);
     }
-    ibv.free_device_list(dev_list);
     return result;
   }
 };
