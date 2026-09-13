@@ -105,9 +105,7 @@ struct ControlConn {
   std::string host;
   std::string port;
 
-  bool connectTo(const std::string& host_port, const std::string& nic,
-                 int deadlineMs);
-  /* Absolute-deadline variants: one caller-computed callback deadline
+  /* Absolute-deadline interface: one caller-computed callback deadline
    * is shared across connect, send, and read so the steps cannot
    * collectively exceed the reported budget. */
   bool connectToUntil(const std::string& host_port, const std::string& nic,
@@ -118,7 +116,6 @@ struct ControlConn {
       fd = -1;
     }
   }
-  bool sendAll(const std::string& bytes, int deadlineMs);
   bool sendAllUntil(
     const std::string& bytes,
     std::chrono::steady_clock::time_point deadlineAt);
@@ -143,14 +140,7 @@ struct V2CallbackCtx {
 
 // hipObjOpsV2_t callbacks -------------------------------------------------
 
-/* Parses "host[:port]" out of the S3 URL for a direct connection. */
-bool ControlConn::connectTo(const std::string& host_port,
-                            const std::string& nic, int deadlineMs) {
-  const auto deadlineAt = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(deadlineMs);
-  return connectToUntil(host_port, nic, deadlineAt);
-}
-
+/* Dials the control plane at "host[:port]". */
 bool ControlConn::connectToUntil(
   const std::string& host_port, const std::string& nic,
   std::chrono::steady_clock::time_point deadlineAt) {
@@ -252,13 +242,6 @@ bool ControlConn::connectToUntil(
   this->host = host;
   this->port = port;
   return true;
-}
-
-bool ControlConn::sendAll(const std::string& bytes, int deadlineMs) {
-  if (fd < 0) return false;
-  const auto deadlineAt = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(deadlineMs);
-  return sendAllUntil(bytes, deadlineAt);
 }
 
 /* Deadline-absolute variant: the caller computes one callback-wide
