@@ -191,11 +191,23 @@ namespace {
         int selectedGid = -1;
     };
 
-    std::string clientNic()
+    struct BridgeSelection {
+        std::string nic;
+        int port = 0;
+        int gidIndex = -1;
+    };
+
+    BridgeSelection bridgeSelection()
     {
-        char       *nic = hipObjNicV2();
-        std::string out = nic != nullptr ? std::string(nic) : std::string();
-        hipObjFreeNicV2(nic);
+        BridgeSelection out;
+        char nic[64];
+        int port = 0;
+        int gid = -1;
+        if (hipObjInterfaceSnapshotV2(nic, sizeof(nic), &port, &gid) == 1) {
+            out.nic.assign(nic);
+            out.port = port;
+            out.gidIndex = gid;
+        }
         return out;
     }
 
@@ -284,7 +296,18 @@ namespace {
                 bool done = false;
                 int rc = 0;
                 struct addrinfo *result = nullptr;
-                bool abandoned = false;
+                ~ResolveState()
+                {
+                    if (result != nullptr) {
+                        freeaddrinfo(result);
+                    }
+                }
+                struct addrinfo *takeResult()
+                {
+                    struct addrinfo *out = result;
+                    result = nullptr;
+                    return out;
+                }
             };
             auto st = std::make_shared<ResolveState>();
             const std::string hostCopy = host;
@@ -297,23 +320,19 @@ namespace {
                 st->result = res;
                 st->done = true;
                 st->cv.notify_all();
-                if ((st->rc != 0 || st->abandoned) && st->result != nullptr) {
-                    freeaddrinfo(st->result);
-                    st->result = nullptr;
-                }
             });
             std::unique_lock<std::mutex> lk(st->mu);
             if (!st->cv.wait_until(lk, deadlineAt, [&]() { return st->done; })) {
-                st->abandoned = true;
                 resolver.detach();
                 return false;
             }
+            struct addrinfo *taken = (st->rc == 0) ? st->takeResult() : nullptr;
             lk.unlock();
             resolver.join();
-            if (st->rc != 0 || st->result == nullptr) {
+            if (st->rc != 0 || taken == nullptr) {
                 return false;
             }
-            list = st->result;
+            list = taken;
             gaiRc = st->rc;
         }
         if (gaiRc != 0 || list == nullptr) {
@@ -911,7 +930,8 @@ namespace {
 
     RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}, hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
+        const BridgeSelection sel = bridgeSelection();
+        V2CallbackCtx cbctx{sctx, sel.nic, {}, false, {}, sel.port, sel.gidIndex};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
@@ -954,7 +974,8 @@ namespace {
 
     RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}, hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
+        const BridgeSelection sel = bridgeSelection();
+        V2CallbackCtx cbctx{sctx, sel.nic, {}, false, {}, sel.port, sel.gidIndex};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
