@@ -90,6 +90,9 @@ namespace v2 {
         /* Buffer pin owned by this entry. Released once, when the entry
          * is fully reclaimed. Null when no pin was acquired. */
         void         *pinnedBuffer   = nullptr;
+        /* False only for a CQ parked after create failed before the
+         * device reference was taken. */
+        bool          holdsDeviceRef = true;
         bool          poisoned       = false;
         bool          destroyClaimed = false;
         bool          destroying     = false;

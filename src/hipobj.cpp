@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -905,14 +906,33 @@ catch (...) {
 }
 
 #ifdef HIPOBJECT_V2_API
-const char *
+char *
 hipObjNicV2(void)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return nullptr;
+    }
     const char *nic = hipObj::v2::v2NicName();
-    return (nic != nullptr && nic[0] != '\0') ? nic : nullptr;
+    if (nic == nullptr || nic[0] == '\0') {
+        return nullptr;
+    }
+    const size_t n    = std::strlen(nic) + 1;
+    char        *copy = static_cast<char *>(std::malloc(n));
+    if (copy == nullptr) {
+        return nullptr;
+    }
+    std::memcpy(copy, nic, n);
+    return copy;
 }
 catch (...) {
     return nullptr;
+}
+
+void
+hipObjFreeNicV2(char *nic)
+{
+    std::free(nic);
 }
 
 hipObjError_t
@@ -950,6 +970,7 @@ hipObjError_t
 hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
+    const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
@@ -960,7 +981,7 @@ try {
     }
     int       diag = 0;
     const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops,
-                                          ctx, 0, &diag);
+                                          ctx, entryMs, true, &diag);
     return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
@@ -971,6 +992,7 @@ hipObjError_t
 hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
+    const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
@@ -980,7 +1002,7 @@ try {
         return err;
     }
     int       diag = 0;
-    const int rc   = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, 0, &diag);
+    const int rc   = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs, true, &diag);
     return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
