@@ -992,8 +992,8 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 
 ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
   V2CallbackCtx cbctx{
-      sctx, clientNic(), {}, false, {},
-      hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
+      sctx, clientNic(), hipObjSelectedPortV2(),
+      hipObjSelectedGidIndexV2(), {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -1022,8 +1022,8 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
   V2CallbackCtx cbctx{
-      sctx, clientNic(), {}, false, {},
-      hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
+      sctx, clientNic(), hipObjSelectedPortV2(),
+      hipObjSelectedGidIndexV2(), {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
