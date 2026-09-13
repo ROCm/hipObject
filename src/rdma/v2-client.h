@@ -43,15 +43,25 @@ struct ibv_pd* v2ProtectionDomain();
  * caller). Returns a hipObjOpError_t value. */
 bool v2IsInitialized();
 
+/* Entry timestamp for the public entry points, read from the same
+ * injectable clock the transfer budget uses. Call before acquiring
+ * the api lock so the wait counts against the budget. */
+uint64_t v2EntryNowMs();
+
 /* Name of the RDMA device the v2 stack selected at init, or an empty
  * string before init. Callers use this instead of minting a v1 RDMA
  * token to discover the NIC. */
 const char* v2NicName();
 
+/* entryMs/haveEntryMs: when haveEntryMs is true the public entry
+ * point captured the timestamp before waiting on the api lock, so
+ * the lock wait counts against the whole-transfer budget; when
+ * false (direct/internal callers, deterministic tests) v2Transfer
+ * stamps its own entry with the injectable clock. */
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
                hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs,
-               int* diagOut = nullptr);
+               bool haveEntryMs, int* diagOut = nullptr);
 
 } // namespace v2
 } // namespace hipObj

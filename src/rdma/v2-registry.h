@@ -74,6 +74,11 @@ struct ConnectionEntryV2 {
    * entry is fully reclaimed (successful destroy), including via the
    * shutdown drain. Null when no pin was acquired. */
   void* pinnedBuffer = nullptr;
+  /* True when createRcConnV2 incremented the device reference for
+   * this entry (it does so only after QP creation succeeded). A
+   * parked CQ-only survivor from a failed rollback never acquired
+   * one, so its release must not decrement. */
+  bool holdsDeviceRef = true;
   bool poisoned = false;
   bool destroyClaimed = false;
   bool destroying = false;

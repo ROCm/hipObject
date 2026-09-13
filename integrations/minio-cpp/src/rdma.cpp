@@ -81,8 +81,13 @@ std::string clientNic() {
   /* The v2 stack owns NIC selection; ask it directly instead of
    * minting a v1 RDMA token (which needs a v1-registered buffer and
    * would admit unregistered memory into the transfer). */
-  const char* nic = hipObjNicV2();
-  return (nic != nullptr) ? std::string(nic) : std::string();
+  char* nic = hipObjNicV2();
+  if (nic == nullptr) {
+    return std::string();
+  }
+  const std::string out(nic);
+  hipObjFreeNicV2(nic);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +107,11 @@ struct ControlConn {
 
   bool connectTo(const std::string& host_port, const std::string& nic,
                  int deadlineMs);
+  /* Absolute-deadline variants: one caller-computed callback deadline
+   * is shared across connect, send, and read so the steps cannot
+   * collectively exceed the reported budget. */
+  bool connectToUntil(const std::string& host_port, const std::string& nic,
+                      std::chrono::steady_clock::time_point deadlineAt);
   void close() {
     if (fd >= 0) {
       ::close(fd);
@@ -109,10 +119,16 @@ struct ControlConn {
     }
   }
   bool sendAll(const std::string& bytes, int deadlineMs);
+  bool sendAllUntil(
+    const std::string& bytes,
+    std::chrono::steady_clock::time_point deadlineAt);
   /* Reads one full CRLF-delimited HTTP/1.1 response: status line,
    * headers, then exactly Content-Length body bytes. Fails on chunked
    * or missing length (the control plane never uses them). */
   bool readResponse(std::string& head, std::string& body, int deadlineMs);
+  bool readResponseUntil(
+    std::string& head, std::string& body,
+    std::chrono::steady_clock::time_point deadlineAt);
   ~ControlConn() { close(); }
 };
 
@@ -130,9 +146,15 @@ struct V2CallbackCtx {
 /* Parses "host[:port]" out of the S3 URL for a direct connection. */
 bool ControlConn::connectTo(const std::string& host_port,
                             const std::string& nic, int deadlineMs) {
-  close();
   const auto deadlineAt = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(deadlineMs);
+  return connectToUntil(host_port, nic, deadlineAt);
+}
+
+bool ControlConn::connectToUntil(
+  const std::string& host_port, const std::string& nic,
+  std::chrono::steady_clock::time_point deadlineAt) {
+  close();
   std::string host = host_port;
   std::string port = "80";
   bool https = false;
@@ -203,9 +225,14 @@ bool ControlConn::connectTo(const std::string& host_port,
         std::chrono::duration_cast<std::chrono::milliseconds>(
           deadlineAt - std::chrono::steady_clock::now())
           .count());
-      if (left <= 0 || poll(&pfd, 1, left) <= 0) {
+      const int pr = poll(&pfd, 1, left);
+      if (left <= 0 || (pr < 0 && errno != EINTR) || pr == 0) {
         ::close(fd);
         fd = -1;
+        if (pr < 0 && errno == EINTR) {
+          --ai; /* interrupted: retry this address within the budget */
+          continue;
+        }
         continue;
       }
       int err = 0;
@@ -231,6 +258,17 @@ bool ControlConn::sendAll(const std::string& bytes, int deadlineMs) {
   if (fd < 0) return false;
   const auto deadlineAt = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(deadlineMs);
+  return sendAllUntil(bytes, deadlineAt);
+}
+
+/* Deadline-absolute variant: the caller computes one callback-wide
+ * deadline and shares it across connect, send, and read so the sum of
+ * every step stays inside the reported budget instead of each step
+ * re-arming a fresh allowance. */
+bool ControlConn::sendAllUntil(const std::string& bytes,
+                               std::chrono::steady_clock::time_point
+                                 deadlineAt) {
+  if (fd < 0) return false;
   size_t off = 0;
   while (off < bytes.size()) {
     struct pollfd pfd{fd, POLLOUT, 0};
@@ -238,7 +276,9 @@ bool ControlConn::sendAll(const std::string& bytes, int deadlineMs) {
       std::chrono::duration_cast<std::chrono::milliseconds>(
         deadlineAt - std::chrono::steady_clock::now())
         .count());
-    if (left <= 0 || poll(&pfd, 1, left) <= 0) return false;
+    const int pr = poll(&pfd, 1, left);
+    if (left <= 0 || (pr < 0 && errno != EINTR) || pr == 0)
+      return false;
     ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
@@ -257,6 +297,13 @@ bool ControlConn::readResponse(std::string& head, std::string& body,
   if (fd < 0) return false;
   const auto deadlineAt = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(deadlineMs);
+  return readResponseUntil(head, body, deadlineAt);
+}
+
+bool ControlConn::readResponseUntil(
+  std::string& head, std::string& body,
+  std::chrono::steady_clock::time_point deadlineAt) {
+  if (fd < 0) return false;
   std::string buf;
   size_t headEnd = std::string::npos;
   size_t contentLen = std::string::npos;
@@ -286,13 +333,30 @@ bool ControlConn::readResponse(std::string& head, std::string& body,
             haveLen = true;
             const std::string num =
               line.substr(needle.size());
-            char* endp = nullptr;
+            /* Trim surrounding whitespace (SP/HTAB), then require at
+             * least one decimal digit and nothing else: signs,
+             * prefixes, embedded spaces, or trailing garbage are
+             * framing errors, not zero. */
+            const size_t first =
+              num.find_first_not_of(" \t");
+            const size_t last =
+              num.find_last_not_of(" \t");
+            if (first == std::string::npos) {
+              return false; /* empty or all-whitespace */
+            }
+            const std::string digits =
+              num.substr(first, last - first + 1);
+            if (digits.find_first_not_of("0123456789") !=
+                  std::string::npos ||
+                digits.size() > 20) {
+              return false;
+            }
             errno = 0;
-            unsigned long long v =
-              std::strtoull(num.c_str(), &endp, 10);
+            char* endp = nullptr;
+            const unsigned long long v =
+              std::strtoull(digits.c_str(), &endp, 10);
             if (errno != 0 || endp == nullptr ||
-                num.find_first_not_of(" \t") != std::string::npos ||
-                *num.rbegin() == ' ') {
+                *endp != '\0') {
               return false;
             }
             contentLen = static_cast<size_t>(v);
@@ -322,7 +386,9 @@ bool ControlConn::readResponse(std::string& head, std::string& body,
       std::chrono::duration_cast<std::chrono::milliseconds>(
         deadlineAt - std::chrono::steady_clock::now())
         .count());
-    if (left <= 0 || poll(&pfd, 1, left) <= 0) return false;
+    const int pr = poll(&pfd, 1, left);
+    if (left <= 0 || (pr < 0 && errno != EINTR) || pr == 0)
+      return false;
     char chunk[4096];
     ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
     if (n < 0) {
@@ -463,15 +529,40 @@ int controlDeadlineMs(const hipObjTransferReqV2_t* req) {
   return static_cast<int>(r);
 }
 
-/* Control-plane authority: the configured callback endpoint wins;
- * the S3 object URL is only a fallback. Dialing and signing use the
- * same authority so a split control endpoint stays consistent. */
-std::string controlAuthority(V2CallbackCtx* c,
-                             const hipObjTransferReqV2_t* req) {
-  if (req->endpoint != nullptr && req->endpoint[0] != '\0') {
-    return std::string(req->endpoint);
+/* Control-plane authority: the configured control endpoint wins;
+ * the S3 object URL is only a fallback. The endpoint is a full
+ * "http(s)://host:port" URI, so strip the scheme for dialing and
+ * signing; connectTo re-derives the scheme itself for the TLS check.
+ * The returned string keeps the scheme prefix (when present) so the
+ * caller can reject HTTPS uniformly. */
+std::string controlAuthorityUri(V2CallbackCtx* c,
+                                const hipObjTransferReqV2_t* req) {
+  if (req->endpoint != nullptr &&
+      req->endpoint->controlEndpoint != nullptr &&
+      req->endpoint->controlEndpoint[0] != '\0') {
+    return std::string(req->endpoint->controlEndpoint);
   }
-  return c->sctx->url.HostHeaderValue();
+  /* The object URL fallback carries its own scheme; hand back a
+   * scheme-qualified URI so the HTTPS rejection in connectTo applies
+   * uniformly and the Host split below handles both shapes. */
+  return std::string(c->sctx->url.https ? "https" : "http") + "://" +
+         c->sctx->url.HostHeaderValue();
+}
+
+/* Authority (host[:port]) of a control URI, for the signed Host
+ * header. connectTo tolerates a scheme prefix, but the signed Host
+ * must never carry one. */
+std::string controlAuthorityHost(const std::string& uri) {
+  std::string authority = uri;
+  const size_t scheme = authority.find("://");
+  if (scheme != std::string::npos) {
+    authority = authority.substr(scheme + 3);
+  }
+  const size_t slash = authority.find('/');
+  if (slash != std::string::npos) {
+    authority = authority.substr(0, slash);
+  }
+  return authority;
 }
 
 int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
@@ -495,18 +586,24 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
 
   ControlConn conn;
   const int dl = controlDeadlineMs(req);
-  const std::string authority = controlAuthority(c, req);
-  if (!conn.connectTo(authority, c->clientNic, dl)) {
+  /* One deadline for the whole callback: connect, send, and the
+   * response read share it, so the steps cannot collectively spend
+   * more than the reported budget. */
+  const auto deadlineAt = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(dl);
+  const std::string authorityUri = controlAuthorityUri(c, req);
+  const std::string authorityHost = controlAuthorityHost(authorityUri);
+  if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt)) {
     return -1;
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, c->clientNic,
-                            extra, authority) ||
-      !conn.sendAll(ex.bytes, dl)) {
+                            extra, authorityHost) ||
+      !conn.sendAllUntil(ex.bytes, deadlineAt)) {
     return -1;
   }
   std::string head, body;
-  if (!conn.readResponse(head, body, dl)) {
+  if (!conn.readResponseUntil(head, body, deadlineAt)) {
     return -1;
   }
   const int status = statusCodeFromHead(head);
@@ -563,8 +660,14 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
     unsigned long long r = strictUlong(srkey, 16, 0xffffffffu);
     if (a == static_cast<unsigned long long>(-1) ||
         r == static_cast<unsigned long long>(-1)) {
-      /* Partial or malformed staging must fail before READY. */
-      return -1;
+      /* Malformed or partial staging: report it as absent (not as an
+       * S3 error) so the core's admission rule classifies the reply
+       * as InvalidValue for PUT before anything reaches READY. A GET
+       * never needed staging, so it proceeds unaffected. */
+      out->stagingPresent = 0;
+      out->stagingAddr = 0;
+      out->stagingRkey = 0;
+      return 0;
     }
     out->stagingAddr = a;
     out->stagingRkey = static_cast<uint32_t>(r);
@@ -588,14 +691,18 @@ int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
   extra.Add(kAmzRdmaMrRkeyHdr, hex32Bridge(req->clientMrRkey));
 
   const int dl = controlDeadlineMs(req);
-  const std::string authority = controlAuthority(c, req);
-  if (!c->readyConn.connectTo(authority, c->clientNic, dl)) {
+  const auto deadlineAt = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(dl);
+  const std::string authorityUri = controlAuthorityUri(c, req);
+  const std::string authorityHost = controlAuthorityHost(authorityUri);
+  if (!c->readyConn.connectToUntil(authorityUri, c->clientNic,
+                                   deadlineAt)) {
     return -1;
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathReady, c->clientNic,
-                            extra, authority) ||
-      !c->readyConn.sendAll(ex.bytes, dl)) {
+                            extra, authorityHost) ||
+      !c->readyConn.sendAllUntil(ex.bytes, deadlineAt)) {
     /* Partial/failed write: the exchange is aborted; the connection
      * is closed, never pooled, and finishReady will not be called. */
     c->readyConn.close();
@@ -651,16 +758,28 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
 
   std::string csum = headerValue(head, "X-Amz-Rdma-Checksum");
   if (!csum.empty()) {
-    /* Wire format is "<ALGORITHM> <base64>"; only the payload is the
-     * checksum. Reject anything without the expected single-space
-     * separation rather than storing a prefixed value. */
-    const size_t sp = csum.find(' ');
+    /* Wire format is "CRC64NVME <base64>" exactly: the algorithm is
+     * part of the contract, and the payload must be the canonical
+     * 12-char base64 of 8 bytes (11 data + '='). Anything else - an
+     * unknown algorithm or malformed base64 - is rejected rather
+     * than stored as if it were a CRC64NVME value. */
+    static const char kCsumPrefix[] = "CRC64NVME ";
+    const size_t plen = sizeof(kCsumPrefix) - 1;
     bool csumOk = false;
     std::string payload;
-    if (sp != std::string::npos && sp > 0 && sp + 1 < csum.size() &&
-        csum.find(' ', sp + 1) == std::string::npos) {
-      payload = csum.substr(sp + 1);
-      csumOk = payload.size() < sizeof(out->checksumB64);
+    if (csum.compare(0, plen, kCsumPrefix) == 0 &&
+        csum.size() == plen + 12) {
+      payload = csum.substr(plen);
+      csumOk = payload.size() == 12 && payload[11] == '=';
+      for (size_t i = 0; csumOk && i < 11; ++i) {
+        const char ch = payload[i];
+        const bool b64 =
+          (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+          (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
+        if (!b64) {
+          csumOk = false;
+        }
+      }
     }
     if (!csumOk) {
       return -1;
@@ -689,18 +808,21 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 
   ControlConn conn;
   const int dl = controlDeadlineMs(req);
-  const std::string authority = controlAuthority(c, req);
-  if (!conn.connectTo(authority, c->clientNic, dl)) {
+  const auto deadlineAt = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(dl);
+  const std::string authorityUri = controlAuthorityUri(c, req);
+  const std::string authorityHost = controlAuthorityHost(authorityUri);
+  if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt)) {
     return 0; /* best effort */
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathCancel, c->clientNic,
-                            extra, authority) ||
-      !conn.sendAll(ex.bytes, dl)) {
+                            extra, authorityHost) ||
+      !conn.sendAllUntil(ex.bytes, deadlineAt)) {
     return 0;
   }
   std::string head, body;
-  if (!conn.readResponse(head, body, dl)) {
+  if (!conn.readResponseUntil(head, body, deadlineAt)) {
     return 0;
   }
   return 0;
@@ -922,10 +1044,12 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
 
 ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
   // Try the v2 protocol first; fall back to v1 only when the server
-  // explicitly signals it does not support hipobj-rc-v2.
+  // explicitly signals it does not support hipobj-rc-v2. Any other
+  // failure propagates the terminal sentinel: the buffer and transfer
+  // state are uncertain, so an HTTP retry must not touch the buffer.
   ssize_t ret = rdmaPutV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
-    return ret;
+    return ret > 0 ? ret : kRdmaV2Failed;
   }
 
   ret = -1;

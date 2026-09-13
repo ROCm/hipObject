@@ -413,11 +413,27 @@ hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
 
 /* ---- hipobj-rc-v2 entry points ---- */
 
-const char* hipObjNicV2() try {
+char* hipObjNicV2() try {
+  /* Snapshot under the lock so a concurrent shutdown clearing the
+   * name cannot race the copy. */
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   const char* nic = hipObj::v2::v2NicName();
-  return (nic != nullptr && nic[0] != '\0') ? nic : nullptr;
+  if (nic == nullptr || nic[0] == '\0') {
+    return nullptr;
+  }
+  char* out = static_cast<char*>(std::malloc(std::strlen(nic) + 1));
+  if (out == nullptr) {
+    return nullptr;
+  }
+  std::memcpy(out, nic, std::strlen(nic) + 1);
+  return out;
 } catch (...) {
   return nullptr;
+}
+
+void hipObjFreeNicV2(char* nic) try {
+  std::free(nic);
+} catch (...) {
 }
 
 hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
@@ -443,14 +459,14 @@ hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
 hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
                           uint64_t size, uint64_t offset, const char* query,
                           hipObjOpsV2_t* ops, void* ctx) try {
+  /* Stamp the entry before the lock so the admission wait counts
+   * against the whole-transfer budget (contract on the public API). */
+  const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   int diag = 0;
-  /* entryMs 0 tells v2Transfer to stamp its own entry (with the
-   * injectable clock, so deadline tests stay deterministic); the
-   * admission wait before this point stays on the real clock and
-   * cannot extend a frozen-clock budget. */
   const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
-                                        query, ops, ctx, 0, &diag);
+                                        query, ops, ctx, entryMs, true,
+                                        &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
@@ -460,13 +476,15 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
                           const void* devPtr, uint64_t size, uint64_t offset,
                           const char* query, hipObjOpsV2_t* ops,
                           void* ctx) try {
+  /* Stamp the entry before the lock so the admission wait counts
+   * against the whole-transfer budget (contract on the public API). */
+  const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   int diag = 0;
-  /* See hipObjGetV2: v2Transfer stamps its own entry timestamp. */
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
                                         const_cast<void*>(devPtr), size,
-                                        offset, query, ops, ctx, 0,
-                                        &diag);
+                                        offset, query, ops, ctx, entryMs,
+                                        true, &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
