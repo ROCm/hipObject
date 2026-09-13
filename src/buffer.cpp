@@ -104,6 +104,11 @@ size_t BufferMap::lookupSize(void* devPtr) const {
   return it->second.size;
 }
 
+bool BufferMap::isDeviceBacked(void* devPtr) const {
+  auto it = entries_.find(reinterpret_cast<uintptr_t>(devPtr));
+  return it != entries_.end() && it->second.isDmabuf;
+}
+
 bool BufferMap::isRegistered(void* devPtr) const {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   return entries_.find(key) != entries_.end();

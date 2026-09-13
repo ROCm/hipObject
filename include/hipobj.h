@@ -430,6 +430,17 @@ typedef struct hipObjOpsV2 {
 HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t* config);
 
 /*!
+ * @brief Query the RDMA NIC name selected by hipObjInitV2
+ * @ingroup init
+ *
+ * Returns the device name chosen at init (the config hint when one was
+ * given), or NULL before hipObjInitV2 has run. The pointer stays valid
+ * until hipObjShutdown. This is the supported way for v2 consumers to
+ * learn the NIC; no v1 RDMA token is needed.
+ */
+HIPOBJ_API const char* hipObjNicV2(void);
+
+/*!
  * @brief V2 GET: download an object into a registered buffer
  * @ingroup io
  *

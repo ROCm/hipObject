@@ -25,6 +25,11 @@ public:
   struct ibv_mr* lookupMr(void* devPtr);
   size_t lookupSize(void* devPtr) const;
   bool isRegistered(void* devPtr) const;
+  /* True when the entry's MR covers the device pointer itself (not a
+   * host-substituted fallback allocation). v2 admission requires this:
+   * advertising a device address with a host MR's rkey would fail the
+   * peer's protection checks. */
+  bool isDeviceBacked(void* devPtr) const;
 
   /* v2: the shared device may close only when no MR and no
    * connection remain. Connections pin the buffers they transfer

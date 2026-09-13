@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <mutex>
 #include <vector>
 
@@ -157,6 +158,11 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   if (state.initialized) {
     return {hipObjAlreadyInitialized, 0};
   }
+  if (hipObj::v2::v2IsInitialized()) {
+    /* v1 and v2 share the buffer map but use different protection
+     * domains; both directions of mixing are rejected. */
+    return {hipObjAlreadyInitialized, 0};
+  }
   if (!hipObj::ibv.is_initialized) {
     return {hipObjRdmaError, 0};
   }
@@ -279,7 +285,8 @@ hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
 
 hipObjError_t hipObjBufDeregister(void* devPtr) try {
   hipObj::DriverState& state = hipObj::getState();
-  if (!state.initialized) {
+  if (!state.initialized && hipObj::v2::v2ProtectionDomain() == nullptr) {
+    /* Neither v1 nor v2 is initialized; nothing can be registered. */
     return {hipObjNotInitialized, 0};
   }
   if (!hipObj::g_bufferMap.isRegistered(devPtr)) {
@@ -401,6 +408,13 @@ hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
 
 /* ---- hipobj-rc-v2 entry points ---- */
 
+const char* hipObjNicV2() try {
+  const char* nic = hipObj::v2::v2NicName();
+  return (nic != nullptr && nic[0] != '\0') ? nic : nullptr;
+} catch (...) {
+  return nullptr;
+}
+
 hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
   if (!config) {
     return {hipObjInvalidValue, 0};
@@ -424,9 +438,14 @@ hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
 hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
                           uint64_t size, uint64_t offset, const char* query,
                           hipObjOpsV2_t* ops, void* ctx) try {
+  /* The whole-transfer budget includes the admission (lock) wait. */
+  const uint64_t entryMs = static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch())
+      .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
-                                        query, ops, ctx);
+                                        query, ops, ctx, entryMs);
   return {static_cast<hipObjOpError_t>(rc), 0};
 } catch (...) {
   return hipObj::handleException();
@@ -436,10 +455,15 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
                           const void* devPtr, uint64_t size, uint64_t offset,
                           const char* query, hipObjOpsV2_t* ops,
                           void* ctx) try {
+  /* The whole-transfer budget includes the admission (lock) wait. */
+  const uint64_t entryMs = static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch())
+      .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
                                         const_cast<void*>(devPtr), size,
-                                        offset, query, ops, ctx);
+                                        offset, query, ops, ctx, entryMs);
   return {static_cast<hipObjOpError_t>(rc), 0};
 } catch (...) {
   return hipObj::handleException();
