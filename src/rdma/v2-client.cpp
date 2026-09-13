@@ -380,7 +380,8 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     /* Post-expiry cancel: one bounded attempt once a session was
      * published. PREPARE-phase expiry has nothing to cancel (the
      * parser requires a 32-hex session). */
-    if (wireCancelEligible && !sessionId.empty()) {
+    if (wireCancelEligible && !sessionId.empty() &&
+        wireOutcome.opError != hipObjSuccess) {
       hipObjTransferReqV2_t creq;
       fillCommonRequest(creq, isPut ? "PUT" : "GET", bucket, key, size,
                         offset, query, 0, 0, deadline,
