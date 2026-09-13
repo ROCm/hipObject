@@ -125,9 +125,76 @@ namespace {
     }
 
     struct V2CallbackCtx {
-        S3RdmaContext *sctx;
-        std::string    clientNic; // NIC hint derived from the client token
+        S3RdmaContext         *sctx;
+        std::string            clientNic; // NIC hint derived from the client token
+        minio::http::Response  lastReady;
+        bool                   readySent = false;
     };
+
+    std::string hexFixed(uint64_t value, int width)
+    {
+        char buf[24];
+        std::snprintf(buf, sizeof(buf), "%0*llx", width, static_cast<unsigned long long>(value));
+        return std::string(buf);
+    }
+
+    // The PREPARE reply token arrives as "200:<88-hex>" in X-Amz-Rdma-Reply.
+    std::string replyTokenPayload(const minio::http::Response &res)
+    {
+        std::string        value  = res.headers.GetFront(kAmzRdmaReply);
+        const std::string  prefix = "200:";
+        if (value.size() > prefix.size() && value.compare(0, prefix.size(), prefix) == 0) {
+            return value.substr(prefix.size());
+        }
+        return {};
+    }
+
+    // POST to a fixed /.hipobj-rc/* path. The object identity travels in a
+    // header, so the signed path stays the control path.
+    minio::http::Response executeControlRequest(S3RdmaContext *sctx, const std::string &controlPath,
+                                                 const std::string &nic, minio::utils::Multimap &extraHeaders)
+    {
+        minio::utils::UtcTime     date   = minio::utils::UtcTime::Now();
+        minio::creds::Credentials creds  = sctx->provider->Fetch();
+        minio::utils::Multimap    queryParams;
+        minio::http::Url          url;
+        const std::string        &region = sctx->region;
+
+        if (minio::error::Error err =
+                sctx->url.BuildUrl(url, minio::http::Method::kPost, region, queryParams, "", "")) {
+            minio::http::Response bad;
+            bad.status_code = -1;
+            return bad;
+        }
+        url.path = controlPath;
+        url.query_string.clear();
+
+        std::string            host = url.HostHeaderValue();
+        minio::utils::Multimap signHeaders;
+        signHeaders.Add("Host", host);
+        signHeaders.Add("x-amz-date", date.ToAmzDate());
+        signHeaders.Add("x-amz-content-sha256", kUnsignedPayload);
+        signHeaders.Add("Content-Length", "0");
+
+        for (const auto &k : extraHeaders.Keys()) {
+            signHeaders.Add(k, extraHeaders.GetFront(k));
+        }
+        if (!creds.session_token.empty()) {
+            signHeaders.Add("X-Amz-Security-Token", creds.session_token);
+        }
+
+        minio::signer::SignV4S3(minio::http::Method::kPost, controlPath, region, signHeaders, queryParams,
+                                creds.access_key, creds.secret_key, kUnsignedPayload, date);
+
+        minio::http::Request req(minio::http::Method::kPost, url);
+        req.headers              = std::move(signHeaders);
+        req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
+        req.timeout_secs         = kRdmaTimeoutSecs;
+        if (!nic.empty()) {
+            req.nic_interface = nic;
+        }
+        return req.Execute();
+    }
 
     minio::http::Response executeV2Request(S3RdmaContext *sctx, minio::http::Method method,
                                            const std::string &nic, minio::utils::Multimap &extra_headers,
@@ -191,19 +258,21 @@ namespace {
 
     int v2SendPrepare(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out)
     {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
 
         minio::utils::Multimap extra;
-        extra.Add(kAmzRdmaToken, req->token ? req->token : "");
         extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+        extra.Add(kAmzRdmaToken, req->token ? req->token : "");
+        extra.Add(kAmzRdmaPsn, hexFixed(req->clientPsn, 6));
+        extra.Add(kAmzRdmaCookie, hexFixed(req->cookie, 8));
+        extra.Add(kAmzRdmaOp, req->method ? req->method : "GET");
+        extra.Add(kAmzRdmaTarget, req->target ? req->target : "");
+        extra.Add(kAmzRdmaSize, std::to_string(req->size));
+        if (req->offset != 0) {
+            extra.Add(kAmzRdmaOffset, std::to_string(req->offset));
+        }
 
-        std::string           query = req->query ? req->query : "";
-        minio::http::Response res =
-            executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                             req->key ? req->key : "", query);
-
+        minio::http::Response res = executeControlRequest(c->sctx, kControlPathPrepare, c->clientNic, extra);
         if (!res.error.empty() || res.status_code <= 0) {
             rdmaTrace("v2 prepare: http failed (status=", res.status_code, " error='", res.error, "')");
             return -1;
@@ -214,52 +283,81 @@ namespace {
         out->protocolEcho      = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
         out->unsupportedMarker = (res.status_code == kRdmaReplyNotImplemented) ? 1 : 0;
 
-        std::string srv_token = res.headers.GetFront(kAmzRdmaToken);
-        if (!srv_token.empty()) {
-            copyCString(out->serverToken, srv_token);
+        std::string srvToken = replyTokenPayload(res);
+        if (!srvToken.empty()) {
+            copyCString(out->serverToken, srvToken);
         }
         std::string session = res.headers.GetFront(kAmzRdmaSession);
         if (!session.empty()) {
             copyCString(out->session, session);
         }
+        std::string psn = res.headers.GetFront(kAmzRdmaPsn);
+        if (!psn.empty()) {
+            out->serverPsn = static_cast<uint32_t>(std::strtoul(psn.c_str(), nullptr, 16));
+        }
+        std::string stagingAddr = res.headers.GetFront(kAmzRdmaMrAddr);
+        std::string stagingRkey = res.headers.GetFront(kAmzRdmaMrRkey);
+        if (!stagingAddr.empty() && !stagingRkey.empty()) {
+            out->stagingAddr    = std::strtoull(stagingAddr.c_str(), nullptr, 16);
+            out->stagingRkey    = static_cast<uint32_t>(std::strtoul(stagingRkey.c_str(), nullptr, 16));
+            out->stagingPresent = (out->stagingAddr != 0 || out->stagingRkey != 0) ? 1 : 0;
+        }
         return 0;
     }
 
-    int v2SendReady(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out)
+    int v2SendReadyRequest(void *ctx, const hipObjTransferReqV2_t *req)
     {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
 
         minio::utils::Multimap extra;
-        extra.Add(kAmzRdmaSession, req->session ? req->session : "");
         extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+        extra.Add(kAmzRdmaSession, req->session ? req->session : "");
+        extra.Add(kAmzRdmaCookie, hexFixed(req->cookie, 8));
+        extra.Add(kAmzRdmaQpn, hexFixed(req->clientQpn, 8));
+        extra.Add(kAmzRdmaMrAddr, hexFixed(req->clientMrAddr, 16));
+        extra.Add(kAmzRdmaMrRkey, hexFixed(req->clientMrRkey, 8));
 
-        std::string           query = req->query ? req->query : "";
-        minio::http::Response res =
-            executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                             req->key ? req->key : "", query);
-
-        if (!res.error.empty() || res.status_code <= 0) {
-            rdmaTrace("v2 ready: http failed (status=", res.status_code, " error='", res.error, "')");
+        // The HTTP client completes the round trip here. finishReady reads
+        // the stashed FINAL response.
+        c->lastReady = executeControlRequest(c->sctx, kControlPathReady, c->clientNic, extra);
+        c->readySent = true;
+        if (!c->lastReady.error.empty() || c->lastReady.status_code <= 0) {
+            rdmaTrace("v2 ready: http failed (status=", c->lastReady.status_code, " error='", c->lastReady.error,
+                      "')");
             return -1;
         }
+        return 0;
+    }
+
+    int v2FinishReady(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out)
+    {
+        (void)req;
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
+        if (!c->readySent) {
+            return -1;
+        }
+        const minio::http::Response &res = c->lastReady;
 
         hipObj::zeroObject(*out);
         out->httpStatus   = res.status_code;
         out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
 
         const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), 0);
-        if (!bytes) {
-            rdmaTrace("v2 ready: malformed ", kAmzRdmaBytesTransferred, " header");
-            return -1;
+        if (bytes) {
+            out->bytes = *bytes;
         }
-        out->bytes = *bytes;
+
+        std::string echo = res.headers.GetFront(kAmzRdmaCookie);
+        if (!echo.empty()) {
+            out->cookieEcho    = static_cast<uint32_t>(std::strtoul(echo.c_str(), nullptr, 16));
+            out->cookiePresent = 1;
+        }
 
         std::string etag = res.headers.GetFront("etag");
         if (!etag.empty()) {
             std::string trimmed = minio::utils::Trim(etag, '"');
             copyCString(out->etag, trimmed);
+            c->sctx->etag = trimmed;
         }
 
         std::string csum = res.headers.GetFront("x-amz-checksum-crc64nvme");
@@ -267,27 +365,18 @@ namespace {
             copyCString(out->checksumB64, csum);
             c->sctx->checksum = csum;
         }
-
-        if (!etag.empty()) {
-            c->sctx->etag = minio::utils::Trim(etag, '"');
-        }
-
         return 0;
     }
 
     int v2SendCancel(void *ctx, const hipObjTransferReqV2_t *req)
     {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
 
         minio::utils::Multimap extra;
+        extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
         extra.Add(kAmzRdmaSession, req->session ? req->session : "");
         extra.Add(kAmzRdmaCancel, "1");
-
-        std::string query = req->query ? req->query : "";
-        executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                         req->key ? req->key : "", query);
+        executeControlRequest(c->sctx, kControlPathCancel, c->clientNic, extra);
         return 0;
     }
 
@@ -305,9 +394,10 @@ namespace {
 
         V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
         hipObjOpsV2_t ops{};
-        ops.sendPrepare = v2SendPrepare;
-        ops.sendReady   = v2SendReady;
-        ops.sendCancel  = v2SendCancel;
+        ops.sendPrepare       = v2SendPrepare;
+        ops.sendReadyRequest  = v2SendReadyRequest;
+        ops.finishReady       = v2FinishReady;
+        ops.sendCancel        = v2SendCancel;
 
         std::string query;
         if (!sctx->uploadId.empty()) {
@@ -355,9 +445,10 @@ namespace {
 
         V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
         hipObjOpsV2_t ops{};
-        ops.sendPrepare = v2SendPrepare;
-        ops.sendReady   = v2SendReady;
-        ops.sendCancel  = v2SendCancel;
+        ops.sendPrepare       = v2SendPrepare;
+        ops.sendReadyRequest  = v2SendReadyRequest;
+        ops.finishReady       = v2FinishReady;
+        ops.sendCancel        = v2SendCancel;
 
         hipObjError_t err =
             hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0, nullptr, &ops, &cbctx);
