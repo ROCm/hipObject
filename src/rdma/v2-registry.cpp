@@ -121,9 +121,19 @@ ConnId ConnectionRegistry::insert(ConnectionEntryV2&& entry) {
     return 0;
   }
   --pendingReserves_;
-  ConnId id = nextId_++;
-  entries_.emplace(id, std::move(entry));
-  return id;
+  const ConnId id = nextId_;
+  try {
+    entries_.emplace(id, std::move(entry));
+    nextId_ = id + 1;
+    return id;
+  } catch (...) {
+    /* The node allocation failed: restore the reservation and the
+     * id counter so the caller's ordinary cleanup sees consistent
+     * accounting. The caller keeps ownership of the connection it
+     * passed (moved-from entry members are null). */
+    ++pendingReserves_;
+    throw;
+  }
 }
 
 bool ConnectionRegistry::claimDestroy(ConnId id) {

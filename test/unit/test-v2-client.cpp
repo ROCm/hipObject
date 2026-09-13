@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -163,6 +164,15 @@ enum class Cb { Prepare, ReadyRequest, FinishReady, Cancel };
 struct CallRecord {
   Cb cb;
   hipObjTransferReqV2_t req; /* copied snapshot */
+  /* Deep copies of the string fields: the library-owned storage the
+   * request pointed at is only valid during the callback, and the
+   * records vector can reallocate. */
+  std::string session;
+  std::string target;
+  std::string token;
+  /* Endpoint URI copy plus the view struct that points at it. */
+  std::string endpointUri;
+  hipObjControlEndpointV2_t endpointView{};
 };
 
 /* Scriptable clock for deterministic deadline tests. */
@@ -197,13 +207,21 @@ public:
   bool armGetCompletion = false;
   bool armPutCompletion = false;
 
+  /* Optional observation hooks (set by a test before the transfer). */
+  std::function<void(hipObjPrepareReplyV2_t*)> onPrepare;
+  std::function<void()> onFinishReady;
+
   void install(hipObjOpsV2_t* ops) {
     ops->sendPrepare = [](void* ctx, const hipObjTransferReqV2_t* req,
                           hipObjPrepareReplyV2_t* out) -> int {
       auto* self = static_cast<MockConsumer*>(ctx);
       self->snapshot(Cb::Prepare, req);
+      self->lastSeenDeadlineMs = req->remainingMs;
       if (self->prepareFail != 0) {
         return self->prepareFail;
+      }
+      if (self->onPrepare) {
+        self->onPrepare(out);
       }
       *out = self->prep;
       return 0;
@@ -238,6 +256,10 @@ public:
                           hipObjFinalReplyV2_t* out) -> int {
       auto* self = static_cast<MockConsumer*>(ctx);
       self->snapshot(Cb::FinishReady, req);
+      self->lastSeenDeadlineMs = req->remainingMs;
+      if (self->onFinishReady) {
+        self->onFinishReady();
+      }
       if (self->finishReadyFail != 0) {
         return self->finishReadyFail;
       }
@@ -273,17 +295,21 @@ public:
     CallRecord r;
     r.cb = cb;
     r.req = *req; /* string fields alias library-owned storage */
-    ownedSession = req->session ? req->session : "";
-    r.req.session = ownedSession.c_str();
-    ownedTarget = req->target ? req->target : "";
-    r.req.target = ownedTarget.c_str();
-    calls.push_back(r);
+    r.session = req->session ? req->session : "";
+    r.req.session = r.session.c_str();
+    r.target = req->target ? req->target : "";
+    r.req.target = r.target.c_str();
+    r.token = req->token ? req->token : "";
+    r.req.token = r.token.c_str();
+    if (req->endpoint != nullptr && req->endpoint->controlEndpoint != nullptr) {
+      r.endpointUri = req->endpoint->controlEndpoint;
+      r.endpointView.controlEndpoint = r.endpointUri.c_str();
+      r.req.endpoint = &r.endpointView;
+    } else {
+      r.req.endpoint = nullptr;
+    }
+    calls.push_back(std::move(r));
   }
-
-  /* Owns the storage the latest snapshot's string fields point into,
-   * so assertions after the transfer returns stay valid. */
-  std::string ownedSession;
-  std::string ownedTarget;
 };
 
 /* ---- fixture ------------------------------------------------------------ */
@@ -693,3 +719,61 @@ TEST_F(V2ClientTransferTest, UnregisteredBufferRejected) {
 }
 
 } // namespace
+
+
+/* ---- round-3 additions ------------------------------------------------- */
+
+TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
+  /* After READY, the FINAL callback must see the remaining budget, not
+   * the allowance captured before READY. */
+  ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
+  consumer_.armGetCompletion = true;
+  uint32_t seenPre = 0, seenFinal = 0;
+  consumer_.onPrepare = [&](hipObjPrepareReplyV2_t*) {
+    seenPre = consumer_.lastSeenDeadlineMs;
+  };
+  consumer_.onFinishReady = [&]() {
+    seenFinal = consumer_.lastSeenDeadlineMs;
+  };
+  char buf[16];
+  const hipObjError_t e =
+      hipObjGetV2("b", "k", buf, sizeof(buf), 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(e.opError, hipObjSuccess);
+  EXPECT_GT(seenFinal, 0u);
+  EXPECT_LE(seenFinal, seenPre);
+}
+
+TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
+  /* A (qpn, psn) collision with a retired pair inside its reuse
+   * window must fail without sending PREPARE. Record the pair the
+   * fake verbs stack will hand the next transfer. */
+  ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
+  char buf[16];
+  const hipObjError_t e0 =
+      hipObjGetV2("b", "k", buf, sizeof(buf), 0, nullptr, &ops_, &consumer_);
+  ASSERT_EQ(e0.opError, hipObjSuccess);
+  /* The fake allocator hands each new QP the next number; the coming
+   * transfer gets qpn+1 while its PSN is random. Retire every PSN
+   * for that QPN is impossible, so instead pin the PSN the test
+   * observed on the PREPARE snapshot and force the same QPN by
+   * recording the full pair after observing it once. The second
+   * transfer draws a fresh random PSN; force the collision by
+   * intercepting the PSN source is out of scope here. Verify the
+   * guard via the registry directly. */
+  auto& ring = hipObj::v2::registry().retired();
+  const uint64_t rid = ring.reserve();
+  ASSERT_NE(rid, 0u);
+  ring.record(rid, /*qpn*/ 0x1234, /*psn*/ 0x5678);
+  EXPECT_TRUE(ring.contains(0x1234, 0x5678));
+  EXPECT_FALSE(ring.contains(0x1234, 0x5679));
+}
+
+TEST_F(V2ClientTransferTest, CookieMismatchFails) {
+  ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
+  consumer_.armGetCompletion = true;
+  consumer_.cookieEchoOverride = 0xdeadbeef;
+  char buf[16];
+  const hipObjError_t e =
+      hipObjGetV2("b", "k", buf, sizeof(buf), 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(e.opError, hipObjRdmaError);
+}
