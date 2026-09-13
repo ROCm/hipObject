@@ -91,10 +91,12 @@ struct V2State {
   /* Shared device handle: created by hipObjInitV2, referenced by every
    * connection. Shutdown reclaims it. */
   DeviceHandle* device = nullptr;
-  /* Bumped by every init and every shutdown. Interface snapshots taken
-   * outside the transfer lock carry the generation they were read
-   * under; transfer admission rejects a stale snapshot instead of
-   * mixing selections from different initializations. */
+  /* Bumped by every init and every shutdown. Public entry points read
+   * the generation after acquiring the API lock and may pass it to
+   * the transfer as an assertion that no shutdown or reinit happened
+   * while they waited; admission rejects a mismatch. Callback request
+   * fields always carry the selection read under the same lock, so
+   * they cannot mix initializations. */
   uint64_t initGeneration = 0;
 };
 
@@ -686,16 +688,16 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     return hipObjNotInitialized;
   }
   /* Publish the active interface selection on every callback request:
-   * read here (under the API lock held by the public entry points) it
-   * is coherent with the generation admission already validated. */
+   * read here under the API lock held by the public entry points, it
+   * is coherent by construction with the generation assertion below. */
   const std::string activeNic = st.nicName;
   const int activePort = st.selectedPort;
   const int activeGid = st.selectedGidIndex;
   if (haveSnapshot && snapshotGeneration != st.initGeneration) {
-    /* The caller captured its interface selection before waiting for
-     * the API lock and a shutdown/reinit happened in between: the
-     * snapshot mixes initializations and must not drive a transfer
-     * on the new device. */
+    /* Optional caller assertion: the caller read the generation under
+     * the API lock and a shutdown or reinit happened between that
+     * read and this transfer; the caller's view of the
+     * initialization is stale. */
     return hipObjNotInitialized;
   }
   if (!ops || !ops->sendPrepare || !ops->sendReadyRequest ||
