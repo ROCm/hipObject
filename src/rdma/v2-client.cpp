@@ -85,6 +85,10 @@ struct V2State {
   std::string nicName;
   int selectedPort = 0;
   int selectedGidIndex = -1;
+  /* Bumped by every successful init and shutdown. A snapshot taken
+   * before the transfer lock carries this generation; admission
+   * rejects it when initialization changed while the caller waited. */
+  uint64_t initGeneration = 0;
   /* Shared device handle: created by hipObjInitV2, referenced by every
    * connection. Shutdown reclaims it. */
   DeviceHandle* device = nullptr;
@@ -147,6 +151,7 @@ void drainEmergencySlots() {
     if (destroyed.qpOk && destroyed.cqOk) {
       slot.used = false;
     }
+    /* A surviving CQ keeps the slot so a later shutdown can retry. */
   }
 }
 
@@ -483,6 +488,16 @@ int v2SelectedGidIndex() {
   return v2State().selectedGidIndex;
 }
 
+InterfaceSnapshot v2InterfaceSnapshot() {
+  const V2State& st = v2State();
+  InterfaceSnapshot out;
+  out.nic = st.nicName;
+  out.port = st.selectedPort;
+  out.gidIndex = st.selectedGidIndex;
+  out.generation = st.initGeneration;
+  return out;
+}
+
 int v2Init(hipObjConfigV2_t* config) {
   V2State& st = v2State();
   if (st.initialized) {
@@ -542,6 +557,7 @@ int v2Init(hipObjConfigV2_t* config) {
   st.transferDeadlineMs = config->transferDeadlineMs;
   st.cancelBudgetMs = config->cancelCleanupBudgetMs;
   st.nicName = nicNameOut;
+  ++st.initGeneration;
   st.initialized = true;
   return hipObjSuccess;
 }
@@ -624,15 +640,20 @@ int v2Shutdown() {
   st.nicName.clear();
   st.selectedPort = 0;
   st.selectedGidIndex = -1;
+  ++st.initGeneration;
   return hipObjSuccess;
 }
 
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
                hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs,
-               bool haveEntryMs, int* diagOut) {
+               bool haveEntryMs, uint64_t snapshotGeneration,
+               bool haveSnapshot, int* diagOut) {
   V2State& st = v2State();
   if (!st.initialized) {
+    return hipObjNotInitialized;
+  }
+  if (haveSnapshot && snapshotGeneration != st.initGeneration) {
     return hipObjNotInitialized;
   }
   if (!ops || !ops->sendPrepare || !ops->sendReadyRequest ||

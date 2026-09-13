@@ -961,6 +961,32 @@ catch (...) {
     return -1;
 }
 
+int
+hipObjInterfaceSnapshotV2(char *nicOut, size_t nicLen, int *portOut, int *gidOut)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return 0;
+    }
+    const hipObj::v2::InterfaceSnapshot snap = hipObj::v2::v2InterfaceSnapshot();
+    if (snap.nic.empty()) {
+        return 0;
+    }
+    if (nicOut != nullptr && nicLen > 0) {
+        std::snprintf(nicOut, nicLen, "%s", snap.nic.c_str());
+    }
+    if (portOut != nullptr) {
+        *portOut = snap.port;
+    }
+    if (gidOut != nullptr) {
+        *gidOut = snap.gidIndex;
+    }
+    return 1;
+}
+catch (...) {
+    return 0;
+}
+
 hipObjError_t
 hipObjInitV2(hipObjConfigV2_t *config)
 try {
@@ -997,6 +1023,14 @@ hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t si
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
     const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
+    hipObj::v2::InterfaceSnapshot snap;
+    {
+        hipObj::ApiGuard snapGuard;
+        if (!snapGuard.owns()) {
+            return hipObj::kReentryError;
+        }
+        snap = hipObj::v2::v2InterfaceSnapshot();
+    }
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
@@ -1007,7 +1041,7 @@ try {
     }
     int       diag = 0;
     const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops,
-                                          ctx, entryMs, true, &diag);
+                                          ctx, entryMs, true, snap.generation, true, &diag);
     return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
@@ -1019,6 +1053,14 @@ hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, ui
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
     const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
+    hipObj::v2::InterfaceSnapshot snap;
+    {
+        hipObj::ApiGuard snapGuard;
+        if (!snapGuard.owns()) {
+            return hipObj::kReentryError;
+        }
+        snap = hipObj::v2::v2InterfaceSnapshot();
+    }
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
@@ -1028,7 +1070,8 @@ try {
         return err;
     }
     int       diag = 0;
-    const int rc   = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs, true, &diag);
+    const int rc   = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs, true,
+                                            snap.generation, true, &diag);
     return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
