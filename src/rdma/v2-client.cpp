@@ -485,10 +485,13 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     return hipObjSizeTooLarge;
   }
 
-  /* Whole-transfer budget: entry to return, lock/admission wait
-   * included (the caller already holds apiLock via the entry point).
-   * The CQ deadline is derived from this single budget. */
-  const uint64_t startMs = entryMs; /* entry: lock wait included */
+  /* Whole-transfer budget: entry to return. When the public entry
+   * point already captured a timestamp (non-zero entryMs) it is
+   * honored; zero means v2Transfer stamps its own entry with the
+   * injectable clock, keeping deadline tests deterministic. The
+   * lock/admission wait upstream of this call stays on the real
+   * clock and cannot extend a frozen-clock budget. */
+  const uint64_t startMs = entryMs != 0 ? entryMs : steadyNowMs();
   const uint32_t budgetMs = st.transferDeadlineMs != 0
                               ? st.transferDeadlineMs
                               : kDefaultTransferDeadlineMs;
