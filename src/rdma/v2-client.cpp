@@ -94,11 +94,6 @@ V2State& v2State() {
   return state;
 }
 
-bool v2IsInitialized() { return v2State().initialized; }
-
-const char* v2NicName() { return v2State().nicName.c_str(); }
-
-
 /* ---- deadline-bounded CQ poll ---- */
 
 bool pollDeadline(struct ibv_cq* cq, int expectedOpcode, uint64_t deadlineMs,
@@ -259,6 +254,7 @@ int releaseSession(SessionResources& res) {
   }
   return kReleaseOk;
 }
+} // namespace
 
 /* Maps an internal failure code to the public error with the
  * non-quiesced-release policy applied. releaseRc is the outcome of
@@ -272,7 +268,9 @@ hipObjError_t finalizeOutcome(hipObjError_t wireOutcome, int releaseRc) {
   return {hipObjInternalError, 0};
 }
 
-} // namespace
+bool v2IsInitialized() { return v2State().initialized; }
+
+const char* v2NicName() { return v2State().nicName.c_str(); }
 
 int v2Init(hipObjConfigV2_t* config) {
   V2State& st = v2State();
