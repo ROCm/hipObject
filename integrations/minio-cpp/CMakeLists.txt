@@ -20,6 +20,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/minio/minio-cpp.git
   GIT_TAG v0.4.0
   GIT_SHALLOW TRUE
+  EXCLUDE_FROM_ALL SYSTEM
 )
 FetchContent_MakeAvailable(miniocpp_upstream)
 
