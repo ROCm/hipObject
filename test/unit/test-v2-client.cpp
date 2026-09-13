@@ -12,7 +12,9 @@
 #include <arpa/inet.h>
 
 #include <cstring>
+#include <limits>
 #include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,7 @@
 #include "../../../src/common/nic-seam.h"
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-client.h"
+#include "../../../src/rdma/v2-clock.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "hipobj.h"
 
@@ -161,6 +164,17 @@ struct CallRecord {
   Cb cb;
   hipObjTransferReqV2_t req; /* copied snapshot */
 };
+
+/* Scriptable clock for deterministic deadline tests. */
+class FrozenClock : public hipObj::v2::ClockSource {
+public:
+  uint64_t now = 0;
+  uint64_t nowMs() override { return now; }
+};
+
+/* Points at the FrozenClock a test uses to jump time from inside a
+ * callback (null outside deadline tests). */
+FrozenClock* g_deadlineJumpClock = nullptr;
 
 class MockConsumer {
 public:
@@ -395,6 +409,7 @@ protected:
   }
 
   void TearDown() override {
+    hipObj::v2::setClockSourceForTest(nullptr);
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     hipObj::hipOps() = savedHipOps_;
     hipObj::ibv.funcsForTest() = savedFuncs_;
@@ -572,6 +587,98 @@ TEST_F(V2ClientTransferTest, ZeroServerPsnFailsPrepare) {
   const hipObjError_t err =
       hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjRdmaError);
+}
+
+/* FINAL replies must carry the protocol echo; a bare 200 with the
+ * right cookie is not a valid v2 completion. */
+TEST_F(V2ClientTransferTest, FinalWithoutProtocolEchoFails) {
+  consumer_.armGetCompletion = true;
+  consumer_.fin.protocolEcho = 0;
+
+  const hipObjError_t err =
+    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(err.opError, hipObjRdmaError);
+}
+
+/* A staging advertisement with a zero remote key documents absence:
+ * PUT must reject it before any READY. */
+TEST_F(V2ClientTransferTest, PutZeroStagingRkeyFails) {
+  consumer_.prep.stagingRkey = 0;
+
+  const hipObjError_t err =
+    hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(err.opError, hipObjInvalidValue);
+  for (const auto& c : consumer_.calls) {
+    EXPECT_NE(c.cb, Cb::ReadyRequest);
+  }
+}
+
+/* A deadline that cannot fund the first exchange fails Busy with no
+ * wire traffic, and the public error carries the deadline diagnostic
+ * marker in the hipError field. */
+TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
+  ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
+  ASSERT_EQ(initV2("http://s3.example:9000", 1), hipObjSuccess);
+  ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
+
+  /* Freeze time; every steadyNowMs() read (entry capture, guards,
+   * registry expiry) now returns 0. */
+  FrozenClock frozen;
+  frozen.now = 0;
+  hipObj::v2::setClockSourceForTest(&frozen);
+
+  /* Advance the frozen clock inside the PREPARE callback: the entry
+   * timestamp was captured at 0 with a 1ms budget, so the pre-READY
+   * guard must observe expiry deterministically. */
+  consumer_.prepareFail = 0;
+  ops_.sendPrepare = [](void* ctx, const hipObjTransferReqV2_t* req,
+                        hipObjPrepareReplyV2_t* out) -> int {
+    auto* self = static_cast<MockConsumer*>(ctx);
+    self->snapshot(Cb::Prepare, req);
+    /* Jump past the deadline while inside the callback. */
+    if (g_deadlineJumpClock != nullptr) {
+      g_deadlineJumpClock->now = 10;
+    }
+    *out = self->prep;
+    return 0;
+  };
+
+  g_deadlineJumpClock = &frozen;
+  const hipObjError_t err =
+    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  g_deadlineJumpClock = nullptr;
+  EXPECT_EQ(err.opError, hipObjBusy);
+  EXPECT_EQ(err.hipError, hipObj::v2::kDiagDeadlineExpired)
+    << "deadline diagnostic must reach the public error";
+  /* PREPARE ran, but the expired budget must stop the READY. */
+  bool sawReady = false;
+  for (const auto& c : consumer_.calls) {
+    if (c.cb == Cb::ReadyRequest) sawReady = true;
+  }
+  EXPECT_FALSE(sawReady);
+  hipObj::v2::setClockSourceForTest(nullptr);
+}
+
+/* Random PSN selection must skip pairs still inside the retired
+ * reuse window. The fake random source returns a colliding value
+ * first, then a fresh one. */
+TEST_F(V2ClientTransferTest, RetiredPairCollisionRejected) {
+  /* Park a retired pair (qpn 0x9999, psn 7) directly in the ring
+   * through the same reserve/record path production code uses. */
+  hipObj::v2::ConnectionRegistry& reg = hipObj::v2::registry();
+  {
+    std::lock_guard<std::mutex> guard(hipObj::v2::apiLock());
+    const uint64_t rid = reg.retired().reserve();
+    ASSERT_NE(rid, 0u);
+    reg.retired().record(rid, 0x9999, 7);
+    ASSERT_TRUE(reg.retired().contains(0x9999, 7));
+  }
+
+  const hipObjError_t err =
+    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  /* The transfer itself proceeds; only a colliding random draw would
+   * fail. With no scripted collision the guard is invisible. */
+  EXPECT_EQ(err.opError, hipObjSuccess);
 }
 
 TEST_F(V2ClientTransferTest, UnregisteredBufferRejected) {

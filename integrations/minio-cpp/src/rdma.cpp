@@ -5,6 +5,7 @@
 
 #include "hipobj_minio/rdma.h"
 
+#include <cctype>
 #include <cerrno>
 #include <cmath>
 #include <net/if.h>
@@ -217,8 +218,9 @@ bool ControlConn::connectTo(const std::string& host_port,
   }
   freeaddrinfo(list);
   if (fd < 0) return false;
-  int blk = fcntl(fd, F_GETFL, 0);
-  fcntl(fd, F_SETFL, blk & ~O_NONBLOCK);
+  /* Keep the socket nonblocking: sendAll/readResponse drive every
+   * byte through poll, so a stalled peer cannot block past the
+   * deadline. */
   this->fd = fd;
   this->host = host;
   this->port = port;
@@ -238,7 +240,13 @@ bool ControlConn::sendAll(const std::string& bytes, int deadlineMs) {
         .count());
     if (left <= 0 || poll(&pfd, 1, left) <= 0) return false;
     ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
-    if (n <= 0) return false;
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        continue; /* poll said writable; retry the partial window */
+      }
+      return false;
+    }
+    if (n == 0) return false;
     off += static_cast<size_t>(n);
   }
   return true;
@@ -259,9 +267,13 @@ bool ControlConn::readResponse(std::string& head, std::string& body,
         head = buf.substr(0, headEnd);
         const std::string rest = buf.substr(headEnd + 4);
         buf = rest;
-        /* Content-Length within the header block. */
+        /* Framing contract for this client: exactly one
+         * Content-Length, no Transfer-Encoding, no interim 1xx. The
+         * reference server always sends Content-Length; anything else
+         * is rejected rather than misread as an empty body. */
         size_t pos = 0;
-        contentLen = 0;
+        bool haveLen = false;
+        bool chunked = false;
         while (pos < head.size()) {
           size_t eol = head.find("\r\n", pos);
           if (eol == std::string::npos) eol = head.size();
@@ -270,9 +282,33 @@ bool ControlConn::readResponse(std::string& head, std::string& body,
           const std::string needle = "content-length:";
           if (line.size() >= needle.size() &&
               strncasecmp(line.c_str(), needle.c_str(), needle.size()) == 0) {
-            contentLen = static_cast<size_t>(
-              std::strtoull(line.c_str() + needle.size(), nullptr, 10));
+            if (haveLen) return false; /* duplicate */
+            haveLen = true;
+            const std::string num =
+              line.substr(needle.size());
+            char* endp = nullptr;
+            errno = 0;
+            unsigned long long v =
+              std::strtoull(num.c_str(), &endp, 10);
+            if (errno != 0 || endp == nullptr ||
+                num.find_first_not_of(" \t") != std::string::npos ||
+                *num.rbegin() == ' ') {
+              return false;
+            }
+            contentLen = static_cast<size_t>(v);
           }
+          const std::string te = "transfer-encoding:";
+          if (line.size() >= te.size() &&
+              strncasecmp(line.c_str(), te.c_str(), te.size()) == 0) {
+            chunked = true;
+          }
+        }
+        if (chunked) return false;
+        if (!haveLen) {
+          /* No length at all is only acceptable for a no-body status
+           * or HEAD-like replies; this client never sends those, so
+           * treat it as malformed framing. */
+          return false;
         }
       }
     }
@@ -289,7 +325,13 @@ bool ControlConn::readResponse(std::string& head, std::string& body,
     if (left <= 0 || poll(&pfd, 1, left) <= 0) return false;
     char chunk[4096];
     ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
-    if (n <= 0) return false;
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    if (n == 0) return false; /* peer closed mid-response */
     buf.append(chunk, static_cast<size_t>(n));
     if (buf.size() > (1u << 20)) return false; /* bounded */
   }
@@ -371,7 +413,11 @@ int statusCodeFromHead(const std::string& head) {
 }
 
 uint32_t hexToU32(const std::string& v) {
-  if (v.empty() || v.size() > 8) return 0;
+  /* The cookie echo is exactly eight hex digits on the wire. */
+  if (v.size() != 8) return 0;
+  for (char ch : v) {
+    if (!std::isxdigit(static_cast<unsigned char>(ch))) return 0;
+  }
   char* endp = nullptr;
   unsigned long n = std::strtoul(v.c_str(), &endp, 16);
   if (endp == nullptr || *endp != '\0' || n > 0xffffffffUL) return 0;
@@ -399,8 +445,7 @@ std::string hex64Bridge(uint64_t v) {
 
 /* The PREPARE reply token arrives as "200:<88-hex>" in
  * X-Amz-Rdma-Reply; strip the status prefix and keep the payload. */
-std::string replyTokenPayload(const minio::http::Response& res) {
-  std::string v = res.headers.GetFront(kAmzRdmaReplyHdr);
+std::string replyTokenPayload(const std::string& v) {
   const std::string prefix = "200:";
   if (v.size() > prefix.size() &&
       v.compare(0, prefix.size(), prefix) == 0) {
@@ -416,6 +461,17 @@ int controlDeadlineMs(const hipObjTransferReqV2_t* req) {
   uint32_t r = req->remainingMs;
   if (r == 0) r = kRdmaTimeoutSecs * 1000;
   return static_cast<int>(r);
+}
+
+/* Control-plane authority: the configured callback endpoint wins;
+ * the S3 object URL is only a fallback. Dialing and signing use the
+ * same authority so a split control endpoint stays consistent. */
+std::string controlAuthority(V2CallbackCtx* c,
+                             const hipObjTransferReqV2_t* req) {
+  if (req->endpoint != nullptr && req->endpoint[0] != '\0') {
+    return std::string(req->endpoint);
+  }
+  return c->sctx->url.HostHeaderValue();
 }
 
 int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
@@ -439,14 +495,13 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
 
   ControlConn conn;
   const int dl = controlDeadlineMs(req);
-  if (!conn.connectTo(c->sctx->url.HostHeaderValue(), c->clientNic, dl)) {
+  const std::string authority = controlAuthority(c, req);
+  if (!conn.connectTo(authority, c->clientNic, dl)) {
     return -1;
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, c->clientNic,
-                            extra, conn.host == "s3.amazonaws.com"
-                              ? conn.host
-                              : c->sctx->url.HostHeaderValue()) ||
+                            extra, authority) ||
       !conn.sendAll(ex.bytes, dl)) {
     return -1;
   }
@@ -475,10 +530,18 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   if (!session.empty()) {
     std::snprintf(out->session, sizeof(out->session), "%s", session.c_str());
   }
-  /* Strict bounded numeric parsing: full-string hex/decimal only. */
+  /* Strict bounded numeric parsing: full-string hex/decimal only.
+   * Leading signs, whitespace, and 0x prefixes are rejected so the
+   * bare-hex wire encodings cannot smuggle in other strtoull forms. */
   auto strictUlong = [](const std::string& v, int base,
                         unsigned long long max) -> unsigned long long {
     if (v.empty()) return static_cast<unsigned long long>(-1);
+    const bool hex = (base == 16);
+    for (char ch : v) {
+      const bool ok = hex ? std::isxdigit(static_cast<unsigned char>(ch))
+                          : (ch >= '0' && ch <= '9');
+      if (!ok) return static_cast<unsigned long long>(-1);
+    }
     char* endp = nullptr;
     errno = 0;
     unsigned long long n = std::strtoull(v.c_str(), &endp, base);
@@ -525,13 +588,13 @@ int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
   extra.Add(kAmzRdmaMrRkeyHdr, hex32Bridge(req->clientMrRkey));
 
   const int dl = controlDeadlineMs(req);
-  if (!c->readyConn.connectTo(c->sctx->url.HostHeaderValue(), c->clientNic,
-                              dl)) {
+  const std::string authority = controlAuthority(c, req);
+  if (!c->readyConn.connectTo(authority, c->clientNic, dl)) {
     return -1;
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathReady, c->clientNic,
-                            extra, c->sctx->url.HostHeaderValue()) ||
+                            extra, authority) ||
       !c->readyConn.sendAll(ex.bytes, dl)) {
     /* Partial/failed write: the exchange is aborted; the connection
      * is closed, never pooled, and finishReady will not be called. */
@@ -588,9 +651,23 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
 
   std::string csum = headerValue(head, "X-Amz-Rdma-Checksum");
   if (!csum.empty()) {
+    /* Wire format is "<ALGORITHM> <base64>"; only the payload is the
+     * checksum. Reject anything without the expected single-space
+     * separation rather than storing a prefixed value. */
+    const size_t sp = csum.find(' ');
+    bool csumOk = false;
+    std::string payload;
+    if (sp != std::string::npos && sp > 0 && sp + 1 < csum.size() &&
+        csum.find(' ', sp + 1) == std::string::npos) {
+      payload = csum.substr(sp + 1);
+      csumOk = payload.size() < sizeof(out->checksumB64);
+    }
+    if (!csumOk) {
+      return -1;
+    }
     std::snprintf(out->checksumB64, sizeof(out->checksumB64), "%s",
-                  csum.c_str());
-    c->sctx->checksum = csum;
+                  payload.c_str());
+    c->sctx->checksum = payload;
   }
   return 0;
 }
@@ -612,12 +689,13 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 
   ControlConn conn;
   const int dl = controlDeadlineMs(req);
-  if (!conn.connectTo(c->sctx->url.HostHeaderValue(), c->clientNic, dl)) {
+  const std::string authority = controlAuthority(c, req);
+  if (!conn.connectTo(authority, c->clientNic, dl)) {
     return 0; /* best effort */
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathCancel, c->clientNic,
-                            extra, c->sctx->url.HostHeaderValue()) ||
+                            extra, authority) ||
       !conn.sendAll(ex.bytes, dl)) {
     return 0;
   }
@@ -868,9 +946,12 @@ ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
+  // Same policy as PUT: only an explicit "unsupported" reply may
+  // downgrade the path; any other v2 failure propagates without an
+  // HTTP retry (the buffer and transfer state are uncertain).
   ssize_t ret = rdmaGetV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
-    return ret;
+    return ret > 0 ? ret : kRdmaV2Failed;
   }
 
   ret = -1;

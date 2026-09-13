@@ -58,14 +58,13 @@ constexpr uint32_t kDefaultCancelBudgetMs = 1'000;
  * failed because the whole-transfer deadline expired (the C ABI has
  * no dedicated timeout code; Busy + this marker preserves the fact
  * without changing the enum). */
-constexpr int kDiagDeadlineExpired = 0x54494D45; /* "TIME" */
 
 constexpr uint32_t kPutGraceMs = 100;
 
 uint64_t steadyNowMs() {
-  auto now = std::chrono::steady_clock::now().time_since_epoch();
-  return static_cast<uint64_t>(
-    std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+  /* Route every v2 time read through the injectable clock so unit
+   * tests control expiry deterministically. */
+  return clockSource().nowMs();
 }
 
 uint64_t remaining(uint64_t deadlineMs) {
@@ -166,16 +165,23 @@ struct SessionResources {
 /* Creates the per-transfer QP/CQ pair as a registry entry with a
  * retired-ring reservation, and pins the buffer MR. Returns 0 on
  * success; on failure every partial resource is rolled back. */
+/* Ownership rules for acquireSession failure paths: every reference
+ * this call acquired (MR pin, registry slot, retirement reservation,
+ * device reference) is released exactly once, HERE, before returning.
+ * res is left describing nothing (no partial owner), so releaseSession
+ * never re-releases. The only exception is a survived-but-undestroyable
+ * verbs object (rollbackFailed), reported as -2 and still owned here:
+ * those are recorded below as a poisoned registry entry so the reaper
+ * path owns them. */
 int acquireSession(void* devPtr, SessionResources& res) {
   ConnectionRegistry& reg = registry();
   /* Retire stale (qpn, psn) records first: a full ring would turn
    * every teardown Busy otherwise, and expired records are free to
    * reclaim (the reuse window has passed). */
-  reg.retired().collectExpired(steadyNowMs());
+  reg.retired().collectExpired(clockSource().nowMs());
   if (!g_bufferMap.acquireMrRef(devPtr)) {
     return -1;
   }
-  res.pinnedBuffer = devPtr;
   if (!reg.reserveSlot()) {
     g_bufferMap.releaseMrRef(devPtr);
     return -1;
@@ -195,26 +201,70 @@ int acquireSession(void* devPtr, SessionResources& res) {
   if (cret != 0) {
     reg.retired().unreserve(retireRid);
     reg.unreserveSlot();
-    return rollbackFailed ? -2 : -1;
+    if (!rollbackFailed) {
+      g_bufferMap.releaseMrRef(devPtr);
+      return -1;
+    }
+    /* Verbs destroy failed during rollback: the surviving object
+     * needs a durable owner. Park it as a poisoned entry keeping the
+     * slot, the reservation, the MR pin, and the device reference;
+     * releaseSession still runs but sees a claimable entry. */
+    ConnectionEntryV2 entry;
+    entry.conn = res.conn;
+    entry.device = v2State().device;
+    entry.reservationId = retireRid;
+    entry.pinnedBuffer = devPtr;
+    entry.poisoned = true;
+    res.id = reg.insert(std::move(entry));
+    if (res.id == 0) {
+      /* Registry full: nothing can own the leftover. Surface it. */
+      g_bufferMap.releaseMrRef(devPtr);
+      return -2;
+    }
+    res.dh = v2State().device;
+    /* The poisoned entry owns the pin now; res must not double-release. */
+    res.pinnedBuffer = nullptr;
+    res.inserted = true;
+    return -2;
   }
   ConnectionEntryV2 entry;
   entry.conn = res.conn;
   entry.device = v2State().device;
   entry.clientPsn = 0;
   entry.reservationId = retireRid;
+  entry.pinnedBuffer = devPtr;
   res.id = reg.insert(std::move(entry));
   if (res.id == 0) {
     bool qpOk = false;
     bool cqOk = false;
     destroyRcConnV2(res.conn, &qpOk, &cqOk);
+    /* The destroy failed: the QP keeps its retirement reservation
+     * (recorded only on successful destroy, so keep the reservation
+     * with a poisoned entry instead of unreserving). */
+    if (!qpOk || !cqOk) {
+      ConnectionEntryV2 poisoned;
+      poisoned.conn = res.conn;
+      poisoned.device = v2State().device;
+      poisoned.reservationId = qpOk ? 0 : retireRid;
+      poisoned.poisoned = true;
+      res.id = reg.insert(std::move(poisoned));
+      releaseDevice(v2State().device);
+      g_bufferMap.releaseMrRef(devPtr);
+      reg.unreserveSlot();
+      return res.id != 0 ? -2 : -1;
+    }
     reg.retired().unreserve(retireRid);
     releaseDevice(v2State().device);
+    g_bufferMap.releaseMrRef(devPtr);
     reg.unreserveSlot();
     return -1;
   }
   res.dh = v2State().device;
+  res.pinnedBuffer = devPtr;
   res.inserted = true;
   if (transitionQpToInitV2(res.dh, res.conn) != 0) {
+    /* The entry owns the QP and the pin; releaseSession will run
+     * releaseConnection on it (id is set, inserted is true). */
     return -1;
   }
   return 0;
@@ -228,11 +278,14 @@ int releaseSession(SessionResources& res) {
      * Busy/leftover outcome keeps the entry (and its pin) alive. */
     int rc = 0;
     if (!res.inserted) {
+      /* Unreachable in practice: acquireSession clears pinnedBuffer
+       * on every not-inserted failure path, so a non-inserted session
+       * holds nothing here. Destroy any stragglers defensively; no
+       * device reference was ever acquired for them. */
       rc = 0;
       bool qpOk = false;
       bool cqOk = false;
       destroyRcConnV2(res.conn, &qpOk, &cqOk);
-      releaseDevice(v2State().device);
       if (!qpOk || !cqOk) {
         rc = kReleaseLeftover;
       }
@@ -243,11 +296,13 @@ int releaseSession(SessionResources& res) {
        * outcomes keep the entry (and its device reference) alive for
        * the retry path. */
       if (rc == kReleaseOk) {
+        /* Only an inserted session ever acquired the device
+         * reference (createRcConnV2 increments it after QP
+         * creation); the not-inserted path never did. */
         releaseDevice(res.dh != nullptr ? res.dh : v2State().device);
       }
     }
-    if (rc == kReleaseOk && res.pinnedBuffer != nullptr) {
-      g_bufferMap.releaseMrRef(res.pinnedBuffer);
+    if (rc == kReleaseOk) {
       res.pinnedBuffer = nullptr;
     }
     return rc;
@@ -306,9 +361,6 @@ int v2Init(hipObjConfigV2_t* config) {
   }
   DeviceHandle* dh = new DeviceHandle();
   RcConnection raw;
-  if (devName != nullptr) {
-    v2State().nicName = devName;
-  }
   const int ret = (devName != nullptr)
                     ? hipObj::openRdmaDeviceByName(devName, raw)
                     : hipObj::openRdmaDevice(nicIndex, raw);
@@ -322,6 +374,9 @@ int v2Init(hipObjConfigV2_t* config) {
   dh->gidIndex = raw.gidIndex;
   dh->localGid = raw.localGid;
   st.device = dh;
+  /* Publish the selected NIC name only after the device opened: a
+   * failed init must not leave a stale name behind. */
+  st.nicName = (devName != nullptr) ? devName : "";
   st.controlEndpoint = config->control.controlEndpoint;
   st.connectDeadlineMs = config->connectDeadlineMs;
   st.transferDeadlineMs = config->transferDeadlineMs;
@@ -371,12 +426,14 @@ int v2Shutdown() {
   }
   st.initialized = false;
   st.controlEndpoint.clear();
+  st.nicName.clear();
   return hipObjSuccess;
 }
 
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
-               hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs) {
+               hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs,
+               int* diagOut) {
   V2State& st = v2State();
   if (!st.initialized) {
     return hipObjNotInitialized;
@@ -411,7 +468,10 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
   const uint64_t deadline = startMs + budgetMs;
   if (steadyNowMs() >= deadline) {
     /* The whole budget was consumed before admission completed. */
-    return hipObjError_t{hipObjBusy, kDiagDeadlineExpired}.opError;
+    if (diagOut != nullptr) {
+      *diagOut = kDiagDeadlineExpired;
+    }
+    return hipObjBusy;
   }
   const uint32_t cancelBudgetMs = st.cancelBudgetMs != 0
                                     ? st.cancelBudgetMs
@@ -445,6 +505,11 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     }
     const int rc = releaseSession(res);
     const hipObjError_t fin0 = finalizeOutcome(wireOutcome, rc);
+    if (diagOut != nullptr) {
+      /* Preserve the deadline diagnostic when the release outcome
+       * does not take precedence. */
+      *diagOut = (fin0.opError == wireOutcome.opError) ? fin0.hipError : 0;
+    }
     return fin0.opError;
   };
 
@@ -477,6 +542,14 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     res.conn.qpNum = res.conn.qp != nullptr ? res.conn.qp->qp_num : 0;
     {
       ConnectionRegistry& reg = registry();
+      /* Reuse guard: the (qpn, psn) pair must not collide with a
+       * retired pair still inside its reuse window. Random selection
+       * makes this improbable, not impossible; check before the pair
+       * reaches the wire. */
+      if (reg.retired().contains(res.conn.qpNum, psn)) {
+        outcome = {hipObjBusy, 0};
+        break;
+      }
       reg.withEntry(res.id, [&](ConnectionEntryV2& entry) {
         entry.clientPsn = psn;
       });
@@ -507,11 +580,22 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
 
     hipObjPrepareReplyV2_t prep;
     std::memset(&prep, 0, sizeof(prep));
+    if (remaining(deadline) == 0) {
+      /* Admit nothing new once the budget is spent. */
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
+      break;
+    }
     const int prc = ops->sendPrepare(ctx, &preq, &prep);
     if (prc != 0) {
       outcome = remaining(deadline) == 0
                     ? hipObjError_t{hipObjBusy, kDiagDeadlineExpired}
                     : hipObjError_t{hipObjS3Error, 0};
+      break;
+    }
+    if (remaining(deadline) == 0) {
+      /* The callback consumed the whole budget: even a well-formed
+       * reply must not advance the protocol. */
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
       break;
     }
     if (prep.httpStatus == 501 && prep.unsupportedMarker) {
@@ -574,8 +658,10 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     sessionId = prep.session;
     wireCancelEligible = true;
     const uint32_t serverPsn = prep.serverPsn;
-    /* PUT requires a valid staging advertisement. */
-    if (isPut && (!prep.stagingPresent || prep.stagingAddr == 0)) {
+    /* PUT requires a valid staging advertisement: both the address
+     * and a nonzero remote key (zero documents absence). */
+    if (isPut && (!prep.stagingPresent || prep.stagingAddr == 0 ||
+                  prep.stagingRkey == 0)) {
       outcome = {hipObjInvalidValue, 0};
       break;
     }
@@ -616,6 +702,8 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       break;
     }
     hipObjTransferReqV2_t rreq;
+    /* Fill with the budget actually remaining for the exchange + the
+     * FINAL read, so the consumer never sees a stale allowance. */
     fillCommonRequest(rreq, isPut ? "PUT" : "GET", bucket, key, size, offset,
                       query, cookie, psn, deadline, remaining(deadline));
     rreq.session = sessionId.c_str();
@@ -624,8 +712,14 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     rreq.clientQpn = res.conn.qpNum;
     rreq.clientMrAddr = reinterpret_cast<uint64_t>(devPtr);
     rreq.clientMrRkey = mr->rkey;
+    if (remaining(deadline) == 0) {
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
+      break;
+    }
     if (ops->sendReadyRequest(ctx, &rreq) != 0) {
-      outcome = {hipObjS3Error, 0};
+      outcome = remaining(deadline) == 0
+                    ? hipObjError_t{hipObjBusy, kDiagDeadlineExpired}
+                    : hipObjError_t{hipObjS3Error, 0};
       break;
     }
 
@@ -674,8 +768,14 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     /* ---- finishReady: consume the pending FINAL response ---- */
     hipObjFinalReplyV2_t fin;
     std::memset(&fin, 0, sizeof(fin));
+    if (remaining(deadline) == 0) {
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
+      break;
+    }
     if (ops->finishReady(ctx, &rreq, &fin) != 0) {
-      outcome = {hipObjS3Error, 0};
+      outcome = remaining(deadline) == 0
+                    ? hipObjError_t{hipObjBusy, kDiagDeadlineExpired}
+                    : hipObjError_t{hipObjS3Error, 0};
       break;
     }
     const bool finalOk = fin.httpStatus == 200 ||
@@ -688,8 +788,20 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       outcome = {hipObjRdmaError, 0};
       break;
     }
+    if (!fin.protocolEcho) {
+      /* The wire parser rejects successful replies without the echo;
+       * hold the core to the same contract. */
+      outcome = {hipObjRdmaError, 0};
+      break;
+    }
     if (!transferDone(p)) {
       outcome = {hipObjInternalError, 0};
+      break;
+    }
+    if (remaining(deadline) == 0) {
+      /* The transfer completed on the wire but outside its budget:
+       * report expiry, not success. */
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
       break;
     }
     outcome = HIPOBJ_SUCCESS;

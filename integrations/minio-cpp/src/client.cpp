@@ -142,6 +142,13 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
     resp.etag = put_ctx.etag;
     return resp;
   }
+  if (ret == kRdmaV2Failed) {
+    /* The v2 attempt failed mid-protocol; the buffer contents and the
+     * upload state are uncertain, so the HTTP fallback must not run. */
+    minio::s3::PutObjectResponse resp;
+    resp.message = "rdma v2 transfer failed";
+    return resp;
+  }
 
   minio::s3::PutObjectArgs http_args = args;
   std::stringstream ss(std::ios_base::in | std::ios_base::out |
@@ -204,6 +211,11 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
   if (ret > 0) {
     minio::s3::GetObjectResponse resp;
     resp.etag = get_ctx.etag;
+    return resp;
+  }
+  if (ret == kRdmaV2Failed) {
+    minio::s3::GetObjectResponse resp;
+    resp.message = "rdma v2 transfer failed";
     return resp;
   }
 

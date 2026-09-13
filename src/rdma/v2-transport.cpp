@@ -12,6 +12,8 @@
 
 #include <arpa/inet.h>
 
+#include "buffer.h"
+#include "v2-client.h"
 #include "ibv-wrapper.h"
 #include "transport.h"
 #include "vendor-ops.h"
@@ -329,6 +331,13 @@ int releaseConnection(ConnId id) {
   });
   reg.commitDestroy(id, qpOk, cqOk);
   if (qpOk && cqOk) {
+    /* Fully reclaimed: the entry's MR pin dies with it. */
+    reg.withEntry(id, [&](ConnectionEntryV2& e) {
+      if (e.pinnedBuffer != nullptr) {
+        g_bufferMap.releaseMrRef(e.pinnedBuffer);
+        e.pinnedBuffer = nullptr;
+      }
+    });
     reg.eraseDestroyed(id);
     return 0;
   }
