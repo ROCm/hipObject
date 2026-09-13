@@ -290,16 +290,28 @@ int releaseSession(SessionResources& res) {
         rc = kReleaseLeftover;
       }
     } else {
+      /* Take the entry's MR pin out before the release so it can be
+       * settled here (this translation unit owns the buffer map
+       * linkage) once the outcome is known. */
+      void* entryPin = nullptr;
+      registry().withEntry(res.id, [&](ConnectionEntryV2& e) {
+        entryPin = e.pinnedBuffer;
+        e.pinnedBuffer = nullptr;
+      });
       rc = releaseConnection(res.id);
       /* The device reference taken by createRcConnV2 is returned when
        * the connection release consumed the entry. Busy and leftover
        * outcomes keep the entry (and its device reference) alive for
-       * the retry path. */
+       * the retry path, so the pin goes back to the entry with it. */
       if (rc == kReleaseOk) {
-        /* Only an inserted session ever acquired the device
-         * reference (createRcConnV2 increments it after QP
-         * creation); the not-inserted path never did. */
+        if (entryPin != nullptr) {
+          g_bufferMap.releaseMrRef(entryPin);
+        }
         releaseDevice(res.dh != nullptr ? res.dh : v2State().device);
+      } else {
+        registry().withEntry(res.id, [&](ConnectionEntryV2& e) {
+          e.pinnedBuffer = entryPin;
+        });
       }
     }
     if (rc == kReleaseOk) {
@@ -400,11 +412,27 @@ int v2Shutdown() {
   std::vector<ConnId> ids;
   reg.forEachId([&ids](ConnId id) { ids.push_back(id); });
   for (auto id : ids) {
+    /* Drain settles each entry's MR pin alongside the release; the
+     * shutdown path never retries, so a non-Ok release drops the
+     * entry (and its pin) into the poisoned-leftover accounting. */
+    void* entryPin = nullptr;
+    reg.withEntry(id, [&](ConnectionEntryV2& e) {
+      entryPin = e.pinnedBuffer;
+      e.pinnedBuffer = nullptr;
+    });
     const int rc = releaseConnection(id);
     if (rc == kReleaseOk) {
+      if (entryPin != nullptr) {
+        g_bufferMap.releaseMrRef(entryPin);
+      }
       releaseDevice(st.device);
-    } else if (rc == kReleaseLeftover) {
-      poisonLeft = true;
+    } else {
+      if (entryPin != nullptr) {
+        g_bufferMap.releaseMrRef(entryPin);
+      }
+      if (rc == kReleaseLeftover) {
+        poisonLeft = true;
+      }
     }
   }
   if (poisonLeft || reg.size() > 0) {
