@@ -202,8 +202,8 @@ namespace {
         if (rdmaDev.empty()) {
             return {};
         }
-        const std::string ibDir = "/sys/class/infiniband/" + rdmaDev;
-        DIR              *d     = ::opendir(ibDir.c_str());
+        const std::string portsDir = "/sys/class/infiniband/" + rdmaDev + "/ports";
+        DIR              *d        = ::opendir(portsDir.c_str());
         if (d == nullptr) {
             return {};
         }
@@ -218,7 +218,7 @@ namespace {
             if (end == nullptr || *end != '\0' || port <= 0) {
                 continue;
             }
-            const std::string ndevsDir = ibDir + "/ports/" + de->d_name + "/gid_attrs/ndevs";
+            const std::string ndevsDir = portsDir + "/" + de->d_name + "/gid_attrs/ndevs";
             DIR              *nd       = ::opendir(ndevsDir.c_str());
             if (nd == nullptr) {
                 continue;
@@ -316,24 +316,35 @@ namespace {
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
             if (!nic.empty()) {
                 const std::string netdev = rdmaNetdev(nic);
-                const std::string &bindIf = !netdev.empty() ? netdev : nic;
+                if (netdev.empty()) {
+                    ::close(fd);
+                    freeaddrinfo(list);
+                    return false;
+                }
                 struct ifreq ifr{};
-                std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", bindIf.c_str());
-                if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) != 0) {
+                std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", netdev.c_str());
+                bool bound = setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) == 0;
+                if (!bound) {
                     struct ifaddrs *ifs = nullptr;
                     if (getifaddrs(&ifs) == 0) {
                         for (struct ifaddrs *i = ifs; i != nullptr; i = i->ifa_next) {
-                            if (std::strcmp(i->ifa_name, bindIf.c_str()) != 0 || i->ifa_addr == nullptr ||
+                            if (std::strcmp(i->ifa_name, netdev.c_str()) != 0 || i->ifa_addr == nullptr ||
                                 i->ifa_addr->sa_family != AF_INET) {
                                 continue;
                             }
                             auto *sa = reinterpret_cast<sockaddr_in *>(i->ifa_addr);
                             if (bind(fd, reinterpret_cast<sockaddr *>(sa), sizeof(*sa)) == 0) {
+                                bound = true;
                                 break;
                             }
                         }
                         freeifaddrs(ifs);
                     }
+                }
+                if (!bound) {
+                    ::close(fd);
+                    freeaddrinfo(list);
+                    return false;
                 }
             }
             const int flags = fcntl(fd, F_GETFL, 0);
@@ -504,10 +515,17 @@ namespace {
     };
 
     bool buildControlExchange(ControlExchange &out, S3RdmaContext *sctx, const std::string &controlPath,
-                              minio::utils::Multimap &extraHeaders, const std::string &hostHeaderValue)
+                              minio::utils::Multimap &extraHeaders, const std::string &hostHeaderValue,
+                              std::chrono::steady_clock::time_point deadlineAt)
     {
+        if (std::chrono::steady_clock::now() >= deadlineAt) {
+            return false;
+        }
         minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
         minio::creds::Credentials creds = sctx->provider->Fetch();
+        if (std::chrono::steady_clock::now() >= deadlineAt) {
+            return false;
+        }
         minio::utils::Multimap    queryParams;
         minio::utils::Multimap    signHeaders;
         signHeaders.Add("Host", hostHeaderValue);
@@ -636,7 +654,7 @@ namespace {
         }
         ControlExchange ex;
         const std::string hostHeader = hostHeaderFromConn(conn);
-        if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, extra, hostHeader) ||
+        if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, extra, hostHeader, deadlineAt) ||
             !conn.sendAll(ex.bytes, deadlineAt)) {
             return -1;
         }
@@ -726,7 +744,7 @@ namespace {
             return -1;
         }
         ControlExchange ex;
-        if (!buildControlExchange(ex, c->sctx, kControlPathReady, extra, hostHeaderFromConn(c->readyConn)) ||
+        if (!buildControlExchange(ex, c->sctx, kControlPathReady, extra, hostHeaderFromConn(c->readyConn), deadlineAt) ||
             !c->readyConn.sendAll(ex.bytes, deadlineAt)) {
             c->readyConn.closeConn();
             return -1;
@@ -852,7 +870,7 @@ namespace {
             return 0;
         }
         ControlExchange ex;
-        if (!buildControlExchange(ex, c->sctx, kControlPathCancel, extra, hostHeaderFromConn(conn)) ||
+        if (!buildControlExchange(ex, c->sctx, kControlPathCancel, extra, hostHeaderFromConn(conn), deadlineAt) ||
             !conn.sendAll(ex.bytes, deadlineAt)) {
             return 0;
         }

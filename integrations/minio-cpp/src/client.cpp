@@ -109,7 +109,8 @@ namespace {
         hipObjError_t EnsureInit(const minio::s3::BaseUrl &base_url)
         {
             std::scoped_lock<std::mutex> lock(mutex_);
-            std::string                  key = base_url.host + ":" + base_url.region;
+            const std::string port = base_url.port == 0 ? std::string() : ":" + std::to_string(base_url.port);
+            std::string key = base_url.host + port + ":" + base_url.region + (base_url.https ? ":https" : ":http");
             if (initialized_ && key == active_key_) {
                 return {hipObjSuccess, 0};
             }
@@ -118,7 +119,7 @@ namespace {
                 initialized_ = false;
             }
             hipObjConfigV2_t cfg{};
-            endpoint_storage_ = (base_url.https ? "https://" : "http://") + base_url.host;
+            endpoint_storage_ = (base_url.https ? "https://" : "http://") + base_url.host + port;
             cfg.v1.endpoint                 = endpoint_storage_.c_str();
             cfg.v1.region                   = base_url.region.c_str();
             cfg.v1.gpuDevice                = -1;
