@@ -215,6 +215,16 @@ int acquireSession(void* devPtr, SessionResources& res) {
         cqParkThrew = true;
       }
       if (cqParkThrew || res.id == 0) {
+        /* Parking failed. Destroy the surviving CQ if it is still
+         * owned here; a failed destroy is reported as -2. */
+        RcConnV2 leftover = std::move(entry.conn);
+        if (!leftover.cq) {
+          leftover = std::move(res.conn);
+        }
+        const DestroyResult destroyed = destroyRcConnV2(leftover);
+        if (!destroyed.cqOk) {
+          hipObj::dropOwnership(leftover.cq);
+        }
         bufferMap().releaseMrRef(devPtr);
         reg.retired().unreserve(parkedRid);
         reg.unreserveSlot();
@@ -270,8 +280,12 @@ int acquireSession(void* devPtr, SessionResources& res) {
       poisoned.conn = std::move(leftover);
       poisoned.device = v2State().device;
       poisoned.reservationId = destroyed.qpOk ? 0 : rid;
+      poisoned.pinnedBuffer = nullptr;
       poisoned.poisoned = true;
-      poisoned.holdsDeviceRef = true;
+      poisoned.holdsDeviceRef = false;
+      if (destroyed.qpOk) {
+        reg.retired().unreserve(rid);
+      }
       try {
         res.id = reg.insert(std::move(poisoned));
       } catch (...) {
@@ -288,7 +302,7 @@ int acquireSession(void* devPtr, SessionResources& res) {
       releaseDevice(*v2State().device);
       res.deviceRefHeld = false;
     }
-    if (destroyed.qpOk) {
+    if (destroyed.qpOk && destroyed.cqOk) {
       reg.retired().unreserve(rid);
     }
     if (res.id == 0) {
@@ -414,6 +428,8 @@ int v2Init(hipObjConfigV2_t* config) {
       return hipObjNicNotFound;
     }
   }
+  const std::string nicNameOut = nic->name;
+  const std::string controlEndpoint = config->control.controlEndpoint;
   DeviceHandle* dh = new DeviceHandle();
   RcConnection raw;
   if (hipObj::openRdmaDeviceByName(nic->name.c_str(), raw) != 0) {
@@ -426,11 +442,11 @@ int v2Init(hipObjConfigV2_t* config) {
   dh->gidIndex = raw.gidIndex;
   dh->localGid = raw.localGid;
   st.device = dh;
-  st.controlEndpoint = config->control.controlEndpoint;
+  st.controlEndpoint = controlEndpoint;
   st.connectDeadlineMs = config->connectDeadlineMs;
   st.transferDeadlineMs = config->transferDeadlineMs;
   st.cancelBudgetMs = config->cancelCleanupBudgetMs;
-  st.nicName = nic->name;
+  st.nicName = nicNameOut;
   st.initialized = true;
   return hipObjSuccess;
 }
@@ -746,7 +762,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       rtrOk = transitionQpToRtrV2(*res.dh, entry.conn, serverQpn, serverGid, serverPsn) == 0;
     });
     if (!rtrOk) {
-      outcome = {hipObjRdmaError, 0};
+      const bool rtrExpired = steadyNowMs() >= connectDeadline;
+      outcome = rtrExpired ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
+                           : hipObjError_t{hipObjRdmaError, 0};
       break;
     }
     if (steadyNowMs() >= connectDeadline) {
@@ -759,7 +777,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       rtsOk = transitionQpToRtsV2(entry.conn, *res.dh, psn) == 0;
     });
     if (!rtsOk) {
-      outcome = {hipObjRdmaError, 0};
+      const bool rtsExpired = steadyNowMs() >= connectDeadline;
+      outcome = rtsExpired ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
+                           : hipObjError_t{hipObjRdmaError, 0};
       break;
     }
     if (steadyNowMs() >= connectDeadline) {
@@ -824,7 +844,8 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       dataOk = pollDeadline(res.cq, IBV_WC_RECV_RDMA_WITH_IMM,
                             deadline, wc) &&
                (wc.wc_flags & IBV_WC_WITH_IMM) != 0 &&
-               ntohl(wc.imm_data) == cookie;
+               ntohl(wc.imm_data) == cookie &&
+               wc.byte_len == size;
     } else {
       /* PUT staging push: bounded grace so the server's receive post
        * (inside its READY handling) is not raced, then WRITE WITH
@@ -886,6 +907,11 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       break;
     }
     if (!fin.cookiePresent || fin.cookieEcho != cookie || !fin.protocolEcho) {
+      outcome = finalExpired ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
+                             : hipObjError_t{hipObjRdmaError, 0};
+      break;
+    }
+    if (fin.bytes != size) {
       outcome = finalExpired ? hipObjError_t{hipObjRdmaError, kDiagDeadlineExpired}
                              : hipObjError_t{hipObjRdmaError, 0};
       break;
