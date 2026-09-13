@@ -99,8 +99,9 @@ std::string clientNic() {
  * leaves the socket on default routing. */
 std::string rdmaNetdev(const std::string& rdmaDev) {
   if (rdmaDev.empty()) return {};
-  const std::string ibDir = "/sys/class/infiniband/" + rdmaDev;
-  DIR* d = ::opendir(ibDir.c_str());
+  const std::string portsDir =
+    "/sys/class/infiniband/" + rdmaDev + "/ports";
+  DIR* d = ::opendir(portsDir.c_str());
   if (d == nullptr) return {};
   struct dirent* de;
   std::string found;
@@ -110,7 +111,7 @@ std::string rdmaNetdev(const std::string& rdmaDev) {
     const long port = std::strtol(de->d_name, &end, 10);
     if (end == nullptr || *end != '\0' || port <= 0) continue;
     const std::string ndevsDir =
-      ibDir + "/ports/" + de->d_name + "/gid_attrs/ndevs";
+      portsDir + "/" + de->d_name + "/gid_attrs/ndevs";
     DIR* nd = ::opendir(ndevsDir.c_str());
     if (nd == nullptr) continue;
     struct dirent* ne;
@@ -252,27 +253,40 @@ bool ControlConn::connectToUntil(
        * bind APIs speak netdev names, so translate when the RDMA
        * device name differs. */
       const std::string netdev = rdmaNetdev(nic);
-      const std::string& bindIf = !netdev.empty() ? netdev : nic;
+      if (netdev.empty()) {
+        /* Without a confirmed netdev the selected-interface contract
+         * cannot be honored observably; fail the connection rather
+         * than silently proceeding with default routing. */
+        ::close(fd);
+        return false;
+      }
       struct ifreq ifr{};
-      std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", bindIf.c_str());
-      if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr,
-                     sizeof(ifr)) != 0) {
+      std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", netdev.c_str());
+      bool bound = setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr,
+                              sizeof(ifr)) == 0;
+      if (!bound) {
         /* Fall back to the interface's address when SO_BINDTODEVICE
          * needs privileges. */
         struct ifaddrs* ifs = nullptr;
         if (getifaddrs(&ifs) == 0) {
           for (struct ifaddrs* i = ifs; i != nullptr; i = i->ifa_next) {
-            if (std::strcmp(i->ifa_name, bindIf.c_str()) != 0 ||
+            if (std::strcmp(i->ifa_name, netdev.c_str()) != 0 ||
                 i->ifa_addr == nullptr || i->ifa_addr->sa_family != AF_INET) {
               continue;
             }
             sockaddr_in* sa = reinterpret_cast<sockaddr_in*>(i->ifa_addr);
             if (bind(fd, reinterpret_cast<sockaddr*>(sa), sizeof(*sa)) == 0) {
+              bound = true;
               break;
             }
           }
           freeifaddrs(ifs);
         }
+      }
+      if (!bound) {
+        ::close(fd);
+        return false;
+      }
       }
     }
     int flags = fcntl(fd, F_GETFL, 0);
@@ -461,9 +475,15 @@ bool buildControlExchange(ControlExchange& out, S3RdmaContext* sctx,
                           const std::string& control_path,
                           const std::string& nic,
                           minio::utils::Multimap& extra_headers,
-                          const std::string& hostHeaderValue) {
+                          const std::string& hostHeaderValue,
+                          std::chrono::steady_clock::time_point deadlineAt) {
+  /* Credential fetching and signing are synchronous and unbounded by
+   * the socket layer; refuse to spend the wire budget on a transfer
+   * whose time was already consumed by them. */
+  if (std::chrono::steady_clock::now() >= deadlineAt) return false;
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
   minio::creds::Credentials creds = sctx->provider->Fetch();
+  if (std::chrono::steady_clock::now() >= deadlineAt) return false;
   minio::utils::Multimap query_params;
   minio::utils::Multimap sign_headers;
   sign_headers.Add("Host", hostHeaderValue);
@@ -652,7 +672,7 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, c->clientNic,
-                            extra, authorityHost) ||
+                            extra, authorityHost, deadlineAt) ||
       !conn.sendAllUntil(ex.bytes, deadlineAt)) {
     return -1;
   }
@@ -755,7 +775,7 @@ int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathReady, c->clientNic,
-                            extra, authorityHost) ||
+                            extra, authorityHost, deadlineAt) ||
       !c->readyConn.sendAllUntil(ex.bytes, deadlineAt)) {
     /* Partial/failed write: the exchange is aborted; the connection
      * is closed, never pooled, and finishReady will not be called. */
@@ -887,7 +907,7 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
   }
   ControlExchange ex;
   if (!buildControlExchange(ex, c->sctx, kControlPathCancel, c->clientNic,
-                            extra, authorityHost) ||
+                            extra, authorityHost, deadlineAt) ||
       !conn.sendAllUntil(ex.bytes, deadlineAt)) {
     return 0;
   }
