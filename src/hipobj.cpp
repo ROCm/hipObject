@@ -158,6 +158,10 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   if (!config) {
     return {hipObjInvalidValue, 0};
   }
+  /* Serialize initialization and every buffer-map mutation with the
+   * transfers: the v2 stack drives RDMA under this same lock, and the
+   * buffer map is not internally synchronized. */
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   hipObj::DriverState& state = hipObj::getState();
   if (state.initialized) {
     return {hipObjAlreadyInitialized, 0};
@@ -469,9 +473,10 @@ hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
       std::chrono::steady_clock::now().time_since_epoch())
       .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  int diag = 0;
   const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
-                                        query, ops, ctx, entryMs);
-  return {static_cast<hipObjOpError_t>(rc), 0};
+                                        query, ops, ctx, entryMs, &diag);
+  return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -486,10 +491,12 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
       std::chrono::steady_clock::now().time_since_epoch())
       .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  int diag = 0;
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
                                         const_cast<void*>(devPtr), size,
-                                        offset, query, ops, ctx, entryMs);
-  return {static_cast<hipObjOpError_t>(rc), 0};
+                                        offset, query, ops, ctx, entryMs,
+                                        &diag);
+  return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
 }

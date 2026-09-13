@@ -21,6 +21,12 @@ extern BufferMap g_bufferMap;
 
 namespace v2 {
 
+/* Diagnostic marker carried in hipObjError_t::hipError when a
+ * transfer fails Busy because its deadline expired. ABI-stable value;
+ * the bridge and callers use it to distinguish expiry from
+ * server-side backpressure. */
+constexpr int kDiagDeadlineExpired = 0x54494D45; /* "TIME" */
+
 /* hipObjInitV2 body. Returns a hipObjOpError_t value. */
 int v2Init(hipObjConfigV2_t* config);
 
@@ -44,7 +50,8 @@ const char* v2NicName();
 
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
-               hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs);
+               hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs,
+               int* diagOut = nullptr);
 
 } // namespace v2
 } // namespace hipObj

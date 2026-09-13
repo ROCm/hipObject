@@ -47,6 +47,10 @@ inline constexpr int kRdmaReplyPartialContent = 206;
 inline constexpr int kRdmaReplyNotImplemented = 501;
 
 inline constexpr ssize_t kRdmaNotSupported = -2;
+/* The v2 path failed for a reason other than "unsupported": the
+ * transfer outcome is uncertain, so callers must not retry over
+ * HTTP with the same buffer. */
+inline constexpr ssize_t kRdmaV2Failed = -3;
 
 inline constexpr long kRdmaConnectTimeoutSecs = 5;
 inline constexpr long kRdmaTimeoutSecs = 10;
