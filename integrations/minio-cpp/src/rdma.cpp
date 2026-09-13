@@ -191,26 +191,6 @@ namespace {
         int selectedGid = -1;
     };
 
-    struct BridgeSelection {
-        std::string nic;
-        int port = 0;
-        int gidIndex = -1;
-    };
-
-    BridgeSelection bridgeSelection()
-    {
-        BridgeSelection out;
-        char nic[64];
-        int port = 0;
-        int gid = -1;
-        if (hipObjInterfaceSnapshotV2(nic, sizeof(nic), &port, &gid) == 1) {
-            out.nic.assign(nic);
-            out.port = port;
-            out.gidIndex = gid;
-        }
-        return out;
-    }
-
     /* Netdev for the data plane's exact port and GID. An empty result
      * means the selected interface cannot be named. */
     std::string rdmaNetdevFor(const std::string &rdmaDev, int port, int gidIdx)
@@ -673,6 +653,9 @@ namespace {
     int v2SendPrepare(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out)
     {
         auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
 
         minio::utils::Multimap extra;
         extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
@@ -767,6 +750,9 @@ namespace {
     int v2SendReadyRequest(void *ctx, const hipObjTransferReqV2_t *req)
     {
         auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
         if (c->readyPending) {
             return -1;
         }
@@ -798,6 +784,9 @@ namespace {
     int v2FinishReady(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out)
     {
         auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
         if (!c->readyPending) {
             return -1;
         }
@@ -899,6 +888,9 @@ namespace {
     int v2SendCancel(void *ctx, const hipObjTransferReqV2_t *req)
     {
         auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
 
         minio::utils::Multimap extra;
         extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
@@ -930,8 +922,7 @@ namespace {
 
     RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        const BridgeSelection sel = bridgeSelection();
-        V2CallbackCtx cbctx{sctx, sel.nic, {}, false, {}, sel.port, sel.gidIndex};
+        V2CallbackCtx cbctx{sctx, {}, {}, false, {}, 0, -1};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
@@ -974,8 +965,7 @@ namespace {
 
     RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        const BridgeSelection sel = bridgeSelection();
-        V2CallbackCtx cbctx{sctx, sel.nic, {}, false, {}, sel.port, sel.gidIndex};
+        V2CallbackCtx cbctx{sctx, {}, {}, false, {}, 0, -1};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;

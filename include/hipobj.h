@@ -461,6 +461,10 @@ typedef struct {
                                                        for the post-expiry CANCEL. */
     const hipObjControlEndpointV2_t *endpoint;  /*!< Control endpoint (library sets
                                                    from init) */
+    const char                      *nic;       /*!< RDMA device the data plane selected.
+                                                    NULL before init. */
+    int                              nicPort;   /*!< Selected port, 0 when unknown */
+    int                              nicGidIndex; /*!< Selected GID index, -1 when unknown */
     uint32_t                         clientQpn;    /*!< READY: this transfer's QP number.
                                                         Zero before the endpoint exists. */
     uint64_t                         clientMrAddr; /*!< READY: registered buffer address.
