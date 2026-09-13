@@ -42,7 +42,7 @@ std::map<struct ibv_cq*, FakeCqState> g_cqStates;
 
 /* Side-channel handles the consumer mock uses to script the data
  * phase: the most recent objects the fakes handed the library. */
-FakeCq* g_lastCq = nullptr;
+struct ibv_cq* g_lastCq = nullptr;
 uint32_t g_lastQpn = 0;
 
 /* Fake device/context/pd: addresses only, never dereferenced as
@@ -188,18 +188,24 @@ public:
       auto* self = static_cast<MockConsumer*>(ctx);
       self->snapshot(Cb::ReadyRequest, req);
       if (g_lastCq != nullptr && self->armGetCompletion) {
+        auto it = g_cqStates.find(g_lastCq);
+        if (it != g_cqStates.end()) {
         struct ibv_wc wc = {};
         wc.status = IBV_WC_SUCCESS;
         wc.opcode = IBV_WC_RECV_RDMA_WITH_IMM;
         wc.wc_flags = IBV_WC_WITH_IMM;
-        wc.imm_data = htonl(req->cookie);
-        g_lastCq->pending.push_back(wc);
+          wc.imm_data = htonl(req->cookie);
+          it->second.pending.push_back(wc);
+        }
       }
       if (g_lastCq != nullptr && self->armPutCompletion) {
-        struct ibv_wc wc = {};
-        wc.status = IBV_WC_SUCCESS;
-        wc.opcode = IBV_WC_RDMA_WRITE;
-        g_lastCq->pending.push_back(wc);
+        auto it = g_cqStates.find(g_lastCq);
+        if (it != g_cqStates.end()) {
+          struct ibv_wc wc = {};
+          wc.status = IBV_WC_SUCCESS;
+          wc.opcode = IBV_WC_RDMA_WRITE;
+          it->second.pending.push_back(wc);
+        }
       }
       return self->readyRequestFail;
     };
