@@ -16,6 +16,10 @@
 
 namespace hipobj::minio {
 
+/* The enclosing namespace name shadows the minio-cpp root namespace
+ * for qualified lookups inside hipobj::minio; rebind it explicitly. */
+namespace minio = ::minio;
+
 /* How the last transfers actually went out.
  *
  * Client::PutObject and Client::GetObject fall back to ordinary HTTP in two
