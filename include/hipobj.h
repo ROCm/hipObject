@@ -303,9 +303,16 @@ typedef struct {
 typedef struct {
   hipObjConfig_t v1;                 /*!< All v1 fields */
   hipObjControlEndpointV2_t control; /*!< v2 control endpoint (required) */
-  uint32_t connectDeadlineMs;  /*!< 0 = default (10 s). Bounds the one
-                                    RDMA connect attempt (RTR/RTS setup
-                                    excluded; those are local verbs). */
+  uint32_t connectDeadlineMs;  /*!< 0 = default (10 s). Bounds the
+                                    local RTR/RTS transition phase.
+                                    This protocol has no separately
+                                    waitable RDMA-connect handshake:
+                                    the remote endpoint is learned
+                                    from PREPARE and the transitions
+                                    are local verbs calls, so the
+                                    budget bounds that phase and is
+                                    always capped by the transfer
+                                    deadline. */
   uint32_t transferDeadlineMs; /*!< 0 = default (60 s). Whole-transfer
                                     budget from entry to hipObjGetV2/
                                     PutV2, including lock/admission
@@ -380,7 +387,7 @@ typedef struct {
 
 /*! @brief FINAL response (the reply to READY) @ingroup io */
 typedef struct {
-  int httpStatus;       /*!< 200 (GET) / 204 (PUT) / 5xx / 409 / 408 */
+  int httpStatus;      /*!< 200 (GET; PUT accepts 200 or 204) / 5xx / 409 / 408 */
   int protocolEcho;     /*!< 1 when the protocol echo header was present */
   uint64_t bytes;       /*!< Bytes transferred per the server */
   uint32_t cookieEcho;  /*!< Must match the request cookie */

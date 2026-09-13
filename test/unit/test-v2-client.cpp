@@ -739,23 +739,34 @@ TEST_F(V2ClientTransferTest, UnregisteredBufferRejected) {
 
 TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
   /* After READY, the FINAL callback must see the remaining budget, not
-   * the allowance captured before READY. */
+   * the allowance captured before READY. Freezing the clock and
+   * advancing it between the phases makes the difference observable:
+   * an implementation that forwards the stale pre-READY allowance
+   * reports an equal value and fails. */
   ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
-  consumer_.armGetCompletion = true;
+
+  FrozenClock frozen;
+  frozen.now = 1000;
+  hipObj::v2::setClockSourceForTest(&frozen);
   uint32_t seenPre = 0, seenFinal = 0;
+  consumer_.armGetCompletion = true;
   consumer_.onPrepare = [&](hipObjPrepareReplyV2_t*) {
     seenPre = consumer_.lastSeenDeadlineMs;
+    /* Spend 5000ms of the 60000ms budget before READY. */
+    frozen.now += 5000;
   };
   consumer_.onFinishReady = [&]() {
     seenFinal = consumer_.lastSeenDeadlineMs;
   };
   const hipObjError_t e =
       hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  hipObj::v2::setClockSourceForTest(nullptr);
   EXPECT_EQ(e.opError, hipObjSuccess);
   EXPECT_GT(seenFinal, 0u);
-  EXPECT_LE(seenFinal, seenPre);
+  EXPECT_LT(seenFinal, seenPre)
+    << "FINAL must observe the budget spent between phases";
 }
 
 TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
@@ -785,3 +796,33 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   EXPECT_FALSE(ring.contains(0x1234, 0x5679));
 }
 
+
+TEST_F(V2ClientTransferTest, ExpiredFinalKeepsDeadlineMarker) {
+  /* An expired FINAL whose reply is also invalid must surface the
+   * deadline diagnostic: the timeout is the actionable diagnosis. */
+  ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
+  ASSERT_EQ(initV2(kEndpoint, 30'000), hipObjSuccess);
+  ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
+
+  FrozenClock frozen;
+  frozen.now = 0;
+  hipObj::v2::setClockSourceForTest(&frozen);
+  consumer_.armGetCompletion = true;
+  consumer_.onFinishReady = [&]() {
+    /* Consume the whole budget inside FINAL, and break the cookie so
+     * the reply classification also fails. */
+    if (g_deadlineJumpClock != nullptr) {
+      g_deadlineJumpClock->now = 100'000;
+    }
+    consumer_.fin.cookieEcho = 0xfeedface;
+  };
+  g_deadlineJumpClock = &frozen;
+  const hipObjError_t err =
+      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  g_deadlineJumpClock = nullptr;
+  hipObj::v2::setClockSourceForTest(nullptr);
+  EXPECT_EQ(err.opError, hipObjRdmaError);
+  EXPECT_EQ(err.hipError, hipObj::v2::kDiagDeadlineExpired)
+    << "expired FINAL must keep the deadline marker even when the "
+       "reply is invalid";
+}
