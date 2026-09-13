@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cerrno>
 #include <chrono>
+#include <limits>
 #include <list>
 #include <memory>
 #include <optional>
@@ -20,6 +21,7 @@
 
 #include <fcntl.h>
 #include <ifaddrs.h>
+#include <dirent.h>
 #include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -179,6 +181,9 @@ namespace {
         /* READY writes the request and parks this socket until finishReady. */
         ControlConn readyConn;
         bool        readyPending = false;
+        /* The FINAL read shares the deadline READY computed before it
+         * wrote the request, instead of starting a new window. */
+        std::chrono::steady_clock::time_point readyDeadline{};
     };
 
     std::string clientNic()
@@ -187,6 +192,82 @@ namespace {
         std::string out = nic != nullptr ? std::string(nic) : std::string();
         hipObjFreeNicV2(nic);
         return out;
+    }
+
+    /* SO_BINDTODEVICE speaks netdev names. An RDMA device such as
+     * mlx5_0 is often not that name, so read the mapping from sysfs.
+     * An empty result leaves the socket on default routing. */
+    std::string rdmaNetdev(const std::string &rdmaDev)
+    {
+        if (rdmaDev.empty()) {
+            return {};
+        }
+        const std::string ibDir = "/sys/class/infiniband/" + rdmaDev;
+        DIR              *d     = ::opendir(ibDir.c_str());
+        if (d == nullptr) {
+            return {};
+        }
+        std::string found;
+        struct dirent *de;
+        while ((de = ::readdir(d)) != nullptr && found.empty()) {
+            if (de->d_name[0] == '.') {
+                continue;
+            }
+            char      *end  = nullptr;
+            const long port = std::strtol(de->d_name, &end, 10);
+            if (end == nullptr || *end != '\0' || port <= 0) {
+                continue;
+            }
+            const std::string ndevsDir = ibDir + "/ports/" + de->d_name + "/gid_attrs/ndevs";
+            DIR              *nd       = ::opendir(ndevsDir.c_str());
+            if (nd == nullptr) {
+                continue;
+            }
+            struct dirent *ne;
+            while ((ne = ::readdir(nd)) != nullptr) {
+                if (ne->d_name[0] == '.') {
+                    continue;
+                }
+                const std::string path = ndevsDir + "/" + ne->d_name;
+                FILE             *f    = std::fopen(path.c_str(), "r");
+                if (f == nullptr) {
+                    continue;
+                }
+                char buf[IFNAMSIZ + 1] = {0};
+                if (std::fgets(buf, sizeof(buf), f) != nullptr) {
+                    char *nl = std::strchr(buf, '\n');
+                    if (nl != nullptr) {
+                        *nl = '\0';
+                    }
+                    if (buf[0] != '\0') {
+                        found = buf;
+                    }
+                }
+                std::fclose(f);
+                if (!found.empty()) {
+                    break;
+                }
+            }
+            ::closedir(nd);
+        }
+        ::closedir(d);
+        return found;
+    }
+
+    /* -1 means the budget is already gone. Callers must fail before
+     * poll: a negative timeout waits forever. */
+    int pollBudgetMs(std::chrono::steady_clock::time_point deadlineAt)
+    {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              deadlineAt - std::chrono::steady_clock::now())
+                              .count();
+        if (left <= 0) {
+            return -1;
+        }
+        if (left > static_cast<long long>(std::numeric_limits<int>::max())) {
+            return std::numeric_limits<int>::max();
+        }
+        return static_cast<int>(left);
     }
 
     bool ControlConn::connectTo(const std::string &hostPort, const std::string &nic,
@@ -214,6 +295,9 @@ namespace {
             /* The direct control path is plain HTTP. TLS is out of scope. */
             return false;
         }
+        if (pollBudgetMs(deadlineAt) < 0) {
+            return false;
+        }
 
         struct addrinfo hints{};
         hints.ai_family   = AF_UNSPEC;
@@ -231,13 +315,15 @@ namespace {
             int one = 1;
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
             if (!nic.empty()) {
+                const std::string netdev = rdmaNetdev(nic);
+                const std::string &bindIf = !netdev.empty() ? netdev : nic;
                 struct ifreq ifr{};
-                std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", nic.c_str());
+                std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", bindIf.c_str());
                 if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) != 0) {
                     struct ifaddrs *ifs = nullptr;
                     if (getifaddrs(&ifs) == 0) {
                         for (struct ifaddrs *i = ifs; i != nullptr; i = i->ifa_next) {
-                            if (std::strcmp(i->ifa_name, nic.c_str()) != 0 || i->ifa_addr == nullptr ||
+                            if (std::strcmp(i->ifa_name, bindIf.c_str()) != 0 || i->ifa_addr == nullptr ||
                                 i->ifa_addr->sa_family != AF_INET) {
                                 continue;
                             }
@@ -258,13 +344,11 @@ namespace {
             }
             if (errno == EINPROGRESS) {
                 struct pollfd pfd{fd, POLLOUT, 0};
-                int           pr   = 0;
-                int           left = 0;
+                int pr = 0;
+                int left = 0;
                 do {
-                    left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                deadlineAt - std::chrono::steady_clock::now())
-                                                .count());
-                    if (left <= 0) {
+                    left = pollBudgetMs(deadlineAt);
+                    if (left < 0) {
                         pr = 0;
                         break;
                     }
@@ -305,13 +389,11 @@ namespace {
         size_t     off        = 0;
         while (off < bytes.size()) {
             struct pollfd pfd{fd, POLLOUT, 0};
-            int           pr   = 0;
-            int           left = 0;
+            int pr = 0;
+            int left = 0;
             do {
-                left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                            deadlineAt - std::chrono::steady_clock::now())
-                                            .count());
-                if (left <= 0) {
+                left = pollBudgetMs(deadlineAt);
+                if (left < 0) {
                     return false;
                 }
                 pr = poll(&pfd, 1, left);
@@ -390,13 +472,11 @@ namespace {
                 return true;
             }
             struct pollfd pfd{fd, POLLIN, 0};
-            int           pr   = 0;
-            int           left = 0;
+            int pr = 0;
+            int left = 0;
             do {
-                left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                            deadlineAt - std::chrono::steady_clock::now())
-                                            .count());
-                if (left <= 0) {
+                left = pollBudgetMs(deadlineAt);
+                if (left < 0) {
                     return false;
                 }
                 pr = poll(&pfd, 1, left);
@@ -510,9 +590,11 @@ namespace {
 
     int controlDeadlineMs(const hipObjTransferReqV2_t *req)
     {
-        uint32_t r = req->remainingMs;
-        if (r == 0) {
-            r = static_cast<uint32_t>(kRdmaTimeoutSecs * 1000);
+        /* Zero means earlier phases already spent the budget. Do not
+         * re-arm the default timeout. */
+        const uint64_t r = req->remainingMs;
+        if (r > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+            return std::numeric_limits<int>::max();
         }
         return static_cast<int>(r);
     }
@@ -650,6 +732,7 @@ namespace {
             return -1;
         }
         c->readyPending = true;
+        c->readyDeadline = deadlineAt;
         return 0;
     }
 
@@ -660,7 +743,7 @@ namespace {
             return -1;
         }
         std::string head, body;
-        if (!c->readyConn.readResponse(head, body, controlDeadlineAt(req))) {
+        if (!c->readyConn.readResponse(head, body, c->readyDeadline)) {
             c->readyConn.closeConn();
             c->readyPending = false;
             return -1;
@@ -719,6 +802,26 @@ namespace {
                         csumOk = false;
                     }
                 }
+                if (csumOk) {
+                    const auto b64v = [](char ch) -> int {
+                        if (ch >= 'A' && ch <= 'Z') {
+                            return ch - 'A';
+                        }
+                        if (ch >= 'a' && ch <= 'z') {
+                            return ch - 'a' + 26;
+                        }
+                        if (ch >= '0' && ch <= '9') {
+                            return ch - '0' + 52;
+                        }
+                        if (ch == '+') {
+                            return 62;
+                        }
+                        return 63;
+                    };
+                    if (b64v(payload[10]) & 0x3) {
+                        csumOk = false;
+                    }
+                }
             }
             if (!csumOk || payload.size() >= sizeof(out->checksumB64)) {
                 return -1;
@@ -762,7 +865,7 @@ namespace {
 
     RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
+        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
@@ -805,7 +908,7 @@ namespace {
 
     RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
+        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
