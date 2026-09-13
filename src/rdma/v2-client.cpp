@@ -504,6 +504,8 @@ int v2SelectedPort() { return v2State().selectedPort; }
 
 int v2SelectedGidIndex() { return v2State().selectedGidIndex; }
 
+uint64_t v2InitGeneration() { return v2State().initGeneration; }
+
 InterfaceSnapshot v2InterfaceSnapshot() {
   const V2State& st = v2State();
   InterfaceSnapshot out;
@@ -683,6 +685,12 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
   if (!st.initialized) {
     return hipObjNotInitialized;
   }
+  /* Publish the active interface selection on every callback request:
+   * read here (under the API lock held by the public entry points) it
+   * is coherent with the generation admission already validated. */
+  const std::string activeNic = st.nicName;
+  const int activePort = st.selectedPort;
+  const int activeGid = st.selectedGidIndex;
   if (haveSnapshot && snapshotGeneration != st.initGeneration) {
     /* The caller captured its interface selection before waiting for
      * the API lock and a shutdown/reinit happened in between: the
@@ -756,6 +764,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       creq.session = sessionId.c_str();
       creq.target = nullptr;
       creq.endpoint = &epV2;
+      creq.nic = activeNic.c_str();
+      creq.nicPort = activePort;
+      creq.nicGidIndex = activeGid;
       cancelSent = true; /* single attempt even if it throws below */
       try {
         ops->sendCancel(ctx, &creq);
@@ -848,6 +859,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     preq.token = clientToken.c_str();
     preq.target = target.c_str();
     preq.endpoint = &epV2;
+    preq.nic = activeNic.c_str();
+    preq.nicPort = activePort;
+    preq.nicGidIndex = activeGid;
 
     hipObjPrepareReplyV2_t prep;
     std::memset(&prep, 0, sizeof(prep));
@@ -1016,6 +1030,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     rreq.session = sessionId.c_str();
     rreq.token = clientToken.c_str();
     rreq.endpoint = &epV2;
+    rreq.nic = activeNic.c_str();
+    rreq.nicPort = activePort;
+    rreq.nicGidIndex = activeGid;
     rreq.clientQpn = res.conn.qpNum;
     rreq.clientMrAddr = reinterpret_cast<uint64_t>(devPtr);
     rreq.clientMrRkey = mr->rkey;

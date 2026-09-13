@@ -40,8 +40,6 @@ int v2Shutdown();
  * runs against this PD. */
 struct ibv_pd* v2ProtectionDomain();
 
-/* Shared body of hipObjGetV2/hipObjPutV2 (apiLock held by the
- * caller). Returns a hipObjOpError_t value. */
 bool v2IsInitialized();
 
 /* Entry timestamp for the public entry points, read from the same
@@ -71,6 +69,13 @@ struct InterfaceSnapshot {
 };
 InterfaceSnapshot v2InterfaceSnapshot();
 
+/* Current init generation. The caller must already hold apiLock (the
+ * public entry points do); reading it under the lock keeps admission
+ * free of unlocked mutable-state access. */
+uint64_t v2InitGeneration();
+
+/* Shared body of hipObjGetV2/hipObjPutV2 (apiLock held by the
+ * caller). Returns a hipObjOpError_t value. */
 /* entryMs/haveEntryMs: when haveEntryMs is true the public entry
  * point captured the timestamp before waiting on the api lock, so
  * the lock wait counts against the whole-transfer budget; when
