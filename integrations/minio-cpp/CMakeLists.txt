@@ -22,7 +22,13 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
   EXCLUDE_FROM_ALL SYSTEM
 )
+# The fetched copy is used in-tree only; its install(EXPORT
+# miniocpp-targets) rule cannot be satisfied here because the shim
+# targets (curlpp_built, inih_cpp) live outside any export set. Skip
+# install rules while the subdirectory is processed.
+set(CMAKE_SKIP_INSTALL_RULES ON)
 FetchContent_MakeAvailable(miniocpp_upstream)
+set(CMAKE_SKIP_INSTALL_RULES OFF)
 
 add_library(hipobj_minio STATIC
   src/rdma.cpp

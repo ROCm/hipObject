@@ -76,6 +76,12 @@ if(NOT TARGET unofficial::curlpp::curlpp)
       curlpp
       GIT_REPOSITORY https://github.com/jpbarrette/curlpp.git
       GIT_TAG v0.8.1
+      # v0.8.1 predates libcurl 7.85, which removed curl_closepolicy and
+      # CURLOPT_CLOSEPOLICY; drop the stale option trait so the source
+      # compiles against current libcurl (mirrors the distro patches).
+      PATCH_COMMAND sed -i
+        "/typedef curlpp::OptionTrait<curl_closepolicy, CURLOPT_CLOSEPOLICY>/d"
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/curlpp/Options.hpp
     )
     FetchContent_GetProperties(curlpp)
     if(NOT curlpp_POPULATED)
