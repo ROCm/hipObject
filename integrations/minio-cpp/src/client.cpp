@@ -33,6 +33,10 @@
 
 namespace hipobj::minio {
 
+/* The enclosing namespace name shadows the minio-cpp root namespace
+ * for qualified lookups; rebind it, and keep the using-directive for
+ * unqualified names the rest of this file already uses. */
+namespace minio = ::minio;
 using namespace ::minio;
 
 namespace {
