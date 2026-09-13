@@ -459,10 +459,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
   }
   struct ibv_mr* mr = buf->mr.get();
 
-  /* Whole-transfer budget: entry to return, lock/admission wait
-   * included (the caller already holds ApiGuard via the entry point).
-   * The CQ deadline is derived from this single budget. */
-  const uint64_t startMs = entryMs;
+  /* Zero entryMs means stamp the entry here, on the injectable clock.
+   * A caller-supplied timestamp is honored as-is. */
+  const uint64_t startMs = entryMs != 0 ? entryMs : steadyNowMs();
   const uint32_t budgetMs = st.transferDeadlineMs != 0
                               ? st.transferDeadlineMs
                               : kDefaultTransferDeadlineMs;
