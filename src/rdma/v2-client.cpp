@@ -93,24 +93,45 @@ struct V2State {
 struct EmergencySlot {
   RcConnV2 conn;
   uint64_t reservationId = 0;
+  bool reserved = false;
   bool used = false;
 };
 constexpr size_t kEmergencySlots = 8;
 EmergencySlot g_emergencySlots[kEmergencySlots];
 
-bool parkEmergency(RcConnV2& conn, uint64_t reservationId) {
-  if (!conn.qp && !conn.cq) {
-    return false;
-  }
-  for (auto& slot : g_emergencySlots) {
-    if (!slot.used) {
-      slot.conn = std::move(conn);
-      slot.reservationId = reservationId;
-      slot.used = true;
-      return true;
+size_t reserveEmergencySlot() {
+  for (size_t i = 0; i < kEmergencySlots; ++i) {
+    if (!g_emergencySlots[i].used && !g_emergencySlots[i].reserved) {
+      g_emergencySlots[i].reserved = true;
+      return i + 1;
     }
   }
-  return false;
+  return 0;
+}
+
+void releaseEmergencyReservation(size_t handle) {
+  if (handle == 0 || handle > kEmergencySlots) {
+    return;
+  }
+  auto& slot = g_emergencySlots[handle - 1];
+  if (slot.reserved && !slot.used) {
+    slot.reserved = false;
+  }
+}
+
+bool parkEmergency(size_t handle, RcConnV2& conn, uint64_t reservationId) {
+  if (handle == 0 || handle > kEmergencySlots || (!conn.qp && !conn.cq)) {
+    return false;
+  }
+  auto& slot = g_emergencySlots[handle - 1];
+  if (!slot.reserved || slot.used) {
+    return false;
+  }
+  slot.conn = std::move(conn);
+  slot.reservationId = reservationId;
+  slot.used = true;
+  slot.reserved = false;
+  return true;
 }
 
 void drainEmergencySlots() {
@@ -119,12 +140,12 @@ void drainEmergencySlots() {
       continue;
     }
     const DestroyResult destroyed = destroyRcConnV2(slot.conn);
-    if (destroyed.qpOk && destroyed.cqOk) {
-      if (slot.reservationId != 0) {
-        registry().retired().unreserve(slot.reservationId);
-      }
-      slot.used = false;
+    if (destroyed.qpOk && slot.reservationId != 0) {
+      registry().retired().unreserve(slot.reservationId);
       slot.reservationId = 0;
+    }
+    if (destroyed.qpOk && destroyed.cqOk) {
+      slot.used = false;
     }
   }
 }
@@ -213,6 +234,20 @@ struct SessionResources {
  * retired-ring reservation, and pins the buffer MR. Returns 0 on
  * success; on failure every partial resource is rolled back. */
 int acquireSession(void* devPtr, SessionResources& res) {
+  const size_t emergencyHandle = reserveEmergencySlot();
+  if (emergencyHandle == 0) {
+    return -1;
+  }
+  struct EmergencyHold {
+    size_t handle;
+    bool parked = false;
+    ~EmergencyHold()
+    {
+      if (!parked) {
+        releaseEmergencyReservation(handle);
+      }
+    }
+  } hold{emergencyHandle};
   ConnectionRegistry& reg = registry();
   /* Expired (qpn, psn) records are reclaimable. Collect them before
    * reserving so a full ring does not turn every teardown Busy. */
@@ -263,7 +298,10 @@ int acquireSession(void* devPtr, SessionResources& res) {
           leftover = std::move(res.conn);
         }
         const DestroyResult destroyed = destroyRcConnV2(leftover);
-        const bool settled = destroyed.cqOk || parkEmergency(leftover, parkedRid);
+        const bool settled = destroyed.cqOk || parkEmergency(hold.handle, leftover, parkedRid);
+        if (settled && !destroyed.cqOk) {
+          hold.parked = true;
+        }
         (void)settled;
         bufferMap().releaseMrRef(devPtr);
         if (destroyed.cqOk) {
@@ -333,8 +371,8 @@ int acquireSession(void* devPtr, SessionResources& res) {
       } catch (...) {
         res.id = 0;
       }
-      if (res.id == 0) {
-        parkEmergency(poisoned.conn, destroyed.qpOk ? 0 : rid);
+      if (res.id == 0 && parkEmergency(hold.handle, poisoned.conn, destroyed.qpOk ? 0 : rid)) {
+        hold.parked = true;
       }
       if (res.id != 0) {
         res.inserted = true;
@@ -557,6 +595,7 @@ int v2Shutdown() {
       }
     }
   }
+  drainEmergencySlots();
   if (poisonLeft || reg.size() > 0) {
     return hipObjRdmaError;
   }

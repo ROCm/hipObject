@@ -512,6 +512,14 @@ typedef struct {
  *
  * The callbacks run while hipObject holds its API lock, so they can't
  * call serialized functions; see @ref threads.
+ *
+ * Time budget: the transfer deadline covers everything a callback
+ * does, including credential acquisition and DNS resolution. The
+ * reference bridge caches signed exchanges and bounds its resolver
+ * by the deadline; integrations must supply a credential provider
+ * that is already cached or otherwise bounded, because the library
+ * cannot interrupt a synchronous provider fetch from inside the
+ * callback.
  */
 typedef struct hipObjOpsV2 {
     hipObjOps_t v1;
