@@ -180,9 +180,7 @@ namespace {
         signHeaders.Add("x-amz-content-sha256", kUnsignedPayload);
         signHeaders.Add("Content-Length", "0");
 
-        for (const auto &k : extraHeaders.Keys()) {
-            signHeaders.Add(k, extraHeaders.GetFront(k));
-        }
+        signHeaders.AddAll(extraHeaders);
         if (!creds.session_token.empty()) {
             signHeaders.Add("X-Amz-Security-Token", creds.session_token);
         }
@@ -228,9 +226,7 @@ namespace {
         sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
         sign_headers.Add("Content-Length", "0");
 
-        for (const auto &k : extra_headers.Keys()) {
-            sign_headers.Add(k, extra_headers.GetFront(k));
-        }
+        sign_headers.AddAll(extra_headers);
 
         if (!creds.session_token.empty()) {
             sign_headers.Add("X-Amz-Security-Token", creds.session_token);
@@ -396,7 +392,7 @@ namespace {
             return {RdmaStatus::Failed};
         }
 
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
+        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get()), {}};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
@@ -447,7 +443,7 @@ namespace {
             return {RdmaStatus::Failed};
         }
 
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
+        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get()), {}};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
