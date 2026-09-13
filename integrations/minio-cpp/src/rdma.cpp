@@ -21,6 +21,9 @@
 #include <chrono>
 #include <cstdio>
 #include <dirent.h>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -97,41 +100,26 @@ std::string clientNic() {
  * same string. SO_BINDTODEVICE and getifaddrs both speak netdev, so
  * resolve the mapping from sysfs before binding; an empty result
  * leaves the socket on default routing. */
-std::string rdmaNetdev(const std::string& rdmaDev) {
-  if (rdmaDev.empty()) return {};
-  const std::string portsDir =
-    "/sys/class/infiniband/" + rdmaDev + "/ports";
-  DIR* d = ::opendir(portsDir.c_str());
-  if (d == nullptr) return {};
-  struct dirent* de;
+/* Netdev backing the data plane's exact port and GID. The port and
+ * GID index come from the library's init-time selection (token
+ * fallback for a pre-init probe), so multi-port or VLAN-GID devices
+ * bind the interface the RDMA address handle actually uses, never an
+ * arbitrary sibling. */
+std::string rdmaNetdevFor(const std::string& rdmaDev, int port, int gidIdx) {
+  if (rdmaDev.empty() || port <= 0 || gidIdx < 0) return {};
+  const std::string path = "/sys/class/infiniband/" + rdmaDev +
+                           "/ports/" + std::to_string(port) +
+                           "/gid_attrs/ndevs/" + std::to_string(gidIdx);
+  FILE* f = std::fopen(path.c_str(), "r");
+  if (f == nullptr) return {};
+  char buf[IFNAMSIZ + 1] = {0};
   std::string found;
-  while ((de = ::readdir(d)) != nullptr && found.empty()) {
-    if (de->d_name[0] == '.') continue;
-    char* end = nullptr;
-    const long port = std::strtol(de->d_name, &end, 10);
-    if (end == nullptr || *end != '\0' || port <= 0) continue;
-    const std::string ndevsDir =
-      portsDir + "/" + de->d_name + "/gid_attrs/ndevs";
-    DIR* nd = ::opendir(ndevsDir.c_str());
-    if (nd == nullptr) continue;
-    struct dirent* ne;
-    while ((ne = ::readdir(nd)) != nullptr) {
-      if (ne->d_name[0] == '.') continue;
-      const std::string path = ndevsDir + "/" + ne->d_name;
-      FILE* f = std::fopen(path.c_str(), "r");
-      if (f == nullptr) continue;
-      char buf[IFNAMSIZ + 1] = {0};
-      if (std::fgets(buf, sizeof(buf), f) != nullptr) {
-        char* nl = std::strchr(buf, '\n');
-        if (nl != nullptr) *nl = '\0';
-        if (buf[0] != '\0') found = buf;
-      }
-      std::fclose(f);
-      if (!found.empty()) break;
-    }
-    ::closedir(nd);
+  if (std::fgets(buf, sizeof(buf), f) != nullptr) {
+    char* nl = std::strchr(buf, '\n');
+    if (nl != nullptr) *nl = '\0';
+    if (buf[0] != '\0') found = buf;
   }
-  ::closedir(d);
+  std::fclose(f);
   return found;
 }
 }
@@ -237,10 +225,63 @@ bool ControlConn::connectToUntil(
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo* list = nullptr;
-  if (getaddrinfo(host.c_str(), port.c_str(), &hints, &list) != 0 ||
-      list == nullptr) {
+  int gaiRc = 0;
+  {
+    /* DNS resolution is not cancellable in place. Run it on a helper
+     * thread and bound the wait by the deadline; on expiry the
+     * connection gives up immediately (the detached helper finishes
+     * and frees its own result) so a stalled resolver cannot consume
+     * the transfer budget unboundedly. */
+    std::mutex resolveMu;
+    std::condition_variable resolveCv;
+    bool resolveDone = false;
+    bool resolveOk = false;
+    std::thread resolver([&]() {
+      struct addrinfo* res = nullptr;
+      const int rc =
+        getaddrinfo(host.c_str(), port.c_str(), &hints, &res);
+      std::lock_guard<std::mutex> lk(resolveMu);
+      gaiRc = rc;
+      if (rc == 0 && res != nullptr) {
+        list = res;
+        resolveOk = true;
+      } else if (res != nullptr) {
+        freeaddrinfo(res);
+      }
+      resolveDone = true;
+      resolveCv.notify_one();
+    });
+    if (!resolver.joinable()) {
+      /* Thread creation failed: fall back to the bounded synchronous
+       * call (the entry check above already rejected an expired
+       * budget). */
+      gaiRc = getaddrinfo(host.c_str(), port.c_str(), &hints, &list);
+    } else {
+      std::unique_lock<std::mutex> lk(resolveMu);
+      if (!resolveCv.wait_until(lk, deadlineAt,
+                                [&]() { return resolveDone; })) {
+        resolver.detach();
+        return false;
+      }
+      lk.unlock();
+      resolver.join();
+      if (!resolveOk) {
+        return false;
+      }
+    }
+  }
+  if (gaiRc != 0 || list == nullptr) {
     return false;
   }
+  /* Every exit below must release the resolver allocation; the early
+   * interface-binding failures previously returned around the single
+   * freeaddrinfo at the end of the loop. */
+  struct AddrInfoOwner {
+    struct addrinfo* p;
+    ~AddrInfoOwner() {
+      if (p) freeaddrinfo(p);
+    }
+  } addrOwner{list};
   int fd = -1;
   for (struct addrinfo* ai = list; ai != nullptr; ai = ai->ai_next) {
     fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
@@ -252,7 +293,9 @@ bool ControlConn::connectToUntil(
        * control traffic shares its fate with the data plane. The
        * bind APIs speak netdev names, so translate when the RDMA
        * device name differs. */
-      const std::string netdev = rdmaNetdev(nic);
+      const std::string netdev =
+          rdmaNetdevFor(nic, hipObj::v2::v2SelectedPort(),
+                        hipObj::v2::v2SelectedGidIndex());
       if (netdev.empty()) {
         /* Without a confirmed netdev the selected-interface contract
          * cannot be honored observably; fail the connection rather
@@ -319,7 +362,6 @@ bool ControlConn::connectToUntil(
     ::close(fd);
     fd = -1;
   }
-  freeaddrinfo(list);
   if (fd < 0) return false;
   /* Keep the socket nonblocking: sendAll/readResponse drive every
    * byte through poll, so a stalled peer cannot block past the
@@ -810,11 +852,21 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
 
   std::string bytes_hdr = headerValue(head, kAmzRdmaBytesTransferred);
   if (!bytes_hdr.empty()) {
-    char* endp = nullptr;
-    unsigned long long n = std::strtoull(bytes_hdr.c_str(), &endp, 10);
-    if (endp != nullptr && *endp == '\0') {
-      out->bytes = n;
+    /* Same strictness as the wire codec: decimal digits only, no
+     * sign, whitespace, or overflow-wrapped spellings. A malformed
+     * present header fails the parse instead of being ignored. */
+    if (bytes_hdr.find_first_not_of("0123456789") != std::string::npos ||
+        bytes_hdr.size() > 20) {
+      return -1;
     }
+    errno = 0;
+    char* endp = nullptr;
+    const unsigned long long n =
+      std::strtoull(bytes_hdr.c_str(), &endp, 10);
+    if (errno != 0 || endp == nullptr || *endp != '\0') {
+      return -1;
+    }
+    out->bytes = n;
   }
 
   std::string echo = headerValue(head, kAmzRdmaCookieHdr);
