@@ -521,16 +521,15 @@ hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
   /* Stamp the entry before the lock so the admission wait counts
    * against the whole-transfer budget (contract on the public API). */
   const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
-  /* Capture the interface selection coherently before waiting for
-   * the API lock; the transfer rejects it if initialization changed
-   * in between instead of mixing selections. */
-  const hipObj::v2::InterfaceSnapshot snap =
-      hipObj::v2::v2InterfaceSnapshot();
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  /* Read the generation under the same lock that guards the transfer:
+   * no unlocked copy of mutable selection state races a shutdown or
+   * reinit between snapshot and admission. */
+  const uint64_t generation = hipObj::v2::v2InitGeneration();
   int diag = 0;
   const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
                                         query, ops, ctx, entryMs, true,
-                                        snap.generation, true, &diag);
+                                        generation, true, &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
@@ -543,14 +542,13 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
   /* Stamp the entry before the lock so the admission wait counts
    * against the whole-transfer budget (contract on the public API). */
   const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
-  const hipObj::v2::InterfaceSnapshot snap =
-      hipObj::v2::v2InterfaceSnapshot();
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  const uint64_t generation = hipObj::v2::v2InitGeneration();
   int diag = 0;
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
                                         const_cast<void*>(devPtr), size,
                                         offset, query, ops, ctx, entryMs,
-                                        true, snap.generation, true,
+                                        true, generation, true,
                                         &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {

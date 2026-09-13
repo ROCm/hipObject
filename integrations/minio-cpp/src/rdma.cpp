@@ -82,28 +82,6 @@ std::string clientNicFromToken(const char* token) {
   return std::string(nicIp);
 }
 
-/* Coherent (nic, port, gid) selection snapshot captured in one
- * library-internal step; separate getters can mix values from
- * different initializations when a shutdown/reinit races the read. */
-struct BridgeSelection {
-  std::string nic;
-  int port = 0;
-  int gidIndex = -1;
-};
-
-BridgeSelection bridgeSelection() {
-  BridgeSelection out;
-  char nic[64];
-  int port = 0;
-  int gid = -1;
-  if (hipObjInterfaceSnapshotV2(nic, sizeof(nic), &port, &gid) == 1) {
-    out.nic.assign(nic);
-    out.port = port;
-    out.gidIndex = gid;
-  }
-  return out;
-}
-
 /* The RDMA device name (e.g. mlx5_0) and the network interface the
  * kernel routes its GIDs through (e.g. eth0) are frequently not the
  * same string. SO_BINDTODEVICE and getifaddrs both speak netdev, so
@@ -176,11 +154,12 @@ struct ControlConn {
 
 struct V2CallbackCtx {
   S3RdmaContext* sctx;
-  std::string clientNic; // NIC the v2 stack selected (hipObjNicV2)
-  /* Interface selection snapshot taken BEFORE entering the core: the
-   * public getters take the API mutex, which the transfer itself
-   * holds for the whole callback window (the header forbids callback
-   * reentry), so callbacks must consume this copy instead. */
+  /* Interface selection the LIBRARY published on the request for this
+   * transfer, copied once at callback entry. The library reads it
+   * under the API lock it already holds for the whole callback
+   * window, so the copy is coherent with the admitted generation
+   * without any callback reentry into locking getters. */
+  std::string clientNic;
   int selectedPort = 0;
   int selectedGid = -1;
   /* Split READY exchange state: the request was written and the socket
@@ -724,6 +703,9 @@ std::string controlAuthorityHost(const std::string& uri) {
 int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
                   hipObjPrepareReplyV2_t* out) {
   auto* c = static_cast<V2CallbackCtx*>(ctx);
+  c->clientNic = req->nic ? req->nic : "";
+  c->selectedPort = req->nicPort;
+  c->selectedGid = req->nicGidIndex;
 
   minio::utils::Multimap extra;
   extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
@@ -835,6 +817,9 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
 
 int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
   auto* c = static_cast<V2CallbackCtx*>(ctx);
+  c->clientNic = req->nic ? req->nic : "";
+  c->selectedPort = req->nicPort;
+  c->selectedGid = req->nicGidIndex;
   if (c->readyPending) {
     return -1; /* one exchange at a time per context */
   }
@@ -873,6 +858,9 @@ int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
 int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
                   hipObjFinalReplyV2_t* out) {
   auto* c = static_cast<V2CallbackCtx*>(ctx);
+  c->clientNic = req->nic ? req->nic : "";
+  c->selectedPort = req->nicPort;
+  c->selectedGid = req->nicGidIndex;
   if (!c->readyPending) {
     return -1;
   }
@@ -976,6 +964,9 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
 
 int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
   auto* c = static_cast<V2CallbackCtx*>(ctx);
+  c->clientNic = req->nic ? req->nic : "";
+  c->selectedPort = req->nicPort;
+  c->selectedGid = req->nicGidIndex;
 
   minio::utils::Multimap extra;
   extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
@@ -1015,9 +1006,8 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 // v2 entry points ---------------------------------------------------------
 
 ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  const BridgeSelection sel = bridgeSelection();
   V2CallbackCtx cbctx{
-      sctx, sel.nic, sel.port, sel.gidIndex, {}, false, {}};
+      sctx, "", 0, -1, {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -1045,9 +1035,8 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  const BridgeSelection sel = bridgeSelection();
   V2CallbackCtx cbctx{
-      sctx, sel.nic, sel.port, sel.gidIndex, {}, false, {}};
+      sctx, "", 0, -1, {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
