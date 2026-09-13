@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hip-seam.h"
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/common/nic-seam.h"
 #include "../../../src/rdma/token.h"
@@ -41,6 +42,12 @@ struct FakeCq {
  * phase: the most recent objects the fakes handed the library. */
 FakeCq* g_lastCq = nullptr;
 uint32_t g_lastQpn = 0;
+
+/* Fake device/context/pd: addresses only, never dereferenced as
+ * real verbs objects (all verbs entry points are faked). */
+struct ibv_device* g_fakeDevList[2] = {nullptr, nullptr};
+struct ibv_context g_fakeCtx;
+struct ibv_pd g_fakePd;
 
 int g_postRecvCalls = 0;
 int g_postSendCalls = 0;
@@ -227,8 +234,43 @@ private:
 class V2ClientTransferTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    savedHipOps_ = hipObj::hipOps();
+    hipObj::HipOps hops;
+    hops.hipDeviceGetPCIBusId = [](char* bus, int len, int) -> hipError_t {
+      snprintf(bus, static_cast<size_t>(len), "0000:42:00.0");
+      return hipSuccess;
+    };
+    hipObj::hipOps() = hops;
+
     savedFuncs_ = hipObj::ibv.funcsForTest();
     auto& f = hipObj::ibv.funcsForTest();
+    f.get_device_list = [](int* n) -> struct ibv_device** {
+      *n = 1;
+      return g_fakeDevList;
+    };
+    f.free_device_list = [](struct ibv_device**) {};
+    f.open_device = [](struct ibv_device*) -> struct ibv_context* {
+      return &g_fakeCtx;
+    };
+    f.alloc_pd = [](struct ibv_context*) -> struct ibv_pd* {
+      return &g_fakePd;
+    };
+    f.dealloc_pd = [](struct ibv_pd*) -> int { return 0; };
+    f.query_port = [](struct ibv_context*, uint8_t, struct ibv_port_attr* a) {
+      a->state = IBV_PORT_ACTIVE;
+      a->lid = 1;
+      return 0;
+    };
+    f.query_gid = [](struct ibv_context*, uint8_t, int, union ibv_gid* g) {
+      std::memset(g, 0xcd, sizeof(*g));
+      return 0;
+    };
+    f.query_device = [](struct ibv_context*, struct ibv_device_attr* a) {
+      std::memset(a, 0, sizeof(*a));
+      a->max_mr_size = ~(0ULL);
+      return 0;
+    };
+    f.dealloc_qp...[truncated]
     f.create_qp = fakeCreateQp;
     f.destroy_qp = fakeDestroyQp;
     f.create_cq = fakeCreateCq;
@@ -280,6 +322,7 @@ protected:
 
   void TearDown() override {
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
+    hipObj::hipOps() = savedHipOps_;
     hipObj::ibv.funcsForTest() = savedFuncs_;
     hipObj::setNicEnumerator(savedNics_);
     hipObj::ibv.is_initialized = false;
@@ -298,6 +341,7 @@ protected:
   hipObjOpsV2_t ops_{};
   MockConsumer consumer_;
   FakeNics nics_;
+  hipObj::HipOps savedHipOps_;
   hipObj::IbvFuncs savedFuncs_;
   hipObj::NicEnumerator* savedNics_ = nullptr;
 };
