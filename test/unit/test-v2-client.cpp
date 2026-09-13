@@ -323,15 +323,6 @@ protected:
       return &g_fakePd;
     };
     f.dealloc_pd = [](struct ibv_pd*) -> int { return 0; };
-    f.query_port = [](struct ibv_context*, uint8_t, struct ibv_port_attr* a) {
-      a->state = IBV_PORT_ACTIVE;
-      a->lid = 1;
-      return 0;
-    };
-    f.query_gid = [](struct ibv_context*, uint8_t, int, union ibv_gid* g) {
-      std::memset(g, 0xcd, sizeof(*g));
-      return 0;
-    };
     f.query_device = [](struct ibv_context*, struct ibv_device_attr* a) {
       std::memset(a, 0, sizeof(*a));
       a->max_mr_size = ~(0ULL);
@@ -346,6 +337,10 @@ protected:
     f.post_send = fakePostSend;
     f.poll_cq = fakePollCq;
     f.reg_mr = fakeRegMr;
+    f.reg_mr_iova2 = [](struct ibv_pd* pd, void* addr, size_t len,
+                        uintptr_t, int) -> struct ibv_mr* {
+      return fakeRegMr(pd, addr, len, 0);
+    };
     f.dereg_mr = fakeDeregMr;
     hipObj::ibv.is_initialized = true;
 
