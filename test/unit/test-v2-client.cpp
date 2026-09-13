@@ -825,9 +825,22 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
   consumer_.armGetCompletion = true;
+  FrozenClock collisionClock;
+  collisionClock.now = 0;
+  hipObj::v2::setClockSourceForTest(&collisionClock);
   FixedPsnSource psnSource;
   hipObj::v2::RandomSource* saved =
       hipObj::v2::setRandomSourceForTest(&psnSource);
+  /* Restore both overrides on every exit path, including fatal
+   * assertion failures: the fixture teardown does not reset the
+   * random override, and the source is stack-local. */
+  struct OverrideGuard {
+    hipObj::v2::RandomSource* prev;
+    ~OverrideGuard() {
+      hipObj::v2::setRandomSourceForTest(prev);
+      hipObj::v2::setClockSourceForTest(nullptr);
+    }
+  } overrideGuard{saved};
   const hipObjError_t e0 =
       hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
   ASSERT_EQ(e0.opError, hipObjSuccess);
@@ -844,7 +857,6 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   consumer_.clear();
   const hipObjError_t e1 =
       hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
-  hipObj::v2::setRandomSourceForTest(saved);
   EXPECT_EQ(e1.opError, hipObjBusy);
   EXPECT_EQ(consumer_.count(Cb::Prepare), 0u)
     << "a retired-pair collision must be rejected before PREPARE";

@@ -99,7 +99,8 @@ std::string clientNic() {
  * kernel routes its GIDs through (e.g. eth0) are frequently not the
  * same string. SO_BINDTODEVICE and getifaddrs both speak netdev, so
  * resolve the mapping from sysfs before binding; an empty result
- * leaves the socket on default routing. */
+ * fails the connection (fail closed) rather than silently falling
+ * back to default routing. */
 /* Netdev backing the data plane's exact port and GID. The port and
  * GID index come from the library's init-time selection (token
  * fallback for a pre-init probe), so multi-port or VLAN-GID devices
@@ -143,7 +144,8 @@ struct ControlConn {
    * is shared across connect, send, and read so the steps cannot
    * collectively exceed the reported budget. */
   bool connectToUntil(const std::string& host_port, const std::string& nic,
-                      std::chrono::steady_clock::time_point deadlineAt);
+                      std::chrono::steady_clock::time_point deadlineAt,
+                      int selectedPort = 0, int selectedGid = -1);
   void close() {
     if (fd >= 0) {
       ::close(fd);
@@ -165,6 +167,12 @@ struct ControlConn {
 struct V2CallbackCtx {
   S3RdmaContext* sctx;
   std::string clientNic; // NIC the v2 stack selected (hipObjNicV2)
+  /* Interface selection snapshot taken BEFORE entering the core: the
+   * public getters take the API mutex, which the transfer itself
+   * holds for the whole callback window (the header forbids callback
+   * reentry), so callbacks must consume this copy instead. */
+  int selectedPort = 0;
+  int selectedGid = -1;
   /* Split READY exchange state: the request was written and the socket
    * is parked until finishReady reads the response. The parked
    * deadline carries over, so the read shares the budget the READY
@@ -193,7 +201,8 @@ static int remainingMs(std::chrono::steady_clock::time_point deadlineAt) {
 /* Dials the control plane at "host[:port]". */
 bool ControlConn::connectToUntil(
   const std::string& host_port, const std::string& nic,
-  std::chrono::steady_clock::time_point deadlineAt) {
+  std::chrono::steady_clock::time_point deadlineAt,
+  int selectedPort, int selectedGid) {
   close();
   std::string host = host_port;
   std::string port = "80";
@@ -231,43 +240,52 @@ bool ControlConn::connectToUntil(
      * connection gives up immediately (the detached helper finishes
      * and frees its own result) so a stalled resolver cannot consume
      * the transfer budget unboundedly. */
-    std::mutex resolveMu;
-    std::condition_variable resolveCv;
-    bool resolveDone = false;
-    bool resolveOk = false;
-    std::thread resolver([&]() {
+    struct ResolveState {
+      std::mutex mu;
+      std::condition_variable cv;
+      bool done = false;
+      /* Set once, read after done under mu. */
+      int rc = 0;
+      struct addrinfo* result = nullptr;
+      bool consumed = false; /* caller took ownership of result */
+    };
+    auto st = std::make_shared<ResolveState>();
+    const std::string hostCopy = host;
+    const std::string portCopy = port;
+    std::thread resolver([st, hostCopy, portCopy, hints]() {
       struct addrinfo* res = nullptr;
       const int rc =
-        getaddrinfo(host.c_str(), port.c_str(), &hints, &res);
-      std::lock_guard<std::mutex> lk(resolveMu);
-      gaiRc = rc;
-      if (rc == 0 && res != nullptr) {
-        list = res;
-        resolveOk = true;
-      } else if (res != nullptr) {
-        freeaddrinfo(res);
+          getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
+      std::lock_guard<std::mutex> lk(st->mu);
+      st->rc = rc;
+      st->result = res;
+      st->done = true;
+      st->cv.notify_all();
+      /* Ownership: with rc != 0 or nullptr the caller never consumes
+       * the result, so this worker frees a non-null failure result
+       * right here under the same lock (timeout path included: it
+       * also never consumes). A successful result is handed to the
+       * caller below while this lock is still held. */
+      if (st->rc != 0 && st->result != nullptr) {
+        freeaddrinfo(st->result);
+        st->result = nullptr;
       }
-      resolveDone = true;
-      resolveCv.notify_one();
     });
-    if (!resolver.joinable()) {
-      /* Thread creation failed: fall back to the bounded synchronous
-       * call (the entry check above already rejected an expired
-       * budget). */
-      gaiRc = getaddrinfo(host.c_str(), port.c_str(), &hints, &list);
-    } else {
-      std::unique_lock<std::mutex> lk(resolveMu);
-      if (!resolveCv.wait_until(lk, deadlineAt,
-                                [&]() { return resolveDone; })) {
-        resolver.detach();
-        return false;
-      }
-      lk.unlock();
-      resolver.join();
-      if (!resolveOk) {
-        return false;
-      }
+    std::unique_lock<std::mutex> lk(st->mu);
+    if (!st->cv.wait_until(lk, deadlineAt,
+                           [&]() { return st->done; })) {
+      /* Timeout: the worker keeps its own state alive (shared_ptr)
+       * and frees its own result. Nothing borrowed outlives us. */
+      resolver.detach();
+      return false;
     }
+    lk.unlock();
+    resolver.join();
+    if (st->rc != 0 || st->result == nullptr) {
+      /* The worker freed any failure result under its lock. */
+      return false;
+    }
+    list = st->result;
   }
   if (gaiRc != 0 || list == nullptr) {
     return false;
@@ -293,8 +311,7 @@ bool ControlConn::connectToUntil(
        * bind APIs speak netdev names, so translate when the RDMA
        * device name differs. */
       const std::string netdev =
-          rdmaNetdevFor(nic, hipObjSelectedPortV2(),
-                        hipObjSelectedGidIndexV2());
+          rdmaNetdevFor(nic, selectedPort, selectedGid);
       if (netdev.empty()) {
         /* Without a confirmed netdev the selected-interface contract
          * cannot be honored observably; fail the connection rather
@@ -707,7 +724,8 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
                           std::chrono::milliseconds(dl);
   const std::string authorityUri = controlAuthorityUri(c, req);
   const std::string authorityHost = controlAuthorityHost(authorityUri);
-  if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt)) {
+  if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt,
+                        c->selectedPort, c->selectedGid)) {
     return -1;
   }
   ControlExchange ex;
@@ -809,8 +827,8 @@ int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
                           std::chrono::milliseconds(dl);
   const std::string authorityUri = controlAuthorityUri(c, req);
   const std::string authorityHost = controlAuthorityHost(authorityUri);
-  if (!c->readyConn.connectToUntil(authorityUri, c->clientNic,
-                                   deadlineAt)) {
+  if (!c->readyConn.connectToUntil(authorityUri, c->clientNic, deadlineAt,
+                                   c->selectedPort, c->selectedGid)) {
     return -1;
   }
   ControlExchange ex;
@@ -952,7 +970,8 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
                           std::chrono::milliseconds(dl);
   const std::string authorityUri = controlAuthorityUri(c, req);
   const std::string authorityHost = controlAuthorityHost(authorityUri);
-  if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt)) {
+  if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt,
+                        c->selectedPort, c->selectedGid)) {
     return 0; /* best effort */
   }
   ControlExchange ex;
@@ -971,7 +990,9 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 // v2 entry points ---------------------------------------------------------
 
 ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
+  V2CallbackCtx cbctx{
+      sctx, clientNic(), {}, false, {},
+      hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -999,7 +1020,9 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
+  V2CallbackCtx cbctx{
+      sctx, clientNic(), {}, false, {},
+      hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
