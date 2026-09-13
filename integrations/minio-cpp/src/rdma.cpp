@@ -95,6 +95,28 @@ std::string clientNic() {
   return out;
 }
 
+/* Coherent (nic, port, gid) selection snapshot captured in one
+ * library-internal step; separate getters can mix values from
+ * different initializations when a shutdown/reinit races the read. */
+struct BridgeSelection {
+  std::string nic;
+  int port = 0;
+  int gidIndex = -1;
+};
+
+BridgeSelection bridgeSelection() {
+  BridgeSelection out;
+  char nic[64];
+  int port = 0;
+  int gid = -1;
+  if (hipObjInterfaceSnapshotV2(nic, sizeof(nic), &port, &gid) == 1) {
+    out.nic.assign(nic);
+    out.port = port;
+    out.gidIndex = gid;
+  }
+  return out;
+}
+
 /* The RDMA device name (e.g. mlx5_0) and the network interface the
  * kernel routes its GIDs through (e.g. eth0) are frequently not the
  * same string. SO_BINDTODEVICE and getifaddrs both speak netdev, so
@@ -246,8 +268,24 @@ bool ControlConn::connectToUntil(
       bool done = false;
       /* Set once, read after done under mu. */
       int rc = 0;
+      /* The state owns every result it holds. The destructor reclaims
+       * an unpublished result: after a timeout the caller detaches
+       * and never looks at rc/result again, so a late successful
+       * result must still be freed by whoever releases the last
+       * reference (the worker's shared_ptr). */
       struct addrinfo* result = nullptr;
-      bool consumed = false; /* caller took ownership of result */
+      ~ResolveState() {
+        if (result != nullptr) {
+          freeaddrinfo(result);
+        }
+      }
+      /* Takes the stored result out, transferring ownership to the
+       * caller. Must be called with mu held. */
+      struct addrinfo* takeResult() {
+        struct addrinfo* out = result;
+        result = nullptr;
+        return out;
+      }
     };
     auto st = std::make_shared<ResolveState>();
     const std::string hostCopy = host;
@@ -261,31 +299,30 @@ bool ControlConn::connectToUntil(
       st->result = res;
       st->done = true;
       st->cv.notify_all();
-      /* Ownership: with rc != 0 or nullptr the caller never consumes
-       * the result, so this worker frees a non-null failure result
-       * right here under the same lock (timeout path included: it
-       * also never consumes). A successful result is handed to the
-       * caller below while this lock is still held. */
-      if (st->rc != 0 && st->result != nullptr) {
-        freeaddrinfo(st->result);
-        st->result = nullptr;
-      }
+      /* The worker never frees a successful result: it stays owned by
+       * the shared state, which either hands it to the waiting caller
+       * (takeResult below) or frees it in its own destructor when
+       * the caller timed out and abandoned it. */
     });
     std::unique_lock<std::mutex> lk(st->mu);
     if (!st->cv.wait_until(lk, deadlineAt,
                            [&]() { return st->done; })) {
-      /* Timeout: the worker keeps its own state alive (shared_ptr)
-       * and frees its own result. Nothing borrowed outlives us. */
+      /* Timeout: the worker keeps the shared state alive, and any
+       * result it later publishes is reclaimed by the state's
+       * destructor when the worker's reference is the last one. */
       resolver.detach();
       return false;
     }
+    /* Take ownership of a successful result while the lock is held;
+     * the worker already finished writing, but taking it under the
+     * mutex keeps the destructor invariant single-threaded. */
+    struct addrinfo* taken = (st->rc == 0) ? st->takeResult() : nullptr;
     lk.unlock();
     resolver.join();
-    if (st->rc != 0 || st->result == nullptr) {
-      /* The worker freed any failure result under its lock. */
+    if (st->rc != 0 || taken == nullptr) {
       return false;
     }
-    list = st->result;
+    list = taken;
   }
   if (gaiRc != 0 || list == nullptr) {
     return false;
@@ -990,9 +1027,9 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 // v2 entry points ---------------------------------------------------------
 
 ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
+  const BridgeSelection sel = bridgeSelection();
   V2CallbackCtx cbctx{
-      sctx, clientNic(), hipObjSelectedPortV2(),
-      hipObjSelectedGidIndexV2(), {}, false, {}};
+      sctx, sel.nic, sel.port, sel.gidIndex, {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -1020,9 +1057,9 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
+  const BridgeSelection sel = bridgeSelection();
   V2CallbackCtx cbctx{
-      sctx, clientNic(), hipObjSelectedPortV2(),
-      hipObjSelectedGidIndexV2(), {}, false, {}};
+      sctx, sel.nic, sel.port, sel.gidIndex, {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;

@@ -91,6 +91,11 @@ struct V2State {
   /* Shared device handle: created by hipObjInitV2, referenced by every
    * connection. Shutdown reclaims it. */
   DeviceHandle* device = nullptr;
+  /* Bumped by every init and every shutdown. Interface snapshots taken
+   * outside the transfer lock carry the generation they were read
+   * under; transfer admission rejects a stale snapshot instead of
+   * mixing selections from different initializations. */
+  uint64_t initGeneration = 0;
 };
 
 /* Emergency owner for verbs objects whose registry parking failed
@@ -155,18 +160,21 @@ static void drainEmergencySlots() {
     bool qpOk = false;
     bool cqOk = false;
     destroyRcConnV2(slot.conn, &qpOk, &cqOk);
-    if (qpOk) {
+    if (qpOk && slot.reservationId != 0) {
       /* The reservation guards a (qpn, psn) pair; with the QP gone
        * the pair can never reach the wire, so settle it now instead
        * of waiting for the CQ recovery too. */
-      if (slot.reservationId != 0) {
-        registry().retired().unreserve(slot.reservationId);
-      }
-      slot.used = false;
+      registry().retired().unreserve(slot.reservationId);
       slot.reservationId = 0;
     }
-    /* A survivor that still cannot be destroyed stays recorded; the
-     * next shutdown retries. */
+    if (qpOk && cqOk) {
+      /* Only a fully destroyed connection may release its recovery
+       * owner: a surviving CQ still needs this slot so a later
+       * shutdown can retry its destroy. */
+      slot.used = false;
+    }
+    /* A survivor that still cannot be fully destroyed stays
+     * recorded; the next shutdown retries. */
   }
 }
 
@@ -496,6 +504,16 @@ int v2SelectedPort() { return v2State().selectedPort; }
 
 int v2SelectedGidIndex() { return v2State().selectedGidIndex; }
 
+InterfaceSnapshot v2InterfaceSnapshot() {
+  const V2State& st = v2State();
+  InterfaceSnapshot out;
+  out.nic = st.nicName;
+  out.port = st.selectedPort;
+  out.gidIndex = st.selectedGidIndex;
+  out.generation = st.initGeneration;
+  return out;
+}
+
 int v2Init(hipObjConfigV2_t* config) {
   V2State& st = v2State();
   if (st.initialized) {
@@ -563,6 +581,7 @@ int v2Init(hipObjConfigV2_t* config) {
   st.connectDeadlineMs = config->connectDeadlineMs;
   st.transferDeadlineMs = config->transferDeadlineMs;
   st.cancelBudgetMs = config->cancelCleanupBudgetMs;
+  ++st.initGeneration;
   st.initialized = true;
   return hipObjSuccess;
 }
@@ -623,7 +642,9 @@ int v2Shutdown() {
     return hipObjRdmaError;
   }
   /* Retry any survivor the registry could not take: emergency slots
-   * left over from insertion-time allocation failures. */
+   * left over from insertion-time allocation failures. A slot that
+   * still holds a surviving CQ must keep the device open; shutdown
+   * reports failure and a later shutdown retries. */
   drainEmergencySlots();
   for (auto& slot : g_emergencySlots) {
     if (slot.used) {
@@ -649,15 +670,24 @@ int v2Shutdown() {
   st.nicName.clear();
   st.selectedPort = 0;
   st.selectedGidIndex = -1;
+  ++st.initGeneration;
   return hipObjSuccess;
 }
 
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
                hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs,
-               bool haveEntryMs, int* diagOut) {
+               bool haveEntryMs, uint64_t snapshotGeneration,
+               bool haveSnapshot, int* diagOut) {
   V2State& st = v2State();
   if (!st.initialized) {
+    return hipObjNotInitialized;
+  }
+  if (haveSnapshot && snapshotGeneration != st.initGeneration) {
+    /* The caller captured its interface selection before waiting for
+     * the API lock and a shutdown/reinit happened in between: the
+     * snapshot mixes initializations and must not drive a transfer
+     * on the new device. */
     return hipObjNotInitialized;
   }
   if (!ops || !ops->sendPrepare || !ops->sendReadyRequest ||

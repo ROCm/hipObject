@@ -487,6 +487,20 @@ HIPOBJ_API int hipObjSelectedPortV2(void);
 HIPOBJ_API int hipObjSelectedGidIndexV2(void);
 
 /*!
+ * @brief Coherent snapshot of the data plane's interface selection
+ * @ingroup init
+ *
+ * Copies the NIC name, port number, and GID index selected at init
+ * into the caller-provided storage in one library-internal step, so
+ * the triple cannot mix values from different initializations when
+ * read while a shutdown/reinit is in flight. The name is truncated
+ * to fit. Returns 1 when an initialized selection was copied, 0
+ * when the library is not initialized.
+ */
+HIPOBJ_API int hipObjInterfaceSnapshotV2(char* nicOut, size_t nicLen,
+                                         int* portOut, int* gidOut);
+
+/*!
  * @brief V2 GET: download an object into a registered buffer
  * @ingroup io
  *
