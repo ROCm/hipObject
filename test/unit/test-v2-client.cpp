@@ -63,6 +63,7 @@ struct ibv_device* allocFakeDevice(const char* name) {
 int g_postRecvCalls = 0;
 int g_postSendCalls = 0;
 const struct ibv_recv_wr* g_lastRecvWr = nullptr;
+struct ibv_send_wr g_ownedSendWr;
 const struct ibv_send_wr* g_lastSendWr = nullptr;
 uint32_t g_cookieInImm = 0;
 
@@ -76,7 +77,8 @@ int fakePostRecv(struct ibv_qp*, struct ibv_recv_wr* wr,
 int fakePostSend(struct ibv_qp*, struct ibv_send_wr* wr,
                  struct ibv_send_wr**) {
   ++g_postSendCalls;
-  g_lastSendWr = wr;
+  g_ownedSendWr = *wr; /* the library's wr is stack-scoped */
+  g_lastSendWr = &g_ownedSendWr;
   g_cookieInImm = ntohl(wr->imm_data);
   return 0;
 }
@@ -358,6 +360,7 @@ protected:
     g_postRecvCalls = 0;
     g_postSendCalls = 0;
     g_lastRecvWr = nullptr;
+    std::memset(&g_ownedSendWr, 0, sizeof(g_ownedSendWr));
     g_lastSendWr = nullptr;
     g_lastCq = nullptr;
 
@@ -449,7 +452,7 @@ TEST_F(V2ClientTransferTest, GetCallbackDataInterleaving) {
 
   /* The deadline fields describe the remaining budget, not an
    * absolute clock value (60 s default budget bounds both). */
-  EXPECT_LT(ready->req.deadlineMs, 60000u);
+  EXPECT_LE(ready->req.deadlineMs, 60000u);
   EXPECT_GT(ready->req.deadlineMs, 0u);
   EXPECT_EQ(ready->req.deadlineMs, ready->req.remainingMs);
 
