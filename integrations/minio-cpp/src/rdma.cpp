@@ -10,7 +10,10 @@
 #include <cstring>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <limits>
+#include <mutex>
+#include <thread>
 #include <list>
 #include <memory>
 #include <optional>
@@ -194,63 +197,31 @@ namespace {
         return out;
     }
 
-    /* SO_BINDTODEVICE speaks netdev names. An RDMA device such as
-     * mlx5_0 is often not that name, so read the mapping from sysfs.
-     * An empty result leaves the socket on default routing. */
-    std::string rdmaNetdev(const std::string &rdmaDev)
+    /* Netdev for the data plane's exact port and GID. An empty result
+     * means the selected interface cannot be named. */
+    std::string rdmaNetdevFor(const std::string &rdmaDev, int port, int gidIdx)
     {
-        if (rdmaDev.empty()) {
+        if (rdmaDev.empty() || port <= 0 || gidIdx < 0) {
             return {};
         }
-        const std::string portsDir = "/sys/class/infiniband/" + rdmaDev + "/ports";
-        DIR              *d        = ::opendir(portsDir.c_str());
-        if (d == nullptr) {
+        const std::string path = "/sys/class/infiniband/" + rdmaDev + "/ports/" + std::to_string(port) +
+                                 "/gid_attrs/ndevs/" + std::to_string(gidIdx);
+        FILE *f = std::fopen(path.c_str(), "r");
+        if (f == nullptr) {
             return {};
         }
+        char buf[IFNAMSIZ + 1] = {0};
         std::string found;
-        struct dirent *de;
-        while ((de = ::readdir(d)) != nullptr && found.empty()) {
-            if (de->d_name[0] == '.') {
-                continue;
+        if (std::fgets(buf, sizeof(buf), f) != nullptr) {
+            char *nl = std::strchr(buf, '\n');
+            if (nl != nullptr) {
+                *nl = '\0';
             }
-            char      *end  = nullptr;
-            const long port = std::strtol(de->d_name, &end, 10);
-            if (end == nullptr || *end != '\0' || port <= 0) {
-                continue;
+            if (buf[0] != '\0') {
+                found = buf;
             }
-            const std::string ndevsDir = portsDir + "/" + de->d_name + "/gid_attrs/ndevs";
-            DIR              *nd       = ::opendir(ndevsDir.c_str());
-            if (nd == nullptr) {
-                continue;
-            }
-            struct dirent *ne;
-            while ((ne = ::readdir(nd)) != nullptr) {
-                if (ne->d_name[0] == '.') {
-                    continue;
-                }
-                const std::string path = ndevsDir + "/" + ne->d_name;
-                FILE             *f    = std::fopen(path.c_str(), "r");
-                if (f == nullptr) {
-                    continue;
-                }
-                char buf[IFNAMSIZ + 1] = {0};
-                if (std::fgets(buf, sizeof(buf), f) != nullptr) {
-                    char *nl = std::strchr(buf, '\n');
-                    if (nl != nullptr) {
-                        *nl = '\0';
-                    }
-                    if (buf[0] != '\0') {
-                        found = buf;
-                    }
-                }
-                std::fclose(f);
-                if (!found.empty()) {
-                    break;
-                }
-            }
-            ::closedir(nd);
         }
-        ::closedir(d);
+        std::fclose(f);
         return found;
     }
 
@@ -303,9 +274,53 @@ namespace {
         hints.ai_family   = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;
         struct addrinfo *list = nullptr;
-        if (getaddrinfo(host.c_str(), port.c_str(), &hints, &list) != 0 || list == nullptr) {
+        int gaiRc = 0;
+        {
+            std::mutex resolveMu;
+            std::condition_variable resolveCv;
+            bool resolveDone = false;
+            bool resolveOk = false;
+            std::thread resolver([&]() {
+                struct addrinfo *res = nullptr;
+                const int rc = getaddrinfo(host.c_str(), port.c_str(), &hints, &res);
+                std::lock_guard<std::mutex> lk(resolveMu);
+                gaiRc = rc;
+                if (rc == 0 && res != nullptr) {
+                    list = res;
+                    resolveOk = true;
+                } else if (res != nullptr) {
+                    freeaddrinfo(res);
+                }
+                resolveDone = true;
+                resolveCv.notify_one();
+            });
+            if (!resolver.joinable()) {
+                gaiRc = getaddrinfo(host.c_str(), port.c_str(), &hints, &list);
+            } else {
+                std::unique_lock<std::mutex> lk(resolveMu);
+                if (!resolveCv.wait_until(lk, deadlineAt, [&]() { return resolveDone; })) {
+                    resolver.detach();
+                    return false;
+                }
+                lk.unlock();
+                resolver.join();
+                if (!resolveOk) {
+                    return false;
+                }
+            }
+        }
+        if (gaiRc != 0 || list == nullptr) {
             return false;
         }
+        struct AddrInfoOwner {
+            struct addrinfo *p;
+            ~AddrInfoOwner()
+            {
+                if (p != nullptr) {
+                    freeaddrinfo(p);
+                }
+            }
+        } addrOwner{list};
         int fd = -1;
         for (struct addrinfo *ai = list; ai != nullptr; ai = ai->ai_next) {
             fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
@@ -315,10 +330,10 @@ namespace {
             int one = 1;
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
             if (!nic.empty()) {
-                const std::string netdev = rdmaNetdev(nic);
+                const std::string netdev =
+                    rdmaNetdevFor(nic, hipObj::v2::v2SelectedPort(), hipObj::v2::v2SelectedGidIndex());
                 if (netdev.empty()) {
                     ::close(fd);
-                    freeaddrinfo(list);
                     return false;
                 }
                 struct ifreq ifr{};
@@ -343,7 +358,6 @@ namespace {
                 }
                 if (!bound) {
                     ::close(fd);
-                    freeaddrinfo(list);
                     return false;
                 }
             }
@@ -380,7 +394,6 @@ namespace {
             ::close(fd);
             fd = -1;
         }
-        freeaddrinfo(list);
         if (fd < 0) {
             return false;
         }
@@ -776,11 +789,16 @@ namespace {
 
         const std::string bytesHdr = rawHeaderValue(head, kAmzRdmaBytesTransferred);
         if (!bytesHdr.empty()) {
+            if (bytesHdr.find_first_not_of("0123456789") != std::string::npos || bytesHdr.size() > 20) {
+                return -1;
+            }
+            errno = 0;
             char                    *endp = nullptr;
             const unsigned long long n    = std::strtoull(bytesHdr.c_str(), &endp, 10);
-            if (endp != nullptr && *endp == '\0') {
-                out->bytes = n;
+            if (errno != 0 || endp == nullptr || *endp != '\0') {
+                return -1;
             }
+            out->bytes = n;
         }
 
         const std::string echo = rawHeaderValue(head, kAmzRdmaCookie);
