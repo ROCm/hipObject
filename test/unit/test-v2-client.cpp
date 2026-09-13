@@ -283,6 +283,8 @@ protected:
     auto& f = hipObj::ibv.funcsForTest();
     delete g_fakeDevList[0];
     g_fakeDevList[0] = allocFakeDevice("fake0");
+    std::memset(&g_fakeCtx, 0, sizeof(g_fakeCtx));
+    g_fakeCtx.device = g_fakeDevList[0];
     f.get_device_list = [](int* n) -> struct ibv_device** {
       *n = 1;
       return g_fakeDevList;
@@ -292,6 +294,28 @@ protected:
       return dev ? dev->name : nullptr;
     };
     f.close_device = [](struct ibv_context*) -> int { return 0; };
+    f.query_port = [](struct ibv_context*, uint8_t,
+                      struct ibv_port_attr* attr) -> int {
+      std::memset(attr, 0, sizeof(*attr));
+      attr->state = IBV_PORT_ACTIVE;
+      attr->gid_tbl_len = 1;
+      attr->link_layer = IBV_LINK_LAYER_ETHERNET;
+      return 0;
+    };
+    f.query_gid = [](struct ibv_context*, uint8_t, int,
+                     union ibv_gid* gid) -> int {
+      /* RoCEv2 IPv4-mapped GID so AutoSelectGidIndex picks index 0. */
+      std::memset(gid, 0, sizeof(*gid));
+      gid->raw[0] = 0xfe;
+      gid->raw[1] = 0x80;
+      gid->raw[10] = 0xff;
+      gid->raw[11] = 0xff;
+      gid->raw[12] = 10;   /* 10.0.0.1 */
+      gid->raw[13] = 0;
+      gid->raw[14] = 0;
+      gid->raw[15] = 1;
+      return 0;
+    };
     f.open_device = [](struct ibv_device*) -> struct ibv_context* {
       return &g_fakeCtx;
     };
