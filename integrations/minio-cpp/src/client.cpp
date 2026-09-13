@@ -323,6 +323,10 @@ Client::PutObject(minio::s3::PutObjectArgs args)
         .object   = args.object,
         .url      = base_url_,
         .region   = region,
+        .uploadId = {},
+        .partNumber = 0,
+        .checksum = {},
+        .etag     = {},
     };
 
     const RdmaResult ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
@@ -403,6 +407,10 @@ Client::GetObject(minio::s3::GetObjectArgs args)
         .object   = args.object,
         .url      = base_url_,
         .region   = region,
+        .uploadId = {},
+        .partNumber = 0,
+        .checksum = {},
+        .etag     = {},
     };
 
     const RdmaResult ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
