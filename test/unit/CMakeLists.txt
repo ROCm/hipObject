@@ -106,5 +106,8 @@ hipobj_add_test(test-v2-server
 hipobj_add_test(test-v2-connref
   test-v2-connref.cpp)
 
+hipobj_add_test(test-v2-client
+  test-v2-client.cpp)
+
 hipobj_add_test(test-seams
   test-seams.cpp)

@@ -253,8 +253,14 @@ hipObjError_t hipObjShutdown(void) try {
 
 hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
   hipObj::DriverState& state = hipObj::getState();
+  /* A v2-only process (hipObjInitV2 without hipObjInit) registers
+   * against the shared v2 device's protection domain. */
+  struct ibv_pd* pd = hipObj::g_conn.pd;
   if (!state.initialized) {
-    return {hipObjNotInitialized, 0};
+    pd = hipObj::v2::v2ProtectionDomain();
+    if (pd == nullptr) {
+      return {hipObjNotInitialized, 0};
+    }
   }
   if (size > hipObj::MAX_MR_SIZE) {
     return {hipObjSizeTooLarge, 0};
@@ -262,7 +268,7 @@ hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
   if (hipObj::g_bufferMap.isRegistered(devPtr)) {
     return {hipObjBufAlreadyRegistered, 0};
   }
-  int ret = hipObj::g_bufferMap.registerBuffer(devPtr, size, hipObj::g_conn.pd);
+  int ret = hipObj::g_bufferMap.registerBuffer(devPtr, size, pd);
   if (ret != 0) {
     return {hipObjRdmaError, 0};
   }
