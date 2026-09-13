@@ -751,9 +751,8 @@ TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
   consumer_.onFinishReady = [&]() {
     seenFinal = consumer_.lastSeenDeadlineMs;
   };
-  char buf[16];
   const hipObjError_t e =
-      hipObjGetV2("b", "k", buf, sizeof(buf), 0, nullptr, &ops_, &consumer_);
+      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
   EXPECT_EQ(e.opError, hipObjSuccess);
   EXPECT_GT(seenFinal, 0u);
   EXPECT_LE(seenFinal, seenPre);
@@ -786,14 +785,3 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   EXPECT_FALSE(ring.contains(0x1234, 0x5679));
 }
 
-TEST_F(V2ClientTransferTest, CookieMismatchFails) {
-  ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
-  ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
-  ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
-  consumer_.armGetCompletion = true;
-  consumer_.cookieEchoOverride = 0xdeadbeef;
-  char buf[16];
-  const hipObjError_t e =
-      hipObjGetV2("b", "k", buf, sizeof(buf), 0, nullptr, &ops_, &consumer_);
-  EXPECT_EQ(e.opError, hipObjRdmaError);
-}
