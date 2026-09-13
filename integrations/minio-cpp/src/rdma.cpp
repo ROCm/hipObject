@@ -160,7 +160,7 @@ namespace {
         std::string port;
 
         bool connectTo(const std::string &hostPort, const std::string &nic,
-                       std::chrono::steady_clock::time_point deadlineAt);
+                       std::chrono::steady_clock::time_point deadlineAt, int selectedPort, int selectedGid);
         void closeConn()
         {
             if (fd >= 0) {
@@ -187,6 +187,8 @@ namespace {
         /* The FINAL read shares the deadline READY computed before it
          * wrote the request, instead of starting a new window. */
         std::chrono::steady_clock::time_point readyDeadline{};
+        int selectedPort = 0;
+        int selectedGid = -1;
     };
 
     std::string clientNic()
@@ -242,7 +244,7 @@ namespace {
     }
 
     bool ControlConn::connectTo(const std::string &hostPort, const std::string &nic,
-                                std::chrono::steady_clock::time_point deadlineAt)
+                                std::chrono::steady_clock::time_point deadlineAt, int selectedPort, int selectedGid)
     {
         closeConn();
         std::string host      = hostPort;
@@ -276,38 +278,43 @@ namespace {
         struct addrinfo *list = nullptr;
         int gaiRc = 0;
         {
-            std::mutex resolveMu;
-            std::condition_variable resolveCv;
-            bool resolveDone = false;
-            bool resolveOk = false;
-            std::thread resolver([&]() {
+            struct ResolveState {
+                std::mutex mu;
+                std::condition_variable cv;
+                bool done = false;
+                int rc = 0;
+                struct addrinfo *result = nullptr;
+                bool abandoned = false;
+            };
+            auto st = std::make_shared<ResolveState>();
+            const std::string hostCopy = host;
+            const std::string portCopy = port;
+            std::thread resolver([st, hostCopy, portCopy, hints]() {
                 struct addrinfo *res = nullptr;
-                const int rc = getaddrinfo(host.c_str(), port.c_str(), &hints, &res);
-                std::lock_guard<std::mutex> lk(resolveMu);
-                gaiRc = rc;
-                if (rc == 0 && res != nullptr) {
-                    list = res;
-                    resolveOk = true;
-                } else if (res != nullptr) {
-                    freeaddrinfo(res);
+                const int rc = getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
+                std::lock_guard<std::mutex> lk(st->mu);
+                st->rc = rc;
+                st->result = res;
+                st->done = true;
+                st->cv.notify_all();
+                if ((st->rc != 0 || st->abandoned) && st->result != nullptr) {
+                    freeaddrinfo(st->result);
+                    st->result = nullptr;
                 }
-                resolveDone = true;
-                resolveCv.notify_one();
             });
-            if (!resolver.joinable()) {
-                gaiRc = getaddrinfo(host.c_str(), port.c_str(), &hints, &list);
-            } else {
-                std::unique_lock<std::mutex> lk(resolveMu);
-                if (!resolveCv.wait_until(lk, deadlineAt, [&]() { return resolveDone; })) {
-                    resolver.detach();
-                    return false;
-                }
-                lk.unlock();
-                resolver.join();
-                if (!resolveOk) {
-                    return false;
-                }
+            std::unique_lock<std::mutex> lk(st->mu);
+            if (!st->cv.wait_until(lk, deadlineAt, [&]() { return st->done; })) {
+                st->abandoned = true;
+                resolver.detach();
+                return false;
             }
+            lk.unlock();
+            resolver.join();
+            if (st->rc != 0 || st->result == nullptr) {
+                return false;
+            }
+            list = st->result;
+            gaiRc = st->rc;
         }
         if (gaiRc != 0 || list == nullptr) {
             return false;
@@ -331,7 +338,7 @@ namespace {
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
             if (!nic.empty()) {
                 const std::string netdev =
-                    rdmaNetdevFor(nic, hipObjSelectedPortV2(), hipObjSelectedGidIndexV2());
+                    rdmaNetdevFor(nic, selectedPort, selectedGid);
                 if (netdev.empty()) {
                     ::close(fd);
                     return false;
@@ -662,7 +669,8 @@ namespace {
 
         ControlConn conn;
         const auto  deadlineAt = controlDeadlineAt(req);
-        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt)) {
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt, c->selectedPort,
+                            c->selectedGid)) {
             return -1;
         }
         ControlExchange ex;
@@ -753,7 +761,8 @@ namespace {
         extra.Add(kAmzRdmaMrRkey, hexFixed(req->clientMrRkey, 8));
 
         const auto deadlineAt = controlDeadlineAt(req);
-        if (!c->readyConn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt)) {
+        if (!c->readyConn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt, c->selectedPort,
+                                     c->selectedGid)) {
             return -1;
         }
         ControlExchange ex;
@@ -884,7 +893,8 @@ namespace {
 
         ControlConn conn;
         const auto  deadlineAt = controlDeadlineAt(req);
-        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt)) {
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt, c->selectedPort,
+                            c->selectedGid)) {
             return 0;
         }
         ControlExchange ex;
@@ -901,7 +911,7 @@ namespace {
 
     RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
+        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}, hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
@@ -944,7 +954,7 @@ namespace {
 
     RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
+        V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}, hipObjSelectedPortV2(), hipObjSelectedGidIndexV2()};
         hipObjOpsV2_t ops{};
         ops.sendPrepare       = v2SendPrepare;
         ops.sendReadyRequest  = v2SendReadyRequest;
