@@ -82,19 +82,6 @@ std::string clientNicFromToken(const char* token) {
   return std::string(nicIp);
 }
 
-std::string clientNic() {
-  /* The v2 stack owns NIC selection; ask it directly instead of
-   * minting a v1 RDMA token (which needs a v1-registered buffer and
-   * would admit unregistered memory into the transfer). */
-  char* nic = hipObjNicV2();
-  if (nic == nullptr) {
-    return std::string();
-  }
-  const std::string out(nic);
-  hipObjFreeNicV2(nic);
-  return out;
-}
-
 /* Coherent (nic, port, gid) selection snapshot captured in one
  * library-internal step; separate getters can mix values from
  * different initializations when a shutdown/reinit races the read. */
