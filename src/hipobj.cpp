@@ -43,6 +43,7 @@
 #include "token.h"
 #include "transport.h"
 #ifdef HIPOBJECT_V2_API
+#include "v2-client.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
 #include "v2-wire.h"
@@ -58,6 +59,14 @@ static NoDestructor<BufferMap>    g_bufferMap;
 static NoDestructor<RcConnection> g_conn;
 HIPOBJ_WARN_NO_EXIT_DTOR_ON
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
+
+#ifdef HIPOBJECT_V2_API
+BufferMap &
+bufferMap()
+{
+    return *g_bufferMap;
+}
+#endif
 
 static hipObjError_t
 handleException()
@@ -565,7 +574,13 @@ try {
     }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
+#ifdef HIPOBJECT_V2_API
+        /* v1 was never initialized; a v2-only session still tears down. */
+        const int rc = hipObj::v2::v2Shutdown();
+        return {static_cast<hipObjOpError_t>(rc), 0};
+#else
         return {hipObjSuccess, 0};
+#endif
     }
 #ifdef HIPOBJECT_V2_API
     /* v2 first: release every connection (destroy retries included);
@@ -870,11 +885,40 @@ catch (...) {
 }
 
 #ifdef HIPOBJECT_V2_API
-// Not implemented yet. The arguments are checked, then callers are told
-// to fall back to the v1 RDMA path.
+hipObjError_t
+hipObjInitV2(hipObjConfigV2_t *config)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
+    if (!config || !config->control.controlEndpoint || config->control.controlEndpoint[0] == '\0') {
+        return {hipObjInvalidValue, 0};
+    }
+    /* Resolve GPU auto-selection here so v2Init stays seam-free. A NIC
+     * hint still allows a GPU-less process, matching hipObjInit. */
+    const bool haveNicHint = config->v1.nicHint && config->v1.nicHint[0] != '\0';
+    if (config->v1.gpuDevice < 0) {
+        int        gpuDevice = 0;
+        hipError_t err       = hipObj::hip().getDevice(&gpuDevice);
+        if (err != hipSuccess) {
+            if (err != hipErrorNoDevice || !haveNicHint) {
+                return {hipObjRdmaError, static_cast<int>(err)};
+            }
+            gpuDevice = -1;
+        }
+        config->v1.gpuDevice = gpuDevice;
+    }
+    const int rc = hipObj::v2::v2Init(config);
+    return {static_cast<hipObjOpError_t>(rc), 0};
+}
+catch (...) {
+    return hipObj::handleException();
+}
+
 hipObjError_t
 hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
+            const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
@@ -884,7 +928,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return {hipObjNotSupported, 0};
+    const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops, ctx);
+    return {static_cast<hipObjOpError_t>(rc), 0};
 }
 catch (...) {
     return hipObj::handleException();
@@ -892,7 +937,7 @@ catch (...) {
 
 hipObjError_t
 hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
+            const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
@@ -902,7 +947,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return {hipObjNotSupported, 0};
+    const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx);
+    return {static_cast<hipObjOpError_t>(rc), 0};
 }
 catch (...) {
     return hipObj::handleException();

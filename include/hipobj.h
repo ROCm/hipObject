@@ -400,6 +400,18 @@ typedef struct {
 typedef struct {
     hipObjConfig_t            v1;      /*!< All v1 fields */
     hipObjControlEndpointV2_t control; /*!< v2 control endpoint (required) */
+    uint32_t connectDeadlineMs;        /*!< 0 = default (10 s). Bounds the one
+                                            RDMA connect attempt (RTR/RTS setup
+                                            excluded; those are local verbs). */
+    uint32_t transferDeadlineMs;       /*!< 0 = default (60 s). Whole-transfer
+                                            budget from entry to hipObjGetV2/
+                                            PutV2, including lock/admission
+                                            wait, all control exchanges, and
+                                            the data phase. */
+    uint32_t cancelCleanupBudgetMs;    /*!< 0 = default (1 s). Budget for the
+                                            single post-expiry CANCEL attempt
+                                            and local teardown; never extends
+                                            the transfer result past TIMEOUT. */
 } hipObjConfigV2_t;
 
 /* Forward declaration of the phase-aware callback set (see below). */
@@ -419,13 +431,21 @@ typedef struct {
     const char                      *bucket;    /*!< Object bucket */
     const char                      *key;       /*!< Object key */
     const char                      *query;     /*!< Canonical query string or NULL */
-    const char                      *token;     /*!< 88-hex RDMA token */
+    const char                      *token;     /*!< 88-hex token[:addr:size] */
     const char                      *session;   /*!< READY/cancel: session id (library sets) */
     const char                      *target;    /*!< Canonical rdma-target value (library sets) */
     uint64_t                         size;      /*!< Transfer size in bytes */
     uint64_t                         offset;    /*!< Byte offset into the object */
     uint32_t                         cookie;    /*!< Client cookie (library generates) */
     uint32_t                         clientPsn; /*!< Client PSN, 1..0xffffff (library generates) */
+    uint32_t                         deadlineMs;  /*!< Whole-transfer budget remaining, set by the
+                                                       library before every callback. Zero means
+                                                       the budget is exhausted; callbacks should
+                                                       fail fast. */
+    uint32_t                         remainingMs; /*!< Budget relevant to the current callback:
+                                                       the transfer's remaining budget for in-
+                                                       flight phases, or the fresh cleanup budget
+                                                       for the post-expiry CANCEL. */
     const hipObjControlEndpointV2_t *endpoint;  /*!< Control endpoint (library sets
                                                    from init) */
 } hipObjTransferReqV2_t;
@@ -438,6 +458,13 @@ typedef struct {
     char     serverToken[97];   /*!< 88-hex peer token + NUL */
     char     session[65];       /*!< 32-hex session id + NUL */
     uint32_t serverPsn;         /*!< Server PSN, 1..0xffffff (0 = invalid) */
+    uint64_t stagingAddr;       /*!< Server staging MR address (PUT), 0 when
+                                     absent; required for PUT data delivery */
+    uint32_t stagingRkey;       /*!< Server staging MR rkey (PUT), 0 when
+                                     absent */
+    int      stagingPresent;    /*!< 1 when both staging fields were present
+                                     and valid; a PUT without a valid staging
+                                     advertisement fails the transfer */
 } hipObjPrepareReplyV2_t;
 
 /*! @brief FINAL response (the reply to READY) @ingroup v2 */
@@ -456,9 +483,11 @@ typedef struct {
  * @brief Phase-aware callbacks for the v2 control protocol
  * @ingroup v2
  *
- * Each send* callback performs one complete HTTP round trip on the
- * control endpoint and fills @p out from the response. All callbacks are
- * required for v2 transfers. The v1 member is unused by the v2 entry
+ * sendPrepare and sendCancel each perform one complete HTTP round trip
+ * on the control endpoint. The READY exchange is split: sendReadyRequest
+ * writes the request bytes and returns, the data phase runs while the
+ * exchange is pending, then finishReady reads the response. All callbacks
+ * are required for v2 transfers. The v1 member is unused by the v2 entry
  * points and is kept for structural forward compatibility.
  *
  * The callbacks run while hipObject holds its API lock, so they can't
@@ -470,17 +499,23 @@ typedef struct hipObjOpsV2 {
     /*! Issue PREPARE; out is filled from the response headers. */
     int (*sendPrepare)(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out);
 
-    /*! Issue READY; the response is FINAL. out reflects it. */
-    int (*sendReady)(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out);
+    /*! Issue the READY request: write the request bytes and return once
+     * they are flushed. Does not read the response. Success means the
+     * complete request was handed to the transport; a partial write or I/O
+     * error is a failure, and finishReady is then never called for it. */
+    int (*sendReadyRequest)(void *ctx, const hipObjTransferReqV2_t *req);
+
+    /*! Read the READY response (FINAL) and fill out. Called at most once,
+     * and exactly once when sendReadyRequest succeeded and the exchange
+     * reaches a terminal disposition. On a data-phase failure or budget
+     * expiry the consumer aborts the connection instead; an aborted
+     * connection must never be reused or returned to a pool. */
+    int (*finishReady)(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out);
 
     /*! Issue CANCEL (idempotent). Only the HTTP status matters. */
     int (*sendCancel)(void *ctx, const hipObjTransferReqV2_t *req);
 } hipObjOpsV2_t;
 
-/* hipObjInitV2() isn't implemented, so its declaration is disabled.
- * Callers get a compile error instead of an undefined symbol at link time.
- */
-#if 0
 /*!
  * @brief Initialize the library for hipobj-rc-v2 transfers
  * @ingroup v2
@@ -491,7 +526,6 @@ typedef struct hipObjOpsV2 {
  * @serialized
  */
 HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
-#endif
 
 /*!
  * @brief V2 GET: download an object into a registered buffer

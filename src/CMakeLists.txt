@@ -22,7 +22,8 @@ if(HIPOBJECT_V2_API)
     rdma/v2-clock.cpp
     rdma/v2-random.cpp
     rdma/v2-registry.cpp
-    rdma/v2-transport.cpp)
+    rdma/v2-transport.cpp
+    rdma/v2-client.cpp)
 endif()
 
 if(HIPOBJ_BNXT)
