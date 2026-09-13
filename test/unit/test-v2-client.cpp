@@ -270,7 +270,6 @@ protected:
       a->max_mr_size = ~(0ULL);
       return 0;
     };
-    f.dealloc_qp...[truncated]
     f.create_qp = fakeCreateQp;
     f.destroy_qp = fakeDestroyQp;
     f.create_cq = fakeCreateCq;
