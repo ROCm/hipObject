@@ -256,11 +256,26 @@ ReleaseResult releaseSession(SessionResources& res) {
    * Busy/leftover outcome keeps the entry (and its pin) alive. */
   ReleaseResult rc = ReleaseResult::Ok;
   if (res.inserted) {
+    /* Take the pin out before release. This unit owns the buffer map
+     * link. A retry keeps the entry, so the pin goes back. */
+    void* entryPin = nullptr;
+    registry().withEntry(res.id, [&](ConnectionEntryV2& e) {
+      entryPin = e.pinnedBuffer;
+      e.pinnedBuffer = nullptr;
+    });
     rc = releaseConnection(res.id);
-    if (rc == ReleaseResult::Ok && res.deviceRefHeld &&
-        v2State().device != nullptr) {
-      releaseDevice(*v2State().device);
-      res.deviceRefHeld = false;
+    if (rc == ReleaseResult::Ok) {
+      if (entryPin != nullptr) {
+        bufferMap().releaseMrRef(entryPin);
+      }
+      if (res.deviceRefHeld && v2State().device != nullptr) {
+        releaseDevice(*v2State().device);
+        res.deviceRefHeld = false;
+      }
+    } else {
+      registry().withEntry(res.id, [&](ConnectionEntryV2& e) {
+        e.pinnedBuffer = entryPin;
+      });
     }
   } else if (res.conn.qp || res.conn.cq) {
     const DestroyResult destroyed = destroyRcConnV2(res.conn);
@@ -375,7 +390,16 @@ int v2Shutdown() {
   std::vector<ConnId> ids;
   reg.forEachId([&ids](ConnId id) { ids.push_back(id); });
   for (auto id : ids) {
+    /* Shutdown never retries, so the pin is settled on every outcome. */
+    void* entryPin = nullptr;
+    reg.withEntry(id, [&](ConnectionEntryV2& e) {
+      entryPin = e.pinnedBuffer;
+      e.pinnedBuffer = nullptr;
+    });
     const ReleaseResult rc = releaseConnection(id);
+    if (entryPin != nullptr) {
+      bufferMap().releaseMrRef(entryPin);
+    }
     if (rc == ReleaseResult::Ok) {
       if (st.device != nullptr) {
         releaseDevice(*st.device);
