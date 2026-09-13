@@ -35,9 +35,16 @@ struct ibv_pd* v2ProtectionDomain();
 
 /* Shared body of hipObjGetV2/hipObjPutV2 (apiLock held by the
  * caller). Returns a hipObjOpError_t value. */
+bool v2IsInitialized();
+
+/* Name of the RDMA device the v2 stack selected at init, or an empty
+ * string before init. Callers use this instead of minting a v1 RDMA
+ * token to discover the NIC. */
+const char* v2NicName();
+
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
-               hipObjOpsV2_t* ops, void* ctx);
+               hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs);
 
 } // namespace v2
 } // namespace hipObj

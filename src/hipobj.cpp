@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <mutex>
 #include <vector>
 
@@ -161,6 +162,17 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   if (state.initialized) {
     return {hipObjAlreadyInitialized, 0};
   }
+#ifdef HIPOBJECT_V2_API
+  /* Serialize initialization and every buffer-map mutation with the
+   * transfers: the v2 stack drives RDMA under this same lock, and the
+   * buffer map is not internally synchronized. */
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  if (hipObj::v2::v2IsInitialized()) {
+    /* v1 and v2 share the buffer map but use different protection
+     * domains; both directions of mixing are rejected. */
+    return {hipObjAlreadyInitialized, 0};
+  }
+#endif /* HIPOBJECT_V2_API */
   if (!hipObj::ibv.is_initialized) {
     return {hipObjRdmaError, 0};
   }
@@ -216,14 +228,16 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
 
 hipObjError_t hipObjShutdown(void) try {
   hipObj::DriverState& state = hipObj::getState();
+#ifdef HIPOBJECT_V2_API
+  /* Read the v1 flag under the same lock the initializers hold, so a
+   * concurrent hipObjInit cannot complete between the branch decision
+   * and the teardown leaving a live v1 device behind a success return. */
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   if (!state.initialized) {
     /* v1 was never initialized; a v2-only session still tears down. */
-    std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
     const int rc = hipObj::v2::v2Shutdown();
     return {static_cast<hipObjOpError_t>(rc), 0};
   }
-#ifdef HIPOBJECT_V2_API
-  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   /* v2 first: release every connection (destroy retries included);
    * leftover poison must stop the teardown so the failure is
    * visible instead of violating the PD/context lifetime rule. */
@@ -258,16 +272,21 @@ hipObjError_t hipObjShutdown(void) try {
 }
 
 hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
+#ifdef HIPOBJECT_V2_API
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+#endif
   hipObj::DriverState& state = hipObj::getState();
+  struct ibv_pd* pd = hipObj::g_conn.pd;
+#ifdef HIPOBJECT_V2_API
   /* A v2-only process (hipObjInitV2 without hipObjInit) registers
    * against the shared v2 device's protection domain. */
-  struct ibv_pd* pd = hipObj::g_conn.pd;
   if (!state.initialized) {
     pd = hipObj::v2::v2ProtectionDomain();
     if (pd == nullptr) {
       return {hipObjNotInitialized, 0};
     }
   }
+#endif
   if (size > hipObj::MAX_MR_SIZE) {
     return {hipObjSizeTooLarge, 0};
   }
@@ -284,10 +303,16 @@ hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
 }
 
 hipObjError_t hipObjBufDeregister(void* devPtr) try {
+#ifdef HIPOBJECT_V2_API
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+#endif
   hipObj::DriverState& state = hipObj::getState();
-  if (!state.initialized) {
+#ifdef HIPOBJECT_V2_API
+  if (!state.initialized && hipObj::v2::v2ProtectionDomain() == nullptr) {
+    /* Neither v1 nor v2 is initialized; nothing can be registered. */
     return {hipObjNotInitialized, 0};
   }
+#endif
   if (!hipObj::g_bufferMap.isRegistered(devPtr)) {
     return {hipObjBufNotRegistered, 0};
   }
@@ -406,6 +431,14 @@ hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
 }
 
 /* ---- hipobj-rc-v2 entry points ---- */
+#ifdef HIPOBJECT_V2_API
+
+const char* hipObjNicV2() try {
+  const char* nic = hipObj::v2::v2NicName();
+  return (nic != nullptr && nic[0] != '\0') ? nic : nullptr;
+} catch (...) {
+  return nullptr;
+}
 
 hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
   if (!config) {
@@ -430,9 +463,14 @@ hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
 hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
                           uint64_t size, uint64_t offset, const char* query,
                           hipObjOpsV2_t* ops, void* ctx) try {
+  /* The whole-transfer budget includes the admission (lock) wait. */
+  const uint64_t entryMs = static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch())
+      .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
-                                        query, ops, ctx);
+                                        query, ops, ctx, entryMs);
   return {static_cast<hipObjOpError_t>(rc), 0};
 } catch (...) {
   return hipObj::handleException();
@@ -442,14 +480,21 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
                           const void* devPtr, uint64_t size, uint64_t offset,
                           const char* query, hipObjOpsV2_t* ops,
                           void* ctx) try {
+  /* The whole-transfer budget includes the admission (lock) wait. */
+  const uint64_t entryMs = static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch())
+      .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
                                         const_cast<void*>(devPtr), size,
-                                        offset, query, ops, ctx);
+                                        offset, query, ops, ctx, entryMs);
   return {static_cast<hipObjOpError_t>(rc), 0};
 } catch (...) {
   return hipObj::handleException();
 }
+
+#endif /* HIPOBJECT_V2_API */
 
 const char* hipObjGetVersionString(void) try {
   static char buf[32];
