@@ -165,6 +165,12 @@ typedef struct {
     int             hipError;
 } hipObjError_t;
 
+/*! @brief Diagnostic marker in hipObjError_t::hipError when a
+ * transfer failed hipObjBusy because its deadline expired.
+ * Distinguishes expiry from server-side backpressure.
+ * @ingroup error */
+#define HIPOBJ_DIAG_DEADLINE_EXPIRED 0x54494D45 /* "TIME" */
+
 /*!
  * @brief Return a human-readable string for an
  *        operation error code
@@ -451,7 +457,9 @@ typedef struct {
     uint32_t                         clientQpn;    /*!< READY: this transfer's QP number.
                                                         Zero before the endpoint exists. */
     uint64_t                         clientMrAddr; /*!< READY: registered buffer address.
-                                                        Zero before READY. */
+                                                        For GET the server WRITEs the object into
+                                                        it; for PUT it is bookkeeping only. Zero
+                                                        before READY. */
     uint32_t                         clientMrRkey; /*!< READY: registered buffer rkey */
 } hipObjTransferReqV2_t;
 
@@ -536,12 +544,17 @@ HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
  * @brief Query the RDMA NIC name selected by hipObjInitV2
  * @ingroup init
  *
- * Returns the device name chosen at init (the config hint when one was
- * given), or NULL before hipObjInitV2 has run. The pointer stays valid
- * until hipObjShutdown. This is the supported way for v2 consumers to
- * learn the NIC; no v1 RDMA token is needed.
+ * Returns an owned copy of the device name chosen at init (the config
+ * hint when one was given), or NULL before hipObjInitV2 has run and
+ * when another call already holds the API lock. The snapshot is taken
+ * under that lock, so hipObjShutdown cannot free it while it is read.
+ * Release with hipObjFreeNicV2. This is the supported way for v2
+ * consumers to learn the NIC; no v1 RDMA token is needed.
  */
-HIPOBJ_API const char* hipObjNicV2(void);
+HIPOBJ_API char* hipObjNicV2(void);
+
+/*! @brief Release a NIC name snapshot from hipObjNicV2 @ingroup init */
+HIPOBJ_API void hipObjFreeNicV2(char* nic);
 
 /*!
  * @brief V2 GET: download an object into a registered buffer

@@ -154,7 +154,8 @@ namespace {
         std::string host;
         std::string port;
 
-        bool connectTo(const std::string &hostPort, const std::string &nic, int deadlineMs);
+        bool connectTo(const std::string &hostPort, const std::string &nic,
+                       std::chrono::steady_clock::time_point deadlineAt);
         void closeConn()
         {
             if (fd >= 0) {
@@ -162,9 +163,10 @@ namespace {
                 fd = -1;
             }
         }
-        bool sendAll(const std::string &bytes, int deadlineMs);
+        bool sendAll(const std::string &bytes, std::chrono::steady_clock::time_point deadlineAt);
         /* One HTTP/1.1 response: status, headers, then Content-Length body. */
-        bool readResponse(std::string &head, std::string &body, int deadlineMs);
+        bool readResponse(std::string &head, std::string &body,
+                          std::chrono::steady_clock::time_point deadlineAt);
         ~ControlConn()
         {
             closeConn();
@@ -181,14 +183,16 @@ namespace {
 
     std::string clientNic()
     {
-        const char *nic = hipObjNicV2();
-        return nic != nullptr ? std::string(nic) : std::string();
+        char       *nic = hipObjNicV2();
+        std::string out = nic != nullptr ? std::string(nic) : std::string();
+        hipObjFreeNicV2(nic);
+        return out;
     }
 
-    bool ControlConn::connectTo(const std::string &hostPort, const std::string &nic, int deadlineMs)
+    bool ControlConn::connectTo(const std::string &hostPort, const std::string &nic,
+                                std::chrono::steady_clock::time_point deadlineAt)
     {
         closeConn();
-        const auto deadlineAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(deadlineMs);
         std::string host      = hostPort;
         std::string port      = "80";
         bool        https     = false;
@@ -254,10 +258,19 @@ namespace {
             }
             if (errno == EINPROGRESS) {
                 struct pollfd pfd{fd, POLLOUT, 0};
-                const int     left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                      deadlineAt - std::chrono::steady_clock::now())
-                                                      .count());
-                if (left <= 0 || poll(&pfd, 1, left) <= 0) {
+                int           pr   = 0;
+                int           left = 0;
+                do {
+                    left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                deadlineAt - std::chrono::steady_clock::now())
+                                                .count());
+                    if (left <= 0) {
+                        pr = 0;
+                        break;
+                    }
+                    pr = poll(&pfd, 1, left);
+                } while (pr < 0 && errno == EINTR);
+                if (pr <= 0) {
                     ::close(fd);
                     fd = -1;
                     continue;
@@ -284,19 +297,26 @@ namespace {
         return true;
     }
 
-    bool ControlConn::sendAll(const std::string &bytes, int deadlineMs)
+    bool ControlConn::sendAll(const std::string &bytes, std::chrono::steady_clock::time_point deadlineAt)
     {
         if (fd < 0) {
             return false;
         }
-        const auto deadlineAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(deadlineMs);
         size_t     off        = 0;
         while (off < bytes.size()) {
             struct pollfd pfd{fd, POLLOUT, 0};
-            const int     left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                  deadlineAt - std::chrono::steady_clock::now())
-                                                  .count());
-            if (left <= 0 || poll(&pfd, 1, left) <= 0) {
+            int           pr   = 0;
+            int           left = 0;
+            do {
+                left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            deadlineAt - std::chrono::steady_clock::now())
+                                            .count());
+                if (left <= 0) {
+                    return false;
+                }
+                pr = poll(&pfd, 1, left);
+            } while (pr < 0 && errno == EINTR);
+            if (pr <= 0) {
                 return false;
             }
             const ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
@@ -311,12 +331,12 @@ namespace {
         return true;
     }
 
-    bool ControlConn::readResponse(std::string &head, std::string &body, int deadlineMs)
+    bool ControlConn::readResponse(std::string &head, std::string &body,
+                                   std::chrono::steady_clock::time_point deadlineAt)
     {
         if (fd < 0) {
             return false;
         }
-        const auto deadlineAt  = std::chrono::steady_clock::now() + std::chrono::milliseconds(deadlineMs);
         std::string buf;
         size_t      headEnd    = std::string::npos;
         size_t      contentLen = std::string::npos;
@@ -342,7 +362,22 @@ namespace {
                         }
                         if (line.size() >= cl.size() && strncasecmp(line.c_str(), cl.c_str(), cl.size()) == 0) {
                             ++lengthCount;
-                            contentLen = static_cast<size_t>(std::strtoull(line.c_str() + cl.size(), nullptr, 10));
+                            const char *val = line.c_str() + cl.size();
+                            while (*val == ' ' || *val == '\t') {
+                                ++val;
+                            }
+                            const std::string digits(val);
+                            if (digits.empty() || digits.size() > 20 ||
+                                digits.find_first_not_of("0123456789") != std::string::npos) {
+                                return false;
+                            }
+                            errno = 0;
+                            char                    *endp = nullptr;
+                            const unsigned long long n    = std::strtoull(digits.c_str(), &endp, 10);
+                            if (errno != 0 || endp == nullptr || *endp != '\0') {
+                                return false;
+                            }
+                            contentLen = static_cast<size_t>(n);
                         }
                     }
                     if (lengthCount != 1) {
@@ -355,10 +390,18 @@ namespace {
                 return true;
             }
             struct pollfd pfd{fd, POLLIN, 0};
-            const int     left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                  deadlineAt - std::chrono::steady_clock::now())
-                                                  .count());
-            if (left <= 0 || poll(&pfd, 1, left) <= 0) {
+            int           pr   = 0;
+            int           left = 0;
+            do {
+                left = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            deadlineAt - std::chrono::steady_clock::now())
+                                            .count());
+                if (left <= 0) {
+                    return false;
+                }
+                pr = poll(&pfd, 1, left);
+            } while (pr < 0 && errno == EINTR);
+            if (pr <= 0) {
                 return false;
             }
             char          chunk[4096];
@@ -471,6 +514,11 @@ namespace {
         return static_cast<int>(r);
     }
 
+    std::chrono::steady_clock::time_point controlDeadlineAt(const hipObjTransferReqV2_t *req)
+    {
+        return std::chrono::steady_clock::now() + std::chrono::milliseconds(controlDeadlineMs(req));
+    }
+
     std::string replyTokenFromHeader(const std::string &value)
     {
         const std::string prefix = "200:";
@@ -497,17 +545,18 @@ namespace {
         }
 
         ControlConn conn;
-        const int   dl = controlDeadlineMs(req);
-        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, dl)) {
+        const auto  deadlineAt = controlDeadlineAt(req);
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt)) {
             return -1;
         }
         ControlExchange ex;
         const std::string hostHeader = hostHeaderFromConn(conn);
-        if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, extra, hostHeader) || !conn.sendAll(ex.bytes, dl)) {
+        if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, extra, hostHeader) ||
+            !conn.sendAll(ex.bytes, deadlineAt)) {
             return -1;
         }
         std::string head, body;
-        if (!conn.readResponse(head, body, dl)) {
+        if (!conn.readResponse(head, body, deadlineAt)) {
             return -1;
         }
         const int status = statusCodeFromHead(head);
@@ -557,7 +606,13 @@ namespace {
             const unsigned long long a = strictUlong(saddr, 16, ~0ULL);
             const unsigned long long r = strictUlong(srkey, 16, 0xffffffffu);
             if (a == static_cast<unsigned long long>(-1) || r == static_cast<unsigned long long>(-1)) {
-                return -1;
+                /* Malformed staging is reported as absent. The core
+                 * classifies a PUT without staging as InvalidValue
+                 * before READY. A GET does not need staging. */
+                out->stagingPresent = 0;
+                out->stagingAddr    = 0;
+                out->stagingRkey    = 0;
+                return 0;
             }
             out->stagingAddr    = a;
             out->stagingRkey    = static_cast<uint32_t>(r);
@@ -581,13 +636,13 @@ namespace {
         extra.Add(kAmzRdmaMrAddr, hexFixed(req->clientMrAddr, 16));
         extra.Add(kAmzRdmaMrRkey, hexFixed(req->clientMrRkey, 8));
 
-        const int dl = controlDeadlineMs(req);
-        if (!c->readyConn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, dl)) {
+        const auto deadlineAt = controlDeadlineAt(req);
+        if (!c->readyConn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt)) {
             return -1;
         }
         ControlExchange ex;
         if (!buildControlExchange(ex, c->sctx, kControlPathReady, extra, hostHeaderFromConn(c->readyConn)) ||
-            !c->readyConn.sendAll(ex.bytes, dl)) {
+            !c->readyConn.sendAll(ex.bytes, deadlineAt)) {
             c->readyConn.closeConn();
             return -1;
         }
@@ -602,7 +657,7 @@ namespace {
             return -1;
         }
         std::string head, body;
-        if (!c->readyConn.readResponse(head, body, controlDeadlineMs(req))) {
+        if (!c->readyConn.readResponse(head, body, controlDeadlineAt(req))) {
             c->readyConn.closeConn();
             c->readyPending = false;
             return -1;
@@ -643,12 +698,26 @@ namespace {
 
         const std::string csum = rawHeaderValue(head, "X-Amz-Rdma-Checksum");
         if (!csum.empty()) {
-            const size_t sp = csum.find(' ');
-            if (sp == std::string::npos || sp == 0 || sp + 1 >= csum.size()) {
-                return -1;
+            /* Wire format is "CRC64NVME <base64>" exactly: 11 data
+             * characters and a trailing '='. Anything else is rejected
+             * rather than stored as a checksum. */
+            static const char kCsumPrefix[] = "CRC64NVME ";
+            const size_t      plen          = sizeof(kCsumPrefix) - 1;
+            bool              csumOk        = false;
+            std::string       payload;
+            if (csum.compare(0, plen, kCsumPrefix) == 0 && csum.size() == plen + 12) {
+                payload = csum.substr(plen);
+                csumOk  = payload.size() == 12 && payload[11] == '=';
+                for (size_t i = 0; csumOk && i < 11; ++i) {
+                    const char ch  = payload[i];
+                    const bool b64 = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                                     (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
+                    if (!b64) {
+                        csumOk = false;
+                    }
+                }
             }
-            const std::string payload = csum.substr(sp + 1);
-            if (payload.size() >= sizeof(out->checksumB64)) {
+            if (!csumOk || payload.size() >= sizeof(out->checksumB64)) {
                 return -1;
             }
             copyCString(out->checksumB64, payload);
@@ -672,17 +741,17 @@ namespace {
         }
 
         ControlConn conn;
-        const int   dl = controlDeadlineMs(req);
-        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, dl)) {
+        const auto  deadlineAt = controlDeadlineAt(req);
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt)) {
             return 0;
         }
         ControlExchange ex;
         if (!buildControlExchange(ex, c->sctx, kControlPathCancel, extra, hostHeaderFromConn(conn)) ||
-            !conn.sendAll(ex.bytes, dl)) {
+            !conn.sendAll(ex.bytes, deadlineAt)) {
             return 0;
         }
         std::string head, body;
-        (void)conn.readResponse(head, body, dl);
+        (void)conn.readResponse(head, body, deadlineAt);
         return 0;
     }
 

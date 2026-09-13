@@ -186,9 +186,16 @@ namespace v2 {
             return 0;
         }
         --pendingReserves_;
-        ConnId id = nextId_++;
-        entries_.emplace(id, std::move(entry));
-        return id;
+        try {
+            ConnId id = nextId_++;
+            entries_.emplace(id, std::move(entry));
+            return id;
+        } catch (...) {
+            /* The reserve was already consumed. Put it back so a
+             * failed node allocation does not leak a slot. */
+            ++pendingReserves_;
+            throw;
+        }
     }
 
     bool ConnectionRegistry::claimDestroy(ConnId id)
