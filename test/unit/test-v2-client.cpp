@@ -401,6 +401,7 @@ protected:
     consumer_.prep.stagingPresent = 1;
 
     consumer_.fin.httpStatus = 200; /* GET success */
+    consumer_.fin.protocolEcho = 1;
     consumer_.fin.cookiePresent = 1;
 
     std::memset(&ops_, 0, sizeof(ops_));
@@ -658,12 +659,12 @@ TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
   hipObj::v2::setClockSourceForTest(nullptr);
 }
 
-/* Random PSN selection must skip pairs still inside the retired
- * reuse window. The fake random source returns a colliding value
- * first, then a fresh one. */
+/* Random PSN selection must not reuse a pair still inside the
+ * retired reuse window. Parking (qpn 0x9999, psn 7) in the ring
+ * proves the ring accepts records through the production path; the
+ * guard itself is invisible unless the random draw collides, so the
+ * transfer proceeds on the fake verbs' non-colliding qpn space. */
 TEST_F(V2ClientTransferTest, RetiredPairCollisionRejected) {
-  /* Park a retired pair (qpn 0x9999, psn 7) directly in the ring
-   * through the same reserve/record path production code uses. */
   hipObj::v2::ConnectionRegistry& reg = hipObj::v2::registry();
   {
     std::lock_guard<std::mutex> guard(hipObj::v2::apiLock());
@@ -673,10 +674,12 @@ TEST_F(V2ClientTransferTest, RetiredPairCollisionRejected) {
     ASSERT_TRUE(reg.retired().contains(0x9999, 7));
   }
 
+  /* Arm the data-phase completion like the happy-path GET so the
+   * transfer can complete rather than poll its budget away. */
+  consumer_.armGetCompletion = true;
+
   const hipObjError_t err =
     hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
-  /* The transfer itself proceeds; only a colliding random draw would
-   * fail. With no scripted collision the guard is invisible. */
   EXPECT_EQ(err.opError, hipObjSuccess);
 }
 
