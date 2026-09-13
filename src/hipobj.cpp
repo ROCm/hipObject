@@ -935,6 +935,32 @@ hipObjFreeNicV2(char *nic)
     std::free(nic);
 }
 
+int
+hipObjSelectedPortV2(void)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return 0;
+    }
+    return hipObj::v2::v2SelectedPort();
+}
+catch (...) {
+    return 0;
+}
+
+int
+hipObjSelectedGidIndexV2(void)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return -1;
+    }
+    return hipObj::v2::v2SelectedGidIndex();
+}
+catch (...) {
+    return -1;
+}
+
 hipObjError_t
 hipObjInitV2(hipObjConfigV2_t *config)
 try {

@@ -331,7 +331,7 @@ namespace {
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
             if (!nic.empty()) {
                 const std::string netdev =
-                    rdmaNetdevFor(nic, hipObj::v2::v2SelectedPort(), hipObj::v2::v2SelectedGidIndex());
+                    rdmaNetdevFor(nic, hipObjSelectedPortV2(), hipObjSelectedGidIndexV2());
                 if (netdev.empty()) {
                     ::close(fd);
                     return false;
