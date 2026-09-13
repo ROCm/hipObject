@@ -28,6 +28,11 @@ int v2Init(hipObjConfigV2_t* config);
  * value; hipObjRdmaError when leftover poison stopped the teardown. */
 int v2Shutdown();
 
+/* Protection domain of the shared v2 device, or nullptr when the v2
+ * half is not initialized. Buffer registration on a v2-only process
+ * runs against this PD. */
+struct ibv_pd* v2ProtectionDomain();
+
 /* Shared body of hipObjGetV2/hipObjPutV2 (apiLock held by the
  * caller). Returns a hipObjOpError_t value. */
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
