@@ -83,10 +83,51 @@ struct V2State {
   /* RDMA device name selected at init. v2 callers query it instead of
    * minting a v1 token just to learn the NIC. */
   std::string nicName;
+  int selectedPort = 0;
+  int selectedGidIndex = -1;
   /* Shared device handle: created by hipObjInitV2, referenced by every
    * connection. Shutdown reclaims it. */
   DeviceHandle* device = nullptr;
 };
+
+struct EmergencySlot {
+  RcConnV2 conn;
+  uint64_t reservationId = 0;
+  bool used = false;
+};
+constexpr size_t kEmergencySlots = 8;
+EmergencySlot g_emergencySlots[kEmergencySlots];
+
+bool parkEmergency(RcConnV2& conn, uint64_t reservationId) {
+  if (!conn.qp && !conn.cq) {
+    return false;
+  }
+  for (auto& slot : g_emergencySlots) {
+    if (!slot.used) {
+      slot.conn = std::move(conn);
+      slot.reservationId = reservationId;
+      slot.used = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+void drainEmergencySlots() {
+  for (auto& slot : g_emergencySlots) {
+    if (!slot.used) {
+      continue;
+    }
+    const DestroyResult destroyed = destroyRcConnV2(slot.conn);
+    if (destroyed.qpOk && destroyed.cqOk) {
+      if (slot.reservationId != 0) {
+        registry().retired().unreserve(slot.reservationId);
+      }
+      slot.used = false;
+      slot.reservationId = 0;
+    }
+  }
+}
 
 V2State& v2State() {
   static V2State state;
@@ -222,11 +263,12 @@ int acquireSession(void* devPtr, SessionResources& res) {
           leftover = std::move(res.conn);
         }
         const DestroyResult destroyed = destroyRcConnV2(leftover);
-        if (!destroyed.cqOk) {
-          hipObj::dropOwnership(leftover.cq);
-        }
+        const bool settled = destroyed.cqOk || parkEmergency(leftover, parkedRid);
+        (void)settled;
         bufferMap().releaseMrRef(devPtr);
-        reg.retired().unreserve(parkedRid);
+        if (destroyed.cqOk) {
+          reg.retired().unreserve(parkedRid);
+        }
         reg.unreserveSlot();
         return -2;
       }
@@ -289,9 +331,10 @@ int acquireSession(void* devPtr, SessionResources& res) {
       try {
         res.id = reg.insert(std::move(poisoned));
       } catch (...) {
-        hipObj::dropOwnership(poisoned.conn.qp);
-        hipObj::dropOwnership(poisoned.conn.cq);
         res.id = 0;
+      }
+      if (res.id == 0) {
+        parkEmergency(poisoned.conn, destroyed.qpOk ? 0 : rid);
       }
       if (res.id != 0) {
         res.inserted = true;
@@ -394,6 +437,14 @@ const char* v2NicName() {
   return v2State().nicName.c_str();
 }
 
+int v2SelectedPort() {
+  return v2State().selectedPort;
+}
+
+int v2SelectedGidIndex() {
+  return v2State().selectedGidIndex;
+}
+
 int v2Init(hipObjConfigV2_t* config) {
   V2State& st = v2State();
   if (st.initialized) {
@@ -419,7 +470,11 @@ int v2Init(hipObjConfigV2_t* config) {
   }
   std::optional<hipObj::RdmaNic> nic;
   if (gpuDevice >= 0) {
-    nic = hipObj::GetClosestNicToGpu(gpuDevice, config->v1.nicHint);
+    try {
+      nic = hipObj::GetClosestNicToGpu(gpuDevice, config->v1.nicHint);
+    } catch (...) {
+      nic.reset();
+    }
   }
   if (!nic) {
     if (haveNicHint) {
@@ -440,6 +495,8 @@ int v2Init(hipObjConfigV2_t* config) {
   dh->pd = std::move(raw.pd);
   dh->portNum = raw.portNum;
   dh->gidIndex = raw.gidIndex;
+  st.selectedPort = static_cast<int>(raw.portNum);
+  st.selectedGidIndex = static_cast<int>(raw.gidIndex);
   dh->localGid = raw.localGid;
   st.device = dh;
   st.controlEndpoint = controlEndpoint;
@@ -503,6 +560,12 @@ int v2Shutdown() {
   if (poisonLeft || reg.size() > 0) {
     return hipObjRdmaError;
   }
+  drainEmergencySlots();
+  for (const auto& slot : g_emergencySlots) {
+    if (slot.used) {
+      return hipObjRdmaError;
+    }
+  }
   /* Buffers go before the device: every MR must be deregistered
    * while the protection domain is still alive. */
   bufferMap().deregisterAll();
@@ -520,6 +583,8 @@ int v2Shutdown() {
   st.initialized = false;
   st.controlEndpoint.clear();
   st.nicName.clear();
+  st.selectedPort = 0;
+  st.selectedGidIndex = -1;
   return hipObjSuccess;
 }
 

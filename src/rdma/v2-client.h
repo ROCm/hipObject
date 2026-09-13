@@ -53,6 +53,12 @@ uint64_t v2EntryNowMs();
  * token to discover the NIC. */
 const char* v2NicName();
 
+/* Port and GID index the v2 data plane uses; meaningful after init
+ * (port > 0, gidIndex >= 0). Lets the control plane bind the exact
+ * interface backing the data-plane address handle. */
+int v2SelectedPort();
+int v2SelectedGidIndex();
+
 /* entryMs/haveEntryMs: when haveEntryMs is true the public entry
  * point captured the timestamp before waiting on the api lock, so
  * the lock wait counts against the whole-transfer budget; when
