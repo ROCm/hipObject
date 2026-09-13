@@ -89,7 +89,7 @@ namespace {
         if (result.status == RdmaStatus::NotSupported) {
             return "not supported";
         }
-        if (result.status == RdmaStatus::Failed) {
+        if (result.status == RdmaStatus::Failed || result.status == RdmaStatus::V2Failed) {
             return "error";
         }
         return "no bytes transferred";
@@ -283,7 +283,7 @@ Client::PutObject(minio::s3::PutObjectArgs args)
 
     hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
-        // RDMA not available (no NIC or no GPU topology) — fall back to HTTP PUT.
+        // RDMA not available (no NIC or no GPU topology). Fall back to HTTP PUT.
         // Copy the buffer into a std::stringstream so minio-cpp can seek in it.
         const char              *src = static_cast<const char *>(args.buf);
         std::string              content(src, size);
@@ -330,6 +330,10 @@ Client::PutObject(minio::s3::PutObjectArgs args)
         CountRdmaPut(ret.bytes);
         return RdmaResponse<minio::s3::PutObjectResponse>(std::move(put_ctx.etag));
     }
+    if (ret.status == RdmaStatus::V2Failed) {
+        return minio::s3::PutObjectResponse(
+            minio::error::Error("RDMA v2 PUT failed; not retrying over HTTP"));
+    }
 
     // The fallback below streams the buffer from the host, so it cannot be
     // taken for device memory, and it turns a GPU-direct transfer into an
@@ -370,7 +374,7 @@ Client::GetObject(minio::s3::GetObjectArgs args)
 
     hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
-        // RDMA not available — fall back to HTTP GET.
+        // RDMA not available. Fall back to HTTP GET.
         return HttpGetIntoBuffer(s3_client_, args, size);
     }
 
@@ -405,6 +409,10 @@ Client::GetObject(minio::s3::GetObjectArgs args)
     if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
         CountRdmaGet(ret.bytes);
         return RdmaResponse<minio::s3::GetObjectResponse>(std::move(get_ctx.etag));
+    }
+    if (ret.status == RdmaStatus::V2Failed) {
+        return minio::s3::GetObjectResponse(
+            minio::error::Error("RDMA v2 GET failed; not retrying over HTTP"));
     }
 
     // As in PutObject: the fallback memcpys into args.buf from the host.

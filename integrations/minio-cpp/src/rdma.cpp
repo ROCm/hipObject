@@ -130,7 +130,7 @@ namespace {
     using RdmaTokenPtr = std::unique_ptr<char, RdmaTokenDeleter>;
 
     // ---------------------------------------------------------------------------
-    // v2 callback context — carries the per-transfer minio credentials and
+    // v2 callback context: carries the per-transfer minio credentials and
     // endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
     // ---------------------------------------------------------------------------
 
@@ -276,8 +276,8 @@ namespace {
         if (fd < 0) {
             return false;
         }
-        const int blk = fcntl(fd, F_GETFL, 0);
-        fcntl(fd, F_SETFL, blk & ~O_NONBLOCK);
+        /* Stay nonblocking. sendAll and readResponse poll, and treat
+         * EAGAIN as "wait again" rather than a hard error. */
         this->fd   = fd;
         this->host = host;
         this->port = port;
@@ -300,6 +300,9 @@ namespace {
                 return false;
             }
             const ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                continue;
+            }
             if (n <= 0) {
                 return false;
             }
@@ -323,8 +326,8 @@ namespace {
                 if (headEnd != std::string::npos) {
                     head = buf.substr(0, headEnd);
                     buf  = buf.substr(headEnd + 4);
-                    contentLen = 0;
-                    size_t pos = 0;
+                    int    lengthCount = 0;
+                    size_t pos         = 0;
                     while (pos < head.size()) {
                         size_t eol = head.find("\r\n", pos);
                         if (eol == std::string::npos) {
@@ -332,11 +335,18 @@ namespace {
                         }
                         const std::string line = head.substr(pos, eol - pos);
                         pos                    = (eol == head.size()) ? head.size() : eol + 2;
-                        const std::string needle = "content-length:";
-                        if (line.size() >= needle.size() &&
-                            strncasecmp(line.c_str(), needle.c_str(), needle.size()) == 0) {
-                            contentLen = static_cast<size_t>(std::strtoull(line.c_str() + needle.size(), nullptr, 10));
+                        const std::string cl = "content-length:";
+                        const std::string te = "transfer-encoding:";
+                        if (line.size() >= te.size() && strncasecmp(line.c_str(), te.c_str(), te.size()) == 0) {
+                            return false;
                         }
+                        if (line.size() >= cl.size() && strncasecmp(line.c_str(), cl.c_str(), cl.size()) == 0) {
+                            ++lengthCount;
+                            contentLen = static_cast<size_t>(std::strtoull(line.c_str() + cl.size(), nullptr, 10));
+                        }
+                    }
+                    if (lengthCount != 1) {
+                        return false;
                     }
                 }
             }
@@ -353,6 +363,9 @@ namespace {
             }
             char          chunk[4096];
             const ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                continue;
+            }
             if (n <= 0) {
                 return false;
             }
@@ -432,6 +445,23 @@ namespace {
         return static_cast<int>(std::strtol(head.c_str() + sp + 1, nullptr, 10));
     }
 
+    std::string controlDialTarget(const hipObjTransferReqV2_t *req, S3RdmaContext *sctx)
+    {
+        if (req->endpoint != nullptr && req->endpoint->controlEndpoint != nullptr &&
+            req->endpoint->controlEndpoint[0] != '\0') {
+            return req->endpoint->controlEndpoint;
+        }
+        return sctx->url.HostHeaderValue();
+    }
+
+    std::string hostHeaderFromConn(const ControlConn &conn)
+    {
+        if (conn.port.empty() || conn.port == "80") {
+            return conn.host;
+        }
+        return conn.host + ":" + conn.port;
+    }
+
     int controlDeadlineMs(const hipObjTransferReqV2_t *req)
     {
         uint32_t r = req->remainingMs;
@@ -468,12 +498,11 @@ namespace {
 
         ControlConn conn;
         const int   dl = controlDeadlineMs(req);
-        if (!conn.connectTo(c->sctx->url.HostHeaderValue(), c->clientNic, dl)) {
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, dl)) {
             return -1;
         }
         ControlExchange ex;
-        const std::string hostHeader =
-            conn.host == "s3.amazonaws.com" ? conn.host : c->sctx->url.HostHeaderValue();
+        const std::string hostHeader = hostHeaderFromConn(conn);
         if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, extra, hostHeader) || !conn.sendAll(ex.bytes, dl)) {
             return -1;
         }
@@ -553,11 +582,11 @@ namespace {
         extra.Add(kAmzRdmaMrRkey, hexFixed(req->clientMrRkey, 8));
 
         const int dl = controlDeadlineMs(req);
-        if (!c->readyConn.connectTo(c->sctx->url.HostHeaderValue(), c->clientNic, dl)) {
+        if (!c->readyConn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, dl)) {
             return -1;
         }
         ControlExchange ex;
-        if (!buildControlExchange(ex, c->sctx, kControlPathReady, extra, c->sctx->url.HostHeaderValue()) ||
+        if (!buildControlExchange(ex, c->sctx, kControlPathReady, extra, hostHeaderFromConn(c->readyConn)) ||
             !c->readyConn.sendAll(ex.bytes, dl)) {
             c->readyConn.closeConn();
             return -1;
@@ -614,8 +643,16 @@ namespace {
 
         const std::string csum = rawHeaderValue(head, "X-Amz-Rdma-Checksum");
         if (!csum.empty()) {
-            copyCString(out->checksumB64, csum);
-            c->sctx->checksum = csum;
+            const size_t sp = csum.find(' ');
+            if (sp == std::string::npos || sp == 0 || sp + 1 >= csum.size()) {
+                return -1;
+            }
+            const std::string payload = csum.substr(sp + 1);
+            if (payload.size() >= sizeof(out->checksumB64)) {
+                return -1;
+            }
+            copyCString(out->checksumB64, payload);
+            c->sctx->checksum = payload;
         }
         return 0;
     }
@@ -636,11 +673,11 @@ namespace {
 
         ControlConn conn;
         const int   dl = controlDeadlineMs(req);
-        if (!conn.connectTo(c->sctx->url.HostHeaderValue(), c->clientNic, dl)) {
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, dl)) {
             return 0;
         }
         ControlExchange ex;
-        if (!buildControlExchange(ex, c->sctx, kControlPathCancel, extra, c->sctx->url.HostHeaderValue()) ||
+        if (!buildControlExchange(ex, c->sctx, kControlPathCancel, extra, hostHeaderFromConn(conn)) ||
             !conn.sendAll(ex.bytes, dl)) {
             return 0;
         }
@@ -689,7 +726,7 @@ namespace {
         }
         if (err.opError != hipObjSuccess) {
             rdmaTrace("v2 put: hipObjPutV2: ", hipObjGetErrorString(err.opError));
-            return {RdmaStatus::Failed};
+            return {RdmaStatus::V2Failed};
         }
         return {RdmaStatus::Ok, size};
     }
@@ -717,7 +754,7 @@ namespace {
         }
         if (err.opError != hipObjSuccess) {
             rdmaTrace("v2 get: hipObjGetV2: ", hipObjGetErrorString(err.opError));
-            return {RdmaStatus::Failed};
+            return {RdmaStatus::V2Failed};
         }
         return {RdmaStatus::Ok, size};
     }

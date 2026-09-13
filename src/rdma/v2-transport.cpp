@@ -15,6 +15,7 @@
 #include <arpa/inet.h>
 
 #include "hipobj-span.h"
+#include "buffer.h"
 #include "ibv-wrapper.h"
 #include "scope-guard.h"
 #include "vendor-ops.h"
@@ -308,6 +309,14 @@ namespace v2 {
         });
         reg.commitDestroy(id, qpOk, cqOk);
         if (qpOk && cqOk) {
+            void *pin = nullptr;
+            reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
+                pin                 = entry.pinnedBuffer;
+                entry.pinnedBuffer  = nullptr;
+            });
+            if (pin != nullptr) {
+                hipObj::bufferMap().releaseMrRef(pin);
+            }
             reg.eraseDestroyed(id);
             return ReleaseResult::Ok;
         }
