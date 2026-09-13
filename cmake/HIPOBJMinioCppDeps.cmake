@@ -81,7 +81,7 @@ if(NOT TARGET unofficial::curlpp::curlpp)
       # compiles against current libcurl (mirrors the distro patches).
       PATCH_COMMAND sed -i
         "/typedef curlpp::OptionTrait<curl_closepolicy, CURLOPT_CLOSEPOLICY>/d"
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/curlpp/Options.hpp
+        <SOURCE_DIR>/include/curlpp/Options.hpp
     )
     FetchContent_GetProperties(curlpp)
     if(NOT curlpp_POPULATED)
