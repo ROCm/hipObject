@@ -18,6 +18,8 @@
 
 namespace hipobj::minio {
 
+namespace minio = ::minio;
+
 namespace {
 
 int parseRdmaReply(const std::string& rdma_reply) {

@@ -12,6 +12,8 @@
 
 namespace hipobj::minio {
 
+namespace minio = ::minio;
+
 class Client {
 public:
   Client(minio::s3::BaseUrl base_url, minio::creds::Provider* provider);
