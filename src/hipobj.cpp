@@ -8,7 +8,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <chrono>
 #include <mutex>
 #include <vector>
 
@@ -467,15 +466,14 @@ hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
 hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
                           uint64_t size, uint64_t offset, const char* query,
                           hipObjOpsV2_t* ops, void* ctx) try {
-  /* The whole-transfer budget includes the admission (lock) wait. */
-  const uint64_t entryMs = static_cast<uint64_t>(
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now().time_since_epoch())
-      .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   int diag = 0;
+  /* entryMs 0 tells v2Transfer to stamp its own entry (with the
+   * injectable clock, so deadline tests stay deterministic); the
+   * admission wait before this point stays on the real clock and
+   * cannot extend a frozen-clock budget. */
   const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
-                                        query, ops, ctx, entryMs, &diag);
+                                        query, ops, ctx, 0, &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
@@ -485,16 +483,12 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
                           const void* devPtr, uint64_t size, uint64_t offset,
                           const char* query, hipObjOpsV2_t* ops,
                           void* ctx) try {
-  /* The whole-transfer budget includes the admission (lock) wait. */
-  const uint64_t entryMs = static_cast<uint64_t>(
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now().time_since_epoch())
-      .count());
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   int diag = 0;
+  /* See hipObjGetV2: v2Transfer stamps its own entry timestamp. */
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
                                         const_cast<void*>(devPtr), size,
-                                        offset, query, ops, ctx, entryMs,
+                                        offset, query, ops, ctx, 0,
                                         &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
