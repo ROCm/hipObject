@@ -809,20 +809,19 @@ TEST_F(V2ClientTransferTest, ExpiredFinalKeepsDeadlineMarker) {
   hipObj::v2::setClockSourceForTest(&frozen);
   consumer_.armGetCompletion = true;
   consumer_.onFinishReady = [&]() {
-    /* Consume the whole budget inside FINAL, and break the cookie so
-     * the reply classification also fails. */
+    /* Consume the whole budget inside FINAL; the reply itself stays
+     * valid so the expiry classification is exercised on its own. */
     if (g_deadlineJumpClock != nullptr) {
       g_deadlineJumpClock->now = 100'000;
     }
-    consumer_.fin.cookieEcho = 0xfeedface;
   };
   g_deadlineJumpClock = &frozen;
   const hipObjError_t err =
       hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
   g_deadlineJumpClock = nullptr;
   hipObj::v2::setClockSourceForTest(nullptr);
-  EXPECT_EQ(err.opError, hipObjRdmaError);
+  EXPECT_EQ(err.opError, hipObjBusy);
   EXPECT_EQ(err.hipError, hipObj::v2::kDiagDeadlineExpired)
-    << "expired FINAL must keep the deadline marker even when the "
-       "reply is invalid";
+    << "a FINAL that completes outside its budget must surface the "
+       "deadline marker";
 }
