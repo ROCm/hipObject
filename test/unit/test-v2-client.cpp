@@ -207,6 +207,18 @@ public:
    * cookie (cookie-mismatch test). */
   uint32_t cookieEchoOverride = 0;
 
+  void clear() { calls.clear(); }
+
+  size_t count(Cb which) const {
+    size_t n = 0;
+    for (const auto& c : calls) {
+      if (c.cb == which) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
   /* When set, sendReadyRequest arms the fake CQ with a data-phase
    * completion (GET receive form) so the data phase succeeds. */
   bool armGetCompletion = false;
@@ -791,33 +803,100 @@ TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
     << "FINAL must observe the budget spent after the READY request";
 }
 
+namespace {
+/* Deterministic PSN source: hands a fixed value then keeps serving it
+ * so the second transfer draws the same PSN as the first. */
+struct FixedPsnSource : public hipObj::v2::RandomSource {
+  uint32_t value = 0x51AB;
+  bool next32(uint32_t& out) override {
+    out = value;
+    return true;
+  }
+};
+} // namespace
+
 TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   /* A (qpn, psn) collision with a retired pair inside its reuse
-   * window must fail without sending PREPARE. Record the pair the
-   * fake verbs stack will hand the next transfer. */
+   * window must fail without sending PREPARE: retire the exact pair
+   * (next QPN, fixed PSN) the next transfer will draw, then drive the
+   * transfer and assert the driver's rejection branch fires. */
   ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
   consumer_.armGetCompletion = true;
+  FixedPsnSource psnSource;
+  hipObj::v2::RandomSource* saved =
+      hipObj::v2::setRandomSourceForTest(&psnSource);
   const hipObjError_t e0 =
       hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
   ASSERT_EQ(e0.opError, hipObjSuccess);
-  /* The fake allocator hands each new QP the next number; the coming
-   * transfer gets qpn+1 while its PSN is random. Retire every PSN
-   * for that QPN is impossible, so instead pin the PSN the test
-   * observed on the PREPARE snapshot and force the same QPN by
-   * recording the full pair after observing it once. The second
-   * transfer draws a fresh random PSN; force the collision by
-   * intercepting the PSN source is out of scope here. Verify the
-   * guard via the registry directly. */
+  /* Release that connection so its ring record is the retired pair.
+   * The fake allocator hands the next QP the next number; the PSN
+   * source still serves the fixed value, so retiring
+   * (firstQpn + 1, fixedPsn) predicts the next transfer exactly. */
+  const uint32_t firstQpn = 0x2000;
+  const uint32_t nextQpn = firstQpn + 1;
   auto& ring = hipObj::v2::registry().retired();
   const uint64_t rid = ring.reserve();
   ASSERT_NE(rid, 0u);
-  ring.record(rid, /*qpn*/ 0x1234, /*psn*/ 0x5678);
-  EXPECT_TRUE(ring.contains(0x1234, 0x5678));
-  EXPECT_FALSE(ring.contains(0x1234, 0x5679));
+  ring.record(rid, nextQpn, psnSource.value);
+
+  consumer_.clear();
+  const hipObjError_t e1 =
+      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  hipObj::v2::setRandomSourceForTest(saved);
+  EXPECT_EQ(e1.opError, hipObjBusy);
+  EXPECT_EQ(consumer_.count(Cb::Prepare), 0u)
+    << "a retired-pair collision must be rejected before PREPARE";
 }
 
+
+TEST_F(V2ClientTransferTest, ExpiredInvalidFinalKeepsDeadlineMarker) {
+  /* An expired FINAL that is ALSO invalid (bad status, mismatched
+   * cookie, missing protocol echo) must still surface the deadline
+   * marker: expiry is the actionable diagnosis regardless of the
+   * reply's own validity. Each sub-case drives the classification
+   * branch it names. */
+  const struct {
+    const char* name;
+    std::function<void(MockConsumer&)> corrupt;
+  } cases[] = {
+    {"bad-status",
+     [](MockConsumer& c) { c.fin.httpStatus = 500; }},
+    {"cookie-mismatch",
+     [](MockConsumer& c) { c.cookieEchoOverride = 0xDEADBEEF; }},
+    {"no-protocol-echo",
+     [](MockConsumer& c) { c.fin.protocolEcho = 0; }},
+  };
+  for (const auto& tc : cases) {
+    ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
+    ASSERT_EQ(initV2(kEndpoint, 30'000), hipObjSuccess);
+    ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
+
+    FrozenClock frozen;
+    frozen.now = 0;
+    hipObj::v2::setClockSourceForTest(&frozen);
+    consumer_.armGetCompletion = true;
+    tc.corrupt(consumer_);
+    consumer_.onFinishReady = [&frozen]() {
+      /* Consume the whole budget inside FINAL while the reply is
+       * already corrupt. */
+      frozen.now = 100'000;
+    };
+    const hipObjError_t err =
+        hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+    hipObj::v2::setClockSourceForTest(nullptr);
+    EXPECT_NE(err.opError, hipObjSuccess) << tc.name;
+    EXPECT_EQ(err.hipError, hipObj::v2::kDiagDeadlineExpired)
+      << tc.name << ": expiry inside an invalid FINAL must surface "
+                   "the deadline marker";
+    /* Reset the scripted reply for the next case. */
+    consumer_.fin.httpStatus = 200;
+    consumer_.fin.protocolEcho = 1;
+    consumer_.cookieEchoOverride = 0;
+    consumer_.onFinishReady = nullptr;
+  }
+}
 
 TEST_F(V2ClientTransferTest, ExpiredFinalKeepsDeadlineMarker) {
   /* An expired FINAL whose reply is also invalid must surface the

@@ -229,6 +229,18 @@ NicEnumerator* setNicEnumerator(NicEnumerator* enumerator) {
   return previous;
 }
 
+int GetClosestNicToGpuSafe(int gpuIndex, const char* hca_list,
+                           const char** dev_name) {
+  /* Enumeration allocates; a throw here would strand the temporary
+   * contexts the enumerator opens. Absorb allocation failures into
+   * the existing -1 contract. */
+  try {
+    return GetClosestNicToGpu(gpuIndex, hca_list, dev_name);
+  } catch (...) {
+    return -1;
+  }
+}
+
 int GetClosestNicToGpu(int gpuIndex, const char* hca_list,
                        const char** dev_name) {
   char gpu_bus_id[32];

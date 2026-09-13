@@ -83,10 +83,59 @@ struct V2State {
   /* RDMA device name selected at init; v2 callers query it instead of
    * minting a v1 RDMA token just to learn the NIC. */
   std::string nicName;
+  /* Port and GID index the data plane actually uses (recorded at init
+   * so the control-plane interface binding can resolve the matching
+   * netdev instead of an arbitrary one). */
+  int selectedPort = 0;
+  int selectedGidIndex = -1;
   /* Shared device handle: created by hipObjInitV2, referenced by every
    * connection. Shutdown reclaims it. */
   DeviceHandle* device = nullptr;
 };
+
+/* Emergency owner for verbs objects whose registry parking failed
+ * (allocation failure or registry full). Fixed capacity, no further
+ * allocation, guarded by apiLock: a survivor recorded here is visible
+ * to shutdown instead of becoming ownerless. */
+struct EmergencySlot {
+  RcConnV2 conn;
+  uint64_t reservationId = 0;
+  bool used = false;
+};
+constexpr size_t kEmergencySlots = 8;
+EmergencySlot g_emergencySlots[kEmergencySlots];
+
+static bool parkEmergency(RcConnV2& conn, uint64_t reservationId) {
+  for (auto& slot : g_emergencySlots) {
+    if (!slot.used) {
+      slot.conn = conn;
+      slot.reservationId = reservationId;
+      slot.used = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void drainEmergencySlots() {
+  for (auto& slot : g_emergencySlots) {
+    if (!slot.used) {
+      continue;
+    }
+    bool qpOk = false;
+    bool cqOk = false;
+    destroyRcConnV2(slot.conn, &qpOk, &cqOk);
+    if (qpOk && cqOk) {
+      if (slot.reservationId != 0) {
+        registry().retired().unreserve(slot.reservationId);
+      }
+      slot.used = false;
+      slot.reservationId = 0;
+    }
+    /* A survivor that still cannot be destroyed stays recorded; the
+     * next shutdown retries. */
+  }
+}
 
 V2State& v2State() {
   static V2State state;
@@ -228,15 +277,23 @@ int acquireSession(void* devPtr, SessionResources& res) {
     }
     if (cqParkThrew || res.id == 0) {
       /* Registry full or the allocation failed again: try to destroy
-       * the surviving CQ directly so the leftover does not outlive
-       * the caller; if that also fails the -2 report is the only
-       * signal left. */
+       * the surviving CQ directly; if that also fails, record it
+       * with the emergency owner so shutdown (not luck) owns it. */
       bool qpIgnored = false;
       bool cqOk = false;
       destroyRcConnV2(res.conn, &qpIgnored, &cqOk);
+      bool settled = cqOk || parkEmergency(res.conn, retireRid);
       g_bufferMap.releaseMrRef(devPtr);
-      reg.retired().unreserve(retireRid);
+      if (cqOk) {
+        reg.retired().unreserve(retireRid);
+      }
       reg.unreserveSlot();
+      if (!settled) {
+        /* Even the emergency owner is exhausted: the reservation
+         * cannot be settled without a retry owner, so it must expire
+         * through the ring rather than be dropped silently. */
+        return -2;
+      }
       return -2;
     }
     res.dh = nullptr; /* no device reference was acquired */
@@ -285,18 +342,21 @@ int acquireSession(void* devPtr, SessionResources& res) {
       if (qpOk) {
         reg.retired().unreserve(retireRid);
       }
+      bool parkedOk = true;
       try {
         res.id = reg.insert(std::move(poisoned));
       } catch (...) {
-        /* Allocation failed twice: the survivor has no registry owner.
-         * Report the failure; the references below are released so the
-         * only exposure is the undestroyable verbs object itself. */
         res.id = 0;
+      }
+      if (res.id == 0) {
+        /* Allocation failed twice: give the survivor to the emergency
+         * owner so shutdown still reclaims it. */
+        parkedOk = parkEmergency(res.conn, qpOk ? 0 : retireRid);
       }
       releaseDevice(v2State().device);
       g_bufferMap.releaseMrRef(devPtr);
       reg.unreserveSlot();
-      return res.id != 0 ? -2 : -1;
+      return (res.id != 0 || parkedOk) ? -2 : -1;
     }
     reg.retired().unreserve(retireRid);
     releaseDevice(v2State().device);
@@ -397,6 +457,10 @@ uint64_t v2EntryNowMs() { return steadyNowMs(); }
 
 const char* v2NicName() { return v2State().nicName.c_str(); }
 
+int v2SelectedPort() { return v2State().selectedPort; }
+
+int v2SelectedGidIndex() { return v2State().selectedGidIndex; }
+
 int v2Init(hipObjConfigV2_t* config) {
   V2State& st = v2State();
   if (st.initialized) {
@@ -419,7 +483,7 @@ int v2Init(hipObjConfigV2_t* config) {
     return hipObjRdmaError;
   }
   const char* devName = nullptr;
-  int nicIndex = hipObj::GetClosestNicToGpu(
+  int nicIndex = hipObj::GetClosestNicToGpuSafe(
     gpuDevice, config->v1.nicHint ? config->v1.nicHint : nullptr, &devName);
   if (nicIndex < 0) {
     if (config->v1.nicHint && config->v1.nicHint[0] != '\0') {
@@ -436,9 +500,17 @@ int v2Init(hipObjConfigV2_t* config) {
   std::string controlEndpoint = config->control.controlEndpoint;
   DeviceHandle* dh = new DeviceHandle();
   RcConnection raw;
-  const int ret = (devName != nullptr)
-                    ? hipObj::openRdmaDeviceByName(devName, raw)
-                    : hipObj::openRdmaDevice(nicIndex, raw);
+  int ret = -1;
+  try {
+    /* The open helpers guarantee no exceptions escape (GID selection
+     * and enumeration are wrapped), so the return-code cleanup below
+     * is the only failure path. */
+    ret = (devName != nullptr)
+            ? hipObj::openRdmaDeviceByName(devName, raw)
+            : hipObj::openRdmaDevice(nicIndex, raw);
+  } catch (...) {
+    ret = -1;
+  }
   if (ret != 0) {
     delete dh;
     return hipObjRdmaError;
@@ -447,6 +519,8 @@ int v2Init(hipObjConfigV2_t* config) {
   dh->pd = raw.pd;
   dh->portNum = raw.portNum;
   dh->gidIndex = raw.gidIndex;
+  v2State().selectedPort = static_cast<int>(raw.portNum);
+  v2State().selectedGidIndex = static_cast<int>(raw.gidIndex);
   dh->localGid = raw.localGid;
   st.device = dh;
   st.nicName = std::move(nicNameOut);
@@ -508,6 +582,14 @@ int v2Shutdown() {
   }
   if (poisonLeft || reg.size() > 0) {
     return hipObjRdmaError;
+  }
+  /* Retry any survivor the registry could not take: emergency slots
+   * left over from insertion-time allocation failures. */
+  drainEmergencySlots();
+  for (auto& slot : g_emergencySlots) {
+    if (slot.used) {
+      return hipObjRdmaError;
+    }
   }
   /* Buffers go before the device: every MR must be deregistered
    * while the protection domain is still alive. */
