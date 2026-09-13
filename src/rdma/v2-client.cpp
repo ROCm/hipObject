@@ -51,7 +51,6 @@ namespace v2 {
 
 namespace {
 
-constexpr uint32_t kDefaultConnectDeadlineMs = 10'000;
 constexpr uint32_t kDefaultTransferDeadlineMs = 60'000;
 constexpr uint32_t kDefaultCancelBudgetMs = 1'000;
 /* Diagnostic carried in hipObjError_t.hipError when the operation
