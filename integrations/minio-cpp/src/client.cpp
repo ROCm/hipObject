@@ -113,18 +113,19 @@ namespace {
                 hipObjShutdown();
                 initialized_ = false;
             }
-            hipObjConfig_t cfg{};
+            hipObjConfigV2_t cfg{};
             endpoint_storage_ = (base_url.https ? "https://" : "http://") + base_url.host;
-            cfg.endpoint      = endpoint_storage_.c_str();
-            cfg.region        = base_url.region.c_str();
-            cfg.gpuDevice     = -1;
-            // Without a GPU there is no topology to walk, so hipObjInit can only find
+            cfg.v1.endpoint                 = endpoint_storage_.c_str();
+            cfg.v1.region                   = base_url.region.c_str();
+            cfg.v1.gpuDevice                = -1;
+            cfg.control.controlEndpoint     = endpoint_storage_.c_str();
+            // Without a GPU there is no topology to walk, so hipObjInitV2 can only find
             // a NIC if it is named explicitly. Same variable the examples read.
             if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && hint[0] != '\0') {
                 nic_hint_storage_ = hint;
-                cfg.nicHint       = nic_hint_storage_.c_str();
+                cfg.v1.nicHint    = nic_hint_storage_.c_str();
             }
-            hipObjError_t err = hipObjInit(&cfg);
+            hipObjError_t err = hipObjInitV2(&cfg);
             if (err.opError == hipObjSuccess) {
                 initialized_ = true;
                 active_key_  = key;

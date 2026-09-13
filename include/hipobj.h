@@ -448,6 +448,11 @@ typedef struct {
                                                        for the post-expiry CANCEL. */
     const hipObjControlEndpointV2_t *endpoint;  /*!< Control endpoint (library sets
                                                    from init) */
+    uint32_t                         clientQpn;    /*!< READY: this transfer's QP number.
+                                                        Zero before the endpoint exists. */
+    uint64_t                         clientMrAddr; /*!< READY: registered buffer address.
+                                                        Zero before READY. */
+    uint32_t                         clientMrRkey; /*!< READY: registered buffer rkey */
 } hipObjTransferReqV2_t;
 
 /*! @brief Response to PREPARE @ingroup v2 */
