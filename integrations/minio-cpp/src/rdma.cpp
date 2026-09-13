@@ -545,9 +545,14 @@ std::string controlAuthorityUri(V2CallbackCtx* c,
   }
   /* The object URL fallback carries its own scheme; hand back a
    * scheme-qualified URI so the HTTPS rejection in connectTo applies
-   * uniformly and the Host split below handles both shapes. */
-  return std::string(c->sctx->url.https ? "https" : "http") + "://" +
-         c->sctx->url.HostHeaderValue();
+   * uniformly and the Host split below handles both shapes. BaseUrl
+   * exposes the authority as host/port fields, not a HostHeaderValue
+   * helper (that lives on http::Url). */
+  const minio::s3::BaseUrl& base = c->sctx->url;
+  const std::string authority =
+      base.port != 0 ? base.host + ":" + std::to_string(base.port)
+                     : base.host;
+  return std::string(base.https ? "https" : "http") + "://" + authority;
 }
 
 /* Authority (host[:port]) of a control URI, for the signed Host
@@ -832,7 +837,7 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 // v2 entry points ---------------------------------------------------------
 
 ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{sctx, clientNic()};
+  V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -860,7 +865,7 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{sctx, clientNic()};
+  V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
