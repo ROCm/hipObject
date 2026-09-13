@@ -267,7 +267,6 @@ public:
     return nullptr;
   }
 
-private:
   void snapshot(Cb cb, const hipObjTransferReqV2_t* req) {
     CallRecord r;
     r.cb = cb;
