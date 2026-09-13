@@ -52,6 +52,7 @@ enum class RdmaStatus {
     Ok,
     Failed,
     NotSupported, /* the server can't do this transfer by RDMA; use HTTP */
+    V2Failed,     /* v2 ran and failed; do not retry the same buffer over HTTP */
 };
 
 /* The outcome of an RDMA transfer, and the bytes it moved when it

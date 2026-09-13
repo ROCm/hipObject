@@ -60,13 +60,10 @@ namespace {
 constexpr uint32_t kDefaultConnectDeadlineMs = 10'000;
 constexpr uint32_t kDefaultTransferDeadlineMs = 60'000;
 constexpr uint32_t kDefaultCancelBudgetMs = 1'000;
-/* hipObjError_t has no timeout code. Busy plus this marker records
- * that the whole-transfer deadline expired. */
-constexpr int kDiagDeadlineExpired = 0x54494D45; /* "TIME" */
 constexpr uint32_t kPutGraceMs = 100;
 
 uint64_t steadyNowMs() {
-  auto now = std::chrono::steady_clock::now().time_since_epoch();
+  const auto now = clockSource().now().time_since_epoch();
   return static_cast<uint64_t>(
     std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
 }
@@ -179,14 +176,12 @@ int acquireSession(void* devPtr, SessionResources& res) {
   ConnectionRegistry& reg = registry();
   /* Expired (qpn, psn) records are reclaimable. Collect them before
    * reserving so a full ring does not turn every teardown Busy. */
-  reg.retired().collectExpired(std::chrono::steady_clock::now());
+  reg.retired().collectExpired(clockSource().now());
   if (!bufferMap().acquireMrRef(devPtr)) {
     return -1;
   }
-  res.pinnedBuffer = devPtr;
   if (!reg.reserveSlot()) {
     bufferMap().releaseMrRef(devPtr);
-    res.pinnedBuffer = nullptr;
     return -1;
   }
   /* Reserve retirement capacity before the QP exists. The pair is
@@ -195,7 +190,6 @@ int acquireSession(void* devPtr, SessionResources& res) {
   RetiredRing::Reservation retire(reg.retired());
   if (!retire) {
     bufferMap().releaseMrRef(devPtr);
-    res.pinnedBuffer = nullptr;
     reg.unreserveSlot();
     return -1;
   }
@@ -208,6 +202,7 @@ int acquireSession(void* devPtr, SessionResources& res) {
     if (leftover) {
       hipObj::dropOwnership(res.conn.cq);
     }
+    bufferMap().releaseMrRef(devPtr);
     reg.unreserveSlot();
     return leftover ? -2 : -1;
   }
@@ -222,6 +217,7 @@ int acquireSession(void* devPtr, SessionResources& res) {
       hipObj::dropOwnership(res.conn.qp);
       hipObj::dropOwnership(res.conn.cq);
     }
+    bufferMap().releaseMrRef(devPtr);
     reg.unreserveSlot();
     return (destroyed.qpOk && destroyed.cqOk) ? -1 : -2;
   }
@@ -233,12 +229,15 @@ int acquireSession(void* devPtr, SessionResources& res) {
   entry.device = res.dh;
   entry.clientPsn = 0;
   entry.reservationId = retire.release();
+  entry.pinnedBuffer = devPtr;
   res.id = reg.insert(std::move(entry));
   if (res.id == 0) {
     /* insert() returns before it moves when the reserve is gone, so
      * this local still owns the connection and the retirement id. */
     reg.retired().unreserve(entry.reservationId);
     entry.reservationId = 0;
+    entry.pinnedBuffer = nullptr;
+    bufferMap().releaseMrRef(devPtr);
     res.qp = nullptr;
     res.cq = nullptr;
     releaseDevice(*res.dh);
@@ -277,10 +276,7 @@ ReleaseResult releaseSession(SessionResources& res) {
     releaseDevice(*v2State().device);
     res.deviceRefHeld = false;
   }
-  if (rc == ReleaseResult::Ok && res.pinnedBuffer != nullptr) {
-    bufferMap().releaseMrRef(res.pinnedBuffer);
-    res.pinnedBuffer = nullptr;
-  }
+  res.pinnedBuffer = nullptr;
   return rc;
 }
 } // namespace
@@ -296,10 +292,6 @@ hipObjError_t finalizeOutcome(hipObjError_t wireOutcome, ReleaseResult releaseRc
   }
   return {hipObjInternalError, 0};
 }
-
-bool v2IsInitialized() { return v2State().initialized; }
-
-const char* v2NicName() { return v2State().nicName.c_str(); }
 
 bool v2IsInitialized() {
   return v2State().initialized;
@@ -417,7 +409,8 @@ int v2Shutdown() {
 
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
-               hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs) {
+               hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs,
+               int* diagOut) {
   V2State& st = v2State();
   if (!st.initialized) {
     return hipObjNotInitialized;
@@ -452,7 +445,10 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                               : kDefaultTransferDeadlineMs;
   const uint64_t deadline = startMs + budgetMs;
   if (steadyNowMs() >= deadline) {
-    return hipObjError_t{hipObjBusy, kDiagDeadlineExpired}.opError;
+    if (diagOut != nullptr) {
+      *diagOut = kDiagDeadlineExpired;
+    }
+    return hipObjBusy;
   }
   const uint32_t cancelBudgetMs = st.cancelBudgetMs != 0
                                     ? st.cancelBudgetMs
@@ -484,6 +480,9 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     }
     const ReleaseResult rc = releaseSession(res);
     const hipObjError_t fin0 = finalizeOutcome(wireOutcome, rc);
+    if (diagOut != nullptr) {
+      *diagOut = (fin0.opError == wireOutcome.opError) ? fin0.hipError : 0;
+    }
     return fin0.opError;
   };
 
@@ -511,6 +510,10 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       break;
     }
     const uint32_t psn = *psnOpt;
+    if (registry().retired().contains(res.qpNum, psn)) {
+      outcome = {hipObjBusy, 0};
+      break;
+    }
     {
       ConnectionRegistry& reg = registry();
       reg.withEntry(res.id, [&](ConnectionEntryV2& entry) {
@@ -544,11 +547,19 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
 
     hipObjPrepareReplyV2_t prep;
     std::memset(&prep, 0, sizeof(prep));
+    if (remaining(deadline) == 0) {
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
+      break;
+    }
     const int prc = ops->sendPrepare(ctx, &preq, &prep);
     if (prc != 0) {
       outcome = remaining(deadline) == 0
                     ? hipObjError_t{hipObjBusy, kDiagDeadlineExpired}
                     : hipObjError_t{hipObjS3Error, 0};
+      break;
+    }
+    if (remaining(deadline) == 0) {
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
       break;
     }
     if (prep.httpStatus == 501 && prep.unsupportedMarker) {
@@ -609,7 +620,8 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     wireCancelEligible = true;
     const uint32_t serverPsn = prep.serverPsn;
     /* PUT requires a valid staging advertisement. */
-    if (isPut && (!prep.stagingPresent || prep.stagingAddr == 0)) {
+    if (isPut && (!prep.stagingPresent || prep.stagingAddr == 0 ||
+                  prep.stagingRkey == 0)) {
       outcome = {hipObjInvalidValue, 0};
       break;
     }
@@ -660,8 +672,14 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     rreq.clientQpn = res.qpNum;
     rreq.clientMrAddr = reinterpret_cast<uint64_t>(devPtr);
     rreq.clientMrRkey = mr->rkey;
+    if (remaining(deadline) == 0) {
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
+      break;
+    }
     if (ops->sendReadyRequest(ctx, &rreq) != 0) {
-      outcome = {hipObjS3Error, 0};
+      outcome = remaining(deadline) == 0
+                    ? hipObjError_t{hipObjBusy, kDiagDeadlineExpired}
+                    : hipObjError_t{hipObjS3Error, 0};
       break;
     }
 
@@ -710,8 +728,14 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     /* ---- finishReady: consume the pending FINAL response ---- */
     hipObjFinalReplyV2_t fin;
     std::memset(&fin, 0, sizeof(fin));
+    if (remaining(deadline) == 0) {
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
+      break;
+    }
     if (ops->finishReady(ctx, &rreq, &fin) != 0) {
-      outcome = {hipObjS3Error, 0};
+      outcome = remaining(deadline) == 0
+                    ? hipObjError_t{hipObjBusy, kDiagDeadlineExpired}
+                    : hipObjError_t{hipObjS3Error, 0};
       break;
     }
     const bool finalOk = fin.httpStatus == 200 ||
@@ -720,12 +744,16 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
       outcome = {hipObjS3Error, 0};
       break;
     }
-    if (!fin.cookiePresent || fin.cookieEcho != cookie) {
+    if (!fin.cookiePresent || fin.cookieEcho != cookie || !fin.protocolEcho) {
       outcome = {hipObjRdmaError, 0};
       break;
     }
     if (!transferDone(p)) {
       outcome = {hipObjInternalError, 0};
+      break;
+    }
+    if (remaining(deadline) == 0) {
+      outcome = {hipObjBusy, kDiagDeadlineExpired};
       break;
     }
     outcome = {hipObjSuccess, 0};

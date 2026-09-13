@@ -87,6 +87,9 @@ namespace v2 {
         DeviceHandle *device         = nullptr;
         uint64_t      reservationId  = 0; /* retired-ring slot for this QP */
         uint32_t      clientPsn      = 0; /* client PSN (recorded on destroy) */
+        /* Buffer pin owned by this entry. Released once, when the entry
+         * is fully reclaimed. Null when no pin was acquired. */
+        void         *pinnedBuffer   = nullptr;
         bool          poisoned       = false;
         bool          destroyClaimed = false;
         bool          destroying     = false;

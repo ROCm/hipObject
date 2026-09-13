@@ -962,9 +962,10 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
+    int       diag = 0;
     const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops,
-                                          ctx, entryMs);
-    return {static_cast<hipObjOpError_t>(rc), 0};
+                                          ctx, entryMs, &diag);
+    return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
     return hipObj::handleException();
@@ -985,8 +986,9 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs);
-    return {static_cast<hipObjOpError_t>(rc), 0};
+    int       diag = 0;
+    const int rc   = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs, &diag);
+    return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
     return hipObj::handleException();
