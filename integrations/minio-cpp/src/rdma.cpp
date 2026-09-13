@@ -111,11 +111,7 @@ minio::http::Response executeControlRequest(
   sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
   sign_headers.Add("Content-Length", "0");
 
-  for (const auto& [k, vals] : extra_headers.map) {
-    for (const auto& v : vals) {
-      sign_headers.Add(k, v);
-    }
-  }
+  sign_headers.AddAll(extra_headers);
 
   if (!creds.session_token.empty()) {
     sign_headers.Add("X-Amz-Security-Token", creds.session_token);
@@ -314,7 +310,7 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
     return -1;
   }
 
-  V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
+  V2CallbackCtx cbctx{sctx, clientNicFromToken(token), {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -351,7 +347,7 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
     return -1;
   }
 
-  V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
+  V2CallbackCtx cbctx{sctx, clientNicFromToken(token), {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
