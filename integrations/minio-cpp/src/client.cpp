@@ -17,6 +17,8 @@
 
 namespace hipobj::minio {
 
+namespace minio = ::minio;
+
 namespace {
 
 class HipObjRuntime {
