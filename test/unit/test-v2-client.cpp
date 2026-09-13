@@ -27,6 +27,7 @@
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-client.h"
 #include "../../../src/rdma/v2-clock.h"
+#include "../../../src/rdma/v2-random.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "hipobj.h"
 
