@@ -174,6 +174,7 @@ struct CallRecord {
   std::string target;
   std::string token;
   /* Endpoint URI copy plus the view struct that points at it. */
+  bool hasEndpoint = false;
   std::string endpointUri;
   hipObjControlEndpointV2_t endpointView{};
 };
@@ -302,19 +303,26 @@ public:
     r.cb = cb;
     r.req = *req; /* string fields alias library-owned storage */
     r.session = req->session ? req->session : "";
-    r.req.session = r.session.c_str();
     r.target = req->target ? req->target : "";
-    r.req.target = r.target.c_str();
     r.token = req->token ? req->token : "";
-    r.req.token = r.token.c_str();
-    if (req->endpoint != nullptr && req->endpoint->controlEndpoint != nullptr) {
+    r.hasEndpoint = req->endpoint != nullptr;
+    if (r.hasEndpoint && req->endpoint->controlEndpoint != nullptr) {
       r.endpointUri = req->endpoint->controlEndpoint;
-      r.endpointView.controlEndpoint = r.endpointUri.c_str();
-      r.req.endpoint = &r.endpointView;
-    } else {
-      r.req.endpoint = nullptr;
     }
     calls.push_back(std::move(r));
+    /* Bind pointers against final storage: the record just moved may
+     * have reallocated the vector, so re-point every record. */
+    for (CallRecord& rec : calls) {
+      rec.req.session = rec.session.c_str();
+      rec.req.target = rec.target.c_str();
+      rec.req.token = rec.token.c_str();
+      if (rec.hasEndpoint) {
+        rec.endpointView.controlEndpoint = rec.endpointUri.c_str();
+        rec.req.endpoint = &rec.endpointView;
+      } else {
+        rec.req.endpoint = nullptr;
+      }
+    }
   }
 };
 
@@ -732,7 +740,9 @@ TEST_F(V2ClientTransferTest, UnregisteredBufferRejected) {
 TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
   /* After READY, the FINAL callback must see the remaining budget, not
    * the allowance captured before READY. */
+  ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
+  ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
   consumer_.armGetCompletion = true;
   uint32_t seenPre = 0, seenFinal = 0;
   consumer_.onPrepare = [&](hipObjPrepareReplyV2_t*) {
@@ -753,10 +763,12 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   /* A (qpn, psn) collision with a retired pair inside its reuse
    * window must fail without sending PREPARE. Record the pair the
    * fake verbs stack will hand the next transfer. */
+  ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
-  char buf[16];
+  ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
+  consumer_.armGetCompletion = true;
   const hipObjError_t e0 =
-      hipObjGetV2("b", "k", buf, sizeof(buf), 0, nullptr, &ops_, &consumer_);
+      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
   ASSERT_EQ(e0.opError, hipObjSuccess);
   /* The fake allocator hands each new QP the next number; the coming
    * transfer gets qpn+1 while its PSN is random. Retire every PSN
@@ -775,7 +787,9 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
 }
 
 TEST_F(V2ClientTransferTest, CookieMismatchFails) {
+  ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
+  ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
   consumer_.armGetCompletion = true;
   consumer_.cookieEchoOverride = 0xdeadbeef;
   char buf[16];
