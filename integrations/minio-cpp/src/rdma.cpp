@@ -294,8 +294,8 @@ bool ControlConn::connectToUntil(
        * bind APIs speak netdev names, so translate when the RDMA
        * device name differs. */
       const std::string netdev =
-          rdmaNetdevFor(nic, hipObj::v2::v2SelectedPort(),
-                        hipObj::v2::v2SelectedGidIndex());
+          rdmaNetdevFor(nic, hipObjSelectedPortV2(),
+                        hipObjSelectedGidIndexV2());
       if (netdev.empty()) {
         /* Without a confirmed netdev the selected-interface contract
          * cannot be honored observably; fail the connection rather

@@ -831,12 +831,11 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   const hipObjError_t e0 =
       hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
   ASSERT_EQ(e0.opError, hipObjSuccess);
-  /* Release that connection so its ring record is the retired pair.
-   * The fake allocator hands the next QP the next number; the PSN
-   * source still serves the fixed value, so retiring
-   * (firstQpn + 1, fixedPsn) predicts the next transfer exactly. */
-  const uint32_t firstQpn = 0x2000;
-  const uint32_t nextQpn = firstQpn + 1;
+  /* The fake allocator hands each new QP the next number after the
+   * one just observed, and the PSN source still serves the fixed
+   * value, so retiring (g_lastQpn + 1, fixedPsn) predicts the next
+   * transfer's pair exactly. */
+  const uint32_t nextQpn = g_lastQpn + 1;
   auto& ring = hipObj::v2::registry().retired();
   const uint64_t rid = ring.reserve();
   ASSERT_NE(rid, 0u);

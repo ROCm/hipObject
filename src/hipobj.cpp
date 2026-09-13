@@ -459,6 +459,20 @@ void hipObjFreeNicV2(char* nic) try {
 } catch (...) {
 }
 
+int hipObjSelectedPortV2() try {
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  return hipObj::v2::v2SelectedPort();
+} catch (...) {
+  return 0;
+}
+
+int hipObjSelectedGidIndexV2() try {
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  return hipObj::v2::v2SelectedGidIndex();
+} catch (...) {
+  return -1;
+}
+
 hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
   if (!config) {
     return {hipObjInvalidValue, 0};
