@@ -473,6 +473,28 @@ int hipObjSelectedGidIndexV2() try {
   return -1;
 }
 
+int hipObjInterfaceSnapshotV2(char* nicOut, size_t nicLen, int* portOut,
+                              int* gidOut) try {
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  const hipObj::v2::InterfaceSnapshot snap =
+      hipObj::v2::v2InterfaceSnapshot();
+  if (snap.nic.empty()) {
+    return 0;
+  }
+  if (nicOut != nullptr && nicLen > 0) {
+    std::snprintf(nicOut, nicLen, "%s", snap.nic.c_str());
+  }
+  if (portOut != nullptr) {
+    *portOut = snap.port;
+  }
+  if (gidOut != nullptr) {
+    *gidOut = snap.gidIndex;
+  }
+  return 1;
+} catch (...) {
+  return 0;
+}
+
 hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
   if (!config) {
     return {hipObjInvalidValue, 0};
@@ -499,11 +521,16 @@ hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
   /* Stamp the entry before the lock so the admission wait counts
    * against the whole-transfer budget (contract on the public API). */
   const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
+  /* Capture the interface selection coherently before waiting for
+   * the API lock; the transfer rejects it if initialization changed
+   * in between instead of mixing selections. */
+  const hipObj::v2::InterfaceSnapshot snap =
+      hipObj::v2::v2InterfaceSnapshot();
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   int diag = 0;
   const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
                                         query, ops, ctx, entryMs, true,
-                                        &diag);
+                                        snap.generation, true, &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
@@ -516,12 +543,15 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
   /* Stamp the entry before the lock so the admission wait counts
    * against the whole-transfer budget (contract on the public API). */
   const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
+  const hipObj::v2::InterfaceSnapshot snap =
+      hipObj::v2::v2InterfaceSnapshot();
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   int diag = 0;
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
                                         const_cast<void*>(devPtr), size,
                                         offset, query, ops, ctx, entryMs,
-                                        true, &diag);
+                                        true, snap.generation, true,
+                                        &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();

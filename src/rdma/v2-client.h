@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include "buffer.h"
 #include "hipobj.h"
@@ -59,6 +60,17 @@ const char* v2NicName();
 int v2SelectedPort();
 int v2SelectedGidIndex();
 
+/* Coherent interface selection snapshot: NIC name, port, and GID
+ * index captured together, plus the init generation they belong to.
+ * A transfer may only run when its generation still matches. */
+struct InterfaceSnapshot {
+  std::string nic;
+  int port = 0;
+  int gidIndex = -1;
+  uint64_t generation = 0;
+};
+InterfaceSnapshot v2InterfaceSnapshot();
+
 /* entryMs/haveEntryMs: when haveEntryMs is true the public entry
  * point captured the timestamp before waiting on the api lock, so
  * the lock wait counts against the whole-transfer budget; when
@@ -67,7 +79,8 @@ int v2SelectedGidIndex();
 int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
                uint64_t size, uint64_t offset, const char* query,
                hipObjOpsV2_t* ops, void* ctx, uint64_t entryMs,
-               bool haveEntryMs, int* diagOut = nullptr);
+               bool haveEntryMs, uint64_t snapshotGeneration = 0,
+               bool haveSnapshot = false, int* diagOut = nullptr);
 
 } // namespace v2
 } // namespace hipObj
