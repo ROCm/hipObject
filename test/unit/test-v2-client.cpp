@@ -32,6 +32,9 @@
 
 namespace {
 
+/* Endpoint URI shared by the transfer tests. */
+constexpr const char* kEndpoint = "http://s3.example:9000";
+
 /* ---- fake verbs objects ------------------------------------------------ */
 
 /* Real verbs structs are allocated (never handed to real verbs) so
@@ -210,6 +213,9 @@ public:
   /* Optional observation hooks (set by a test before the transfer). */
   std::function<void(hipObjPrepareReplyV2_t*)> onPrepare;
   std::function<void()> onFinishReady;
+
+  /* Deadline advertised on the request the callback last received. */
+  uint32_t lastSeenDeadlineMs = 0;
 
   void install(hipObjOpsV2_t* ops) {
     ops->sendPrepare = [](void* ctx, const hipObjTransferReqV2_t* req,
