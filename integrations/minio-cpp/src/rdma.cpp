@@ -20,8 +20,10 @@
 
 #include <chrono>
 #include <cstdio>
+#include <dirent.h>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -90,6 +92,49 @@ std::string clientNic() {
   return out;
 }
 
+/* The RDMA device name (e.g. mlx5_0) and the network interface the
+ * kernel routes its GIDs through (e.g. eth0) are frequently not the
+ * same string. SO_BINDTODEVICE and getifaddrs both speak netdev, so
+ * resolve the mapping from sysfs before binding; an empty result
+ * leaves the socket on default routing. */
+std::string rdmaNetdev(const std::string& rdmaDev) {
+  if (rdmaDev.empty()) return {};
+  const std::string ibDir = "/sys/class/infiniband/" + rdmaDev;
+  DIR* d = ::opendir(ibDir.c_str());
+  if (d == nullptr) return {};
+  struct dirent* de;
+  std::string found;
+  while ((de = ::readdir(d)) != nullptr && found.empty()) {
+    if (de->d_name[0] == '.') continue;
+    char* end = nullptr;
+    const long port = std::strtol(de->d_name, &end, 10);
+    if (end == nullptr || *end != '\0' || port <= 0) continue;
+    const std::string ndevsDir =
+      ibDir + "/ports/" + de->d_name + "/gid_attrs/ndevs";
+    DIR* nd = ::opendir(ndevsDir.c_str());
+    if (nd == nullptr) continue;
+    struct dirent* ne;
+    while ((ne = ::readdir(nd)) != nullptr) {
+      if (ne->d_name[0] == '.') continue;
+      const std::string path = ndevsDir + "/" + ne->d_name;
+      FILE* f = std::fopen(path.c_str(), "r");
+      if (f == nullptr) continue;
+      char buf[IFNAMSIZ + 1] = {0};
+      if (std::fgets(buf, sizeof(buf), f) != nullptr) {
+        char* nl = std::strchr(buf, '\n');
+        if (nl != nullptr) *nl = '\0';
+        if (buf[0] != '\0') found = buf;
+      }
+      std::fclose(f);
+      if (!found.empty()) break;
+    }
+    ::closedir(nd);
+  }
+  ::closedir(d);
+  return found;
+}
+}
+
 // ---------------------------------------------------------------------------
 // v2 callback context — carries the per-transfer minio credentials and
 // endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
@@ -122,7 +167,6 @@ struct ControlConn {
   /* Reads one full CRLF-delimited HTTP/1.1 response: status line,
    * headers, then exactly Content-Length body bytes. Fails on chunked
    * or missing length (the control plane never uses them). */
-  bool readResponse(std::string& head, std::string& body, int deadlineMs);
   bool readResponseUntil(
     std::string& head, std::string& body,
     std::chrono::steady_clock::time_point deadlineAt);
@@ -133,12 +177,29 @@ struct V2CallbackCtx {
   S3RdmaContext* sctx;
   std::string clientNic; // NIC the v2 stack selected (hipObjNicV2)
   /* Split READY exchange state: the request was written and the socket
-   * is parked until finishReady reads the response. */
+   * is parked until finishReady reads the response. The parked
+   * deadline carries over, so the read shares the budget the READY
+   * callback computed before writing the request. */
   ControlConn readyConn;
   bool readyPending = false;
+  std::chrono::steady_clock::time_point readyDeadline{};
 };
 
 // hipObjOpsV2_t callbacks -------------------------------------------------
+
+/* Remaining milliseconds until the absolute deadline. Returns -1
+ * when the budget is already exhausted; callers must fail fast
+ * instead of handing a negative value to poll, which waits
+ * indefinitely. The result is clamped into the range poll accepts. */
+static int remainingMs(std::chrono::steady_clock::time_point deadlineAt) {
+  const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      deadlineAt - std::chrono::steady_clock::now())
+                      .count();
+  if (left <= 0) return -1;
+  if (left > static_cast<long long>(std::numeric_limits<int>::max()))
+    return std::numeric_limits<int>::max();
+  return static_cast<int>(left);
+}
 
 /* Dials the control plane at "host[:port]". */
 bool ControlConn::connectToUntil(
@@ -166,6 +227,10 @@ bool ControlConn::connectToUntil(
     return false;
   }
 
+  /* Resolution is synchronous and cannot be interrupted, so do not
+   * even enter it with an exhausted budget. */
+  if (remainingMs(deadlineAt) < 0) return false;
+
   struct addrinfo hints{};
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
@@ -182,9 +247,13 @@ bool ControlConn::connectToUntil(
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     if (!nic.empty()) {
       /* Bind the outbound socket to the RDMA NIC's interface so the
-       * control traffic shares its fate with the data plane. */
+       * control traffic shares its fate with the data plane. The
+       * bind APIs speak netdev names, so translate when the RDMA
+       * device name differs. */
+      const std::string netdev = rdmaNetdev(nic);
+      const std::string& bindIf = !netdev.empty() ? netdev : nic;
       struct ifreq ifr{};
-      std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", nic.c_str());
+      std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", bindIf.c_str());
       if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr,
                      sizeof(ifr)) != 0) {
         /* Fall back to the interface's address when SO_BINDTODEVICE
@@ -192,7 +261,7 @@ bool ControlConn::connectToUntil(
         struct ifaddrs* ifs = nullptr;
         if (getifaddrs(&ifs) == 0) {
           for (struct ifaddrs* i = ifs; i != nullptr; i = i->ifa_next) {
-            if (std::strcmp(i->ifa_name, nic.c_str()) != 0 ||
+            if (std::strcmp(i->ifa_name, bindIf.c_str()) != 0 ||
                 i->ifa_addr == nullptr || i->ifa_addr->sa_family != AF_INET) {
               continue;
             }
@@ -210,25 +279,28 @@ bool ControlConn::connectToUntil(
     int rc = ::connect(fd, ai->ai_addr, ai->ai_addrlen);
     if (rc == 0) break;
     if (errno == EINPROGRESS) {
-      struct pollfd pfd{fd, POLLOUT, 0};
-      int left = static_cast<int>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-          deadlineAt - std::chrono::steady_clock::now())
-          .count());
-      const int pr = poll(&pfd, 1, left);
-      if (left <= 0 || (pr < 0 && errno != EINTR) || pr == 0) {
-        ::close(fd);
-        fd = -1;
-        if (pr < 0 && errno == EINTR) {
-          --ai; /* interrupted: retry this address within the budget */
-          continue;
-        }
-        continue;
+      /* Retry the same address when a signal interrupts the wait; the
+       * addrinfo list is linked, so rewinding with pointer arithmetic
+       * is invalid. */
+      bool writable = false;
+      while (true) {
+        const int left = remainingMs(deadlineAt);
+        if (left < 0) break;
+        struct pollfd pfd{fd, POLLOUT, 0};
+        const int pr = poll(&pfd, 1, left);
+        if (pr < 0 && errno == EINTR) continue;
+        if (pr <= 0) break;           /* budget exhausted or poll error */
+        writable = true;
+        break;
       }
-      int err = 0;
-      socklen_t elen = sizeof(err);
-      getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &elen);
-      if (err == 0) break;
+      if (writable) {
+        int err = 0;
+        socklen_t elen = sizeof(err);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &elen) == 0 &&
+            err == 0) {
+          break;
+        }
+      }
     }
     ::close(fd);
     fd = -1;
@@ -254,14 +326,12 @@ bool ControlConn::sendAllUntil(const std::string& bytes,
   if (fd < 0) return false;
   size_t off = 0;
   while (off < bytes.size()) {
+    const int left = remainingMs(deadlineAt);
+    if (left < 0) return false;
     struct pollfd pfd{fd, POLLOUT, 0};
-    int left = static_cast<int>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-        deadlineAt - std::chrono::steady_clock::now())
-        .count());
     const int pr = poll(&pfd, 1, left);
-    if (left <= 0 || (pr < 0 && errno != EINTR) || pr == 0)
-      return false;
+    if (pr < 0 && errno != EINTR) return false;
+    if (pr == 0) return false;
     ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
@@ -273,14 +343,6 @@ bool ControlConn::sendAllUntil(const std::string& bytes,
     off += static_cast<size_t>(n);
   }
   return true;
-}
-
-bool ControlConn::readResponse(std::string& head, std::string& body,
-                               int deadlineMs) {
-  if (fd < 0) return false;
-  const auto deadlineAt = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(deadlineMs);
-  return readResponseUntil(head, body, deadlineAt);
 }
 
 bool ControlConn::readResponseUntil(
@@ -364,14 +426,12 @@ bool ControlConn::readResponseUntil(
       body = buf.substr(0, contentLen);
       return true;
     }
+    const int left = remainingMs(deadlineAt);
+    if (left < 0) return false;
     struct pollfd pfd{fd, POLLIN, 0};
-    int left = static_cast<int>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-        deadlineAt - std::chrono::steady_clock::now())
-        .count());
     const int pr = poll(&pfd, 1, left);
-    if (left <= 0 || (pr < 0 && errno != EINTR) || pr == 0)
-      return false;
+    if (pr < 0 && errno != EINTR) return false;
+    if (pr == 0) return false;
     char chunk[4096];
     ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
     if (n < 0) {
@@ -506,9 +566,14 @@ std::string replyTokenPayload(const std::string& v) {
 /* Deadline for control I/O: the callback budget the library reported,
  * clamped to a floor so a tiny remainder still gets a fair socket
  * wait instead of an immediate failure. */
+/* Remaining transfer budget for this callback. Zero means exhausted
+ * after earlier phases consumed the allowance, not an invitation to
+ * re-arm a fresh default timeout, so it is reported as zero and the
+ * poll loops fail fast. */
 int controlDeadlineMs(const hipObjTransferReqV2_t* req) {
-  uint32_t r = req->remainingMs;
-  if (r == 0) r = kRdmaTimeoutSecs * 1000;
+  const uint64_t r = req->remainingMs;
+  if (r > static_cast<uint64_t>(std::numeric_limits<int>::max()))
+    return std::numeric_limits<int>::max();
   return static_cast<int>(r);
 }
 
@@ -697,6 +762,7 @@ int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
     return -1;
   }
   c->readyPending = true;
+  c->readyDeadline = deadlineAt;
   return 0;
 }
 
@@ -707,7 +773,7 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
     return -1;
   }
   std::string head, body;
-  if (!c->readyConn.readResponse(head, body, controlDeadlineMs(req))) {
+  if (!c->readyConn.readResponseUntil(head, body, c->readyDeadline)) {
     c->readyConn.close();
     c->readyPending = false;
     return -1;
@@ -768,6 +834,21 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
           csumOk = false;
         }
       }
+      /* Canonical form: the padding bits of the last data character
+       * must be zero, so an encoding like AAAAAAAAB= is rejected the
+       * same way the wire codec rejects it. */
+      if (csumOk) {
+        const auto b64v = [](char ch) -> int {
+          if (ch >= 'A' && ch <= 'Z') return ch - 'A';
+          if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
+          if (ch >= '0' && ch <= '9') return ch - '0' + 52;
+          if (ch == '+') return 62;
+          return 63;
+        };
+        if (b64v(payload[10]) & 0x3) {
+          csumOk = false;
+        }
+      }
     }
     if (!csumOk) {
       return -1;
@@ -819,7 +900,7 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 // v2 entry points ---------------------------------------------------------
 
 ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
+  V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -847,7 +928,7 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{sctx, clientNic(), {}, false};
+  V2CallbackCtx cbctx{sctx, clientNic(), {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
