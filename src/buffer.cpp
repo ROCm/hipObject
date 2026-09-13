@@ -298,6 +298,13 @@ BufferMap::isRegistered(const void *devPtr) const
     return find(devPtr) != nullptr;
 }
 
+bool
+BufferMap::isDeviceBacked(const void *devPtr) const
+{
+    const BufEntry *entry = find(devPtr);
+    return entry != nullptr && entry->isDmabuf;
+}
+
 #ifdef HIPOBJECT_V2_API
 bool
 BufferMap::acquireMrRef(void *devPtr)

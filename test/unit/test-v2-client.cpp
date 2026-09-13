@@ -381,6 +381,7 @@ protected:
     std::strncpy(consumer_.prep.session, "00112233445566778899aabbccddeeff",
                  sizeof(consumer_.prep.session) - 1);
     consumer_.prep.httpStatus = 200;
+    consumer_.prep.protocolEcho = 1;
     consumer_.prep.serverPsn = 5;
     consumer_.prep.stagingAddr = 0x70000000;
     consumer_.prep.stagingRkey = 0x21436587;
@@ -546,8 +547,32 @@ TEST_F(V2ClientTransferTest, FinalCookieMismatchFails) {
   EXPECT_EQ(err.opError, hipObjRdmaError);
 }
 
-/* Buffer admission: an unregistered pointer is rejected before any
- * callback fires. */
+TEST_F(V2ClientTransferTest, MissingProtocolEchoFailsPrepare) {
+  consumer_.prep.protocolEcho = 0;
+  const hipObjError_t err =
+      hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(err.opError, hipObjRdmaError);
+  /* No READY may follow a rejected PREPARE. */
+  for (const auto& c : consumer_.calls) {
+    EXPECT_NE(c.cb, Cb::Ready);
+  }
+}
+
+TEST_F(V2ClientTransferTest, MalformedSessionFailsPrepare) {
+  std::strncpy(consumer_.prep.session, "nothex!!",
+               sizeof(consumer_.prep.session) - 1);
+  const hipObjError_t err =
+      hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(err.opError, hipObjRdmaError);
+}
+
+TEST_F(V2ClientTransferTest, ZeroServerPsnFailsPrepare) {
+  consumer_.prep.serverPsn = 0;
+  const hipObjError_t err =
+      hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(err.opError, hipObjRdmaError);
+}
+
 TEST_F(V2ClientTransferTest, UnregisteredBufferRejected) {
   alignas(4096) char unreg[512];
   const hipObjError_t err =

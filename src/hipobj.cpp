@@ -491,6 +491,12 @@ try {
     if (state.initialized) {
         return {hipObjAlreadyInitialized, 0};
     }
+#ifdef HIPOBJECT_V2_API
+    /* v1 and v2 share the buffer map and must not mix protection domains. */
+    if (hipObj::v2::v2IsInitialized()) {
+        return {hipObjAlreadyInitialized, 0};
+    }
+#endif
     if (!hipObj::ibvAvailable()) {
         return {hipObjRdmaError, 0};
     }
@@ -690,7 +696,13 @@ try {
     }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
+#ifdef HIPOBJECT_V2_API
+        if (hipObj::v2::v2ProtectionDomain() == nullptr) {
+            return {hipObjNotInitialized, 0};
+        }
+#else
         return {hipObjNotInitialized, 0};
+#endif
     }
     if (!devPtr) {
         return {hipObjInvalidValue, 0};
@@ -893,6 +905,16 @@ catch (...) {
 }
 
 #ifdef HIPOBJECT_V2_API
+const char *
+hipObjNicV2(void)
+try {
+    const char *nic = hipObj::v2::v2NicName();
+    return (nic != nullptr && nic[0] != '\0') ? nic : nullptr;
+}
+catch (...) {
+    return nullptr;
+}
+
 hipObjError_t
 hipObjInitV2(hipObjConfigV2_t *config)
 try {
@@ -928,6 +950,10 @@ hipObjError_t
 hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
+    /* The whole-transfer budget includes the admission wait. */
+    const uint64_t entryMs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
@@ -936,7 +962,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops, ctx);
+    const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops,
+                                          ctx, entryMs);
     return {static_cast<hipObjOpError_t>(rc), 0};
 }
 catch (...) {
@@ -947,6 +974,9 @@ hipObjError_t
 hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
+    const uint64_t entryMs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
@@ -955,7 +985,7 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx);
+    const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs);
     return {static_cast<hipObjOpError_t>(rc), 0};
 }
 catch (...) {
