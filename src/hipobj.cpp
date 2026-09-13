@@ -22,12 +22,13 @@
 #include "state.h"
 #include "token.h"
 #include "transport.h"
+#include "v2-client.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
 
 namespace hipObj {
 
-static BufferMap g_bufferMap;
+BufferMap g_bufferMap;
 static RcConnection g_conn;
 
 static hipObjError_t handleException() {
@@ -212,7 +213,10 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
 hipObjError_t hipObjShutdown(void) try {
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
-    return HIPOBJ_SUCCESS;
+    /* v1 was never initialized; a v2-only session still tears down. */
+    std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+    const int rc = hipObj::v2::v2Shutdown();
+    return {static_cast<hipObjOpError_t>(rc), 0};
   }
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   /* v2 first: release every connection (destroy retries included);
@@ -385,6 +389,52 @@ hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
     return {hipObjInvalidValue, 0};
   }
   return HIPOBJ_SUCCESS;
+} catch (...) {
+  return hipObj::handleException();
+}
+
+/* ---- hipobj-rc-v2 entry points ---- */
+
+hipObjError_t hipObjInitV2(hipObjConfigV2_t* config) try {
+  if (!config) {
+    return {hipObjInvalidValue, 0};
+  }
+  /* Resolve GPU auto-selection here so v2Init stays seam-free. */
+  if (config->v1.gpuDevice < 0) {
+    int gpuDevice = 0;
+    hipError_t err = hipObj::hipOps().hipGetDevice(&gpuDevice);
+    if (err != hipSuccess) {
+      return {hipObjRdmaError, 0};
+    }
+    config->v1.gpuDevice = gpuDevice;
+  }
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  const int rc = hipObj::v2::v2Init(config);
+  return {static_cast<hipObjOpError_t>(rc), 0};
+} catch (...) {
+  return hipObj::handleException();
+}
+
+hipObjError_t hipObjGetV2(const char* bucket, const char* key, void* devPtr,
+                          uint64_t size, uint64_t offset, const char* query,
+                          hipObjOpsV2_t* ops, void* ctx) try {
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  const int rc = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset,
+                                        query, ops, ctx);
+  return {static_cast<hipObjOpError_t>(rc), 0};
+} catch (...) {
+  return hipObj::handleException();
+}
+
+hipObjError_t hipObjPutV2(const char* bucket, const char* key,
+                          const void* devPtr, uint64_t size, uint64_t offset,
+                          const char* query, hipObjOpsV2_t* ops,
+                          void* ctx) try {
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
+  const int rc = hipObj::v2::v2Transfer(1, bucket, key,
+                                        const_cast<void*>(devPtr), size,
+                                        offset, query, ops, ctx);
+  return {static_cast<hipObjOpError_t>(rc), 0};
 } catch (...) {
   return hipObj::handleException();
 }
