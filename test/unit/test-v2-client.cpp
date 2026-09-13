@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -29,14 +30,15 @@ namespace {
 
 /* ---- fake verbs objects ------------------------------------------------ */
 
-struct FakeQp {
-  uint32_t qp_num;
-};
-struct FakeCq {
-  int magic = 0x4351;
+/* Real verbs structs are allocated (never handed to real verbs) so
+ * field reads like qp->qp_num see the true layout; the completion
+ * queue keeps its scripted completions in a side map keyed by the
+ * struct address. */
+struct FakeCqState {
   /* Completions the next poll_cq calls return, in order. */
   std::vector<struct ibv_wc> pending;
 };
+std::map<struct ibv_cq*, FakeCqState> g_cqStates;
 
 /* Side-channel handles the consumer mock uses to script the data
  * phase: the most recent objects the fakes handed the library. */
@@ -71,36 +73,41 @@ int fakePostSend(struct ibv_qp*, struct ibv_send_wr* wr,
 }
 
 int fakePollCq(struct ibv_cq* cq, int, struct ibv_wc* wc) {
-  FakeCq* f = reinterpret_cast<FakeCq*>(cq);
-  if (f->pending.empty()) {
+  auto it = g_cqStates.find(cq);
+  if (it == g_cqStates.end() || it->second.pending.empty()) {
     return 0;
   }
-  *wc = f->pending.front();
-  f->pending.erase(f->pending.begin());
+  *wc = it->second.pending.front();
+  it->second.pending.erase(it->second.pending.begin());
   return 1;
 }
 
 struct ibv_qp* fakeCreateQp(struct ibv_pd*, struct ibv_qp_init_attr*) {
   static uint32_t nextQpn = 0x2000;
-  const uint32_t qpn = nextQpn++;
-  g_lastQpn = qpn;
-  return reinterpret_cast<struct ibv_qp*>(new FakeQp{qpn});
+  auto* qp = new struct ibv_qp();
+  std::memset(qp, 0, sizeof(*qp));
+  qp->qp_num = nextQpn++;
+  g_lastQpn = qp->qp_num;
+  return qp;
 }
 
 struct ibv_cq* fakeCreateCq(struct ibv_context*, int, void*,
                             struct ibv_comp_channel*, int) {
-  auto* cq = new FakeCq();
+  auto* cq = new struct ibv_cq();
+  std::memset(cq, 0, sizeof(*cq));
+  g_cqStates[cq] = FakeCqState{};
   g_lastCq = cq;
-  return reinterpret_cast<struct ibv_cq*>(cq);
+  return cq;
 }
 
 int fakeDestroyQp(struct ibv_qp* qp) {
-  delete reinterpret_cast<FakeQp*>(qp);
+  delete qp;
   return 0;
 }
 
 int fakeDestroyCq(struct ibv_cq* cq) {
-  delete reinterpret_cast<FakeCq*>(cq);
+  g_cqStates.erase(cq);
+  delete cq;
   return 0;
 }
 
