@@ -9,3 +9,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/HIPOBJUseGTest.cmake)
 # links hipobj, so a shared hipobj would put a second copy of every
 # library global in the process.
 hipobj_add_test(test-rdma-header test-rdma-header.cpp)
+
+hipobj_add_test(test-bridge-bounds test-bridge-bounds.cpp)
+target_include_directories(test-bridge-bounds PRIVATE
+  ${PROJECT_SOURCE_DIR}/integrations/minio-cpp/include)

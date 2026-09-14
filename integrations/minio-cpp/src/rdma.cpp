@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <limits>
@@ -20,6 +21,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #include <fcntl.h>
@@ -134,6 +136,41 @@ namespace {
 
     using RdmaTokenPtr = std::unique_ptr<char, RdmaTokenDeleter>;
 
+    constexpr unsigned kMaxOutstandingResolvers = 4;
+    std::atomic<unsigned> g_outstandingResolvers{0};
+    int (*g_resolveHook)(const char *, const char *, const struct addrinfo *, struct addrinfo **) = nullptr;
+    bool g_forceResolverLaunchFail = false;
+
+    bool acquireResolverSlot()
+    {
+        unsigned cur = g_outstandingResolvers.load(std::memory_order_relaxed);
+        while (cur < kMaxOutstandingResolvers) {
+            if (g_outstandingResolvers.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel,
+                                                             std::memory_order_relaxed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void releaseResolverSlot()
+    {
+        g_outstandingResolvers.fetch_sub(1, std::memory_order_acq_rel);
+    }
+
+    minio::creds::Credentials fetchCreds(S3RdmaContext *sctx)
+    {
+        if (sctx->haveCachedCreds && static_cast<bool>(sctx->cachedCreds)) {
+            return sctx->cachedCreds;
+        }
+        minio::creds::Credentials creds = sctx->provider->Fetch();
+        if (static_cast<bool>(creds)) {
+            sctx->cachedCreds = creds;
+            sctx->haveCachedCreds = true;
+        }
+        return creds;
+    }
+
     // ---------------------------------------------------------------------------
     // v2 callback context: carries the per-transfer minio credentials and
     // endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
@@ -177,6 +214,12 @@ namespace {
             closeConn();
         }
     };
+
+    bool connectControlForTestImpl(const std::string &hostPort, std::chrono::steady_clock::time_point deadlineAt)
+    {
+        ControlConn conn;
+        return conn.connectTo(hostPort, "", deadlineAt, 0, -1);
+    }
 
     struct V2CallbackCtx {
         S3RdmaContext *sctx;
@@ -292,15 +335,33 @@ namespace {
             auto st = std::make_shared<ResolveState>();
             const std::string hostCopy = host;
             const std::string portCopy = port;
-            std::thread resolver([st, hostCopy, portCopy, hints]() {
-                struct addrinfo *res = nullptr;
-                const int rc = getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
-                std::lock_guard<std::mutex> lk(st->mu);
-                st->rc = rc;
-                st->result = res;
-                st->done = true;
-                st->cv.notify_all();
-            });
+            if (!acquireResolverSlot()) {
+                return false;
+            }
+            if (g_forceResolverLaunchFail) {
+                releaseResolverSlot();
+                return false;
+            }
+            std::thread resolver;
+            try {
+                resolver = std::thread([st, hostCopy, portCopy, hints]() {
+                    struct addrinfo *res = nullptr;
+                    const int rc = g_resolveHook != nullptr
+                                       ? g_resolveHook(hostCopy.c_str(), portCopy.c_str(), &hints, &res)
+                                       : getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
+                    {
+                        std::lock_guard<std::mutex> lk(st->mu);
+                        st->rc = rc;
+                        st->result = res;
+                        st->done = true;
+                        st->cv.notify_all();
+                    }
+                    releaseResolverSlot();
+                });
+            } catch (const std::system_error &) {
+                releaseResolverSlot();
+                return false;
+            }
             std::unique_lock<std::mutex> lk(st->mu);
             if (!st->cv.wait_until(lk, deadlineAt, [&]() { return st->done; })) {
                 resolver.detach();
@@ -541,7 +602,7 @@ namespace {
             return false;
         }
         minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-        minio::creds::Credentials creds = sctx->provider->Fetch();
+        minio::creds::Credentials creds = fetchCreds(sctx);
         if (std::chrono::steady_clock::now() >= deadlineAt) {
             return false;
         }
@@ -995,6 +1056,44 @@ namespace {
 
 } // namespace
 
+namespace test {
+unsigned outstandingResolverCount()
+{
+    return g_outstandingResolvers.load(std::memory_order_relaxed);
+}
+
+void resetOutstandingResolvers()
+{
+    g_outstandingResolvers.store(0, std::memory_order_relaxed);
+}
+
+void setResolveHook(int (*fn)(const char *, const char *, const struct addrinfo *, struct addrinfo **))
+{
+    g_resolveHook = fn;
+}
+
+void setForceResolverLaunchFail(bool fail)
+{
+    g_forceResolverLaunchFail = fail;
+}
+
+minio::creds::Credentials fetchCredsForTest(S3RdmaContext *sctx)
+{
+    return fetchCreds(sctx);
+}
+
+bool connectControlForTest(const std::string &hostPort, std::chrono::steady_clock::time_point deadline)
+{
+#ifdef HIPOBJECT_V2_API
+    return connectControlForTestImpl(hostPort, deadline);
+#else
+    (void)hostPort;
+    (void)deadline;
+    return false;
+#endif
+}
+} // namespace test
+
 RdmaResult
 rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
 {
@@ -1005,7 +1104,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     const std::string rdma_token(token ? token : "");
 
     minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-    minio::creds::Credentials creds = sctx->provider->Fetch();
+    minio::creds::Credentials creds = fetchCreds(sctx);
     minio::utils::Multimap    query_params;
     minio::http::Url          url;
     const std::string        &region = sctx->region;
@@ -1096,7 +1195,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     const std::string rdma_token(token ? token : "");
 
     minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-    minio::creds::Credentials creds = sctx->provider->Fetch();
+    minio::creds::Credentials creds = fetchCreds(sctx);
     minio::utils::Multimap    query_params;
     minio::http::Url          url;
     const std::string        &region = sctx->region;
