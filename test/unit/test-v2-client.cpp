@@ -564,6 +564,7 @@ TEST_F(V2ClientTransferTest, GetCallbackDataInterleaving) {
  * single fake device ("fake0") on port 1; GID index is whatever
  * device open recorded (non-negative). */
 TEST_F(V2ClientTransferTest, CallbacksCarrySelectionTuple) {
+  consumer_.armGetCompletion = true;
   const hipObjError_t err =
     hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
   ASSERT_EQ(err.opError, hipObjSuccess);
