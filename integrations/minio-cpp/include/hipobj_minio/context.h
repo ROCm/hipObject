@@ -27,6 +27,11 @@ struct S3RdmaContext {
   unsigned int partNumber = 0;
   std::string checksum;
   std::string etag;
+  /* Last successful provider fetch for this transfer. Empty
+   * expiration never expires; a timed credential is reused until
+   * Credentials::operator bool() reports it spent. */
+  minio::creds::Credentials cachedCreds{};
+  bool haveCachedCreds = false;
 };
 
 } // namespace hipobj::minio

@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <dirent.h>
@@ -29,6 +30,7 @@
 #include <limits>
 #include <map>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <hipobj.h>
@@ -110,7 +112,65 @@ std::string rdmaNetdevFor(const std::string& rdmaDev, int port, int gidIdx) {
   std::fclose(f);
   return found;
 }
+
+/* Outstanding detached DNS workers. A stalled getaddrinfo used to
+ * leave an uncapped thread behind every timed-out connect; the
+ * semaphore admits a bounded number of those workers so a slow
+ * resolver cannot grow without limit. */
+constexpr unsigned kMaxOutstandingResolvers = 4;
+std::atomic<unsigned> g_outstandingResolvers{0};
+int (*g_resolveHook)(const char*, const char*, const struct addrinfo*,
+                     struct addrinfo**) = nullptr;
+bool g_forceResolverLaunchFail = false;
+
+bool acquireResolverSlot() {
+  unsigned cur = g_outstandingResolvers.load(std::memory_order_relaxed);
+  while (cur < kMaxOutstandingResolvers) {
+    if (g_outstandingResolvers.compare_exchange_weak(
+          cur, cur + 1, std::memory_order_acq_rel,
+          std::memory_order_relaxed)) {
+      return true;
+    }
+  }
+  return false;
 }
+
+void releaseResolverSlot() {
+  g_outstandingResolvers.fetch_sub(1, std::memory_order_acq_rel);
+}
+
+minio::creds::Credentials fetchCreds(S3RdmaContext* sctx) {
+  if (sctx->haveCachedCreds && static_cast<bool>(sctx->cachedCreds)) {
+    return sctx->cachedCreds;
+  }
+  minio::creds::Credentials creds = sctx->provider->Fetch();
+  if (static_cast<bool>(creds)) {
+    sctx->cachedCreds = creds;
+    sctx->haveCachedCreds = true;
+  }
+  return creds;
+}
+} // namespace
+
+namespace test {
+unsigned outstandingResolverCount() {
+  return g_outstandingResolvers.load(std::memory_order_relaxed);
+}
+void resetOutstandingResolvers() {
+  g_outstandingResolvers.store(0, std::memory_order_relaxed);
+}
+void setResolveHook(int (*fn)(const char*, const char*,
+                              const struct addrinfo*,
+                              struct addrinfo**)) {
+  g_resolveHook = fn;
+}
+void setForceResolverLaunchFail(bool fail) {
+  g_forceResolverLaunchFail = fail;
+}
+minio::creds::Credentials fetchCredsForTest(S3RdmaContext* sctx) {
+  return fetchCreds(sctx);
+}
+} // namespace test
 
 // ---------------------------------------------------------------------------
 // v2 callback context — carries the per-transfer minio credentials and
@@ -150,6 +210,15 @@ struct ControlConn {
     std::chrono::steady_clock::time_point deadlineAt);
   ~ControlConn() { close(); }
 };
+
+namespace test {
+bool connectControlForTest(
+  const std::string& host_port,
+  std::chrono::steady_clock::time_point deadline) {
+  ControlConn conn;
+  return conn.connectToUntil(host_port, "", deadline, 0, -1);
+}
+} // namespace test
 
 struct V2CallbackCtx {
   S3RdmaContext* sctx;
@@ -256,26 +325,40 @@ bool ControlConn::connectToUntil(
     auto st = std::make_shared<ResolveState>();
     const std::string hostCopy = host;
     const std::string portCopy = port;
-    std::thread resolver([st, hostCopy, portCopy, hints]() {
-      struct addrinfo* res = nullptr;
-      const int rc =
-          getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
-      std::lock_guard<std::mutex> lk(st->mu);
-      st->rc = rc;
-      st->result = res;
-      st->done = true;
-      st->cv.notify_all();
-      /* The worker never frees a successful result: it stays owned by
-       * the shared state, which either hands it to the waiting caller
-       * (takeResult below) or frees it in its own destructor when
-       * the caller timed out and abandoned it. */
-    });
+    if (!acquireResolverSlot()) {
+      return false;
+    }
+    if (g_forceResolverLaunchFail) {
+      releaseResolverSlot();
+      return false;
+    }
+    std::thread resolver;
+    try {
+      resolver = std::thread([st, hostCopy, portCopy, hints]() {
+        struct addrinfo* res = nullptr;
+        const int rc = g_resolveHook
+          ? g_resolveHook(hostCopy.c_str(), portCopy.c_str(), &hints, &res)
+          : getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
+        {
+          std::lock_guard<std::mutex> lk(st->mu);
+          st->rc = rc;
+          st->result = res;
+          st->done = true;
+          st->cv.notify_all();
+        }
+        releaseResolverSlot();
+      });
+    } catch (const std::system_error&) {
+      releaseResolverSlot();
+      return false;
+    }
     std::unique_lock<std::mutex> lk(st->mu);
     if (!st->cv.wait_until(lk, deadlineAt,
                            [&]() { return st->done; })) {
       /* Timeout: the worker keeps the shared state alive, and any
        * result it later publishes is reclaimed by the state's
-       * destructor when the worker's reference is the last one. */
+       * destructor when the worker's reference is the last one.
+       * The worker itself releases the resolver slot. */
       resolver.detach();
       return false;
     }
@@ -542,7 +625,7 @@ bool buildControlExchange(ControlExchange& out, S3RdmaContext* sctx,
    * whose time was already consumed by them. */
   if (std::chrono::steady_clock::now() >= deadlineAt) return false;
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
-  minio::creds::Credentials creds = sctx->provider->Fetch();
+  minio::creds::Credentials creds = fetchCreds(sctx);
   if (std::chrono::steady_clock::now() >= deadlineAt) return false;
   minio::utils::Multimap query_params;
   minio::utils::Multimap sign_headers;
@@ -1060,7 +1143,7 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
                 static_cast<unsigned long>(size));
 
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
-  minio::creds::Credentials creds = sctx->provider->Fetch();
+  minio::creds::Credentials creds = fetchCreds(sctx);
   minio::utils::Multimap query_params;
   minio::http::Url url;
   const std::string& region = sctx->region;
@@ -1149,7 +1232,7 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
                 static_cast<unsigned long>(size));
 
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
-  minio::creds::Credentials creds = sctx->provider->Fetch();
+  minio::creds::Credentials creds = fetchCreds(sctx);
   minio::utils::Multimap query_params;
   minio::http::Url url;
   const std::string& region = sctx->region;

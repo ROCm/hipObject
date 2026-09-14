@@ -7,6 +7,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
+#include <netdb.h>
+#include <string>
 
 #include "hipobj_minio/context.h"
 
@@ -63,5 +66,18 @@ ssize_t rdmaGet(S3RdmaContext* ctx, const char* token, const void* buf,
 ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size);
 
 ssize_t rdmaGetWithRetry(S3RdmaContext* ctx, void* buf, size_t size);
+
+namespace test {
+unsigned outstandingResolverCount();
+void resetOutstandingResolvers();
+void setResolveHook(int (*fn)(const char* host, const char* service,
+                              const struct addrinfo* hints,
+                              struct addrinfo** res));
+void setForceResolverLaunchFail(bool fail);
+bool connectControlForTest(
+  const std::string& host_port,
+  std::chrono::steady_clock::time_point deadline);
+minio::creds::Credentials fetchCredsForTest(S3RdmaContext* sctx);
+} // namespace test
 
 } // namespace hipobj::minio
