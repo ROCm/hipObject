@@ -174,6 +174,7 @@ struct CallRecord {
   std::string session;
   std::string target;
   std::string token;
+  std::string nic;
   /* Endpoint URI copy plus the view struct that points at it. */
   bool hasEndpoint = false;
   std::string endpointUri;
@@ -329,6 +330,7 @@ public:
     r.session = req->session ? req->session : "";
     r.target = req->target ? req->target : "";
     r.token = req->token ? req->token : "";
+    r.nic = req->nic ? req->nic : "";
     r.hasEndpoint = req->endpoint != nullptr;
     if (r.hasEndpoint && req->endpoint->controlEndpoint != nullptr) {
       r.endpointUri = req->endpoint->controlEndpoint;
@@ -340,6 +342,7 @@ public:
       rec.req.session = rec.session.c_str();
       rec.req.target = rec.target.c_str();
       rec.req.token = rec.token.c_str();
+      rec.req.nic = rec.nic.c_str();
       if (rec.hasEndpoint) {
         rec.endpointView.controlEndpoint = rec.endpointUri.c_str();
         rec.req.endpoint = &rec.endpointView;
@@ -502,6 +505,16 @@ protected:
   hipObj::NicEnumerator* savedNics_ = nullptr;
 };
 
+const char* CbName(Cb cb) {
+  switch (cb) {
+    case Cb::Prepare: return "Prepare";
+    case Cb::ReadyRequest: return "ReadyRequest";
+    case Cb::FinishReady: return "FinishReady";
+    case Cb::Cancel: return "Cancel";
+  }
+  return "?";
+}
+
 /* ---- happy-path interleaving (GET) -------------------------------------- */
 
 /* The library must call sendPrepare, then sendReadyRequest, then
@@ -541,6 +554,70 @@ TEST_F(V2ClientTransferTest, GetCallbackDataInterleaving) {
 
   /* No CANCEL on the success path. */
   EXPECT_EQ(consumer_.cancelCalls, 0);
+}
+
+/* ---- interface selection fields ---------------------------------------- */
+
+/* Every callback request must describe the interface the data plane
+ * selected: the NIC name from topology enumeration and the port and
+ * GID index the device open settled on. The fixtures enumerate a
+ * single fake device ("fake0") on port 1; GID index is whatever
+ * device open recorded (non-negative). */
+TEST_F(V2ClientTransferTest, CallbacksCarrySelectionTuple) {
+  const hipObjError_t err =
+    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  ASSERT_EQ(err.opError, hipObjSuccess);
+
+  ASSERT_EQ(consumer_.calls.size(), 3u);
+  const int gid = consumer_.calls[0].req.nicGidIndex;
+  EXPECT_GE(gid, 0);
+  for (const CallRecord& rec : consumer_.calls) {
+    EXPECT_STREQ(rec.req.nic, "fake0") << CbName(rec.cb);
+    EXPECT_EQ(rec.req.nicPort, 1) << CbName(rec.cb);
+    EXPECT_EQ(rec.req.nicGidIndex, gid) << CbName(rec.cb);
+  }
+}
+
+/* PUT uses the same request fill as GET; pin the tuple on that
+ * path as well so a PUT-only regression is visible. */
+TEST_F(V2ClientTransferTest, PutCallbacksCarrySelectionTuple) {
+  consumer_.fin.httpStatus = 204;
+  consumer_.armPutCompletion = true;
+
+  const hipObjError_t err =
+    hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  ASSERT_EQ(err.opError, hipObjSuccess);
+
+  ASSERT_EQ(consumer_.calls.size(), 3u);
+  const int gid = consumer_.calls[0].req.nicGidIndex;
+  EXPECT_GE(gid, 0);
+  for (const CallRecord& rec : consumer_.calls) {
+    EXPECT_STREQ(rec.req.nic, "fake0") << CbName(rec.cb);
+    EXPECT_EQ(rec.req.nicPort, 1) << CbName(rec.cb);
+    EXPECT_EQ(rec.req.nicGidIndex, gid) << CbName(rec.cb);
+  }
+}
+
+/* A CANCEL after a data-phase expiry must carry the same selection
+ * tuple as PREPARE, not a stale or cleared view. */
+TEST_F(V2ClientTransferTest, CancelCarriesSelectionTuple) {
+  ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
+  ASSERT_EQ(initV2("http://s3.example:9000", 150), hipObjSuccess);
+  ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
+  consumer_.armGetCompletion = false;
+
+  const hipObjError_t err =
+    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  EXPECT_EQ(err.opError, hipObjBusy);
+
+  const CallRecord* prep = consumer_.find(Cb::Prepare);
+  ASSERT_NE(prep, nullptr);
+  const CallRecord* cancel = consumer_.find(Cb::Cancel);
+  ASSERT_NE(cancel, nullptr);
+  EXPECT_STREQ(cancel->req.nic, "fake0");
+  EXPECT_EQ(cancel->req.nicPort, 1);
+  EXPECT_EQ(cancel->req.nicGidIndex, prep->req.nicGidIndex);
+  EXPECT_GE(cancel->req.nicGidIndex, 0);
 }
 
 /* ---- happy-path interleaving (PUT) -------------------------------------- */
