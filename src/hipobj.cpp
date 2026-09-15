@@ -157,10 +157,6 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   if (!config) {
     return {hipObjInvalidValue, 0};
   }
-  /* Serialize initialization and every buffer-map mutation with the
-   * transfers: the v2 stack drives RDMA under this same lock, and the
-   * buffer map is not internally synchronized. */
-  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   hipObj::DriverState& state = hipObj::getState();
   if (state.initialized) {
     return {hipObjAlreadyInitialized, 0};
@@ -312,7 +308,6 @@ hipObjError_t hipObjBufDeregister(void* devPtr) try {
   hipObj::DriverState& state = hipObj::getState();
 #ifdef HIPOBJECT_V2_API
   if (!state.initialized && hipObj::v2::v2ProtectionDomain() == nullptr) {
-    /* Neither v1 nor v2 is initialized; nothing can be registered. */
     return {hipObjNotInitialized, 0};
   }
 #endif
@@ -454,9 +449,7 @@ char* hipObjNicV2() try {
   return nullptr;
 }
 
-void hipObjFreeNicV2(char* nic) try {
-  std::free(nic);
-} catch (...) {
+void hipObjFreeNicV2(char* nic) try { std::free(nic); } catch (...) {
 }
 
 int hipObjSelectedPortV2() try {
@@ -476,8 +469,7 @@ int hipObjSelectedGidIndexV2() try {
 int hipObjInterfaceSnapshotV2(char* nicOut, size_t nicLen, int* portOut,
                               int* gidOut) try {
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
-  const hipObj::v2::InterfaceSnapshot snap =
-      hipObj::v2::v2InterfaceSnapshot();
+  const hipObj::v2::InterfaceSnapshot snap = hipObj::v2::v2InterfaceSnapshot();
   if (snap.nic.empty()) {
     return 0;
   }
@@ -546,10 +538,9 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
   const uint64_t generation = hipObj::v2::v2InitGeneration();
   int diag = 0;
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
-                                        const_cast<void*>(devPtr), size,
-                                        offset, query, ops, ctx, entryMs,
-                                        true, generation, true,
-                                        &diag);
+                                        const_cast<void*>(devPtr), size, offset,
+                                        query, ops, ctx, entryMs, true,
+                                        generation, true, &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
