@@ -294,10 +294,29 @@ namespace {
         if (slash != std::string::npos) {
             host = host.substr(0, slash);
         }
-        const size_t colon = host.rfind(':');
-        if (colon != std::string::npos) {
-            port = host.substr(colon + 1);
-            host = host.substr(0, colon);
+        if (!host.empty() && host.front() == '[') {
+            /* Bracketed IPv6 literal: the port follows the closing bracket.
+             * rfind(':') would otherwise split inside the address. */
+            const size_t close = host.find(']');
+            if (close == std::string::npos) {
+                return false;
+            }
+            if (close + 1 < host.size()) {
+                if (host[close + 1] != ':' || close + 2 >= host.size()) {
+                    return false;
+                }
+                port = host.substr(close + 2);
+                if (port.find_first_not_of("0123456789") != std::string::npos) {
+                    return false;
+                }
+            }
+            host = host.substr(1, close - 1);
+        } else {
+            const size_t colon = host.rfind(':');
+            if (colon != std::string::npos) {
+                port = host.substr(colon + 1);
+                host = host.substr(0, colon);
+            }
         }
         if (https) {
             /* The direct control path is plain HTTP. TLS is out of scope. */
@@ -429,7 +448,11 @@ namespace {
                 }
             }
             const int flags = fcntl(fd, F_GETFL, 0);
-            fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+            if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+                ::close(fd);
+                fd = -1;
+                continue;
+            }
             const int rc = ::connect(fd, ai->ai_addr, ai->ai_addrlen);
             if (rc == 0) {
                 break;
@@ -504,6 +527,15 @@ namespace {
         return true;
     }
 
+    int statusCodeFromHead(const std::string &head)
+    {
+        const size_t sp = head.find(' ');
+        if (sp == std::string::npos) {
+            return 0;
+        }
+        return static_cast<int>(std::strtol(head.c_str() + sp + 1, nullptr, 10));
+    }
+
     bool ControlConn::readResponse(std::string &head, std::string &body,
                                    std::chrono::steady_clock::time_point deadlineAt)
     {
@@ -529,8 +561,9 @@ namespace {
                         const std::string line = head.substr(pos, eol - pos);
                         pos                    = (eol == head.size()) ? head.size() : eol + 2;
                         const std::string cl = "content-length:";
-                        const std::string te = "transfer-encoding:";
-                        if (line.size() >= te.size() && strncasecmp(line.c_str(), te.c_str(), te.size()) == 0) {
+                        const std::string transferEncoding = "transfer-encoding:";
+                        if (line.size() >= transferEncoding.size() &&
+                            strncasecmp(line.c_str(), transferEncoding.c_str(), transferEncoding.size()) == 0) {
                             return false;
                         }
                         if (line.size() >= cl.size() && strncasecmp(line.c_str(), cl.c_str(), cl.size()) == 0) {
@@ -554,7 +587,14 @@ namespace {
                         }
                     }
                     if (lengthCount != 1) {
-                        return false;
+                        /* RFC 9110 forbids Content-Length on a 204, so a
+                         * bodyless 204 is a zero-length body, not a framing
+                         * error. */
+                        if (lengthCount == 0 && statusCodeFromHead(head) == 204) {
+                            contentLen = 0;
+                        } else {
+                            return false;
+                        }
                     }
                 }
             }
@@ -1259,70 +1299,20 @@ RdmaResult
 rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
 #ifdef HIPOBJECT_V2_API
-    // Try the v2 protocol first; fall back to v1 only when the server
-    // explicitly signals it does not support hipobj-rc-v2.
-    const RdmaResult v2 = rdmaPutV2(ctx, buf, size);
-    if (v2.status != RdmaStatus::NotSupported) {
-        return v2;
-    }
+    return rdmaPutV2(ctx, buf, size);
+#else
+    return {RdmaStatus::Failed};
 #endif /* HIPOBJECT_V2_API */
-    RdmaResult ret{RdmaStatus::Failed};
-    for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
-        char               *rawToken = nullptr;
-        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
-        const RdmaTokenPtr  token(rawToken);
-        if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v1 put: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
-        }
-        // A buffer the NIC cannot reach directly is registered as a host
-        // staging buffer, so the bytes have to be there before the server
-        // reads it.
-        hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
-        if (serr.opError != hipObjSuccess) {
-            rdmaTrace("v1 put: stage to host: ", hipObjGetErrorString(serr.opError));
-            return {RdmaStatus::Failed};
-        }
-        ret = rdmaPut(ctx, token.get(), size);
-        if ((ret.status == RdmaStatus::Ok && ret.bytes > 0) || ret.status == RdmaStatus::NotSupported) {
-            return ret;
-        }
-    }
-    return ret;
 }
 
 RdmaResult
 rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
 #ifdef HIPOBJECT_V2_API
-    const RdmaResult v2 = rdmaGetV2(ctx, buf, size);
-    if (v2.status != RdmaStatus::NotSupported) {
-        return v2;
-    }
+    return rdmaGetV2(ctx, buf, size);
+#else
+    return {RdmaStatus::Failed};
 #endif /* HIPOBJECT_V2_API */
-    RdmaResult ret{RdmaStatus::Failed};
-    for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
-        char               *rawToken = nullptr;
-        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
-        const RdmaTokenPtr  token(rawToken);
-        if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v1 get: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
-        }
-        ret = rdmaGet(ctx, token.get(), size);
-        if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
-            hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
-            if (serr.opError != hipObjSuccess) {
-                rdmaTrace("v1 get: stage to device: ", hipObjGetErrorString(serr.opError));
-                return {RdmaStatus::Failed};
-            }
-            return ret;
-        }
-        if (ret.status == RdmaStatus::NotSupported) {
-            return ret;
-        }
-    }
-    return ret;
 }
 
 } // namespace hipobj::minio
