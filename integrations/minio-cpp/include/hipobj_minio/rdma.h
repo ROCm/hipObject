@@ -47,8 +47,7 @@ inline constexpr int kRdmaReplyPartialContent = 206;
 inline constexpr int kRdmaReplyNotImplemented = 501;
 
 inline constexpr long kRdmaConnectTimeoutSecs = 5;
-inline constexpr long kRdmaTimeoutSecs        = 10;
-inline constexpr int  kRdmaMaxAttempts        = 2;
+inline constexpr long kRdmaTimeoutSecs = 10;
 
 /* How an RDMA transfer ended */
 enum class RdmaStatus {
