@@ -32,10 +32,10 @@ public:
                            minio::creds::Provider* provider) {
     std::lock_guard<std::mutex> lock(mutex_);
     const std::string port = base_url.port == 0
-      ? std::string()
-      : ":" + std::to_string(base_url.port);
+                               ? std::string()
+                               : ":" + std::to_string(base_url.port);
     std::string key = base_url.host + port + ":" + base_url.region +
-      (base_url.https ? ":https" : ":http");
+                      (base_url.https ? ":https" : ":http");
     if (initialized_ && key == active_key_) {
       return HIPOBJ_SUCCESS;
     }

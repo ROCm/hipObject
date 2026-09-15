@@ -5,11 +5,12 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <chrono>
-#include <netdb.h>
 #include <string>
+
+#include <netdb.h>
 
 #include "hipobj_minio/context.h"
 
@@ -55,7 +56,6 @@ inline constexpr ssize_t kRdmaV2Failed = -3;
 
 inline constexpr long kRdmaConnectTimeoutSecs = 5;
 inline constexpr long kRdmaTimeoutSecs = 10;
-inline constexpr int kRdmaMaxAttempts = 2;
 
 ssize_t rdmaPut(S3RdmaContext* ctx, const char* token, const void* buf,
                 size_t size);
@@ -74,9 +74,8 @@ void setResolveHook(int (*fn)(const char* host, const char* service,
                               const struct addrinfo* hints,
                               struct addrinfo** res));
 void setForceResolverLaunchFail(bool fail);
-bool connectControlForTest(
-  const std::string& host_port,
-  std::chrono::steady_clock::time_point deadline);
+bool connectControlForTest(const std::string& host_port,
+                           std::chrono::steady_clock::time_point deadline);
 minio::creds::Credentials fetchCredsForTest(S3RdmaContext* sctx);
 } // namespace test
 

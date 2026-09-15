@@ -5,39 +5,38 @@
 
 #include "hipobj_minio/rdma.h"
 
+#include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
-#include <net/if.h>
-#include <ifaddrs.h>
+#include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <map>
+#include <mutex>
+#include <string>
+#include <system_error>
+#include <thread>
+#include <vector>
+
+#include <dirent.h>
 #include <fcntl.h>
+#include <hipobj.h>
+#include <ifaddrs.h>
+#include <miniocpp/http.h>
+#include <miniocpp/request.h>
+#include <miniocpp/signer.h>
+#include <miniocpp/utils.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include <atomic>
-#include <chrono>
-#include <cstdio>
-#include <dirent.h>
-#include <condition_variable>
-#include <mutex>
-#include <thread>
-#include <cstdlib>
-#include <cstring>
-#include <limits>
-#include <map>
-#include <string>
-#include <system_error>
-#include <vector>
-
-#include <hipobj.h>
-#include <miniocpp/http.h>
-#include <miniocpp/request.h>
-#include <miniocpp/signer.h>
-#include <miniocpp/utils.h>
 
 namespace hipobj::minio {
 
@@ -61,20 +60,6 @@ int parseRdmaReply(const std::string& rdma_reply) {
   return httpCode;
 }
 
-/* Canonical rdma-target fallback: /bucket/key with the sorted query
- * appended. The library normally supplies req->target already built;
- * this covers a null target (defensive) without a second encoder. */
-std::string buildObjectTarget(const char* bucket, const char* key,
-                              const char* query) {
-  std::string t = std::string("/") + (bucket ? bucket : "") + "/" +
-                  (key ? key : "");
-  if (query && query[0] != '\0') {
-    t += "?";
-    t += query;
-  }
-  return t;
-}
-
 std::string clientNicFromToken(const char* token) {
   char nicIp[32];
   hipObjError_t err = hipObjTokenClientNic(token, nicIp, sizeof(nicIp));
@@ -90,33 +75,31 @@ std::string clientNicFromToken(const char* token) {
  * resolve the mapping from sysfs before binding; an empty result
  * fails the connection (fail closed) rather than silently falling
  * back to default routing. */
-/* Netdev backing the data plane's exact port and GID. The port and
- * GID index come from the library's init-time selection (token
- * fallback for a pre-init probe), so multi-port or VLAN-GID devices
- * bind the interface the RDMA address handle actually uses, never an
- * arbitrary sibling. */
+/* Resolve the selected RDMA port and GID to its netdev for socket binding. */
 std::string rdmaNetdevFor(const std::string& rdmaDev, int port, int gidIdx) {
-  if (rdmaDev.empty() || port <= 0 || gidIdx < 0) return {};
-  const std::string path = "/sys/class/infiniband/" + rdmaDev +
-                           "/ports/" + std::to_string(port) +
-                           "/gid_attrs/ndevs/" + std::to_string(gidIdx);
+  if (rdmaDev.empty() || port <= 0 || gidIdx < 0)
+    return {};
+  const std::string path = "/sys/class/infiniband/" + rdmaDev + "/ports/" +
+                           std::to_string(port) + "/gid_attrs/ndevs/" +
+                           std::to_string(gidIdx);
   FILE* f = std::fopen(path.c_str(), "r");
-  if (f == nullptr) return {};
+  if (f == nullptr)
+    return {};
   char buf[IFNAMSIZ + 1] = {0};
   std::string found;
   if (std::fgets(buf, sizeof(buf), f) != nullptr) {
     char* nl = std::strchr(buf, '\n');
-    if (nl != nullptr) *nl = '\0';
-    if (buf[0] != '\0') found = buf;
+    if (nl != nullptr)
+      *nl = '\0';
+    if (buf[0] != '\0')
+      found = buf;
   }
   std::fclose(f);
   return found;
 }
 
-/* Outstanding detached DNS workers. A stalled getaddrinfo used to
- * leave an uncapped thread behind every timed-out connect; the
- * semaphore admits a bounded number of those workers so a slow
- * resolver cannot grow without limit. */
+/* Limit outstanding resolver workers so stalled DNS lookups cannot exhaust
+ * threads. */
 constexpr unsigned kMaxOutstandingResolvers = 4;
 std::atomic<unsigned> g_outstandingResolvers{0};
 int (*g_resolveHook)(const char*, const char*, const struct addrinfo*,
@@ -127,8 +110,7 @@ bool acquireResolverSlot() {
   unsigned cur = g_outstandingResolvers.load(std::memory_order_relaxed);
   while (cur < kMaxOutstandingResolvers) {
     if (g_outstandingResolvers.compare_exchange_weak(
-          cur, cur + 1, std::memory_order_acq_rel,
-          std::memory_order_relaxed)) {
+          cur, cur + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) {
       return true;
     }
   }
@@ -159,8 +141,7 @@ unsigned outstandingResolverCount() {
 void resetOutstandingResolvers() {
   g_outstandingResolvers.store(0, std::memory_order_relaxed);
 }
-void setResolveHook(int (*fn)(const char*, const char*,
-                              const struct addrinfo*,
+void setResolveHook(int (*fn)(const char*, const char*, const struct addrinfo*,
                               struct addrinfo**)) {
   g_resolveHook = fn;
 }
@@ -199,22 +180,28 @@ struct ControlConn {
       fd = -1;
     }
   }
-  bool sendAllUntil(
-    const std::string& bytes,
-    std::chrono::steady_clock::time_point deadlineAt);
-  /* Reads one full CRLF-delimited HTTP/1.1 response: status line,
-   * headers, then exactly Content-Length body bytes. Fails on chunked
-   * or missing length (the control plane never uses them). */
-  bool readResponseUntil(
-    std::string& head, std::string& body,
-    std::chrono::steady_clock::time_point deadlineAt);
-  ~ControlConn() { close(); }
+  bool sendAllUntil(const std::string& bytes,
+                    std::chrono::steady_clock::time_point deadlineAt);
+  /* Read a Content-Length-framed response, or a bodyless 204; reject
+   * Transfer-Encoding. */
+  bool readResponseUntil(std::string& head, std::string& body,
+                         std::chrono::steady_clock::time_point deadlineAt);
+  ~ControlConn() {
+    close();
+  }
 };
 
+/* Parse the status code from the HTTP response head. */
+int statusCodeFromHead(const std::string& head) {
+  size_t sp = head.find(' ');
+  if (sp == std::string::npos)
+    return 0;
+  return static_cast<int>(std::strtol(head.c_str() + sp + 1, nullptr, 10));
+}
+
 namespace test {
-bool connectControlForTest(
-  const std::string& host_port,
-  std::chrono::steady_clock::time_point deadline) {
+bool connectControlForTest(const std::string& host_port,
+                           std::chrono::steady_clock::time_point deadline) {
   ControlConn conn;
   return conn.connectToUntil(host_port, "", deadline, 0, -1);
 }
@@ -249,7 +236,8 @@ static int remainingMs(std::chrono::steady_clock::time_point deadlineAt) {
   const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
                       deadlineAt - std::chrono::steady_clock::now())
                       .count();
-  if (left <= 0) return -1;
+  if (left <= 0)
+    return -1;
   if (left > static_cast<long long>(std::numeric_limits<int>::max()))
     return std::numeric_limits<int>::max();
   return static_cast<int>(left);
@@ -258,8 +246,8 @@ static int remainingMs(std::chrono::steady_clock::time_point deadlineAt) {
 /* Dials the control plane at "host[:port]". */
 bool ControlConn::connectToUntil(
   const std::string& host_port, const std::string& nic,
-  std::chrono::steady_clock::time_point deadlineAt,
-  int selectedPort, int selectedGid) {
+  std::chrono::steady_clock::time_point deadlineAt, int selectedPort,
+  int selectedGid) {
   close();
   std::string host = host_port;
   std::string port = "80";
@@ -270,11 +258,30 @@ bool ControlConn::connectToUntil(
     host = host_port.substr(scheme + 3);
   }
   size_t slash = host.find('/');
-  if (slash != std::string::npos) host = host.substr(0, slash);
-  size_t colon = host.rfind(':');
-  if (colon != std::string::npos) {
-    port = host.substr(colon + 1);
-    host = host.substr(0, colon);
+  if (slash != std::string::npos)
+    host = host.substr(0, slash);
+  if (!host.empty() && host.front() == '[') {
+    /* Bracketed IPv6 literal: the port, if any, follows the closing
+     * bracket; rfind(':') would otherwise split inside the address. */
+    const size_t close = host.find(']');
+    if (close == std::string::npos)
+      return false;
+    if (close + 1 < host.size()) {
+      if (host[close + 1] != ':' || close + 2 >= host.size()) {
+        return false;
+      }
+      port = host.substr(close + 2);
+      if (port.find_first_not_of("0123456789") != std::string::npos) {
+        return false;
+      }
+    }
+    host = host.substr(1, close - 1);
+  } else {
+    size_t colon = host.rfind(':');
+    if (colon != std::string::npos) {
+      port = host.substr(colon + 1);
+      host = host.substr(0, colon);
+    }
   }
   if (https) {
     /* TLS termination is out of scope for the direct control path:
@@ -284,13 +291,13 @@ bool ControlConn::connectToUntil(
 
   /* Resolution is synchronous and cannot be interrupted, so do not
    * even enter it with an exhausted budget. */
-  if (remainingMs(deadlineAt) < 0) return false;
+  if (remainingMs(deadlineAt) < 0)
+    return false;
 
-  struct addrinfo hints{};
+  struct addrinfo hints {};
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo* list = nullptr;
-  int gaiRc = 0;
   {
     /* DNS resolution is not cancellable in place. Run it on a helper
      * thread and bound the wait by the deadline; on expiry the
@@ -303,11 +310,8 @@ bool ControlConn::connectToUntil(
       bool done = false;
       /* Set once, read after done under mu. */
       int rc = 0;
-      /* The state owns every result it holds. The destructor reclaims
-       * an unpublished result: after a timeout the caller detaches
-       * and never looks at rc/result again, so a late successful
-       * result must still be freed by whoever releases the last
-       * reference (the worker's shared_ptr). */
+      /* Own the DNS result until the caller takes it; free late results
+       * after timeout. */
       struct addrinfo* result = nullptr;
       ~ResolveState() {
         if (result != nullptr) {
@@ -337,8 +341,10 @@ bool ControlConn::connectToUntil(
       resolver = std::thread([st, hostCopy, portCopy, hints]() {
         struct addrinfo* res = nullptr;
         const int rc = g_resolveHook
-          ? g_resolveHook(hostCopy.c_str(), portCopy.c_str(), &hints, &res)
-          : getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
+                         ? g_resolveHook(hostCopy.c_str(), portCopy.c_str(),
+                                         &hints, &res)
+                         : getaddrinfo(hostCopy.c_str(), portCopy.c_str(),
+                                       &hints, &res);
         {
           std::lock_guard<std::mutex> lk(st->mu);
           st->rc = rc;
@@ -353,18 +359,15 @@ bool ControlConn::connectToUntil(
       return false;
     }
     std::unique_lock<std::mutex> lk(st->mu);
-    if (!st->cv.wait_until(lk, deadlineAt,
-                           [&]() { return st->done; })) {
-      /* Timeout: the worker keeps the shared state alive, and any
-       * result it later publishes is reclaimed by the state's
-       * destructor when the worker's reference is the last one.
-       * The worker itself releases the resolver slot. */
+    if (!st->cv.wait_until(lk, deadlineAt, [&]() {
+          return st->done;
+        })) {
+      /* The detached worker retains the result owner and releases its
+       * resolver slot. */
       resolver.detach();
       return false;
     }
-    /* Take ownership of a successful result while the lock is held;
-     * the worker already finished writing, but taking it under the
-     * mutex keeps the destructor invariant single-threaded. */
+    /* Transfer result ownership under the mutex. */
     struct addrinfo* taken = (st->rc == 0) ? st->takeResult() : nullptr;
     lk.unlock();
     resolver.join();
@@ -373,22 +376,19 @@ bool ControlConn::connectToUntil(
     }
     list = taken;
   }
-  if (gaiRc != 0 || list == nullptr) {
-    return false;
-  }
-  /* Every exit below must release the resolver allocation; the early
-   * interface-binding failures previously returned around the single
-   * freeaddrinfo at the end of the loop. */
+  /* Free the resolver result on every exit path. */
   struct AddrInfoOwner {
     struct addrinfo* p;
     ~AddrInfoOwner() {
-      if (p) freeaddrinfo(p);
+      if (p)
+        freeaddrinfo(p);
     }
   } addrOwner{list};
   int fd = -1;
   for (struct addrinfo* ai = list; ai != nullptr; ai = ai->ai_next) {
     fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if (fd < 0) continue;
+    if (fd < 0)
+      continue;
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     if (!nic.empty()) {
@@ -396,8 +396,7 @@ bool ControlConn::connectToUntil(
        * control traffic shares its fate with the data plane. The
        * bind APIs speak netdev names, so translate when the RDMA
        * device name differs. */
-      const std::string netdev =
-          rdmaNetdevFor(nic, selectedPort, selectedGid);
+      const std::string netdev = rdmaNetdevFor(nic, selectedPort, selectedGid);
       if (netdev.empty()) {
         /* Without a confirmed netdev the selected-interface contract
          * cannot be honored observably; fail the connection rather
@@ -405,7 +404,7 @@ bool ControlConn::connectToUntil(
         ::close(fd);
         return false;
       }
-      struct ifreq ifr{};
+      struct ifreq ifr {};
       std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", netdev.c_str());
       bool bound = setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr,
                               sizeof(ifr)) == 0;
@@ -433,22 +432,33 @@ bool ControlConn::connectToUntil(
         return false;
       }
     }
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    const int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+      /* Without nonblocking I/O the poll-driven deadline loop below
+       * is meaningless: a stalled peer could block connect, send, or
+       * recv past deadlineAt. Treat it as this address failing. */
+      ::close(fd);
+      fd = -1;
+      continue;
+    }
     int rc = ::connect(fd, ai->ai_addr, ai->ai_addrlen);
-    if (rc == 0) break;
+    if (rc == 0)
+      break;
     if (errno == EINPROGRESS) {
-      /* Retry the same address when a signal interrupts the wait; the
-       * addrinfo list is linked, so rewinding with pointer arithmetic
-       * is invalid. */
+      /* Retry interrupted polls for this address until the deadline. */
       bool writable = false;
       while (true) {
         const int left = remainingMs(deadlineAt);
-        if (left < 0) break;
-        struct pollfd pfd{fd, POLLOUT, 0};
+        if (left < 0)
+          break;
+        struct pollfd pfd {
+          fd, POLLOUT, 0
+        };
         const int pr = poll(&pfd, 1, left);
-        if (pr < 0 && errno == EINTR) continue;
-        if (pr <= 0) break;           /* budget exhausted or poll error */
+        if (pr < 0 && errno == EINTR)
+          continue;
+        if (pr <= 0)
+          break; /* budget exhausted or poll error */
         writable = true;
         break;
       }
@@ -464,7 +474,8 @@ bool ControlConn::connectToUntil(
     ::close(fd);
     fd = -1;
   }
-  if (fd < 0) return false;
+  if (fd < 0)
+    return false;
   /* Keep the socket nonblocking: sendAll/readResponse drive every
    * byte through poll, so a stalled peer cannot block past the
    * deadline. */
@@ -474,30 +485,33 @@ bool ControlConn::connectToUntil(
   return true;
 }
 
-/* Deadline-absolute variant: the caller computes one callback-wide
- * deadline and shares it across connect, send, and read so the sum of
- * every step stays inside the reported budget instead of each step
- * re-arming a fresh allowance. */
-bool ControlConn::sendAllUntil(const std::string& bytes,
-                               std::chrono::steady_clock::time_point
-                                 deadlineAt) {
-  if (fd < 0) return false;
+bool ControlConn::sendAllUntil(
+  const std::string& bytes, std::chrono::steady_clock::time_point deadlineAt) {
+  if (fd < 0)
+    return false;
   size_t off = 0;
   while (off < bytes.size()) {
     const int left = remainingMs(deadlineAt);
-    if (left < 0) return false;
-    struct pollfd pfd{fd, POLLOUT, 0};
+    if (left < 0)
+      return false;
+    struct pollfd pfd {
+      fd, POLLOUT, 0
+    };
     const int pr = poll(&pfd, 1, left);
-    if (pr < 0 && errno != EINTR) return false;
-    if (pr == 0) return false;
-    ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
+    if (pr < 0 && errno != EINTR)
+      return false;
+    if (pr == 0)
+      return false;
+    ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off,
+                       MSG_NOSIGNAL);
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
         continue; /* poll said writable; retry the partial window */
       }
       return false;
     }
-    if (n == 0) return false;
+    if (n == 0)
+      return false;
     off += static_cast<size_t>(n);
   }
   return true;
@@ -506,7 +520,8 @@ bool ControlConn::sendAllUntil(const std::string& bytes,
 bool ControlConn::readResponseUntil(
   std::string& head, std::string& body,
   std::chrono::steady_clock::time_point deadlineAt) {
-  if (fd < 0) return false;
+  if (fd < 0)
+    return false;
   std::string buf;
   size_t headEnd = std::string::npos;
   size_t contentLen = std::string::npos;
@@ -517,64 +532,65 @@ bool ControlConn::readResponseUntil(
         head = buf.substr(0, headEnd);
         const std::string rest = buf.substr(headEnd + 4);
         buf = rest;
-        /* Framing contract for this client: exactly one
-         * Content-Length, no Transfer-Encoding, no interim 1xx. The
-         * reference server always sends Content-Length; anything else
-         * is rejected rather than misread as an empty body. */
+        /* Reject Transfer-Encoding and duplicate Content-Length; permit a
+         * bodyless 204 without Content-Length. */
         size_t pos = 0;
         bool haveLen = false;
         bool chunked = false;
         while (pos < head.size()) {
           size_t eol = head.find("\r\n", pos);
-          if (eol == std::string::npos) eol = head.size();
+          if (eol == std::string::npos)
+            eol = head.size();
           std::string line = head.substr(pos, eol - pos);
           pos = (eol == head.size()) ? head.size() : eol + 2;
           const std::string needle = "content-length:";
           if (line.size() >= needle.size() &&
               strncasecmp(line.c_str(), needle.c_str(), needle.size()) == 0) {
-            if (haveLen) return false; /* duplicate */
+            if (haveLen)
+              return false; /* duplicate */
             haveLen = true;
-            const std::string num =
-              line.substr(needle.size());
+            const std::string num = line.substr(needle.size());
             /* Trim surrounding whitespace (SP/HTAB), then require at
              * least one decimal digit and nothing else: signs,
              * prefixes, embedded spaces, or trailing garbage are
              * framing errors, not zero. */
-            const size_t first =
-              num.find_first_not_of(" \t");
-            const size_t last =
-              num.find_last_not_of(" \t");
+            const size_t first = num.find_first_not_of(" \t");
+            const size_t last = num.find_last_not_of(" \t");
             if (first == std::string::npos) {
               return false; /* empty or all-whitespace */
             }
-            const std::string digits =
-              num.substr(first, last - first + 1);
-            if (digits.find_first_not_of("0123456789") !=
-                  std::string::npos ||
+            const std::string digits = num.substr(first, last - first + 1);
+            if (digits.find_first_not_of("0123456789") != std::string::npos ||
                 digits.size() > 20) {
               return false;
             }
             errno = 0;
             char* endp = nullptr;
-            const unsigned long long v =
-              std::strtoull(digits.c_str(), &endp, 10);
-            if (errno != 0 || endp == nullptr ||
-                *endp != '\0') {
+            const unsigned long long v = std::strtoull(digits.c_str(), &endp,
+                                                       10);
+            if (errno != 0 || *endp != '\0') {
               return false;
             }
             contentLen = static_cast<size_t>(v);
           }
-          const std::string te = "transfer-encoding:";
-          if (line.size() >= te.size() &&
-              strncasecmp(line.c_str(), te.c_str(), te.size()) == 0) {
+          const std::string transferEncoding = "transfer-encoding:";
+          if (line.size() >= transferEncoding.size() &&
+              strncasecmp(line.c_str(), transferEncoding.c_str(),
+                          transferEncoding.size()) == 0) {
             chunked = true;
           }
         }
-        if (chunked) return false;
+        if (chunked)
+          return false;
         if (!haveLen) {
-          /* No length at all is only acceptable for a no-body status
-           * or HEAD-like replies; this client never sends those, so
-           * treat it as malformed framing. */
+          /* RFC 9110 forbids Content-Length on a 204, so a compliant
+           * bodyless 204 is framed as a zero-length body rather than
+           * rejected as malformed framing. */
+          if (statusCodeFromHead(head) == 204) {
+            body.clear();
+            return true;
+          }
+          /* Other responses require Content-Length. */
           return false;
         }
       }
@@ -585,11 +601,16 @@ bool ControlConn::readResponseUntil(
       return true;
     }
     const int left = remainingMs(deadlineAt);
-    if (left < 0) return false;
-    struct pollfd pfd{fd, POLLIN, 0};
+    if (left < 0)
+      return false;
+    struct pollfd pfd {
+      fd, POLLIN, 0
+    };
     const int pr = poll(&pfd, 1, left);
-    if (pr < 0 && errno != EINTR) return false;
-    if (pr == 0) return false;
+    if (pr < 0 && errno != EINTR)
+      return false;
+    if (pr == 0)
+      return false;
     char chunk[4096];
     ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
     if (n < 0) {
@@ -598,9 +619,11 @@ bool ControlConn::readResponseUntil(
       }
       return false;
     }
-    if (n == 0) return false; /* peer closed mid-response */
+    if (n == 0)
+      return false; /* peer closed mid-response */
     buf.append(chunk, static_cast<size_t>(n));
-    if (buf.size() > (1u << 20)) return false; /* bounded */
+    if (buf.size() > (1u << 20))
+      return false; /* bounded */
   }
 }
 
@@ -610,8 +633,8 @@ bool ControlConn::readResponseUntil(
  * cancel}; the canonical target (object path + sorted query) travels
  * in a header so the signed path stays the fixed control path. */
 struct ControlExchange {
-  std::string head;   /* status line + headers, CRLF lines */
-  std::string bytes;  /* full serialized request */
+  std::string head;  /* status line + headers, CRLF lines */
+  std::string bytes; /* full serialized request */
 };
 
 bool buildControlExchange(ControlExchange& out, S3RdmaContext* sctx,
@@ -623,10 +646,12 @@ bool buildControlExchange(ControlExchange& out, S3RdmaContext* sctx,
   /* Credential fetching and signing are synchronous and unbounded by
    * the socket layer; refuse to spend the wire budget on a transfer
    * whose time was already consumed by them. */
-  if (std::chrono::steady_clock::now() >= deadlineAt) return false;
+  if (std::chrono::steady_clock::now() >= deadlineAt)
+    return false;
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
   minio::creds::Credentials creds = fetchCreds(sctx);
-  if (std::chrono::steady_clock::now() >= deadlineAt) return false;
+  if (std::chrono::steady_clock::now() >= deadlineAt)
+    return false;
   minio::utils::Multimap query_params;
   minio::utils::Multimap sign_headers;
   sign_headers.Add("Host", hostHeaderValue);
@@ -639,8 +664,8 @@ bool buildControlExchange(ControlExchange& out, S3RdmaContext* sctx,
   }
   minio::signer::SignV4S3(minio::http::Method::kPost, control_path,
                           sctx->region, sign_headers, query_params,
-                          creds.access_key, creds.secret_key,
-                          kUnsignedPayload, date);
+                          creds.access_key, creds.secret_key, kUnsignedPayload,
+                          date);
   std::string req = "POST ";
   req += control_path;
   req += " HTTP/1.1\r\n";
@@ -663,37 +688,34 @@ std::string headerValue(const std::string& head, const std::string& name) {
   }
   while (pos < head.size()) {
     size_t eol = head.find("\r\n", pos);
-    if (eol == std::string::npos) eol = head.size();
+    if (eol == std::string::npos)
+      eol = head.size();
     std::string line = head.substr(pos, eol - pos);
     pos = (eol == head.size()) ? head.size() : eol + 2;
     if (line.size() > lower.size() + 1 &&
         strncasecmp(line.c_str(), lower.c_str(), lower.size()) == 0 &&
         line[lower.size()] == ':') {
       size_t vs = lower.size() + 1;
-      while (vs < line.size() && line[vs] == ' ') ++vs;
+      while (vs < line.size() && line[vs] == ' ')
+        ++vs;
       return line.substr(vs);
     }
   }
   return std::string();
 }
 
-int statusCodeFromHead(const std::string& head) {
-  /* "HTTP/1.1 200 OK" */
-  size_t sp = head.find(' ');
-  if (sp == std::string::npos) return 0;
-  return static_cast<int>(
-    std::strtol(head.c_str() + sp + 1, nullptr, 10));
-}
-
 uint32_t hexToU32(const std::string& v) {
   /* The cookie echo is exactly eight hex digits on the wire. */
-  if (v.size() != 8) return 0;
+  if (v.size() != 8)
+    return 0;
   for (char ch : v) {
-    if (!std::isxdigit(static_cast<unsigned char>(ch))) return 0;
+    if (!std::isxdigit(static_cast<unsigned char>(ch)))
+      return 0;
   }
   char* endp = nullptr;
   unsigned long n = std::strtoul(v.c_str(), &endp, 16);
-  if (endp == nullptr || *endp != '\0' || n > 0xffffffffUL) return 0;
+  if (*endp != '\0' || n > 0xffffffffUL)
+    return 0;
   return static_cast<uint32_t>(n);
 }
 
@@ -711,8 +733,7 @@ std::string hex24Bridge(uint32_t v) {
 
 std::string hex64Bridge(uint64_t v) {
   char buf[24];
-  std::snprintf(buf, sizeof(buf), "%llx",
-                static_cast<unsigned long long>(v));
+  std::snprintf(buf, sizeof(buf), "%llx", static_cast<unsigned long long>(v));
   return std::string(buf);
 }
 
@@ -720,20 +741,13 @@ std::string hex64Bridge(uint64_t v) {
  * X-Amz-Rdma-Reply; strip the status prefix and keep the payload. */
 std::string replyTokenPayload(const std::string& v) {
   const std::string prefix = "200:";
-  if (v.size() > prefix.size() &&
-      v.compare(0, prefix.size(), prefix) == 0) {
+  if (v.size() > prefix.size() && v.compare(0, prefix.size(), prefix) == 0) {
     return v.substr(prefix.size());
   }
   return std::string();
 }
 
-/* Deadline for control I/O: the callback budget the library reported,
- * clamped to a floor so a tiny remainder still gets a fair socket
- * wait instead of an immediate failure. */
-/* Remaining transfer budget for this callback. Zero means exhausted
- * after earlier phases consumed the allowance, not an invitation to
- * re-arm a fresh default timeout, so it is reported as zero and the
- * poll loops fail fast. */
+/* Return the callback budget, capped at INT_MAX; zero means expired. */
 int controlDeadlineMs(const hipObjTransferReqV2_t* req) {
   const uint64_t r = req->remainingMs;
   if (r > static_cast<uint64_t>(std::numeric_limits<int>::max()))
@@ -741,28 +755,19 @@ int controlDeadlineMs(const hipObjTransferReqV2_t* req) {
   return static_cast<int>(r);
 }
 
-/* Control-plane authority: the configured control endpoint wins;
- * the S3 object URL is only a fallback. The endpoint is a full
- * "http(s)://host:port" URI, so strip the scheme for dialing and
- * signing; connectTo re-derives the scheme itself for the TLS check.
- * The returned string keeps the scheme prefix (when present) so the
- * caller can reject HTTPS uniformly. */
+/* Return the configured control URI, or the object endpoint URI, retaining
+ * its scheme. */
 std::string controlAuthorityUri(V2CallbackCtx* c,
                                 const hipObjTransferReqV2_t* req) {
-  if (req->endpoint != nullptr &&
-      req->endpoint->controlEndpoint != nullptr &&
+  if (req->endpoint != nullptr && req->endpoint->controlEndpoint != nullptr &&
       req->endpoint->controlEndpoint[0] != '\0') {
     return std::string(req->endpoint->controlEndpoint);
   }
-  /* The object URL fallback carries its own scheme; hand back a
-   * scheme-qualified URI so the HTTPS rejection in connectTo applies
-   * uniformly and the Host split below handles both shapes. BaseUrl
-   * exposes the authority as host/port fields, not a HostHeaderValue
-   * helper (that lives on http::Url). */
+  /* Retain the scheme so HTTPS rejection and Host parsing apply uniformly. */
   const minio::s3::BaseUrl& base = c->sctx->url;
-  const std::string authority =
-      base.port != 0 ? base.host + ":" + std::to_string(base.port)
-                     : base.host;
+  const std::string authority = base.port != 0
+                                  ? base.host + ":" + std::to_string(base.port)
+                                  : base.host;
   return std::string(base.https ? "https" : "http") + "://" + authority;
 }
 
@@ -795,10 +800,7 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   extra.Add(kAmzRdmaPsnHdr, hex24Bridge(req->clientPsn));
   extra.Add(kAmzRdmaCookieHdr, hex32Bridge(req->cookie));
   extra.Add(kAmzRdmaOpHdr, req->method ? req->method : "GET");
-  extra.Add(kAmzRdmaTargetHdr,
-            req->target ? req->target
-                        : buildObjectTarget(req->bucket, req->key,
-                                            req->query));
+  extra.Add(kAmzRdmaTargetHdr, req->target);
   extra.Add(kAmzRdmaSizeHdr, std::to_string(req->size));
   if (req->offset != 0) {
     extra.Add(kAmzRdmaOffsetHdr, std::to_string(req->offset));
@@ -814,7 +816,7 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   const std::string authorityUri = controlAuthorityUri(c, req);
   const std::string authorityHost = controlAuthorityHost(authorityUri);
   if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt,
-                        c->selectedPort, c->selectedGid)) {
+                           c->selectedPort, c->selectedGid)) {
     return -1;
   }
   ControlExchange ex;
@@ -839,7 +841,8 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   std::string pstat = headerValue(head, "X-Amz-Rdma-Protocol-Status");
   out->unsupportedMarker = pstat == "unsupported" ? 1 : 0;
 
-  std::string srv_token = replyTokenPayload(headerValue(head, kAmzRdmaReplyHdr));
+  std::string srv_token = replyTokenPayload(
+    headerValue(head, kAmzRdmaReplyHdr));
   if (!srv_token.empty()) {
     std::snprintf(out->serverToken, sizeof(out->serverToken), "%s",
                   srv_token.c_str());
@@ -853,17 +856,19 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
    * bare-hex wire encodings cannot smuggle in other strtoull forms. */
   auto strictUlong = [](const std::string& v, int base,
                         unsigned long long max) -> unsigned long long {
-    if (v.empty()) return static_cast<unsigned long long>(-1);
+    if (v.empty())
+      return static_cast<unsigned long long>(-1);
     const bool hex = (base == 16);
     for (char ch : v) {
       const bool ok = hex ? std::isxdigit(static_cast<unsigned char>(ch))
                           : (ch >= '0' && ch <= '9');
-      if (!ok) return static_cast<unsigned long long>(-1);
+      if (!ok)
+        return static_cast<unsigned long long>(-1);
     }
     char* endp = nullptr;
     errno = 0;
     unsigned long long n = std::strtoull(v.c_str(), &endp, base);
-    if (errno != 0 || endp == nullptr || *endp != '\0' || n > max) {
+    if (errno != 0 || *endp != '\0' || n > max) {
       return static_cast<unsigned long long>(-1);
     }
     return n;
@@ -871,7 +876,8 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
   std::string psn = headerValue(head, kAmzRdmaPsnHdr);
   if (!psn.empty()) {
     unsigned long long n = strictUlong(psn, 16, 0xffffffu);
-    if (n == static_cast<unsigned long long>(-1)) return -1;
+    if (n == static_cast<unsigned long long>(-1))
+      return -1;
     out->serverPsn = static_cast<uint32_t>(n);
   }
   std::string saddr = headerValue(head, kAmzRdmaMrAddrHdr);
@@ -924,8 +930,8 @@ int v2SendReadyRequest(void* ctx, const hipObjTransferReqV2_t* req) {
     return -1;
   }
   ControlExchange ex;
-  if (!buildControlExchange(ex, c->sctx, kControlPathReady, c->clientNic,
-                            extra, authorityHost, deadlineAt) ||
+  if (!buildControlExchange(ex, c->sctx, kControlPathReady, c->clientNic, extra,
+                            authorityHost, deadlineAt) ||
       !c->readyConn.sendAllUntil(ex.bytes, deadlineAt)) {
     /* Partial/failed write: the exchange is aborted; the connection
      * is closed, never pooled, and finishReady will not be called. */
@@ -973,9 +979,8 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
     }
     errno = 0;
     char* endp = nullptr;
-    const unsigned long long n =
-      std::strtoull(bytes_hdr.c_str(), &endp, 10);
-    if (errno != 0 || endp == nullptr || *endp != '\0') {
+    const unsigned long long n = std::strtoull(bytes_hdr.c_str(), &endp, 10);
+    if (errno != 0 || *endp != '\0') {
       return -1;
     }
     out->bytes = n;
@@ -1005,15 +1010,13 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
     const size_t plen = sizeof(kCsumPrefix) - 1;
     bool csumOk = false;
     std::string payload;
-    if (csum.compare(0, plen, kCsumPrefix) == 0 &&
-        csum.size() == plen + 12) {
+    if (csum.compare(0, plen, kCsumPrefix) == 0 && csum.size() == plen + 12) {
       payload = csum.substr(plen);
-      csumOk = payload.size() == 12 && payload[11] == '=';
+      csumOk = payload[11] == '=';
       for (size_t i = 0; csumOk && i < 11; ++i) {
         const char ch = payload[i];
-        const bool b64 =
-          (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-          (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
+        const bool b64 = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                         (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
         if (!b64) {
           csumOk = false;
         }
@@ -1023,10 +1026,14 @@ int v2FinishReady(void* ctx, const hipObjTransferReqV2_t* req,
        * same way the wire codec rejects it. */
       if (csumOk) {
         const auto b64v = [](char ch) -> int {
-          if (ch >= 'A' && ch <= 'Z') return ch - 'A';
-          if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
-          if (ch >= '0' && ch <= '9') return ch - '0' + 52;
-          if (ch == '+') return 62;
+          if (ch >= 'A' && ch <= 'Z')
+            return ch - 'A';
+          if (ch >= 'a' && ch <= 'z')
+            return ch - 'a' + 26;
+          if (ch >= '0' && ch <= '9')
+            return ch - '0' + 52;
+          if (ch == '+')
+            return 62;
           return 63;
         };
         if (b64v(payload[10]) & 0x3) {
@@ -1069,7 +1076,7 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
   const std::string authorityUri = controlAuthorityUri(c, req);
   const std::string authorityHost = controlAuthorityHost(authorityUri);
   if (!conn.connectToUntil(authorityUri, c->clientNic, deadlineAt,
-                        c->selectedPort, c->selectedGid)) {
+                           c->selectedPort, c->selectedGid)) {
     return 0; /* best effort */
   }
   ControlExchange ex;
@@ -1088,8 +1095,7 @@ int v2SendCancel(void* ctx, const hipObjTransferReqV2_t* req) {
 // v2 entry points ---------------------------------------------------------
 
 ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{
-      sctx, "", 0, -1, {}, false, {}};
+  V2CallbackCtx cbctx{sctx, "", 0, -1, {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -1117,8 +1123,7 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
-  V2CallbackCtx cbctx{
-      sctx, "", 0, -1, {}, false, {}};
+  V2CallbackCtx cbctx{sctx, "", 0, -1, {}, false, {}};
   hipObjOpsV2_t ops{};
   ops.sendPrepare = v2SendPrepare;
   ops.sendReadyRequest = v2SendReadyRequest;
@@ -1300,54 +1305,20 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
 }
 
 ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
-  // Try the v2 protocol first; fall back to v1 only when the server
-  // explicitly signals it does not support hipobj-rc-v2. Any other
-  // failure propagates the terminal sentinel: the buffer and transfer
-  // state are uncertain, so an HTTP retry must not touch the buffer.
-  ssize_t ret = rdmaPutV2(ctx, buf, size);
+  // Only explicit v2 unsupported permits HTTP fallback; other failures may
+  // leave transfer state uncertain.
+  const ssize_t ret = rdmaPutV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
     return ret > 0 ? ret : kRdmaV2Failed;
-  }
-
-  ret = -1;
-  for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
-    char* token = nullptr;
-    hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT,
-                                            &token);
-    if (terr.opError != hipObjSuccess || token == nullptr) {
-      return -1;
-    }
-    ret = rdmaPut(ctx, token, buf, size);
-    hipObjPutRdmaToken(token);
-    if (ret > 0 || ret == kRdmaNotSupported) {
-      return ret;
-    }
   }
   return ret;
 }
 
 ssize_t rdmaGetWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
-  // Same policy as PUT: only an explicit "unsupported" reply may
-  // downgrade the path; any other v2 failure propagates without an
-  // HTTP retry (the buffer and transfer state are uncertain).
-  ssize_t ret = rdmaGetV2(ctx, buf, size);
+  // Apply the same unsupported-only fallback policy as PUT.
+  const ssize_t ret = rdmaGetV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
     return ret > 0 ? ret : kRdmaV2Failed;
-  }
-
-  ret = -1;
-  for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
-    char* token = nullptr;
-    hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET,
-                                            &token);
-    if (terr.opError != hipObjSuccess || token == nullptr) {
-      return -1;
-    }
-    ret = rdmaGet(ctx, token, buf, size);
-    hipObjPutRdmaToken(token);
-    if (ret > 0 || ret == kRdmaNotSupported) {
-      return ret;
-    }
   }
   return ret;
 }
