@@ -2,8 +2,9 @@
  * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * Bounds on the minio-cpp bridge: outstanding DNS workers stay
+ */
+
+/* Bounds on the minio-cpp bridge: outstanding DNS workers stay
  * capped, a failed thread launch is a transport failure, and a
  * successful credential fetch is reused for the rest of a transfer.
  */
@@ -12,13 +13,13 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
-#include <netdb.h>
 #include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <miniocpp/credentials.h>
 #include <miniocpp/providers.h>
+#include <netdb.h>
 
 #include "hipobj_minio/context.h"
 #include "hipobj_minio/rdma.h"
@@ -80,8 +81,8 @@ TEST_F(BridgeBoundsTest, CredentialFetchIsCached) {
 
 TEST_F(BridgeBoundsTest, ResolverLaunchFailureIsTransportFailure) {
   setForceResolverLaunchFail(true);
-  const auto deadline =
-    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(2);
   EXPECT_FALSE(connectControlForTest("127.0.0.1:9", deadline));
   EXPECT_EQ(outstandingResolverCount(), 0u);
 }
@@ -101,15 +102,16 @@ TEST_F(BridgeBoundsTest, OutstandingResolversStayCapped) {
         ++started;
         cv.notify_all();
       }
-      const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+      const auto deadline = std::chrono::steady_clock::now() +
+                            std::chrono::milliseconds(250);
       (void)connectControlForTest("stalled.invalid:9", deadline);
     });
   }
   {
     std::unique_lock<std::mutex> lk(mu);
-    cv.wait_for(lk, std::chrono::seconds(2),
-                [&]() { return started == kLaunch; });
+    cv.wait_for(lk, std::chrono::seconds(2), [&]() {
+      return started == kLaunch;
+    });
   }
   /* The stall hook holds a slot for 400 ms; the connect deadline is
    * 250 ms, so each call detaches and leaves the worker counted
@@ -122,8 +124,8 @@ TEST_F(BridgeBoundsTest, OutstandingResolversStayCapped) {
     t.join();
   }
   /* Give detached helpers time to release their slots. */
-  const auto giveUp =
-    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  const auto giveUp = std::chrono::steady_clock::now() +
+                      std::chrono::seconds(2);
   while (outstandingResolverCount() != 0u &&
          std::chrono::steady_clock::now() < giveUp) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
