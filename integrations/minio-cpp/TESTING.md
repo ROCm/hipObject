@@ -114,7 +114,7 @@ Install runtime deps: ROCm, `libibverbs`, `libnuma`, OpenSSL, libcurl.
 
    - Unregistered buffer → `hipObjBufNotRegistered`
    - Wrong credentials → S3 error before RDMA
-   - NIC failure → retry (`kRdmaMaxAttempts = 2`) then HTTP fallback
+   - NIC failure -> v2 error propagates without HTTP fallback (only an explicit unsupported reply falls back).
 
 ### Optional interoperability
 
