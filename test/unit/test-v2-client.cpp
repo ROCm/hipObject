@@ -67,6 +67,7 @@ struct ibv_device* allocFakeDevice(const char* name) {
 }
 
 int g_postRecvCalls = 0;
+std::function<void()> g_postRecvObserver;
 int g_postSendCalls = 0;
 const struct ibv_recv_wr* g_lastRecvWr = nullptr;
 struct ibv_send_wr g_ownedSendWr;
@@ -77,6 +78,9 @@ int fakePostRecv(struct ibv_qp*, struct ibv_recv_wr* wr,
                  struct ibv_recv_wr**) {
   ++g_postRecvCalls;
   g_lastRecvWr = wr;
+  if (g_postRecvObserver) {
+    g_postRecvObserver();
+  }
   return 0;
 }
 
@@ -431,6 +435,7 @@ protected:
     savedNics_ = hipObj::setNicEnumerator(&nics_);
 
     g_postRecvCalls = 0;
+    g_postRecvObserver = nullptr;
     g_postSendCalls = 0;
     g_lastRecvWr = nullptr;
     std::memset(&g_ownedSendWr, 0, sizeof(g_ownedSendWr));
@@ -471,6 +476,7 @@ protected:
   }
 
   void TearDown() override {
+    g_postRecvObserver = nullptr;
     hipObj::v2::setClockSourceForTest(nullptr);
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     hipObj::hipOps() = savedHipOps_;
@@ -514,6 +520,14 @@ const char* CbName(Cb cb) {
  * READY request carrying the wire endpoint fields. */
 TEST_F(V2ClientTransferTest, GetCallbackDataInterleaving) {
   consumer_.armGetCompletion = true;
+  bool recvBeforeReady = false;
+  bool sawReady = false;
+  g_postRecvObserver = [&]() {
+    if (!sawReady) {
+      recvBeforeReady = true;
+    }
+  };
+  consumer_.onReadyRequest = [&]() { sawReady = true; };
 
   const hipObjError_t err =
     hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
@@ -525,6 +539,7 @@ TEST_F(V2ClientTransferTest, GetCallbackDataInterleaving) {
   EXPECT_EQ(consumer_.calls[1].cb, Cb::ReadyRequest);
   EXPECT_EQ(consumer_.calls[2].cb, Cb::FinishReady);
   EXPECT_EQ(g_postRecvCalls, 1) << "GET posts the receive once";
+  EXPECT_TRUE(recvBeforeReady) << "GET posts the receive before READY";
   EXPECT_EQ(g_postSendCalls, 0) << "GET never posts a send";
 
   /* The READY request carries the wire endpoint fields. */
