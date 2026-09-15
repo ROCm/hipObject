@@ -207,7 +207,7 @@ void fillCommonRequest(hipObjTransferReqV2_t& req, const char* method,
                        const char* bucket, const char* key, uint64_t size,
                        uint64_t offset, const char* query, uint32_t cookie,
                        uint32_t clientPsn, uint64_t deadlineMs,
-                       uint64_t remainingMs) {
+                       uint64_t transferBudgetMs, uint64_t remainingMs) {
   std::memset(&req, 0, sizeof(req));
   req.method = method;
   req.bucket = bucket;
@@ -217,13 +217,15 @@ void fillCommonRequest(hipObjTransferReqV2_t& req, const char* method,
   req.offset = offset;
   req.cookie = cookie;
   req.clientPsn = clientPsn;
-  /* deadlineMs is the remaining whole-transfer budget per the header
-   * contract, not the absolute steady-clock deadline. The absolute
-   * deadline stays a caller-side bound and is not copied into the request. */
+  /* deadlineMs is the absolute steady-clock bound and is not copied.
+   * The request deadline is the remaining whole-transfer budget;
+   * remainingMs is the budget for this callback, which on post-expiry
+   * CANCEL is a fresh cleanup allowance. */
   (void)deadlineMs;
   req.deadlineMs = static_cast<uint32_t>(
+    transferBudgetMs > 0xffffffff ? 0xffffffff : transferBudgetMs);
+  req.remainingMs = static_cast<uint32_t>(
     remainingMs > 0xffffffff ? 0xffffffff : remainingMs);
-  req.remainingMs = req.deadlineMs;
 }
 
 struct SessionResources {
@@ -730,7 +732,7 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
         wireOutcome.opError != hipObjSuccess) {
       hipObjTransferReqV2_t creq;
       fillCommonRequest(creq, isPut ? "PUT" : "GET", bucket, key, size,
-                        offset, query, 0, 0, deadline,
+                        offset, query, 0, 0, deadline, remaining(deadline),
                         cancelBudgetMs);
       creq.session = sessionId.c_str();
       creq.target = nullptr;
@@ -806,7 +808,8 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     const uint32_t cookie = *cookieOpt;
     hipObjTransferReqV2_t preq;
     fillCommonRequest(preq, isPut ? "PUT" : "GET", bucket, key, size, offset,
-                      query, cookie, psn, deadline, remaining(deadline));
+                      query, cookie, psn, deadline, remaining(deadline),
+                      remaining(deadline));
     preq.token = clientToken.c_str();
     preq.target = target.c_str();
     preq.endpoint = &epV2;
@@ -965,7 +968,8 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     }
     hipObjTransferReqV2_t rreq;
     fillCommonRequest(rreq, isPut ? "PUT" : "GET", bucket, key, size, offset,
-                      query, cookie, psn, deadline, remaining(deadline));
+                      query, cookie, psn, deadline, remaining(deadline),
+                      remaining(deadline));
     rreq.session = sessionId.c_str();
     rreq.token = clientToken.c_str();
     rreq.endpoint = &epV2;
