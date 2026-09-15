@@ -15,13 +15,25 @@ set(MINIO_CPP_ENABLE_RDMA OFF CACHE BOOL "" FORCE)
 set(MINIO_CPP_TEST OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(
-  miniocpp_upstream
-  GIT_REPOSITORY https://github.com/minio/minio-cpp.git
-  GIT_TAG v0.4.0
-  GIT_SHALLOW TRUE
-  EXCLUDE_FROM_ALL SYSTEM
-)
+# EXCLUDE_FROM_ALL and SYSTEM on FetchContent_Declare need CMake
+# 3.28; the repository baseline is 3.21, so pass them only where they
+# are understood and keep the declaration valid on older releases.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+  FetchContent_Declare(
+    miniocpp_upstream
+    GIT_REPOSITORY https://github.com/minio/minio-cpp.git
+    GIT_TAG v0.4.0
+    GIT_SHALLOW TRUE
+    EXCLUDE_FROM_ALL SYSTEM
+  )
+else()
+  FetchContent_Declare(
+    miniocpp_upstream
+    GIT_REPOSITORY https://github.com/minio/minio-cpp.git
+    GIT_TAG v0.4.0
+    GIT_SHALLOW TRUE
+  )
+endif()
 # The fetched copy is used in-tree only; its install(EXPORT
 # miniocpp-targets) rule cannot be satisfied here because the shim
 # targets (curlpp_built, inih_cpp) live outside any export set. Skip
