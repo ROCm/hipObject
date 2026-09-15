@@ -2,14 +2,13 @@
  * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
- *
- * Mock-consumer tests for the v2 client driver (v2Transfer): the
+ */
+
+/* Mock-consumer tests for the v2 client driver (v2Transfer): the
  * full PREPARE -> READY -> data -> FINAL path is driven through the
  * hipObjOpsV2_t callbacks with faked verbs and a scriptable consumer,
  * asserting the callback/data interleaving and the deadline fields
  * the library reports. No RDMA or GPU hardware is involved. */
-
-#include <arpa/inet.h>
 
 #include <cstring>
 #include <functional>
@@ -19,9 +18,9 @@
 #include <string>
 #include <vector>
 
+#include <arpa/inet.h>
 #include <gtest/gtest.h>
 
-#include "hip-seam.h"
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/common/nic-seam.h"
 #include "../../../src/rdma/token.h"
@@ -29,6 +28,7 @@
 #include "../../../src/rdma/v2-clock.h"
 #include "../../../src/rdma/v2-random.h"
 #include "../../../src/rdma/v2-registry.h"
+#include "hip-seam.h"
 #include "hipobj.h"
 
 namespace {
@@ -70,20 +70,25 @@ struct ibv_device* allocFakeDevice(const char* name) {
 
 int g_postRecvCalls = 0;
 int g_postSendCalls = 0;
+std::function<void()> g_postRecvObserver; /* records post_recv ordering */
 const struct ibv_recv_wr* g_lastRecvWr = nullptr;
 struct ibv_send_wr g_ownedSendWr;
 const struct ibv_send_wr* g_lastSendWr = nullptr;
 uint32_t g_cookieInImm = 0;
 
-int fakePostRecv(struct ibv_qp*, struct ibv_recv_wr* wr,
-                 struct ibv_recv_wr**) {
+int fakePostRecv(struct ibv_qp*, struct ibv_recv_wr* wr, struct ibv_recv_wr**) {
   ++g_postRecvCalls;
   g_lastRecvWr = wr;
+  /* Ordering matters: the receive must be in place before the READY
+   * request arms the server's WRITE_WITH_IMM, so record the post in
+   * the same sequence the callbacks are recorded in. */
+  if (g_postRecvObserver != nullptr) {
+    g_postRecvObserver();
+  }
   return 0;
 }
 
-int fakePostSend(struct ibv_qp*, struct ibv_send_wr* wr,
-                 struct ibv_send_wr**) {
+int fakePostSend(struct ibv_qp*, struct ibv_send_wr* wr, struct ibv_send_wr**) {
   ++g_postSendCalls;
   g_ownedSendWr = *wr; /* the library's wr is stack-scoped */
   g_lastSendWr = &g_ownedSendWr;
@@ -163,7 +168,7 @@ public:
 
 /* ---- mock consumer ------------------------------------------------------ */
 
-enum class Cb { Prepare, ReadyRequest, FinishReady, Cancel };
+enum class Cb { Prepare, ReadyRequest, FinishReady, Cancel, PostRecv };
 
 struct CallRecord {
   Cb cb;
@@ -185,7 +190,9 @@ struct CallRecord {
 class FrozenClock : public hipObj::v2::ClockSource {
 public:
   uint64_t now = 0;
-  uint64_t nowMs() override { return now; }
+  uint64_t nowMs() override {
+    return now;
+  }
 };
 
 /* Points at the FrozenClock a test uses to jump time from inside a
@@ -194,8 +201,7 @@ FrozenClock* g_deadlineJumpClock = nullptr;
 
 class MockConsumer {
 public:
-  /* Scripted PREPARE reply (value-initialized: tests that do not
-   * populate every field must not inherit stack garbage). */
+  /* Scripted PREPARE reply. */
   hipObjPrepareReplyV2_t prep{};
   /* Scripted FINAL reply. */
   hipObjFinalReplyV2_t fin{};
@@ -209,7 +215,9 @@ public:
    * cookie (cookie-mismatch test). */
   uint32_t cookieEchoOverride = 0;
 
-  void clear() { calls.clear(); }
+  void clear() {
+    calls.clear();
+  }
 
   size_t count(Cb which) const {
     size_t n = 0;
@@ -234,7 +242,18 @@ public:
   /* Deadline advertised on the request the callback last received. */
   uint32_t lastSeenDeadlineMs = 0;
 
+  /* Fake post_recv hook: records the post among the callback events
+   * (no request object exists at post time). */
+  void recordPostRecv() {
+    CallRecord r{};
+    r.cb = Cb::PostRecv;
+    calls.push_back(r);
+  }
+
   void install(hipObjOpsV2_t* ops) {
+    g_postRecvObserver = [this]() {
+      recordPostRecv();
+    };
     ops->sendPrepare = [](void* ctx, const hipObjTransferReqV2_t* req,
                           hipObjPrepareReplyV2_t* out) -> int {
       auto* self = static_cast<MockConsumer*>(ctx);
@@ -260,13 +279,12 @@ public:
       if (g_lastCq != nullptr && self->armGetCompletion) {
         auto it = g_cqStates.find(g_lastCq);
         if (it != g_cqStates.end()) {
-        struct ibv_wc wc = {};
-        wc.status = IBV_WC_SUCCESS;
-        wc.opcode = IBV_WC_RECV_RDMA_WITH_IMM;
-        wc.wc_flags = IBV_WC_WITH_IMM;
+          struct ibv_wc wc = {};
+          wc.status = IBV_WC_SUCCESS;
+          wc.opcode = IBV_WC_RECV_RDMA_WITH_IMM;
+          wc.wc_flags = IBV_WC_WITH_IMM;
           wc.imm_data = htonl(req->cookie);
-          /* The server wrote the full request; a short fake write
-           * would now fail the length check. */
+          /* Complete the full request length. */
           wc.byte_len = req->size;
           it->second.pending.push_back(wc);
         }
@@ -380,11 +398,14 @@ protected:
       *n = 1;
       return g_fakeDevList;
     };
-    f.free_device_list = [](struct ibv_device**) {};
+    f.free_device_list = [](struct ibv_device**) {
+    };
     f.get_device_name = [](struct ibv_device* dev) -> const char* {
       return dev ? dev->name : nullptr;
     };
-    f.close_device = [](struct ibv_context*) -> int { return 0; };
+    f.close_device = [](struct ibv_context*) -> int {
+      return 0;
+    };
     f.query_port = [](struct ibv_context*, uint8_t,
                       struct ibv_port_attr* attr) -> int {
       std::memset(attr, 0, sizeof(*attr));
@@ -401,7 +422,7 @@ protected:
       gid->raw[1] = 0x80;
       gid->raw[10] = 0xff;
       gid->raw[11] = 0xff;
-      gid->raw[12] = 10;   /* 10.0.0.1 */
+      gid->raw[12] = 10; /* 10.0.0.1 */
       gid->raw[13] = 0;
       gid->raw[14] = 0;
       gid->raw[15] = 1;
@@ -413,7 +434,9 @@ protected:
     f.alloc_pd = [](struct ibv_context*) -> struct ibv_pd* {
       return &g_fakePd;
     };
-    f.dealloc_pd = [](struct ibv_pd*) -> int { return 0; };
+    f.dealloc_pd = [](struct ibv_pd*) -> int {
+      return 0;
+    };
     f.query_device = [](struct ibv_context*, struct ibv_device_attr* a) {
       std::memset(a, 0, sizeof(*a));
       a->max_mr_size = ~(0ULL);
@@ -428,8 +451,8 @@ protected:
     f.post_send = fakePostSend;
     f.poll_cq = fakePollCq;
     f.reg_mr = fakeRegMr;
-    f.reg_mr_iova2 = [](struct ibv_pd* pd, void* addr, size_t len,
-                        uintptr_t, int) -> struct ibv_mr* {
+    f.reg_mr_iova2 = [](struct ibv_pd * pd, void* addr, size_t len, uintptr_t,
+                        int) -> struct ibv_mr* {
       return fakeRegMr(pd, addr, len, 0);
     };
     f.dereg_mr = fakeDeregMr;
@@ -479,6 +502,7 @@ protected:
   }
 
   void TearDown() override {
+    g_postRecvObserver = nullptr;
     hipObj::v2::setClockSourceForTest(nullptr);
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     hipObj::hipOps() = savedHipOps_;
@@ -507,35 +531,39 @@ protected:
 
 const char* CbName(Cb cb) {
   switch (cb) {
-    case Cb::Prepare: return "Prepare";
-    case Cb::ReadyRequest: return "ReadyRequest";
-    case Cb::FinishReady: return "FinishReady";
-    case Cb::Cancel: return "Cancel";
+    case Cb::Prepare:
+      return "Prepare";
+    case Cb::ReadyRequest:
+      return "ReadyRequest";
+    case Cb::FinishReady:
+      return "FinishReady";
+    case Cb::Cancel:
+      return "Cancel";
+    case Cb::PostRecv:
+      return "PostRecv";
   }
   return "?";
 }
 
 /* ---- happy-path interleaving (GET) -------------------------------------- */
 
-/* The library must call sendPrepare, then sendReadyRequest, then
- * post the receive, then the data phase, then finishReady, with the
- * READY request carrying the wire endpoint fields. */
+/* Post the receive before READY so a fast peer can write immediately. */
 TEST_F(V2ClientTransferTest, GetCallbackDataInterleaving) {
   consumer_.armGetCompletion = true;
 
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   ASSERT_EQ(err.opError, hipObjSuccess);
 
-  /* Interleaving: Prepare, ReadyRequest, (receive posted), FinishReady. */
-  ASSERT_EQ(consumer_.calls.size(), 3u);
+  ASSERT_EQ(consumer_.calls.size(), 4u);
   EXPECT_EQ(consumer_.calls[0].cb, Cb::Prepare);
-  EXPECT_EQ(consumer_.calls[1].cb, Cb::ReadyRequest);
-  EXPECT_EQ(consumer_.calls[2].cb, Cb::FinishReady);
+  EXPECT_EQ(consumer_.calls[1].cb, Cb::PostRecv)
+    << "the receive must be posted before READY arms the server";
+  EXPECT_EQ(consumer_.calls[2].cb, Cb::ReadyRequest);
+  EXPECT_EQ(consumer_.calls[3].cb, Cb::FinishReady);
   EXPECT_EQ(g_postRecvCalls, 1) << "GET posts the receive once";
   EXPECT_EQ(g_postSendCalls, 0) << "GET never posts a send";
 
-  /* The READY request carries the wire endpoint fields. */
   const CallRecord* ready = consumer_.find(Cb::ReadyRequest);
   ASSERT_NE(ready, nullptr);
   EXPECT_EQ(ready->req.clientQpn, g_lastQpn);
@@ -552,41 +580,40 @@ TEST_F(V2ClientTransferTest, GetCallbackDataInterleaving) {
   EXPECT_GT(ready->req.deadlineMs, 0u);
   EXPECT_EQ(ready->req.deadlineMs, ready->req.remainingMs);
 
-  /* No CANCEL on the success path. */
   EXPECT_EQ(consumer_.cancelCalls, 0);
 }
 
 /* ---- interface selection fields ---------------------------------------- */
 
-/* Every callback request must describe the interface the data plane
- * selected: the NIC name from topology enumeration and the port and
- * GID index the device open settled on. The fixtures enumerate a
- * single fake device ("fake0") on port 1; GID index is whatever
- * device open recorded (non-negative). */
+/* All callbacks must report the same selected NIC, port, and GID index. */
 TEST_F(V2ClientTransferTest, CallbacksCarrySelectionTuple) {
   consumer_.armGetCompletion = true;
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   ASSERT_EQ(err.opError, hipObjSuccess);
 
-  ASSERT_EQ(consumer_.calls.size(), 3u);
+  /* GET interleaves a PostRecv record, which has no request snapshot;
+   * the selection tuple is pinned on the request-bearing records. */
+  ASSERT_EQ(consumer_.calls.size(), 4u);
+  EXPECT_EQ(consumer_.calls[1].cb, Cb::PostRecv);
   const int gid = consumer_.calls[0].req.nicGidIndex;
   EXPECT_GE(gid, 0);
   for (const CallRecord& rec : consumer_.calls) {
+    if (rec.cb == Cb::PostRecv) {
+      continue;
+    }
     EXPECT_STREQ(rec.req.nic, "fake0") << CbName(rec.cb);
     EXPECT_EQ(rec.req.nicPort, 1) << CbName(rec.cb);
     EXPECT_EQ(rec.req.nicGidIndex, gid) << CbName(rec.cb);
   }
 }
 
-/* PUT uses the same request fill as GET; pin the tuple on that
- * path as well so a PUT-only regression is visible. */
 TEST_F(V2ClientTransferTest, PutCallbacksCarrySelectionTuple) {
   consumer_.fin.httpStatus = 204;
   consumer_.armPutCompletion = true;
 
-  const hipObjError_t err =
-    hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   ASSERT_EQ(err.opError, hipObjSuccess);
 
   ASSERT_EQ(consumer_.calls.size(), 3u);
@@ -607,8 +634,8 @@ TEST_F(V2ClientTransferTest, CancelCarriesSelectionTuple) {
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
   consumer_.armGetCompletion = false;
 
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjBusy);
 
   const CallRecord* prep = consumer_.find(Cb::Prepare);
@@ -627,8 +654,8 @@ TEST_F(V2ClientTransferTest, PutCallbackDataInterleaving) {
   consumer_.fin.httpStatus = 204; /* PUT success */
   consumer_.armPutCompletion = true;
 
-  const hipObjError_t err =
-    hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   ASSERT_EQ(err.opError, hipObjSuccess);
 
   ASSERT_EQ(consumer_.calls.size(), 3u);
@@ -642,12 +669,11 @@ TEST_F(V2ClientTransferTest, PutCallbackDataInterleaving) {
     << "WRITE immediate data carries the client cookie";
 }
 
-/* PUT without a staging advertisement fails before READY. */
 TEST_F(V2ClientTransferTest, PutWithoutStagingFailsBeforeReady) {
   consumer_.prep.stagingPresent = 0;
 
-  const hipObjError_t err =
-    hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjInvalidValue);
   EXPECT_EQ(consumer_.find(Cb::ReadyRequest), nullptr)
     << "no READY after a rejected staging advertisement";
@@ -655,19 +681,16 @@ TEST_F(V2ClientTransferTest, PutWithoutStagingFailsBeforeReady) {
 
 /* ---- failure paths ------------------------------------------------------ */
 
-/* PREPARE 501 + unsupported marker maps to NotSupported and never
- * reaches READY or the data phase. */
 TEST_F(V2ClientTransferTest, Prepare501StopsBeforeReady) {
   consumer_.prep.httpStatus = 501;
   consumer_.prep.unsupportedMarker = 1;
 
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjNotSupported);
   EXPECT_EQ(consumer_.find(Cb::ReadyRequest), nullptr);
   EXPECT_EQ(g_postRecvCalls, 0);
-  EXPECT_EQ(consumer_.cancelCalls, 0)
-    << "nothing was published; no CANCEL";
+  EXPECT_EQ(consumer_.cancelCalls, 0) << "nothing was published; no CANCEL";
 }
 
 /* A data-phase expiry after a successful READY request must attempt
@@ -682,12 +705,10 @@ TEST_F(V2ClientTransferTest, DataExpiryIssuesSingleCancel) {
   /* No completion is armed: the data phase runs out of budget. */
   consumer_.armGetCompletion = false;
 
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjBusy) << "expiry maps to Busy per the driver";
 
-  /* Exactly one CANCEL, carrying the session id and the fresh
-   * cleanup budget (default 1 s). */
   ASSERT_EQ(consumer_.cancelCalls, 1);
   const CallRecord* cancel = consumer_.find(Cb::Cancel);
   ASSERT_NE(cancel, nullptr);
@@ -696,23 +717,20 @@ TEST_F(V2ClientTransferTest, DataExpiryIssuesSingleCancel) {
   EXPECT_EQ(cancel->req.remainingMs, 1000u);
 }
 
-/* finishReady reporting a FINAL whose cookie echo does not match
- * fails the transfer with RdmaError. */
 TEST_F(V2ClientTransferTest, FinalCookieMismatchFails) {
   consumer_.armGetCompletion = true;
-  consumer_.cookieEchoOverride = 0xdeadbeef; /* will not match */
+  consumer_.cookieEchoOverride = 0xdeadbeef;
 
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjRdmaError);
 }
 
 TEST_F(V2ClientTransferTest, MissingProtocolEchoFailsPrepare) {
   consumer_.prep.protocolEcho = 0;
-  const hipObjError_t err =
-      hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjRdmaError);
-  /* No READY may follow a rejected PREPARE. */
   for (const auto& c : consumer_.calls) {
     EXPECT_NE(c.cb, Cb::ReadyRequest);
     EXPECT_NE(c.cb, Cb::FinishReady);
@@ -722,15 +740,15 @@ TEST_F(V2ClientTransferTest, MissingProtocolEchoFailsPrepare) {
 TEST_F(V2ClientTransferTest, MalformedSessionFailsPrepare) {
   std::strncpy(consumer_.prep.session, "nothex!!",
                sizeof(consumer_.prep.session) - 1);
-  const hipObjError_t err =
-      hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjRdmaError);
 }
 
 TEST_F(V2ClientTransferTest, ZeroServerPsnFailsPrepare) {
   consumer_.prep.serverPsn = 0;
-  const hipObjError_t err =
-      hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjRdmaError);
 }
 
@@ -740,8 +758,8 @@ TEST_F(V2ClientTransferTest, FinalWithoutProtocolEchoFails) {
   consumer_.armGetCompletion = true;
   consumer_.fin.protocolEcho = 0;
 
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjRdmaError);
 }
 
@@ -750,17 +768,16 @@ TEST_F(V2ClientTransferTest, FinalWithoutProtocolEchoFails) {
 TEST_F(V2ClientTransferTest, PutZeroStagingRkeyFails) {
   consumer_.prep.stagingRkey = 0;
 
-  const hipObjError_t err =
-    hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjPutV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjInvalidValue);
   for (const auto& c : consumer_.calls) {
     EXPECT_NE(c.cb, Cb::ReadyRequest);
   }
 }
 
-/* A deadline that cannot fund the first exchange fails Busy with no
- * wire traffic, and the public error carries the deadline diagnostic
- * marker in the hipError field. */
+/* Expiry during PREPARE prevents READY and preserves the deadline
+ * diagnostic. */
 TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
   ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2("http://s3.example:9000", 1), hipObjSuccess);
@@ -780,7 +797,6 @@ TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
                         hipObjPrepareReplyV2_t* out) -> int {
     auto* self = static_cast<MockConsumer*>(ctx);
     self->snapshot(Cb::Prepare, req);
-    /* Jump past the deadline while inside the callback. */
     if (g_deadlineJumpClock != nullptr) {
       g_deadlineJumpClock->now = 10;
     }
@@ -789,8 +805,8 @@ TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
   };
 
   g_deadlineJumpClock = &frozen;
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   g_deadlineJumpClock = nullptr;
   EXPECT_EQ(err.opError, hipObjBusy);
   EXPECT_EQ(err.hipError, hipObj::v2::kDiagDeadlineExpired)
@@ -798,17 +814,15 @@ TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
   /* PREPARE ran, but the expired budget must stop the READY. */
   bool sawReady = false;
   for (const auto& c : consumer_.calls) {
-    if (c.cb == Cb::ReadyRequest) sawReady = true;
+    if (c.cb == Cb::ReadyRequest)
+      sawReady = true;
   }
   EXPECT_FALSE(sawReady);
   hipObj::v2::setClockSourceForTest(nullptr);
 }
 
-/* Random PSN selection must not reuse a pair still inside the
- * retired reuse window. Parking (qpn 0x9999, psn 7) in the ring
- * proves the ring accepts records through the production path; the
- * guard itself is invisible unless the random draw collides, so the
- * transfer proceeds on the fake verbs' non-colliding qpn space. */
+/* A non-colliding transfer succeeds while an unrelated retired pair remains
+ * recorded. */
 TEST_F(V2ClientTransferTest, RetiredPairCollisionRejected) {
   hipObj::v2::ConnectionRegistry& reg = hipObj::v2::registry();
   {
@@ -823,31 +837,24 @@ TEST_F(V2ClientTransferTest, RetiredPairCollisionRejected) {
    * transfer can complete rather than poll its budget away. */
   consumer_.armGetCompletion = true;
 
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", buf_, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjSuccess);
 }
 
 TEST_F(V2ClientTransferTest, UnregisteredBufferRejected) {
   alignas(4096) char unreg[512];
-  const hipObjError_t err =
-    hipObjGetV2("bkt", "obj", unreg, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("bkt", "obj", unreg, 512, 0, nullptr,
+                                        &ops_, &consumer_);
   EXPECT_EQ(err.opError, hipObjBufNotRegistered);
-  EXPECT_TRUE(consumer_.calls.empty())
-    << "no callback before buffer admission";
+  EXPECT_TRUE(consumer_.calls.empty()) << "no callback before buffer admission";
 }
 
 } // namespace
 
-
-/* ---- round-3 additions ------------------------------------------------- */
-
 TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
-  /* After READY, the FINAL callback must see the remaining budget, not
-   * the allowance captured before READY. Freezing the clock and
-   * advancing it between the phases makes the difference observable:
-   * an implementation that forwards the stale pre-READY allowance
-   * reports an equal value and fails. */
+  /* Advance time between READY and FINAL to verify the reported budget
+   * decreases. */
   ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2(kEndpoint, 60'000), hipObjSuccess);
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
@@ -864,16 +871,14 @@ TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
   };
   consumer_.onReadyRequest = [&]() {
     seenReady = consumer_.lastSeenDeadlineMs;
-    /* Spend another 5000ms between READY and FINAL: only a FINAL that
-     * refreshes its budget observes this, so a stale implementation
-     * forwards seenReady and fails the comparison. */
+    /* Spend another 5000 ms before FINAL. */
     frozen.now += 5000;
   };
   consumer_.onFinishReady = [&]() {
     seenFinal = consumer_.lastSeenDeadlineMs;
   };
-  const hipObjError_t e =
-      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t e = hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_,
+                                      &consumer_);
   hipObj::v2::setClockSourceForTest(nullptr);
   EXPECT_EQ(e.opError, hipObjSuccess);
   EXPECT_GT(seenReady, 0u);
@@ -907,8 +912,8 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   collisionClock.now = 0;
   hipObj::v2::setClockSourceForTest(&collisionClock);
   FixedPsnSource psnSource;
-  hipObj::v2::RandomSource* saved =
-      hipObj::v2::setRandomSourceForTest(&psnSource);
+  hipObj::v2::RandomSource* saved = hipObj::v2::setRandomSourceForTest(
+    &psnSource);
   /* Restore both overrides on every exit path, including fatal
    * assertion failures: the fixture teardown does not reset the
    * random override, and the source is stack-local. */
@@ -919,8 +924,8 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
       hipObj::v2::setClockSourceForTest(nullptr);
     }
   } overrideGuard{saved};
-  const hipObjError_t e0 =
-      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t e0 = hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_,
+                                       &consumer_);
   ASSERT_EQ(e0.opError, hipObjSuccess);
   /* The fake allocator hands each new QP the next number after the
    * one just observed, and the PSN source still serves the fixed
@@ -933,30 +938,32 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   ring.record(rid, nextQpn, psnSource.value);
 
   consumer_.clear();
-  const hipObjError_t e1 =
-      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t e1 = hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_,
+                                       &consumer_);
   EXPECT_EQ(e1.opError, hipObjBusy);
   EXPECT_EQ(consumer_.count(Cb::Prepare), 0u)
     << "a retired-pair collision must be rejected before PREPARE";
 }
 
-
 TEST_F(V2ClientTransferTest, ExpiredInvalidFinalKeepsDeadlineMarker) {
-  /* An expired FINAL that is ALSO invalid (bad status, mismatched
-   * cookie, missing protocol echo) must still surface the deadline
-   * marker: expiry is the actionable diagnosis regardless of the
-   * reply's own validity. Each sub-case drives the classification
-   * branch it names. */
+  /* Preserve the expiry diagnostic for invalid status, cookie, and protocol
+   * replies. */
   const struct {
     const char* name;
     std::function<void(MockConsumer&)> corrupt;
   } cases[] = {
     {"bad-status",
-     [](MockConsumer& c) { c.fin.httpStatus = 500; }},
+     [](MockConsumer& c) {
+       c.fin.httpStatus = 500;
+     }},
     {"cookie-mismatch",
-     [](MockConsumer& c) { c.cookieEchoOverride = 0xDEADBEEF; }},
+     [](MockConsumer& c) {
+       c.cookieEchoOverride = 0xDEADBEEF;
+     }},
     {"no-protocol-echo",
-     [](MockConsumer& c) { c.fin.protocolEcho = 0; }},
+     [](MockConsumer& c) {
+       c.fin.protocolEcho = 0;
+     }},
   };
   for (const auto& tc : cases) {
     ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
@@ -973,14 +980,14 @@ TEST_F(V2ClientTransferTest, ExpiredInvalidFinalKeepsDeadlineMarker) {
        * already corrupt. */
       frozen.now = 100'000;
     };
-    const hipObjError_t err =
-        hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+    const hipObjError_t err = hipObjGetV2("b", "k", buf_, 512, 0, nullptr,
+                                          &ops_, &consumer_);
     hipObj::v2::setClockSourceForTest(nullptr);
     EXPECT_NE(err.opError, hipObjSuccess) << tc.name;
     EXPECT_EQ(err.hipError, hipObj::v2::kDiagDeadlineExpired)
-      << tc.name << ": expiry inside an invalid FINAL must surface "
-                   "the deadline marker";
-    /* Reset the scripted reply for the next case. */
+      << tc.name
+      << ": expiry inside an invalid FINAL must surface "
+         "the deadline marker";
     consumer_.fin.httpStatus = 200;
     consumer_.fin.protocolEcho = 1;
     consumer_.cookieEchoOverride = 0;
@@ -989,8 +996,7 @@ TEST_F(V2ClientTransferTest, ExpiredInvalidFinalKeepsDeadlineMarker) {
 }
 
 TEST_F(V2ClientTransferTest, ExpiredFinalKeepsDeadlineMarker) {
-  /* An expired FINAL whose reply is also invalid must surface the
-   * deadline diagnostic: the timeout is the actionable diagnosis. */
+  /* A valid FINAL received after expiry retains the deadline diagnostic. */
   ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
   ASSERT_EQ(initV2(kEndpoint, 30'000), hipObjSuccess);
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
@@ -1007,8 +1013,8 @@ TEST_F(V2ClientTransferTest, ExpiredFinalKeepsDeadlineMarker) {
     }
   };
   g_deadlineJumpClock = &frozen;
-  const hipObjError_t err =
-      hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
+  const hipObjError_t err = hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_,
+                                        &consumer_);
   g_deadlineJumpClock = nullptr;
   hipObj::v2::setClockSourceForTest(nullptr);
   EXPECT_EQ(err.opError, hipObjBusy);
