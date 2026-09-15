@@ -220,14 +220,16 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
 }
 
 hipObjError_t hipObjShutdown(void) try {
+  /* Read the v1 flag under the same lock the initializers hold, so a
+   * concurrent hipObjInit cannot complete between the branch decision
+   * and the teardown leaving a live v1 device behind a success return. */
+  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
     /* v1 was never initialized; a v2-only session still tears down. */
-    std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
     const int rc = hipObj::v2::v2Shutdown();
     return {static_cast<hipObjOpError_t>(rc), 0};
   }
-  std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   /* v2 first: release every connection (destroy retries included);
    * leftover poison must stop the teardown so the failure is
    * visible instead of violating the PD/context lifetime rule. */
@@ -291,7 +293,6 @@ hipObjError_t hipObjBufDeregister(void* devPtr) try {
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized && hipObj::v2::v2ProtectionDomain() == nullptr) {
-    /* Neither v1 nor v2 is initialized; nothing can be registered. */
     return {hipObjNotInitialized, 0};
   }
   if (!hipObj::g_bufferMap.isRegistered(devPtr)) {
@@ -431,9 +432,7 @@ char* hipObjNicV2() try {
   return nullptr;
 }
 
-void hipObjFreeNicV2(char* nic) try {
-  std::free(nic);
-} catch (...) {
+void hipObjFreeNicV2(char* nic) try { std::free(nic); } catch (...) {
 }
 
 int hipObjSelectedPortV2() try {
@@ -453,8 +452,7 @@ int hipObjSelectedGidIndexV2() try {
 int hipObjInterfaceSnapshotV2(char* nicOut, size_t nicLen, int* portOut,
                               int* gidOut) try {
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
-  const hipObj::v2::InterfaceSnapshot snap =
-      hipObj::v2::v2InterfaceSnapshot();
+  const hipObj::v2::InterfaceSnapshot snap = hipObj::v2::v2InterfaceSnapshot();
   if (snap.nic.empty()) {
     return 0;
   }
@@ -523,10 +521,9 @@ hipObjError_t hipObjPutV2(const char* bucket, const char* key,
   const uint64_t generation = hipObj::v2::v2InitGeneration();
   int diag = 0;
   const int rc = hipObj::v2::v2Transfer(1, bucket, key,
-                                        const_cast<void*>(devPtr), size,
-                                        offset, query, ops, ctx, entryMs,
-                                        true, generation, true,
-                                        &diag);
+                                        const_cast<void*>(devPtr), size, offset,
+                                        query, ops, ctx, entryMs, true,
+                                        generation, true, &diag);
   return {static_cast<hipObjOpError_t>(rc), diag};
 } catch (...) {
   return hipObj::handleException();
