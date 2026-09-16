@@ -20,7 +20,7 @@ Compatibility matrix
 +---------------------------+------------------+------------------+
 | RDMA transport            | DC (ConnectX)    | RC (bnxt/ionic)  |
 +---------------------------+------------------+------------------+
-| Direct cuObject server    | N/A              | Requires [adapter](https://github.com/versity/versitygw/tree/main/cuwrapper) |
+| Direct cuObject server    | N/A              | adapter_         |
 +---------------------------+------------------+------------------+
 
 Control plane
@@ -41,8 +41,10 @@ Thor-2 and AMD Pensando Pollara NICs.  The transport byte in the token
 distinguishes DC (``0x00``) from RC (``0x01``).
 
 A stock ``libcuobjserver`` stack cannot serve RC clients directly.  An
-RC-to-DC [adapter](https://github.com/versity/versitygw/tree/main/cuwrapper) bridges AMD RC clients to
+RC-to-DC adapter_ bridges AMD RC clients to
 cuObject-equipped storage gateways in production deployments.
+
+.. _adapter: https://github.com/versity/versitygw/tree/main/cuwrapper
 
 Testing paths
 -------------
