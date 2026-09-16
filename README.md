@@ -105,7 +105,7 @@ hipObject separates control and data planes:
 
 The library uses RC (Reliable Connection) transport rather
 than DC (Dynamic Connection), since DC is exclusive to
-Mellanox/NVIDIA ConnectX hardware. A server-side adapter
+Mellanox/NVIDIA ConnectX hardware. A server-side [adapter](https://github.com/versity/versitygw/tree/main/cuwrapper)
 bridges RC clients to cuObject's DC-based server library.
 
 See [docs/interop.rst](docs/interop.rst) for the cuObject
