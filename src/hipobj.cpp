@@ -272,6 +272,9 @@ hipObjError_t hipObjBufRegisterHost(void* hostPtr, size_t size) try {
   if (!state.initialized) {
     return {hipObjNotInitialized, 0};
   }
+  if (!hostPtr) {
+    return {hipObjInvalidValue, 0};
+  }
   if (size > hipObj::MAX_MR_SIZE) {
     return {hipObjSizeTooLarge, 0};
   }

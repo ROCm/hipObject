@@ -132,4 +132,21 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer) {
   EXPECT_EQ(g_lastHostFree, g_lastHostMalloc);
 }
 
+TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers) {
+  hipObj::BufferMap buffers;
+  void* gpuBuf = reinterpret_cast<void*>(0x2000);
+  g_ibvLog.failRegisterAddr = gpuBuf;
+
+  EXPECT_EQ(buffers.registerBuffer(
+              gpuBuf, 64, reinterpret_cast<struct ibv_pd*>(1)),
+            0);
+  ASSERT_NE(g_lastHostMalloc, nullptr);
+
+  buffers.deregisterAll();
+
+  EXPECT_EQ(g_hostFreeCalls, 1);
+  EXPECT_EQ(g_lastHostFree, g_lastHostMalloc);
+  EXPECT_EQ(g_ibvLog.deregisterCalls, 1);
+}
+
 } // namespace

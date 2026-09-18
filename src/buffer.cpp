@@ -34,6 +34,18 @@ int validateRegistration(bool isRegistered, size_t entryCount, size_t size) {
   return 0;
 }
 
+void freeOwnedHostBuffer(void* hostBuf) {
+  if (!hostBuf) {
+    return;
+  }
+  auto freeFn = hipObj::hipOps().hipHostFree;
+  if (freeFn) {
+    (void)freeFn(hostBuf);
+    return;
+  }
+  (void)hipHostFree(hostBuf);
+}
+
 } // namespace
 
 int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
@@ -57,7 +69,7 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
   }
   mr = ibv.reg_mr_host(pd, hostBuf, size, access);
   if (!mr) {
-    (void)hipObj::hipOps().hipHostFree(hostBuf);
+    freeOwnedHostBuffer(hostBuf);
     return -1;
   }
   entries_[key] = {mr, size, false, true};
@@ -93,7 +105,7 @@ int BufferMap::deregisterBuffer(void* devPtr) {
   void* hostBuf = ent.ownsHostBuf ? ent.mr->addr : nullptr;
   ibv.dereg_mr(ent.mr);
   if (hostBuf) {
-    (void)hipObj::hipOps().hipHostFree(hostBuf);
+    freeOwnedHostBuffer(hostBuf);
   }
   entries_.erase(it);
   return 0;
@@ -104,7 +116,7 @@ void BufferMap::deregisterAll() {
     void* hostBuf = ent.ownsHostBuf ? ent.mr->addr : nullptr;
     ibv.dereg_mr(ent.mr);
     if (hostBuf) {
-      (void)hipObj::hipOps().hipHostFree(hostBuf);
+      freeOwnedHostBuffer(hostBuf);
     }
   }
   entries_.clear();
