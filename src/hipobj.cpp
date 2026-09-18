@@ -400,12 +400,12 @@ const char* hipObjGetVersionString(void) try {
 
 // Not yet implemented — callers fall back to the v1 RDMA path.
 hipObjError_t hipObjPutV2(const char*, const char*, const void*, uint64_t,
-                           uint64_t, const char*, hipObjOpsV2_t*, void*) {
+                          uint64_t, const char*, hipObjOpsV2_t*, void*) {
   return {hipObjNotSupported, 0};
 }
 
 hipObjError_t hipObjGetV2(const char*, const char*, void*, uint64_t, uint64_t,
-                           const char*, hipObjOpsV2_t*, void*) {
+                          const char*, hipObjOpsV2_t*, void*) {
   return {hipObjNotSupported, 0};
 }
 
