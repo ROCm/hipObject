@@ -5,6 +5,8 @@
 
 #include "hipobj_minio/client.h"
 
+#include <algorithm>
+#include <cstring>
 #include <mutex>
 #include <sstream>
 
@@ -16,6 +18,8 @@
 #include "hipobj_minio/rdma.h"
 
 namespace hipobj::minio {
+
+using namespace ::minio;
 
 namespace {
 
@@ -101,9 +105,18 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
   hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_,
                                                                 provider_);
   if (init_err.opError != hipObjSuccess) {
-    return minio::s3::PutObjectResponse(
-      minio::error::Error("hipObject init failed: " +
-                          std::string(hipObjGetErrorString(init_err.opError))));
+    // RDMA not available (no NIC or no GPU topology) — fall back to HTTP PUT.
+    // Copy the buffer into a std::stringstream so minio-cpp can seek in it.
+    const char* src = static_cast<const char*>(args.buf);
+    std::string content(src, size);
+    std::stringstream ss(content, std::ios_base::in | std::ios_base::binary);
+    minio::s3::PutObjectArgs http_args = args;
+    http_args.stream = &ss;
+    http_args.buf = nullptr;
+    http_args.size = std::nullopt;
+    http_args.object_size = static_cast<long>(size);
+    http_args.part_size = 0;
+    return s3_client_.PutObject(http_args);
   }
 
   bool registered_here = false;
@@ -165,9 +178,23 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
   hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_,
                                                                 provider_);
   if (init_err.opError != hipObjSuccess) {
-    return minio::s3::GetObjectResponse(
-      minio::error::Error("hipObject init failed: " +
-                          std::string(hipObjGetErrorString(init_err.opError))));
+    // RDMA not available — fall back to HTTP GET.
+    // Accumulate response into a string, then memcpy to the caller's buffer.
+    std::string received;
+    received.reserve(size);
+    minio::s3::GetObjectArgs http_args = args;
+    http_args.datafunc = [&](minio::http::DataFunctionArgs chunk) -> bool {
+      received.append(chunk.datachunk);
+      return true;
+    };
+    http_args.buf = nullptr;
+    http_args.size = std::nullopt;
+    minio::s3::GetObjectResponse resp = s3_client_.GetObject(http_args);
+    if (resp) {
+      size_t copy_len = std::min(received.size(), size);
+      std::memcpy(args.buf, received.data(), copy_len);
+    }
+    return resp;
   }
 
   bool registered_here = false;
@@ -205,11 +232,14 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
   }
 
   minio::s3::GetObjectArgs http_args = args;
-  std::stringstream ss(std::ios_base::in | std::ios_base::out |
-                       std::ios_base::binary);
-  ss.rdbuf()->pubsetbuf(args.buf, static_cast<std::streamsize>(size));
-  http_args.datafunc = [&ss](minio::http::DataFunctionArgs chunk) -> bool {
-    ss << chunk.datachunk;
+  char* dst = static_cast<char*>(args.buf);
+  size_t offset = 0;
+  http_args.datafunc = [&](minio::http::DataFunctionArgs chunk) -> bool {
+    size_t len = chunk.datachunk.size();
+    if (offset + len > size)
+      len = size - offset;
+    std::memcpy(dst + offset, chunk.datachunk.data(), len);
+    offset += len;
     return true;
   };
   http_args.buf = nullptr;

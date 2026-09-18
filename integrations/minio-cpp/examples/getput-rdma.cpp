@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <unistd.h>
 
 #include <hip/hip_runtime.h>
 

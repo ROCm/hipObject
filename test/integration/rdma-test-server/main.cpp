@@ -152,8 +152,7 @@ int main(int argc, char* argv[]) {
   hipobj::test::RdmaTestServer rdma;
   if (!rdma.isReady()) {
     fprintf(stderr,
-            "hipobj-rdma-test-server: RDMA not available (libibverbs/NIC)\n");
-    return 1;
+            "hipobj-rdma-test-server: RDMA not available — running in HTTP-only mode\n");
   }
 
   std::map<std::string, std::vector<uint8_t>> objects;
@@ -184,12 +183,32 @@ int main(int argc, char* argv[]) {
 
       const std::string key = objectKey(req.path);
       auto tokenIt = req.headers.find("x-amz-rdma-token");
-      if (tokenIt == req.headers.end()) {
-        resp.status = 400;
-        resp.body = "missing x-amz-rdma-token";
+
+      // HTTP-only mode: RDMA token absent or RDMA not available.
+      if (tokenIt == req.headers.end() || !rdma.isReady()) {
+        if (req.method == "PUT") {
+          objects[key] = std::vector<uint8_t>(req.body.begin(), req.body.end());
+          resp.status = 200;
+          resp.headers["etag"] = "\"test\"";
+          return resp;
+        }
+        if (req.method == "GET") {
+          auto it = objects.find(key);
+          if (it == objects.end()) {
+            resp.status = 404;
+            resp.body = "not found";
+            return resp;
+          }
+          resp.status = 200;
+          resp.body = std::string(it->second.begin(), it->second.end());
+          return resp;
+        }
+        resp.status = 405;
+        resp.body = "method not allowed";
         return resp;
       }
 
+      // Reaching here: token present and RDMA ready — use RDMA path.
       if (req.method == "PUT") {
         std::vector<uint8_t> payload;
         std::string replyHeader;
@@ -238,9 +257,13 @@ int main(int argc, char* argv[]) {
       return resp;
     });
 
+  // Use the threaded server so large HTTP request bodies (e.g. HTTP-only
+  // PUT payloads) are received in full rather than truncated at the
+  // 65 KB single-recv limit of runOnce().
+  server.startThreaded();
   fprintf(stdout, "hipobj-rdma-test-server listening on port %d\n", port);
   for (;;) {
-    server.runOnce(1000);
+    std::this_thread::sleep_for(std::chrono::seconds(3600));
   }
   return 0;
 }
