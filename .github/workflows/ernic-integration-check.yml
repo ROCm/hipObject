@@ -446,7 +446,8 @@ jobs:
             -device '{"driver":"vfio-user-pci","socket":{"type":"unix","path":"/tmp/vfio-user-rocm-ernic.sock"}}' \
             -serial file:/tmp/qemu-console.log -monitor none \
             -qmp unix:/tmp/qmp.sock,server=on,wait=off > /tmp/qemu.log 2>&1 &
-          echo "QEMU_PID=$!" >> "$GITHUB_ENV"
+          QEMU_PID=$!
+          echo "QEMU_PID=$QEMU_PID" >> "$GITHUB_ENV"
           sleep 5
           kill -0 "$QEMU_PID" 2>/dev/null || { cat /tmp/qemu.log; exit 1; }
 
