@@ -21,24 +21,32 @@ constexpr int IBV_ACCESS_REMOTE_READ = 0x1;
 constexpr int IBV_ACCESS_REMOTE_WRITE = 0x2;
 constexpr int IBV_ACCESS_LOCAL_WRITE = 0x4;
 
-} // namespace
-
-int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
+int validateRegistration(bool isRegistered, size_t entryCount, size_t size) {
   if (size > MAX_MR_SIZE) {
     return -1;
   }
-  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-  if (entries_.find(key) != entries_.end()) {
+  if (isRegistered) {
     return -1;
   }
-  if (entries_.size() >= kMaxEntries) {
+  if (entryCount >= BufferMap::kMaxEntries) {
+    return -1;
+  }
+  return 0;
+}
+
+} // namespace
+
+int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(),
+                           size) != 0) {
     return -1;
   }
   int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
                IBV_ACCESS_LOCAL_WRITE;
   struct ibv_mr* mr = ibv.reg_mr(pd, devPtr, size, access);
   if (mr) {
-    entries_[key] = {mr, size, true};
+    entries_[key] = {mr, size, true, false};
     return 0;
   }
   void* hostBuf = nullptr;
@@ -49,10 +57,26 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
   }
   mr = ibv.reg_mr_host(pd, hostBuf, size, access);
   if (!mr) {
-    (void)hipHostFree(hostBuf);
+    (void)hipObj::hipOps().hipHostFree(hostBuf);
     return -1;
   }
-  entries_[key] = {mr, size, false};
+  entries_[key] = {mr, size, false, true};
+  return 0;
+}
+
+int BufferMap::registerHostBuffer(void* hostPtr, size_t size, struct ibv_pd* pd) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(hostPtr);
+  if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(),
+                           size) != 0) {
+    return -1;
+  }
+  int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
+               IBV_ACCESS_LOCAL_WRITE;
+  struct ibv_mr* mr = ibv.reg_mr_host(pd, hostPtr, size, access);
+  if (!mr) {
+    return -1;
+  }
+  entries_[key] = {mr, size, false, false};
   return 0;
 }
 
@@ -66,10 +90,10 @@ int BufferMap::deregisterBuffer(void* devPtr) {
     return -1; /* pinned by a live v2 connection */
   }
   BufEntry& ent = it->second;
-  void* hostBuf = (!ent.isDmabuf) ? ent.mr->addr : nullptr;
+  void* hostBuf = ent.ownsHostBuf ? ent.mr->addr : nullptr;
   ibv.dereg_mr(ent.mr);
   if (hostBuf) {
-    (void)hipHostFree(hostBuf);
+    (void)hipObj::hipOps().hipHostFree(hostBuf);
   }
   entries_.erase(it);
   return 0;
@@ -77,10 +101,10 @@ int BufferMap::deregisterBuffer(void* devPtr) {
 
 void BufferMap::deregisterAll() {
   for (auto& [key, ent] : entries_) {
-    void* hostBuf = (!ent.isDmabuf) ? ent.mr->addr : nullptr;
+    void* hostBuf = ent.ownsHostBuf ? ent.mr->addr : nullptr;
     ibv.dereg_mr(ent.mr);
     if (hostBuf) {
-      (void)hipHostFree(hostBuf);
+      (void)hipObj::hipOps().hipHostFree(hostBuf);
     }
   }
   entries_.clear();

@@ -27,6 +27,7 @@ namespace hipObj {
 using HipGetDeviceFn = hipError_t (*)(int*);
 using HipDeviceGetPCIBusIdFn = hipError_t (*)(char*, int, int);
 using HipHostMallocFn = hipError_t (*)(void**, size_t, unsigned int);
+using HipHostFreeFn = hipError_t (*)(void*);
 using HipFreeFn = hipError_t (*)(void*);
 using HipDeviceSynchronizeFn = hipError_t (*)();
 
@@ -34,6 +35,7 @@ struct HipOps {
   HipGetDeviceFn hipGetDevice = nullptr;
   HipDeviceGetPCIBusIdFn hipDeviceGetPCIBusId = nullptr;
   HipHostMallocFn hipHostMalloc = nullptr;
+  HipHostFreeFn hipHostFree = nullptr;
   HipFreeFn hipFree = nullptr;
   HipDeviceSynchronizeFn hipDeviceSynchronize = nullptr;
 };

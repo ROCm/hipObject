@@ -94,6 +94,9 @@ hipObjShutdown();
 hipFree(gpu_buf);
 ```
 
+For CPU-based transfers, allocate a host buffer (for example with `malloc()` or
+`hipHostMalloc()`) and register it with `hipObjBufRegisterHost()`.
+
 ## Architecture
 
 hipObject separates control and data planes:

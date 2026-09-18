@@ -267,6 +267,27 @@ hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
   return hipObj::handleException();
 }
 
+hipObjError_t hipObjBufRegisterHost(void* hostPtr, size_t size) try {
+  hipObj::DriverState& state = hipObj::getState();
+  if (!state.initialized) {
+    return {hipObjNotInitialized, 0};
+  }
+  if (size > hipObj::MAX_MR_SIZE) {
+    return {hipObjSizeTooLarge, 0};
+  }
+  if (hipObj::g_bufferMap.isRegistered(hostPtr)) {
+    return {hipObjBufAlreadyRegistered, 0};
+  }
+  int ret =
+    hipObj::g_bufferMap.registerHostBuffer(hostPtr, size, hipObj::g_conn.pd);
+  if (ret != 0) {
+    return {hipObjRdmaError, 0};
+  }
+  return HIPOBJ_SUCCESS;
+} catch (...) {
+  return hipObj::handleException();
+}
+
 hipObjError_t hipObjBufDeregister(void* devPtr) try {
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {

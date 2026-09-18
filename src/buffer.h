@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* GPU buffer registration and MR cache */
+/* Buffer registration and MR cache */
 
 #pragma once
 
@@ -20,6 +20,7 @@ public:
   static constexpr size_t kMaxEntries = 256;
 
   int registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd);
+  int registerHostBuffer(void* hostPtr, size_t size, struct ibv_pd* pd);
   int deregisterBuffer(void* devPtr);
   void deregisterAll();
   struct ibv_mr* lookupMr(void* devPtr);
@@ -40,6 +41,7 @@ private:
     struct ibv_mr* mr;
     size_t size;
     bool isDmabuf;
+    bool ownsHostBuf;
     size_t refCount = 0; /* pinned by live v2 connections */
   };
 
