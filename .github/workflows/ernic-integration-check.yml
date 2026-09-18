@@ -472,13 +472,19 @@ jobs:
 
       - name: Copy minio binary to VM
         run: |
-          scp $SSH_OPTS -P $SSH_PORT \
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -P $SSH_PORT \
             "${{ github.workspace }}/ernic-build-s3/integrations/minio-cpp/minio-getput-rdma" \
             "${VM_USER}@localhost:/tmp/minio-getput-rdma"
 
       - name: Run S3 PUT+GET test in VM
         run: |
-          ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" bash -s << 'EOFVM'
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p $SSH_PORT "${VM_USER}@localhost" bash -s << 'EOFVM'
           set -e
           chmod +x /tmp/minio-getput-rdma
           echo "=== Waiting for ernic NIC and S3 endpoint ==="
