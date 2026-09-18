@@ -157,11 +157,6 @@ static void applyVendorQpAttrs(RcConnection& conn, struct ibv_qp_attr* attr) {
   if (ibv.query_device(conn.ctx, &devAttr) != 0) {
     return;
   }
-#ifdef HIPOBJ_BNXT
-  if (isBnxtDevice(devAttr.vendor_id)) {
-    configureBnxtQp(attr);
-  }
-#endif
 #ifdef HIPOBJ_IONIC
   if (isIonicDevice(devAttr.vendor_id)) {
     configureIonicQp(attr);

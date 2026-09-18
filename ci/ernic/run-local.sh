@@ -196,7 +196,6 @@ _rocm_build() {
             -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_IONIC=ON \
-            -DHIPOBJ_BNXT=OFF \
             -DHIPOBJ_INTEGRATION_TESTS=ON \
             -DHIPOBJ_MINIO_CLIENT=${MINIO_ON} \
             -DHIPOBJ_BUILD_DOCS=OFF \

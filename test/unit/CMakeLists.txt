@@ -53,9 +53,6 @@ target_link_libraries(hipobj_test_objects
     hsa-runtime64::hsa-runtime64
     stdc++)
 
-if(HIPOBJ_BNXT)
-  target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_BNXT)
-endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_IONIC)
 endif()

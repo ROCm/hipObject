@@ -16,7 +16,7 @@ Covers token header formatting (`token:buf:size`), numeric
 
 ## Layer 2 — hipObject smoke (GPU + NIC, no S3)
 
-On an AMD GPU node with `bnxt_re` or `ionic_rdma`:
+On an AMD GPU node with `ionic_rdma`:
 
 ```bash
 ibv_devinfo
@@ -58,8 +58,8 @@ succeeds:
 
 1. Capture `ibv_devinfo` and server logs from cuObjServer / RC adapter.
 2. Confirm whether the server reply includes a peer token for RC connect.
-3. Verify vendor QP attributes: BNXT/IONIC backends apply `configureBnxtQp`
-   / `configureIonicQp` during RTR/RTS transitions in
+3. Verify vendor QP attributes: the ionic backend applies `configureIonicQp`
+   during RTR/RTS transitions in
    [`src/rdma/transport.cpp`](../../src/rdma/transport.cpp).
 
 ## Layer 3 — AIStor end-to-end
@@ -77,7 +77,7 @@ succeeds:
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DHIPOBJ_MINIO_CLIENT=ON \
-  -DHIPOBJ_BNXT=ON
+  -DHIPOBJ_IONIC=ON
 cmake --build build
 ```
 

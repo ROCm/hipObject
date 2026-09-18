@@ -51,7 +51,6 @@
           - "{{ hipobj_build_dir }}"
           - -DCMAKE_BUILD_TYPE={{ hipobj_cmake_build_type }}
           - -DHIPOBJ_MINIO_CLIENT=ON
-          - -DHIPOBJ_BNXT={{ hipobj_cmake_hipobj_bnxt }}
           - -DHIPOBJ_IONIC={{ hipobj_cmake_hipobj_ionic }}
       args:
         creates: "{{ hipobj_build_dir }}/CMakeCache.txt"

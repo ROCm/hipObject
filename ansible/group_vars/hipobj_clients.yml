@@ -11,8 +11,7 @@ hipobj_install_prefix: /opt/hipobject
 hipobj_do_install: false
 
 hipobj_cmake_build_type: Release
-hipobj_cmake_hipobj_bnxt: "ON"
-hipobj_cmake_hipobj_ionic: "OFF"
+hipobj_cmake_hipobj_ionic: "ON"
 
 # Smoke test object size in bytes (see integrations/minio-cpp/TESTING.md).
 hipobj_test_size: "10485760"

@@ -18,7 +18,7 @@ Compatibility matrix
 +---------------------------+------------------+------------------+
 | GET / PUT / multipart     | Yes              | Yes (via SDK)    |
 +---------------------------+------------------+------------------+
-| RDMA transport            | DC (ConnectX)    | RC (bnxt/ionic)  |
+| RDMA transport            | DC (ConnectX)    | RC (ionic)       |
 +---------------------------+------------------+------------------+
 | Direct cuObject server    | N/A              | adapter_         |
 +---------------------------+------------------+------------------+
@@ -36,9 +36,9 @@ Data plane
 ~~~~~~~~~~
 
 cuObject v1.2.0 requires Dynamic Connection (DC) transport on NVIDIA
-ConnectX NICs.  hipObject uses Reliable Connection (RC) on Broadcom
-Thor-2 and AMD Pensando Pollara NICs.  The transport byte in the token
-distinguishes DC (``0x00``) from RC (``0x01``).
+ConnectX NICs.  hipObject uses Reliable Connection (RC) on AMD Pensando
+Pollara (ionic) NICs.  The transport byte in the token distinguishes DC
+(``0x00``) from RC (``0x01``).
 
 A stock ``libcuobjserver`` stack cannot serve RC clients directly.  An
 RC-to-DC adapter_ bridges AMD RC clients to
@@ -117,7 +117,7 @@ Hardware topology
    AMD GPU client                Storage server
    +----------------+            +------------------+
    | MI300 + hipObj |  RoCEv2 RC  | RC adapter       |
-   | bnxt / ionic   | ----------> | cuObjServer (DC) |
+   | ionic          | ----------> | cuObjServer (DC) |
    +----------------+            | MinIO AIStor     |
                                  +------------------+
 

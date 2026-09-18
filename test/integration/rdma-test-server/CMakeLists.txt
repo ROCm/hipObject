@@ -24,10 +24,6 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   ${CMAKE_SOURCE_DIR}/src/common/rdma-topology.cpp
   ${CMAKE_SOURCE_DIR}/src/common/rdma-numa-wrapper.cpp)
 
-if(HIPOBJ_BNXT)
-  list(APPEND HIPOBJ_TEST_SERVER_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/rdma/bnxt/bnxt-backend.cpp)
-endif()
 if(HIPOBJ_IONIC)
   list(APPEND HIPOBJ_TEST_SERVER_SOURCES
     ${CMAKE_SOURCE_DIR}/src/rdma/ionic/ionic-backend.cpp)
@@ -57,9 +53,6 @@ target_link_libraries(hipobj-rdma-test-server PRIVATE OpenSSL::Crypto)
 find_package(Threads REQUIRED)
 target_link_libraries(hipobj-rdma-test-server PRIVATE Threads::Threads)
 
-if(HIPOBJ_BNXT)
-  target_compile_definitions(hipobj-rdma-test-server PRIVATE HIPOBJ_BNXT)
-endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj-rdma-test-server PRIVATE HIPOBJ_IONIC)
 endif()

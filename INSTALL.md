@@ -23,8 +23,7 @@
 mkdir build && cd build
 cmake .. \
   -DCMAKE_BUILD_TYPE=Release \
-  -DHIPOBJ_BNXT=ON \
-  -DHIPOBJ_IONIC=OFF
+  -DHIPOBJ_IONIC=ON
 
 # Build
 make -j$(nproc)
@@ -40,8 +39,7 @@ sudo make install
 
 | Option             | Default   | Description                |
 | ------------------ | --------- | -------------------------- |
-| `HIPOBJ_BNXT`      | ON        | Build Thor-2 RDMA backend  |
-| `HIPOBJ_IONIC`     | OFF       | Build ionic RDMA backend   |
+| `HIPOBJ_IONIC`     | ON        | Build ionic RDMA backend   |
 | `BUILD_SHARED_LIBS`| OFF       | Build shared library       |
 | `BUILD_TESTING`    | ON        | Build and register tests   |
 | `HIPOBJ_BUILD_DOCS`| OFF       | Build documentation        |
