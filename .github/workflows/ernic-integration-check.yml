@@ -370,9 +370,9 @@ jobs:
 
       - name: Extract rocm-ernic binary from ernic image
         run: |
-          docker create --name _ernic_tmp "$ERNIC_IMAGE_LATEST"
-          docker cp _ernic_tmp:/usr/local/bin/rocm-ernic ./rocm-ernic
-          docker rm _ernic_tmp
+          docker create --name ernic-tmp "$ERNIC_IMAGE_LATEST"
+          docker cp ernic-tmp:/usr/local/bin/rocm-ernic ./rocm-ernic
+          docker rm ernic-tmp
           chmod +x ./rocm-ernic
           ./rocm-ernic --help | head -3
 
