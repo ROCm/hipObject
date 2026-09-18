@@ -50,8 +50,8 @@ void freeOwnedHostBuffer(void* hostBuf) {
 
 int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-  if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(),
-                           size) != 0) {
+  if (validateRegistration(entries_.find(key) != entries_.end(),
+                           entries_.size(), size) != 0) {
     return -1;
   }
   int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
@@ -76,10 +76,11 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
   return 0;
 }
 
-int BufferMap::registerHostBuffer(void* hostPtr, size_t size, struct ibv_pd* pd) {
+int BufferMap::registerHostBuffer(void* hostPtr, size_t size,
+                                  struct ibv_pd* pd) {
   uintptr_t key = reinterpret_cast<uintptr_t>(hostPtr);
-  if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(),
-                           size) != 0) {
+  if (validateRegistration(entries_.find(key) != entries_.end(),
+                           entries_.size(), size) != 0) {
     return -1;
   }
   int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
@@ -143,6 +144,12 @@ size_t BufferMap::lookupSize(void* devPtr) const {
 bool BufferMap::isRegistered(void* devPtr) const {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   return entries_.find(key) != entries_.end();
+}
+
+bool BufferMap::requiresDeviceSync(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  return it != entries_.end() && it->second.isDmabuf;
 }
 
 bool BufferMap::acquireMrRef(void* devPtr) {

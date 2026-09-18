@@ -104,15 +104,28 @@ TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory) {
   hipObj::BufferMap buffers;
   char hostBuf[32] = {};
 
-  EXPECT_EQ(buffers.registerHostBuffer(
-              hostBuf, sizeof(hostBuf), reinterpret_cast<struct ibv_pd*>(1)),
+  EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf),
+                                       reinterpret_cast<struct ibv_pd*>(1)),
             0);
   ASSERT_NE(buffers.lookupMr(hostBuf), nullptr);
   EXPECT_EQ(buffers.lookupMr(hostBuf)->addr, hostBuf);
+  EXPECT_FALSE(buffers.requiresDeviceSync(hostBuf));
   EXPECT_EQ(g_hostMallocCalls, 0);
 
   EXPECT_EQ(buffers.deregisterBuffer(hostBuf), 0);
   EXPECT_EQ(g_hostFreeCalls, 0);
+}
+
+TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync) {
+  hipObj::BufferMap buffers;
+  void* gpuBuf = reinterpret_cast<void*>(0x4000);
+
+  EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64,
+                                   reinterpret_cast<struct ibv_pd*>(1)),
+            0);
+  EXPECT_TRUE(buffers.requiresDeviceSync(gpuBuf));
+
+  EXPECT_EQ(buffers.deregisterBuffer(gpuBuf), 0);
 }
 
 TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer) {
@@ -120,11 +133,12 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer) {
   void* gpuBuf = reinterpret_cast<void*>(0x1000);
   g_ibvLog.failRegisterAddr = gpuBuf;
 
-  EXPECT_EQ(buffers.registerBuffer(
-              gpuBuf, 64, reinterpret_cast<struct ibv_pd*>(1)),
+  EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64,
+                                   reinterpret_cast<struct ibv_pd*>(1)),
             0);
   ASSERT_NE(buffers.lookupMr(gpuBuf), nullptr);
   EXPECT_EQ(buffers.lookupMr(gpuBuf)->addr, g_lastHostMalloc);
+  EXPECT_FALSE(buffers.requiresDeviceSync(gpuBuf));
   EXPECT_EQ(g_hostMallocCalls, 1);
 
   EXPECT_EQ(buffers.deregisterBuffer(gpuBuf), 0);
@@ -137,8 +151,8 @@ TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers) {
   void* gpuBuf = reinterpret_cast<void*>(0x2000);
   g_ibvLog.failRegisterAddr = gpuBuf;
 
-  EXPECT_EQ(buffers.registerBuffer(
-              gpuBuf, 64, reinterpret_cast<struct ibv_pd*>(1)),
+  EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64,
+                                   reinterpret_cast<struct ibv_pd*>(1)),
             0);
   ASSERT_NE(g_lastHostMalloc, nullptr);
 

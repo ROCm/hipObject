@@ -26,6 +26,7 @@ public:
   struct ibv_mr* lookupMr(void* devPtr);
   size_t lookupSize(void* devPtr) const;
   bool isRegistered(void* devPtr) const;
+  bool requiresDeviceSync(void* devPtr) const;
 
   /* v2: the shared device may close only when no MR and no
    * connection remain. Connections pin the buffers they transfer

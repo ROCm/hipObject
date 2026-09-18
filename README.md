@@ -95,7 +95,9 @@ hipFree(gpu_buf);
 ```
 
 For CPU-based transfers, allocate a host buffer (for example with `malloc()` or
-`hipHostMalloc()`) and register it with `hipObjBufRegisterHost()`.
+`hipHostMalloc()`) and register it with `hipObjBufRegisterHost()`. On GPU-less
+hosts, set `config.nicHint` to the RDMA device name so `hipObjInit()` can open
+that NIC without GPU topology discovery.
 
 ## Architecture
 
