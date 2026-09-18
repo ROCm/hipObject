@@ -151,8 +151,8 @@ int main(int argc, char* argv[]) {
 
   hipobj::test::RdmaTestServer rdma;
   if (!rdma.isReady()) {
-    fprintf(stderr,
-            "hipobj-rdma-test-server: RDMA not available — running in HTTP-only mode\n");
+    fprintf(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
+                    "HTTP-only mode\n");
   }
 
   std::map<std::string, std::vector<uint8_t>> objects;

@@ -11,12 +11,17 @@
 #   ernic-client: put-object/get-object/v2-data-client;
 #     Layer 2 (control-plane) and Layer 3 (data-plane, payload verified).
 #
-# Job 2 - ernic-minio-v1 (v1 protocol, minio-cpp bridge):
+# Job 2 - ernic-minio-v1 (v1 protocol, minio-cpp bridge, hipobj-rdma-test-server):
 #   ernic-server-v1: hipobj-rdma-test-server (v1 mode) on port 9000.
 #   rocjitsu:        rocjitsu GPU emulator serving a vfio-user socket via a
 #                    shared tmpfs volume.  The client picks up the socket and
 #                    runs minio-getput-rdma in gpu mode (hipMalloc → RDMA PUT/GET).
 #   ernic-minio-client: minio-getput-rdma; payload integrity verified.
+#
+# Job 3 - ernic-s3-backend (rocm-ernic --backend s3, single container):
+#   A single privileged ernic container creates a TAP interface, starts
+#   rocm-ernic in S3 backend mode, and runs minio-getput-rdma against it.
+#   Tests the built-in rocm-ernic S3-over-RDMA server end-to-end.
 
 name: eRNIC Integration Check
 
@@ -48,7 +53,8 @@ permissions:
 
 env:
   # Bump these intentionally when the ernic or rocjitsu images are updated.
-  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic
+  # latest includes --backend s3 and --tap support (commit 6ca9a465).
+  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest
   ROCJITSU_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:august-28-2026
   ROCM_IMAGE: rocm/dev-ubuntu-24.04:7.14.0-full
 
@@ -302,3 +308,66 @@ jobs:
           docker run --rm -v "${{ github.workspace }}/ernic-build-v1:/d" \
             busybox sh -c "rm -rf /d/*" 2>/dev/null || true
           rm -rf "${{ github.workspace }}/ernic-build-v1" 2>/dev/null || true
+
+  ernic-s3-backend:
+    name: rocm-ernic S3 backend test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - name: Make S3 backend entrypoint executable
+        run: chmod +x ci/ernic/s3-backend-entrypoint.sh
+
+      - name: Build hipObject + minio-cpp binaries (ROCm container)
+        run: |
+          docker run --rm \
+            --user root \
+            -v "${{ github.workspace }}:/hipobject:ro" \
+            -v "${{ github.workspace }}/ernic-build-s3:/hipobject-build" \
+            -e ROCM_PATH=/opt/rocm \
+            "$ROCM_IMAGE" \
+            bash -c "
+              apt-get update -qq && \
+              apt-get install -y -qq git cmake ninja-build libibverbs-dev libnuma-dev \
+                libcurl4-openssl-dev libssl-dev \
+                nlohmann-json3-dev libpugixml-dev && \
+              cmake -B /hipobject-build -G Ninja -S /hipobject \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH=/opt/rocm \
+                -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
+                -DBUILD_TESTING=ON \
+                -DHIPOBJ_IONIC=ON \
+                -DHIPOBJ_BNXT=OFF \
+                -DHIPOBJ_INTEGRATION_TESTS=ON \
+                -DHIPOBJ_MINIO_CLIENT=ON \
+                -DHIPOBJ_BUILD_DOCS=OFF \
+                -DCMAKE_SKIP_INSTALL_RULES=ON && \
+              cmake --build /hipobject-build --parallel \$(nproc) \
+                --target minio-getput-rdma && \
+              mkdir -p /hipobject-build/rocm-libs && \
+              find /opt/rocm -name '*.so*' \( -type f -o -type l \) \
+                -exec cp -P {} /hipobject-build/rocm-libs/ \; 2>/dev/null || true
+            "
+
+      - name: Pull ernic image
+        run: docker pull "$ERNIC_IMAGE"
+
+      - name: Run S3 backend test (single privileged container)
+        run: |
+          docker run --rm \
+            --name ernic-s3-backend \
+            --cap-add NET_ADMIN \
+            -v "${{ github.workspace }}/ernic-build-s3:/hipobject-build:ro" \
+            -v "${{ github.workspace }}:/hipobject:ro" \
+            -e TEST_SIZE=65536 \
+            --entrypoint /hipobject/ci/ernic/s3-backend-entrypoint.sh \
+            "$ERNIC_IMAGE"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker run --rm -v "${{ github.workspace }}/ernic-build-s3:/d" \
+            busybox sh -c "rm -rf /d/*" 2>/dev/null || true
+          rm -rf "${{ github.workspace }}/ernic-build-s3" 2>/dev/null || true

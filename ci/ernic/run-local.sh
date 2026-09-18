@@ -6,26 +6,29 @@
 # Run ernic integration tests locally using pre-built or freshly-built binaries.
 #
 # Usage:
-#   ci/ernic/run-local.sh                     # v2 test, use build-v2 binaries
-#   ci/ernic/run-local.sh --rebuild           # v2 test, force ROCm container build
-#   ci/ernic/run-local.sh --minio-v1          # v1 minio-cpp test, use build-minio binaries
+#   ci/ernic/run-local.sh                       # v2 test, use build-v2 binaries
+#   ci/ernic/run-local.sh --rebuild             # v2 test, force ROCm container build
+#   ci/ernic/run-local.sh --minio-v1            # v1 minio-cpp test, use build-minio binaries
 #   ci/ernic/run-local.sh --minio-v1 --rebuild  # v1 minio-cpp test, force build
+#   ci/ernic/run-local.sh --s3-backend          # rocm-ernic --backend s3 test (requires --privileged)
 
 set -euo pipefail
 
 REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-ERNIC_IMAGE=${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
+ERNIC_IMAGE=${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
 ROCJITSU_IMAGE=${ROCJITSU_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:august-28-2026}
 ROCM_IMAGE=rocm/dev-ubuntu-24.04:7.14.0-full
 AMD_CA_CERT=/home/stebates/Projects/batesste-ci-images/common/amd-root-ca.crt
 
 MINIO_V1=false
+S3_BACKEND=false
 REBUILD=false
 
 for arg in "$@"; do
     case "${arg}" in
-        --minio-v1) MINIO_V1=true ;;
-        --rebuild)  REBUILD=true  ;;
+        --minio-v1)    MINIO_V1=true    ;;
+        --s3-backend)  S3_BACKEND=true  ;;
+        --rebuild)     REBUILD=true     ;;
         *) echo "Unknown argument: ${arg}"; exit 1 ;;
     esac
 done
@@ -226,9 +229,43 @@ _wait_for_server() {
     done
 }
 
+# ── s3-backend test ───────────────────────────────────────────────────────────
+
+run_s3_backend() {
+    local BUILD_DIR="${REPO}/build-minio"
+
+    if [ "${REBUILD}" = true ]; then
+        BUILD_DIR=/tmp/ernic-s3-rebuild
+        mkdir -p "${BUILD_DIR}/rocm-libs"
+        echo "=== Rebuilding (s3-backend) in ROCm container ==="
+        _rocm_build "${BUILD_DIR}" "ON" "minio-getput-rdma"
+    else
+        if [ ! -x "${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma" ]; then
+            echo "ERROR: ${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma not found"
+            echo "Run with --rebuild or build build-minio first"
+            exit 1
+        fi
+        echo "=== Using existing build-minio binaries ==="
+    fi
+
+    chmod +x "${REPO}/ci/ernic/s3-backend-entrypoint.sh"
+
+    echo "=== Running S3 backend test (single privileged container) ==="
+    docker run --rm \
+        --name ernic-s3-backend-local \
+        --cap-add NET_ADMIN \
+        -v "${BUILD_DIR}:/hipobject-build:ro" \
+        -v "${REPO}:/hipobject:ro" \
+        -e TEST_SIZE=65536 \
+        --entrypoint /hipobject/ci/ernic/s3-backend-entrypoint.sh \
+        "$ERNIC_IMAGE"
+}
+
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
-if [ "${MINIO_V1}" = true ]; then
+if [ "${S3_BACKEND}" = true ]; then
+    run_s3_backend
+elif [ "${MINIO_V1}" = true ]; then
     run_minio_v1
 else
     run_v2
