@@ -188,11 +188,9 @@ bool parseClientNicFromTokenHex(const char* tokenHex, char* nicIp,
 
 std::string formatRdmaHeaderValue(const char* tokenHex, const void* buf,
                                   size_t size) {
-  char header[512];
-  std::snprintf(header, sizeof(header), "%s:%016lx:%016lx", tokenHex,
-                reinterpret_cast<uintptr_t>(buf),
-                static_cast<unsigned long>(size));
-  return std::string(header);
+  (void)buf;
+  (void)size;
+  return tokenHex ? std::string(tokenHex) : std::string();
 }
 
 bool parsePeerTokenFromReply(const char* reply, size_t replyLen,

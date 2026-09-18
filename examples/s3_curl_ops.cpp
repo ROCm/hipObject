@@ -78,13 +78,8 @@ int hipObjS3CurlSendRequest(void* ctx, const char* token, size_t tokenLen) {
     return -1;
   }
 
-  char rdmaHeader[512];
-  std::snprintf(rdmaHeader, sizeof(rdmaHeader), "%.*s:%016lx:%016lx",
-                static_cast<int>(tokenLen), token,
-                reinterpret_cast<uintptr_t>(cfg->devPtr),
-                static_cast<unsigned long>(cfg->objectSize));
-
-  std::string headerToken = std::string("x-amz-rdma-token: ") + rdmaHeader;
+  std::string headerToken = "x-amz-rdma-token: ";
+  headerToken.append(token, tokenLen);
   struct curl_slist* headers = nullptr;
   headers = curl_slist_append(headers, headerToken.c_str());
   headers = curl_slist_append(headers, "Content-Length: 0");
