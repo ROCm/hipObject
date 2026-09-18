@@ -63,6 +63,8 @@ find_package(hsa-runtime64 CONFIG REQUIRED)
 message(STATUS
   "hsa-runtime64 @ ${hsa-runtime64_DIR}")
 
+option(HIPOBJ_BNXT
+  "Build BNXT (Thor-2) RDMA provider" ON)
 option(HIPOBJ_IONIC
   "Build IONIC (Pensando) RDMA provider" OFF)
 
@@ -105,6 +107,10 @@ set(HIPOBJ_SOURCES
   src/rdma/v2-transport.cpp
   src/s3/control.cpp)
 
+if(HIPOBJ_BNXT)
+  list(APPEND HIPOBJ_SOURCES
+    src/rdma/bnxt/bnxt-backend.cpp)
+endif()
 if(HIPOBJ_IONIC)
   list(APPEND HIPOBJ_SOURCES
     src/rdma/ionic/ionic-backend.cpp)
@@ -136,6 +142,10 @@ target_link_libraries(hipobj
   PRIVATE
     dl)
 
+if(HIPOBJ_BNXT)
+  target_compile_definitions(hipobj
+    PRIVATE HIPOBJ_BNXT)
+endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_IONIC)

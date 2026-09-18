@@ -29,7 +29,8 @@ vendor-neutral client for GPU-direct object storage.
 - Zero-copy data path bypassing host CPU for payloads
 - S3 control plane with RDMA data plane split
 - NUMA-aware NIC selection (closest NIC to target GPU)
-- Supports AMD Pensando ionic RDMA NIC (`ionic_rdma`)
+- Supports Broadcom Thor-2 (`bnxt_re`) and AMD Pensando
+  ionic (`ionic_rdma`) RDMA NICs
 - dmabuf-based GPU memory export for RDMA registration
 - Host-staged fallback when dmabuf is unavailable
 - Wire-compatible with cuObject `x-amz-rdma-token` protocol
@@ -56,7 +57,7 @@ vendor-neutral client for GPU-direct object storage.
 ### Hardware
 
 - AMD Instinct GPU (MI200 / MI300 series)
-- AMD Pensando Pollara 400 (ionic) NIC
+- Broadcom Thor-2 or AMD Pensando Pollara 400 NIC
 - RoCEv2-capable network fabric with PFC/ECN
 
 ## Building

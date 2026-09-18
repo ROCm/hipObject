@@ -23,6 +23,7 @@ cmake -B build \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
   -DBUILD_TESTING=ON \
+  -DHIPOBJ_BNXT=ON \
   -DHIPOBJ_IONIC=ON
 cmake --build build -j"$(nproc)"
 ```
