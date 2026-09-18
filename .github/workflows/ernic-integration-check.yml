@@ -14,9 +14,11 @@
 # Job 2 - ernic-minio-v1 (v1 protocol, minio-cpp bridge, hipobj-rdma-test-server):
 #   ernic-server-v1: hipobj-rdma-test-server (v1 mode) on port 9000.
 #   rocjitsu:        rocjitsu GPU emulator serving a vfio-user socket via a
-#                    shared tmpfs volume.  The client picks up the socket and
-#                    runs minio-getput-rdma in gpu mode (hipMalloc → RDMA PUT/GET).
-#   ernic-minio-client: minio-getput-rdma; payload integrity verified.
+#                    shared tmpfs volume (wired for future GPU path; client
+#                    currently runs in nogpu mode — /dev/kfd + /dev/dri not
+#                    present in Docker without vfio-pci passthrough).
+#   ernic-minio-client: minio-getput-rdma in nogpu+HTTP-only mode;
+#                    payload integrity verified end-to-end.
 #
 # Job 3 - ernic-s3-backend (rocm-ernic --backend s3, single container):
 #   A single privileged ernic container creates a TAP interface, starts

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -156,6 +157,7 @@ int main(int argc, char* argv[]) {
   }
 
   std::map<std::string, std::vector<uint8_t>> objects;
+  std::mutex objects_mu;
 
   hipobj::test::HttpServer server(port);
   server.setHandler(
@@ -187,12 +189,14 @@ int main(int argc, char* argv[]) {
       // HTTP-only mode: RDMA token absent or RDMA not available.
       if (tokenIt == req.headers.end() || !rdma.isReady()) {
         if (req.method == "PUT") {
+          std::lock_guard<std::mutex> lk(objects_mu);
           objects[key] = std::vector<uint8_t>(req.body.begin(), req.body.end());
           resp.status = 200;
           resp.headers["etag"] = "\"test\"";
           return resp;
         }
         if (req.method == "GET") {
+          std::lock_guard<std::mutex> lk(objects_mu);
           auto it = objects.find(key);
           if (it == objects.end()) {
             resp.status = 404;
@@ -224,7 +228,10 @@ int main(int argc, char* argv[]) {
           resp.body = "RDMA PUT failed";
           return resp;
         }
-        objects[key] = std::move(payload);
+        {
+          std::lock_guard<std::mutex> lk(objects_mu);
+          objects[key] = std::move(payload);
+        }
         resp.status = 200;
         resp.headers["x-amz-rdma-reply"] = replyHeader;
         resp.headers["etag"] = "\"test\"";
@@ -232,15 +239,19 @@ int main(int argc, char* argv[]) {
       }
 
       if (req.method == "GET") {
-        auto it = objects.find(key);
-        if (it == objects.end()) {
-          resp.status = 404;
-          resp.body = "not found";
-          return resp;
+        std::vector<uint8_t> data;
+        {
+          std::lock_guard<std::mutex> lk(objects_mu);
+          auto it = objects.find(key);
+          if (it == objects.end()) {
+            resp.status = 404;
+            resp.body = "not found";
+            return resp;
+          }
+          data = it->second;
         }
         std::string replyHeader;
-        if (rdma.rdmaWriteToClient(tokenIt->second, it->second, replyHeader) !=
-            0) {
+        if (rdma.rdmaWriteToClient(tokenIt->second, data, replyHeader) != 0) {
           resp.status = 500;
           resp.body = "RDMA GET failed";
           return resp;
@@ -248,7 +259,7 @@ int main(int argc, char* argv[]) {
         resp.status = 200;
         resp.headers["x-amz-rdma-reply"] = replyHeader;
         resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(
-          it->second.size());
+          data.size());
         return resp;
       }
 

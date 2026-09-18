@@ -24,7 +24,7 @@ services:
   # ── v2 protocol (default) ──────────────────────────────────────────────────
 
   ernic-server:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:august-27-2026}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
     container_name: ernic-server
     hostname: ernic-server
     expose:
@@ -45,7 +45,7 @@ services:
       - ernic-net
 
   ernic-client:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:august-27-2026}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
     container_name: ernic-client
     depends_on:
       ernic-server:
@@ -65,7 +65,7 @@ services:
 
   ernic-server-v1:
     profiles: [minio-v1]
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:august-27-2026}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
     container_name: ernic-server-v1
     hostname: ernic-server
     expose:
@@ -104,7 +104,7 @@ services:
 
   ernic-minio-client:
     profiles: [minio-v1]
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:august-27-2026}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
     container_name: ernic-minio-client
     depends_on:
       ernic-server-v1:
