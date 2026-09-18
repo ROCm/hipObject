@@ -378,7 +378,7 @@ jobs:
 
       - name: Select QEMU accelerator and guest size
         run: |
-          if [ -c /dev/kvm ] && qemu-system-x86_64 -accel help 2>/dev/null | grep -qw kvm; then
+          if [ -c /dev/kvm ] && ${QEMU_PATH:-}qemu-system-x86_64 -accel help 2>/dev/null | grep -qw kvm; then
             echo "QEMU_ACCEL=kvm"  >> "$GITHUB_ENV"
             echo "QEMU_CPU=host"   >> "$GITHUB_ENV"
           else
@@ -435,7 +435,7 @@ jobs:
 
       - name: Start QEMU VM
         run: |
-          qemu-system-x86_64 \
+          ${QEMU_PATH:-}qemu-system-x86_64 \
             -machine q35,accel=${QEMU_ACCEL},memory-backend=mem0 \
             -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
             -object memory-backend-memfd,id=mem0,share=on,size=${VM_MEM_MB}M \
