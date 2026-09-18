@@ -306,7 +306,7 @@ typedef struct {
   const char* bucket;  /*!< Object bucket */
   const char* key;     /*!< Object key */
   const char* query;   /*!< Canonical query string or NULL */
-  const char* token;   /*!< 88-hex token[:addr:size] */
+  const char* token;   /*!< 88-hex RDMA token */
   const char* session; /*!< READY/cancel: session id (library sets) */
   const char* target;  /*!< Canonical rdma-target value (library sets) */
   uint64_t size;       /*!< Transfer size in bytes */
