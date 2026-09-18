@@ -387,7 +387,7 @@ jobs:
           fi
           HOST_MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
           VM_VCPUS=$(( ($(nproc) - 1) )); [ "$VM_VCPUS" -lt 4 ] && VM_VCPUS=4
-          VM_MEM_MB=$(( HOST_MEM_MB * 3 / 4 )); [ "$VM_MEM_MB" -gt 8192 ] && VM_MEM_MB=8192
+          VM_MEM_MB=$(( HOST_MEM_MB * 3 / 4 )); [ "$VM_MEM_MB" -gt 4096 ] && VM_MEM_MB=4096
           echo "VM_VCPUS=$VM_VCPUS" >> "$GITHUB_ENV"
           echo "VM_MEM_MB=$VM_MEM_MB" >> "$GITHUB_ENV"
 
@@ -493,8 +493,9 @@ jobs:
       - name: Collect logs
         if: always()
         run: |
-          cat /tmp/ernic-s3.log    || true
-          cat /tmp/qemu-console.log || true
+          echo "=== ernic-s3.log ===" && cat /tmp/ernic-s3.log    || true
+          echo "=== qemu.log ==="     && cat /tmp/qemu.log         || true
+          echo "=== qemu-console ===" && cat /tmp/qemu-console.log || true
 
       - name: Teardown
         if: always()
