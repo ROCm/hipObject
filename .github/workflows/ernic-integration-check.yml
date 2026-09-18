@@ -55,8 +55,13 @@ permissions:
 
 env:
   # Bump these intentionally when the ernic or rocjitsu images are updated.
-  # latest includes --backend s3 and --tap support (commit 6ca9a465).
-  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest
+  # ERNIC_IMAGE_IONIC: september-17-2026-ionic adds rdma-core 64.0 provider,
+  #   libdrm2, libdrm-amdgpu1, libnuma1, libpugixml1v5 — needed by minio-v1
+  #   and s3-backend jobs.
+  # ERNIC_IMAGE_LATEST: commit 6ca9a465, adds --backend s3/nvmeof/tap — used
+  #   by the v2 two-container job.
+  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic
+  ERNIC_IMAGE_LATEST: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest
   ROCJITSU_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:august-28-2026
   ROCM_IMAGE: rocm/dev-ubuntu-24.04:7.14.0-full
 
@@ -353,8 +358,8 @@ jobs:
                 -exec cp -P {} /hipobject-build/rocm-libs/ \; 2>/dev/null || true
             "
 
-      - name: Pull ernic image
-        run: docker pull "$ERNIC_IMAGE"
+      - name: Pull ernic image (latest — has --backend s3)
+        run: docker pull "$ERNIC_IMAGE_LATEST"
 
       - name: Run S3 backend test (single privileged container)
         run: |
@@ -365,7 +370,7 @@ jobs:
             -v "${{ github.workspace }}:/hipobject:ro" \
             -e TEST_SIZE=65536 \
             --entrypoint /hipobject/ci/ernic/s3-backend-entrypoint.sh \
-            "$ERNIC_IMAGE"
+            "$ERNIC_IMAGE_LATEST"
 
       - name: Teardown
         if: always()

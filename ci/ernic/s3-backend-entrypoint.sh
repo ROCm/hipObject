@@ -34,6 +34,12 @@ echo "=== ernic S3 backend test ==="
 echo "    size:     ${TEST_SIZE} bytes"
 echo "    endpoint: http://${S3_IP}:${S3_PORT}"
 
+# Ensure iproute2 is available (not installed in the base ernic image).
+if ! command -v ip >/dev/null 2>&1; then
+    apt-get update -qq 2>/dev/null
+    apt-get install -y -qq iproute2 2>/dev/null
+fi
+
 # Create the TAP interface so rocm-ernic can bind its S3 endpoint to it.
 ip tuntap add dev "${TAP_IFNAME}" mode tap 2>/dev/null || true
 ip link set "${TAP_IFNAME}" up
