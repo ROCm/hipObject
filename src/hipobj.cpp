@@ -62,7 +62,8 @@ static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
   return true;
 }
 
-static int finishTransferAfterReply(const char* reply, size_t replyLen) {
+static int finishTransferAfterReply(const char* reply, size_t replyLen,
+                                    bool requiresDeviceSync) {
   RdmaToken peerToken;
   int httpCode = 0;
   if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
@@ -77,6 +78,9 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen) {
   if (pollCompletion(g_conn, -1, 5000) != 0) {
     return -1;
   }
+  if (!requiresDeviceSync) {
+    return 0;
+  }
   hipError_t err = hipObj::hipOps().hipDeviceSynchronize();
   return (err == hipSuccess) ? 0 : -1;
 }
@@ -84,6 +88,8 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen) {
 static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
                                      off_t offset, hipObjOps_t* ops,
                                      void* ctx) {
+  bool requiresDeviceSync = g_bufferMap.requiresDeviceSync(
+    const_cast<void*>(devPtr));
   RdmaToken token;
   if (!buildRdmaToken(devPtr, size, offset, token)) {
     return {hipObjRdmaError, 0};
@@ -99,7 +105,7 @@ static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
       rdmaStatus != 0) {
     return {hipObjS3Error, 0};
   }
-  if (finishTransferAfterReply(replyBuf, replyLen) != 0) {
+  if (finishTransferAfterReply(replyBuf, replyLen, requiresDeviceSync) != 0) {
     return {hipObjRdmaError, 0};
   }
   return HIPOBJ_SUCCESS;
@@ -163,14 +169,22 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   if (gpuDevice < 0) {
     hipError_t err = hipObj::hipOps().hipGetDevice(&gpuDevice);
     if (err != hipSuccess) {
-      return {hipObjRdmaError, static_cast<int>(err)};
+      if (err == hipErrorNoDevice && config->nicHint &&
+          config->nicHint[0] != '\0') {
+        gpuDevice = -1;
+      } else {
+        return {hipObjRdmaError, static_cast<int>(err)};
+      }
     }
   }
   const char* devName = nullptr;
-  int nicIndex = hipObj::GetClosestNicToGpu(gpuDevice,
-                                            config->nicHint ? config->nicHint
-                                                            : nullptr,
-                                            &devName);
+  int nicIndex = -1;
+  if (gpuDevice >= 0) {
+    nicIndex = hipObj::GetClosestNicToGpu(gpuDevice,
+                                          config->nicHint ? config->nicHint
+                                                          : nullptr,
+                                          &devName);
+  }
   if (nicIndex < 0) {
     // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
     // hint is provided, try opening it directly without GPU topology so the
@@ -259,6 +273,30 @@ hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
     return {hipObjBufAlreadyRegistered, 0};
   }
   int ret = hipObj::g_bufferMap.registerBuffer(devPtr, size, hipObj::g_conn.pd);
+  if (ret != 0) {
+    return {hipObjRdmaError, 0};
+  }
+  return HIPOBJ_SUCCESS;
+} catch (...) {
+  return hipObj::handleException();
+}
+
+hipObjError_t hipObjBufRegisterHost(void* hostPtr, size_t size) try {
+  hipObj::DriverState& state = hipObj::getState();
+  if (!state.initialized) {
+    return {hipObjNotInitialized, 0};
+  }
+  if (!hostPtr) {
+    return {hipObjInvalidValue, 0};
+  }
+  if (size > hipObj::MAX_MR_SIZE) {
+    return {hipObjSizeTooLarge, 0};
+  }
+  if (hipObj::g_bufferMap.isRegistered(hostPtr)) {
+    return {hipObjBufAlreadyRegistered, 0};
+  }
+  int ret = hipObj::g_bufferMap.registerHostBuffer(hostPtr, size,
+                                                   hipObj::g_conn.pd);
   if (ret != 0) {
     return {hipObjRdmaError, 0};
   }

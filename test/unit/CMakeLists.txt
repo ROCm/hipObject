@@ -108,3 +108,6 @@ hipobj_add_test(test-v2-connref
 
 hipobj_add_test(test-seams
   test-seams.cpp)
+
+hipobj_add_test(test-buffer-registration
+  test-buffer-registration.cpp)
