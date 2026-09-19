@@ -482,8 +482,9 @@ HIPOBJ_API int hipObjSelectedPortV2(void);
 /*! @brief GID index the v2 data plane selected at init @ingroup init
  *
  * -1 before init or when unavailable. Pair with
- * hipObjSelectedPortV2 and the NIC from hipObjNicV2 to read
- * @c /sys/class/infiniband/<dev>/ports/<port>/gid_attrs/ndevs/<gid>.
+ * hipObjSelectedPortV2 and the NIC from hipObjNicV2 to read the sysfs
+ * ndevs entry of the selected GID:
+ * @c /sys/class/infiniband/@<dev@>/ports/@<port@>/gid_attrs/ndevs/@<gid@>.
  */
 HIPOBJ_API int hipObjSelectedGidIndexV2(void);
 
