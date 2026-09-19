@@ -12,8 +12,10 @@
 
 #include <arpa/inet.h>
 
+#include "buffer.h"
 #include "ibv-wrapper.h"
 #include "transport.h"
+#include "v2-client.h"
 #include "vendor-ops.h"
 
 namespace hipObj {

@@ -105,6 +105,7 @@ set(HIPOBJ_SOURCES
   src/rdma/v2-random.cpp
   src/rdma/v2-registry.cpp
   src/rdma/v2-transport.cpp
+  src/rdma/v2-client.cpp
   src/s3/control.cpp)
 
 if(HIPOBJ_BNXT)

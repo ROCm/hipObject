@@ -22,6 +22,8 @@ enum GidPriority {
   ROCEV2_IPV4 = 5,
 };
 
+int GetClosestNicToGpuSafe(int gpuIndex, const char* hca_list,
+                           const char** dev_name);
 int GetClosestNicToGpu(int gpuIndex, const char* hca_list,
                        const char** dev_name);
 

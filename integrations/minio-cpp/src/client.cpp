@@ -17,6 +17,8 @@
 
 namespace hipobj::minio {
 
+namespace minio = ::minio;
+
 namespace {
 
 class HipObjRuntime {
@@ -29,7 +31,11 @@ public:
   hipObjError_t EnsureInit(minio::s3::BaseUrl base_url,
                            minio::creds::Provider* provider) {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::string key = base_url.host + ":" + base_url.region;
+    const std::string port = base_url.port == 0
+                               ? std::string()
+                               : ":" + std::to_string(base_url.port);
+    std::string key = base_url.host + port + ":" + base_url.region +
+                      (base_url.https ? ":https" : ":http");
     if (initialized_ && key == active_key_) {
       return HIPOBJ_SUCCESS;
     }
@@ -37,13 +43,14 @@ public:
       hipObjShutdown();
       initialized_ = false;
     }
-    hipObjConfig_t cfg{};
     endpoint_storage_ = (base_url.https ? "https://" : "http://") +
-                        base_url.host;
-    cfg.endpoint = endpoint_storage_.c_str();
-    cfg.region = base_url.region.c_str();
-    cfg.gpuDevice = -1;
-    hipObjError_t err = hipObjInit(&cfg);
+                        base_url.host + port;
+    hipObjConfigV2_t cfg{};
+    cfg.v1.endpoint = endpoint_storage_.c_str();
+    cfg.v1.region = base_url.region.c_str();
+    cfg.v1.gpuDevice = -1;
+    cfg.control.controlEndpoint = endpoint_storage_.c_str();
+    hipObjError_t err = hipObjInitV2(&cfg);
     if (err.opError == hipObjSuccess) {
       initialized_ = true;
       active_key_ = key;
@@ -131,12 +138,23 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
     .object = args.object,
     .url = base_url_,
     .region = region,
+    .uploadId = {},
+    .partNumber = 0,
+    .checksum = {},
+    .etag = {},
   };
 
   ssize_t ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
   if (ret > 0) {
     minio::s3::PutObjectResponse resp;
     resp.etag = put_ctx.etag;
+    return resp;
+  }
+  if (ret == kRdmaV2Failed) {
+    /* The v2 attempt failed mid-protocol; the buffer contents and the
+     * upload state are uncertain, so the HTTP fallback must not run. */
+    minio::s3::PutObjectResponse resp;
+    resp.message = "rdma v2 transfer failed";
     return resp;
   }
 
@@ -195,12 +213,21 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
     .object = args.object,
     .url = base_url_,
     .region = region,
+    .uploadId = {},
+    .partNumber = 0,
+    .checksum = {},
+    .etag = {},
   };
 
   ssize_t ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
   if (ret > 0) {
     minio::s3::GetObjectResponse resp;
     resp.etag = get_ctx.etag;
+    return resp;
+  }
+  if (ret == kRdmaV2Failed) {
+    minio::s3::GetObjectResponse resp;
+    resp.message = "rdma v2 transfer failed";
     return resp;
   }
 

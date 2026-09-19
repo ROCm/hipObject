@@ -70,6 +70,15 @@ struct ConnectionEntryV2 {
   uint64_t reservationId = 0; /* retired-ring slot for this QP */
   uint32_t clientPsn = 0;     /* client PSN (recorded on destroy) */
   uint8_t phase = 0;          /* v2::Phase, opaque here */
+  /* Buffer MR pin owned by this entry; released exactly once when the
+   * entry is fully reclaimed (successful destroy), including via the
+   * shutdown drain. Null when no pin was acquired. */
+  void* pinnedBuffer = nullptr;
+  /* True when createRcConnV2 incremented the device reference for
+   * this entry (it does so only after QP creation succeeded). A
+   * parked CQ-only survivor from a failed rollback never acquired
+   * one, so its release must not decrement. */
+  bool holdsDeviceRef = true;
   bool poisoned = false;
   bool destroyClaimed = false;
   bool destroying = false;

@@ -13,6 +13,10 @@
 
 namespace hipobj::minio {
 
+/* The enclosing namespace name shadows the minio-cpp root namespace
+ * for qualified lookups inside hipobj::minio; rebind it explicitly. */
+namespace minio = ::minio;
+
 struct S3RdmaContext {
   minio::creds::Provider* provider = nullptr;
   std::string bucket;
@@ -23,6 +27,11 @@ struct S3RdmaContext {
   unsigned int partNumber = 0;
   std::string checksum;
   std::string etag;
+  /* Last successful provider fetch for this transfer. Empty
+   * expiration never expires; a timed credential is reused until
+   * Credentials::operator bool() reports it spent. */
+  minio::creds::Credentials cachedCreds{};
+  bool haveCachedCreds = false;
 };
 
 } // namespace hipobj::minio
