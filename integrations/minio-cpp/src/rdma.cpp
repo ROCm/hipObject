@@ -18,6 +18,8 @@
 
 namespace hipobj::minio {
 
+using namespace ::minio;
+
 namespace {
 
 int parseRdmaReply(const std::string& rdma_reply) {
@@ -83,10 +85,8 @@ minio::http::Response executeV2Request(
   sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
   sign_headers.Add("Content-Length", "0");
 
-  for (const auto& [k, vals] : extra_headers.map) {
-    for (const auto& v : vals) {
-      sign_headers.Add(k, v);
-    }
+  for (const auto& k : extra_headers.Keys()) {
+    sign_headers.Add(k, extra_headers.GetFront(k));
   }
 
   if (!creds.session_token.empty()) {

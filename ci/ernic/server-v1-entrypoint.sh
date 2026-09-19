@@ -9,5 +9,9 @@
 set -euo pipefail
 
 export LD_LIBRARY_PATH=/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+
+rocm-ernic --backend loopback &
+sleep 1
+
 exec /hipobject-build/test/integration/rdma-test-server/hipobj-rdma-test-server \
     9000

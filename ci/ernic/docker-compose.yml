@@ -2,37 +2,41 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Two-container ernic integration test.
+# Two-container ernic integration tests.
 #
-# ernic-server: runs the rocm-ernic emulated NIC daemon then the
-#   hipobj-rdma-test-server S3+RDMA endpoint on port 9000.
-# ernic-client: builds hipobject against the same ernic image
-#   (which provides libibverbs + the ionic provider) and runs
-#   the put-object / get-object examples end-to-end.
+# Default profile (v2 protocol):
+#   ernic-server: rocm-ernic loopback + hipobj-rdma-test-server --v2 on port 9000.
+#   ernic-client: rocm-ernic loopback + put-object / get-object / v2-data-client.
 #
-# When an emulated GPU is available, add to ernic-client:
-#   devices:
-#     - /dev/kfd
-#     - /dev/dri
+# minio-v1 profile (v1 protocol, minio-cpp bridge):
+#   ernic-server-v1: rocm-ernic loopback + hipobj-rdma-test-server (v1 mode).
+#   rocjitsu:        rocjitsu GPU emulator serving a vfio-user socket on the
+#                    shared vfio-sockets volume.  Provides /dev/kfd + /dev/dri
+#                    to the client container via the emulated GFX device.
+#   ernic-minio-client: rocm-ernic loopback + minio-getput-rdma in gpu or nogpu
+#                    mode depending on whether the rocjitsu socket is present.
+#
+# Usage:
+#   docker compose up                          # v2 test
+#   docker compose --profile minio-v1 up      # v1 minio-cpp test with rocjitsu
 
 services:
+  # ── v2 protocol (default) ──────────────────────────────────────────────────
+
   ernic-server:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:aug-26-2026}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
     container_name: ernic-server
     hostname: ernic-server
-    # rocm-ernic listens on a vfio-user socket; the ibverbs provider
-    # connects to it within the same container.  No extra ports needed.
-    # hipobj-rdma-test-server speaks S3 on 9000.
     expose:
       - "9000"
     volumes:
       - hipobj-src:/hipobject:ro
-      - ernic-build-server:/hipobject-build-server
+      - ernic-build-server:/hipobject-build
     environment:
       ROCM_PATH: /opt/rocm
     entrypoint: ["/bin/bash", "/hipobject/ci/ernic/server-entrypoint.sh"]
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9000/health"]
+      test: ["CMD", "bash", "-c", "(echo > /dev/tcp/127.0.0.1/9000) 2>/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -41,14 +45,14 @@ services:
       - ernic-net
 
   ernic-client:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:aug-26-2026}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
     container_name: ernic-client
     depends_on:
       ernic-server:
         condition: service_healthy
     volumes:
       - hipobj-src:/hipobject:ro
-      - ernic-build-client:/hipobject-build-client
+      - ernic-build-client:/hipobject-build
     environment:
       ROCM_PATH: /opt/rocm
       SERVER_ENDPOINT: http://ernic-server:9000
@@ -57,10 +61,71 @@ services:
     networks:
       - ernic-net
 
+  # ── v1 minio-cpp profile ───────────────────────────────────────────────────
+
+  ernic-server-v1:
+    profiles: [minio-v1]
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
+    container_name: ernic-server-v1
+    hostname: ernic-server
+    expose:
+      - "9000"
+    volumes:
+      - hipobj-src:/hipobject:ro
+      - ernic-build-server-v1:/hipobject-build
+    environment:
+      ROCM_PATH: /opt/rocm
+    entrypoint: ["/bin/bash", "/hipobject/ci/ernic/server-v1-entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "(echo > /dev/tcp/127.0.0.1/9000) 2>/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    networks:
+      - ernic-minio-net
+
+  rocjitsu:
+    profiles: [minio-v1]
+    image: ${ROCJITSU_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:august-28-2026}
+    container_name: rocjitsu
+    # Expose the emulated GFX device via a vfio-user socket on the shared volume.
+    # The client container picks it up via ROCJITSU_SOCKET.
+    command:
+      - rocjitsu
+      - --config
+      - /usr/local/share/rocjitsu/configs/${ROCJITSU_CONFIG:-gfx950_mi355x.json}
+      - --vfio-socket
+      - /tmp/vfio-sockets/rocjitsu.sock
+    volumes:
+      - vfio-sockets:/tmp/vfio-sockets
+    networks:
+      - ernic-minio-net
+
+  ernic-minio-client:
+    profiles: [minio-v1]
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
+    container_name: ernic-minio-client
+    depends_on:
+      ernic-server-v1:
+        condition: service_healthy
+      rocjitsu:
+        condition: service_started
+    volumes:
+      - hipobj-src:/hipobject:ro
+      - ernic-build-client-v1:/hipobject-build
+      - vfio-sockets:/tmp/vfio-sockets
+    environment:
+      ROCM_PATH: /opt/rocm
+      SERVER_ENDPOINT: http://ernic-server:9000
+      TEST_SIZE: "65536"
+      ROCJITSU_SOCKET: /tmp/vfio-sockets/rocjitsu.sock
+      ROCJITSU_CONFIG: ${ROCJITSU_CONFIG:-gfx950_mi355x.json}
+    entrypoint: ["/bin/bash", "/hipobject/ci/ernic/minio-v1-client-entrypoint.sh"]
+    networks:
+      - ernic-minio-net
+
 volumes:
-  # Bind-mount the hipobject source tree read-only into both containers.
-  # When run locally, set HIPOBJ_SRC to the repo root.  In CI the checkout
-  # action populates it first.
   hipobj-src:
     driver: local
     driver_opts:
@@ -69,6 +134,10 @@ volumes:
       device: ${HIPOBJ_SRC:-./../..}
   ernic-build-server:
   ernic-build-client:
+  ernic-build-server-v1:
+  ernic-build-client-v1:
+  vfio-sockets:
 
 networks:
   ernic-net:
+  ernic-minio-net:
