@@ -20,6 +20,7 @@ env:
 
 jobs:
   minio-integration:
+    if: false  # TODO: MinIO (AIStor) downloads now require accepting a license that fails CI; re-enable once resolved
     runs-on: ubuntu-24.04
     container:
       image: rocm/dev-ubuntu-24.04:7.2
