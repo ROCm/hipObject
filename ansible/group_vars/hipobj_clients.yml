@@ -28,8 +28,9 @@ rocm_setup_install_metrics_exporter: false
 rdma_setup_motd: false
 rdma_setup_install_rdma_exporter: false
 
-# MinIO Client binary (dl.min.io), not the Ubuntu "mc" APT package (Midnight
+# MinIO AIStor Client binary (dl.min.io); the open-source "mc" client is
+# archived and no longer served. Not the Ubuntu "mc" APT package (Midnight
 # Commander). Override URL for mirrors or pin with hipobj_minio_mc_checksum.
-hipobj_minio_mc_download_url: https://dl.min.io/client/mc/release/linux-amd64/mc
+hipobj_minio_mc_download_url: https://dl.min.io/aistor/mc/release/linux-amd64/mc
 hipobj_minio_mc_install_path: /usr/local/bin/mc
 hipobj_minio_mc_checksum: ""
