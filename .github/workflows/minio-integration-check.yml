@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  MINIO_DEB_URL: https://dl.min.io/server/minio/release/linux-amd64/minio.deb
+  MINIO_DEB_URL: https://dl.min.io/aistor/minio/release/linux-amd64/minio_20260919170525.0.0_amd64.deb
   MINIO_ROOT_USER: minioadmin
   MINIO_ROOT_PASSWORD: minioadmin
   MINIO_ENDPOINT: http://127.0.0.1:9000
@@ -44,7 +44,7 @@ jobs:
 
       - name: Install mc (MinIO client)
         run: |
-          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc \
+          curl -fsSL https://dl.min.io/aistor/mc/release/linux-amd64/mc \
             -o /usr/local/bin/mc
           chmod +x /usr/local/bin/mc
 
@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p /tmp/minio-data
-          MINIO_BIN="$(find /usr/local/bin /usr/bin -name 'minio' -type f -executable 2>/dev/null | head -1)"
+          MINIO_BIN="$(find -L /usr/local/bin /usr/bin -name 'minio' -type f -executable 2>/dev/null | head -1)"
           if [ -z "$MINIO_BIN" ]; then echo "minio binary not found"; exit 1; fi
           echo "Using minio at $MINIO_BIN"
           MINIO_ROOT_USER=$MINIO_ROOT_USER \
