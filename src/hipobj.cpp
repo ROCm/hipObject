@@ -63,7 +63,7 @@ static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
 }
 
 static int finishTransferAfterReply(const char* reply, size_t replyLen) {
-  RdmaToken peerToken;
+  RdmaToken peerToken{};
   int httpCode = 0;
   if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
     if (connectRcPeer(g_conn, peerToken) != 0) {
@@ -84,7 +84,7 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen) {
 static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
                                      off_t offset, hipObjOps_t* ops,
                                      void* ctx) {
-  RdmaToken token;
+  RdmaToken token{};
   if (!buildRdmaToken(devPtr, size, offset, token)) {
     return {hipObjRdmaError, 0};
   }
@@ -335,7 +335,7 @@ hipObjError_t hipObjGetRdmaToken(const void* devPtr, size_t size, int op,
   if (!hipObj::g_bufferMap.lookupMr(const_cast<void*>(devPtr))) {
     return {hipObjBufNotRegistered, 0};
   }
-  hipObj::RdmaToken token;
+  hipObj::RdmaToken token{};
   if (!hipObj::buildRdmaToken(devPtr, size, 0, token)) {
     return {hipObjRdmaError, 0};
   }
