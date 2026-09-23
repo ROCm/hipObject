@@ -29,6 +29,7 @@ using HipDeviceGetPCIBusIdFn = hipError_t (*)(char*, int, int);
 using HipHostMallocFn = hipError_t (*)(void**, size_t, unsigned int);
 using HipFreeFn = hipError_t (*)(void*);
 using HipDeviceSynchronizeFn = hipError_t (*)();
+using HipMemcpyFn = hipError_t (*)(void*, const void*, size_t, hipMemcpyKind);
 
 struct HipOps {
   HipGetDeviceFn hipGetDevice = nullptr;
@@ -36,6 +37,7 @@ struct HipOps {
   HipHostMallocFn hipHostMalloc = nullptr;
   HipFreeFn hipFree = nullptr;
   HipDeviceSynchronizeFn hipDeviceSynchronize = nullptr;
+  HipMemcpyFn hipMemcpy = nullptr;
 };
 
 /* Populates a table with the real HIP entry points. Called once for the
