@@ -15,6 +15,7 @@
 #include <hip/hip_runtime.h>
 
 #include <miniocpp/client.h>
+#include <unistd.h>
 
 #include "hipobj_minio/client.h"
 
