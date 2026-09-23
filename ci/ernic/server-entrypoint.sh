@@ -3,17 +3,22 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run the pre-built hipobj-rdma-test-server inside the ernic container.
-# The binary is built on the runner (ROCm container) and mounted read-only
-# at /hipobject-build.  The ernic container provides the rocm-ernic ibverbs
-# device; no compilation happens here.
+# Run the pre-built hipobj-rdma-test-server inside an ernic guest VM.
+# The binary and its ROCm closure are built on the runner (ROCm container)
+# and copied into the guest at ${BUILD_DIR}; no compilation happens here.
+#
+# The verbs device comes from the guest's ionic/ionic_rdma drivers bound to
+# the emulated PCI function that rocm-ernic serves on the host. Nothing
+# ernic-side runs in here.
+#
+# Environment variables (all have defaults):
+#   BUILD_DIR    - where the binaries were copied (default: /tmp/hipobject-build)
+#   SERVER_PORT  - control-plane listen port      (default: 9000)
 
 set -euo pipefail
 
-export LD_LIBRARY_PATH=/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+BUILD_DIR="${BUILD_DIR:-/tmp/hipobject-build}"
+export LD_LIBRARY_PATH="${BUILD_DIR}/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-rocm-ernic --backend loopback &
-sleep 1
-
-exec /hipobject-build/test/integration/rdma-test-server/hipobj-rdma-test-server \
-    9000 --v2
+exec "${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server" \
+    "${SERVER_PORT:-9000}" --v2

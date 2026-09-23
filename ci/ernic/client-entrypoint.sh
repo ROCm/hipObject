@@ -3,35 +3,41 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run pre-built hipObject example and v2-data-client binaries inside the
-# ernic container against hipobj-rdma-test-server.  All binaries are built
-# on the runner (ROCm container) and mounted read-only at /hipobject-build.
+# Run pre-built hipObject example and v2-data-client binaries inside an
+# ernic guest VM against hipobj-rdma-test-server running in a second guest.
+# All binaries are built on the runner (ROCm container) and copied into the
+# guest at ${BUILD_DIR}.
 #
 # Environment variables (all have defaults):
-#   SERVER_ENDPOINT  - http URL of the test server (default: http://ernic-server:9000)
+#   BUILD_DIR        - where the binaries were copied (default: /tmp/hipobject-build)
+#   SERVER_ENDPOINT  - http URL of the test server (default: http://192.168.200.10:9000)
 #   TEST_SIZE        - object size in bytes         (default: 1048576)
+#   HIPOBJ_NIC_HINT  - verbs device to bind to. The caller should pass the
+#                      device find-rdma-device.sh discovered: udev renames
+#                      ionic_%d twice, so the final name is not predictable.
 
 set -euo pipefail
 
-export LD_LIBRARY_PATH=/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+BUILD_DIR="${BUILD_DIR:-/tmp/hipobject-build}"
+export LD_LIBRARY_PATH="${BUILD_DIR}/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-rocm-ernic --backend loopback &
-sleep 1
-
-# Pass the rocm-ernic device name as a NIC hint so hipObjInit can find
-# the device without GPU topology. rocm-ernic registers as ernic0.
 export HIPOBJ_NIC_HINT="${HIPOBJ_NIC_HINT:-ernic0}"
 echo "Using NIC hint: ${HIPOBJ_NIC_HINT}"
 
-SERVER_ENDPOINT="${SERVER_ENDPOINT:-http://ernic-server:9000}"
+SERVER_ENDPOINT="${SERVER_ENDPOINT:-http://192.168.200.10:9000}"
 TEST_SIZE="${TEST_SIZE:-1048576}"
-BUILD_DIR=/hipobject-build
 BUCKET=hipobj-ci
 OBJECT=ernic-test-object
 
 SERVER_HOST="${SERVER_ENDPOINT#http://}"
 SERVER_HOST="${SERVER_HOST%%:*}"
 SERVER_PORT="${SERVER_ENDPOINT##*:}"
+
+# Layers 1 and 2 stage through a device buffer, so they need a GPU the way
+# the rocjitsu lane has one. The two-VM lane has an emulated NIC and no
+# emulated GPU, and there hipMalloc returns hipErrorNoDevice before any of
+# the RDMA path is exercised; layer 3 covers the wire there.
+if [ -e /dev/kfd ]; then
 
 # Layer 2: control-plane PUT + GET via curl ops
 echo "--- RDMA PUT ---"
@@ -61,6 +67,10 @@ echo "${get_out}" | grep -q "GET ok\|succeeded\|Data integrity" || {
     echo "Output: ${get_out}"
     exit 1
 }
+
+else
+    echo "--- no /dev/kfd: skipping the GPU-buffer PUT/GET layers ---"
+fi
 
 # Layer 3: data-plane transfer with payload verification
 echo "--- RDMA data-plane PUT (payload verification) ---"

@@ -1,0 +1,14 @@
+Subject: [PATCH] amdgpu/ras: do not query RAS caps from a VBIOS that is not there
+
+--- a/amd/amdgpu/amdgpu_ras.c
++++ b/amd/amdgpu/amdgpu_ras.c
+@@ -3482,7 +3482,8 @@
+ 		goto init_ras_enabled_flag;
+ 
+ 	/* query ras capablity from bios */
+-	if (!adev->gmc.xgmi.connected_to_cpu && !adev->gmc.is_app_apu) {
++	if (!adev->gmc.xgmi.connected_to_cpu && !adev->gmc.is_app_apu &&
++	    adev->mode_info.atom_context) {
+ 		amdgpu_ras_query_ras_capablity_from_vbios(adev);
+ 	} else {
+ 		/* driver only manages a few IP blocks RAS feature

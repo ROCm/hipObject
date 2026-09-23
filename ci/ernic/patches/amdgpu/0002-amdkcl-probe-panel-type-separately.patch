@@ -1,0 +1,85 @@
+Subject: [PATCH] amdkcl: probe panel_type and DRM_MODE_PANEL_TYPE_LCD honestly
+
+--- a/amd/dkms/m4/drm-display-info.m4
++++ b/amd/dkms/m4/drm-display-info.m4
+@@ -93,10 +93,50 @@
+ 	])
+ ])
+ 
++dnl #
++dnl # display_info->panel_type is AMD-downstream only; it has never merged
++dnl # upstream, so it must not be inferred from the amd_vsdb probe (that one
++dnl # did merge, at v6.19, and is true on every mainline kernel since).
++dnl #
++AC_DEFUN([AC_AMDGPU_DRM_DISPLAY_INFO_PANEL_TYPE], [
++	AC_KERNEL_DO_BACKGROUND([
++		AC_KERNEL_TRY_COMPILE([
++			#include <drm/drm_connector.h>
++		], [
++			struct drm_display_info *display_info = NULL;
++			display_info->panel_type = DRM_MODE_PANEL_TYPE_LCD;
++		], [
++			AC_DEFINE(HAVE_DRM_DISPLAY_INFO_PANEL_TYPE, 1,
++				[display_info->panel_type is available])
++		])
++	])
++])
++
++dnl #
++dnl # DRM_MODE_PANEL_TYPE_LCD is an AMD-downstream uapi value; upstream
++dnl # drm_mode.h defines only UNKNOWN and OLED. Probe the constant itself
++dnl # rather than assuming it ships with the panel_type member.
++dnl #
++AC_DEFUN([AC_AMDGPU_DRM_MODE_PANEL_TYPE_LCD], [
++	AC_KERNEL_DO_BACKGROUND([
++		AC_KERNEL_TRY_COMPILE([
++			#include <uapi/drm/drm_mode.h>
++		], [
++			int v = DRM_MODE_PANEL_TYPE_LCD;
++			(void)v;
++		], [
++			AC_DEFINE(HAVE_DRM_MODE_PANEL_TYPE_LCD, 1,
++				[DRM_MODE_PANEL_TYPE_LCD is available])
++		])
++	])
++])
++
+ AC_DEFUN([AC_AMDGPU_DRM_DISPLAY_INFO], [
+ 	AC_AMDGPU_DRM_DISPLAY_INFO_EDID_HDMI_RGB444_DC_MODES
+ 	AC_AMDGPU_DRM_DISPLAY_INFO_MONITOR_RANGE
+ 	AC_AMDGPU_DRM_DISPLAY_INFO_MAX_DSC_BPP
+ 	AC_AMDGPU_DRM_DISPLAY_INFO_LUMINANCE_RANGE
+ 	AC_AMDGPU_DRM_DISPLAY_INFO_AMD_VSDB
++	AC_AMDGPU_DRM_DISPLAY_INFO_PANEL_TYPE
++	AC_AMDGPU_DRM_MODE_PANEL_TYPE_LCD
+ ])
+--- a/amd/display/amdgpu_dm/amdgpu_dm_connector.c
++++ b/amd/display/amdgpu_dm/amdgpu_dm_connector.c
+@@ -443,12 +443,14 @@
+ 	}
+ 
+ 	/* If VSDB and DPCD didn't determine panel type, check DID */
++#ifdef HAVE_DRM_DISPLAY_INFO_PANEL_TYPE
+ 	if (panel_type == PANEL_TYPE_NONE) {
+ 		if (display_info->panel_type == DRM_MODE_PANEL_TYPE_LCD)
+ 			panel_type = PANEL_TYPE_LCD;
+ 		else if (display_info->panel_type == DRM_MODE_PANEL_TYPE_OLED)
+ 			panel_type = PANEL_TYPE_OLED;
+ 	}
++#endif
+ 
+ 	if (panel_type == PANEL_TYPE_NONE) {
+ 		struct drm_amd_vsdb_info *vsdb = &display_info->amd_vsdb;
+@@ -471,10 +473,12 @@
+ 		drm_object_property_set_value(&connector->base,
+ 		    adev_to_drm(adev)->mode_config.panel_type_property,
+ 		    DRM_MODE_PANEL_TYPE_OLED);
++#ifdef HAVE_DRM_MODE_PANEL_TYPE_LCD
+ 	else if (link->panel_type == PANEL_TYPE_LCD)
+ 		drm_object_property_set_value(&connector->base,
+ 		    adev_to_drm(adev)->mode_config.panel_type_property,
+ 		    DRM_MODE_PANEL_TYPE_LCD);
++#endif
+ 	else
+ 		drm_object_property_set_value(&connector->base,
+ 		    adev_to_drm(adev)->mode_config.panel_type_property,

@@ -1,4 +1,6 @@
 [codespell]
 check-hidden = true
-skip = ./.git,./build,./build-*,.venv
+# ci/ernic/patches quotes AMD's amdgpu sources verbatim; their typos are not
+# ours to fix and changing them would make the patches stop applying.
+skip = ./.git,./build,./build-*,.venv,./ci/ernic/patches
 ignore-words-list = hsa,rdma,bnxt,nvme,hipobj
