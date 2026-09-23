@@ -23,9 +23,11 @@
 
 #include "http_server.h"
 #include "rdma_server.h"
+#ifdef HIPOBJECT_V2_API
 #include "v2_handlers.h"
 #include "v2_request.h"
 #include "v2_sigv4.h"
+#endif
 
 namespace {
 
@@ -41,7 +43,9 @@ std::string objectKey(const std::string& path) {
 int main(int argc, char* argv[]) {
   int port = 9000;
   bool v2Mode = false;
+#ifdef HIPOBJECT_V2_API
   bool hangAfterPrepare = false;
+#endif
   std::string accessKey = "hipobj-test-key";
   std::string secretKey = "hipobj-test-secret";
   for (int i = 1; i < argc; ++i) {
@@ -53,12 +57,15 @@ int main(int argc, char* argv[]) {
     } else if (arg == "--v2-secret-key" && i + 1 < argc) {
       secretKey = argv[++i];
     } else if (arg == "--hang-after-prepare") {
+#ifdef HIPOBJECT_V2_API
       hangAfterPrepare = true;
+#endif
     } else {
       port = std::atoi(arg.c_str());
     }
   }
 
+#ifdef HIPOBJECT_V2_API
   if (v2Mode) {
     /* v2 reference mode: control protocol on the threaded server.
      * RDMA objects are attached per session by the transport layer;
@@ -148,6 +155,14 @@ int main(int argc, char* argv[]) {
     }
     return 0;
   }
+#else
+  if (v2Mode) {
+    fprintf(stderr,
+            "hipobj-rdma-test-server: --v2 requested but this build was "
+            "configured with HIPOBJECT_V2_API=OFF\n");
+    return 1;
+  }
+#endif /* HIPOBJECT_V2_API */
 
   hipobj::test::RdmaTestServer rdma;
   if (!rdma.isReady()) {

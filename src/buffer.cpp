@@ -109,6 +109,7 @@ bool BufferMap::isRegistered(void* devPtr) const {
   return entries_.find(key) != entries_.end();
 }
 
+#ifdef HIPOBJECT_V2_API
 bool BufferMap::acquireMrRef(void* devPtr) {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   auto it = entries_.find(key);
@@ -143,6 +144,7 @@ bool BufferMap::anyPinned() const {
   }
   return false;
 }
+#endif /* HIPOBJECT_V2_API */
 
 size_t BufferMap::size() const {
   return entries_.size();

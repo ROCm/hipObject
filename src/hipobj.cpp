@@ -22,8 +22,10 @@
 #include "state.h"
 #include "token.h"
 #include "transport.h"
+#ifdef HIPOBJECT_V2_API
 #include "v2-registry.h"
 #include "v2-transport.h"
+#endif
 
 namespace hipObj {
 
@@ -136,10 +138,12 @@ const char* hipObjGetErrorString(hipObjOpError_t err) {
         return "Size too large";
       case hipObjInternalError:
         return "Internal error";
+#ifdef HIPOBJECT_V2_API
       case hipObjNotSupported:
         return "hipobj-rc-v2 not supported by server";
       case hipObjBusy:
         return "Server busy (backpressure)";
+#endif /* HIPOBJECT_V2_API */
       default:
         return "Unknown error";
     }
@@ -214,6 +218,7 @@ hipObjError_t hipObjShutdown(void) try {
   if (!state.initialized) {
     return HIPOBJ_SUCCESS;
   }
+#ifdef HIPOBJECT_V2_API
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   /* v2 first: release every connection (destroy retries included);
    * leftover poison must stop the teardown so the failure is
@@ -233,6 +238,7 @@ hipObjError_t hipObjShutdown(void) try {
   if (poisonLeft || reg.size() > 0) {
     return {hipObjRdmaError, 0};
   }
+#endif /* HIPOBJECT_V2_API */
   hipObj::g_bufferMap.deregisterAll();
   hipObj::closeRdmaDevice(hipObj::g_conn);
   state.initialized = false;
