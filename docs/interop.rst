@@ -28,17 +28,64 @@ Control plane
 
 hipObject is wire-compatible with cuObject at the S3 header level.
 Applications embed a hex-encoded RDMA token in ``x-amz-rdma-token`` and
-read ``x-amz-rdma-reply`` from the HTTP response.  Reply values may be
-legacy tags (``ok`` / ``err``), numeric HTTP codes (``200``, ``501``),
-or an RC peer handshake of the form ``200:<server-token-hex>``.
+read ``x-amz-rdma-reply`` from the HTTP response.
+
+``x-amz-rdma-token``
+  The header value is exactly one fixed-width RDMA token encoded as 88 hex
+  characters (44 binary bytes). No suffix or additional ``:``-separated
+  component is permitted in the header value.
+
+  The binary payload layout is:
+
+  +-------+-------------+--------+------------------------------------------+
+  | Byte  | Width       | Type   | Meaning                                  |
+  +=======+=============+========+==========================================+
+  | 0     | 1 byte      | u8     | transport                                |
+  +-------+-------------+--------+------------------------------------------+
+  | 1     | 4 bytes     | u32 LE | QP number                                |
+  +-------+-------------+--------+------------------------------------------+
+  | 5     | 16 bytes    | bytes  | GID, copied verbatim                     |
+  +-------+-------------+--------+------------------------------------------+
+  | 21    | 4 bytes     | u32 LE | rkey                                     |
+  +-------+-------------+--------+------------------------------------------+
+  | 25    | 8 bytes     | u64 LE | remote address                           |
+  +-------+-------------+--------+------------------------------------------+
+  | 33    | 8 bytes     | u64 LE | length                                   |
+  +-------+-------------+--------+------------------------------------------+
+  | 41    | 1 byte      | u8     | port number                              |
+  +-------+-------------+--------+------------------------------------------+
+  | 42    | 2 bytes     | u16 LE | LID                                      |
+  +-------+-------------+--------+------------------------------------------+
+
+  Enumerated values:
+
+  * ``transport = 0x00``: DC
+  * ``transport = 0x01``: RC
+
+  ``encodeRdmaToken()`` emits lowercase hex, but receivers accept either hex
+  case. A peer that validates the token as a fixed-length hex string will
+  reject any value longer than 88 hex characters.
+
+``x-amz-rdma-reply``
+  Clients must accept these forms:
+
+  * ``ok`` — legacy success marker, deprecated
+  * ``err`` — legacy error marker, deprecated
+  * ``<http-status>`` — decimal HTTP status code such as ``200`` or ``501``
+  * ``200:<server-token-hex>`` — RC peer handshake reply carrying one 88-hex
+    RDMA token
+
+  Only ``200:<server-token-hex>`` carries a peer token. Legacy ``ok`` / ``err``
+  remain accepted for cuObject compatibility but new implementations should
+  prefer numeric status codes, and RC peer handshakes should use the
+  ``200:<server-token-hex>`` form.
 
 Data plane
 ~~~~~~~~~~
 
 cuObject v1.2.0 requires Dynamic Connection (DC) transport on NVIDIA
 ConnectX NICs.  hipObject uses Reliable Connection (RC) on Broadcom
-Thor-2 and AMD Pensando Pollara NICs.  The transport byte in the token
-distinguishes DC (``0x00``) from RC (``0x01``).
+Thor-2 and AMD Pensando Pollara NICs.
 
 A stock ``libcuobjserver`` stack cannot serve RC clients directly.  An
 RC-to-DC adapter_ bridges AMD RC clients to

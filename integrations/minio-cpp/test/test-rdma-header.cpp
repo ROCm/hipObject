@@ -18,7 +18,7 @@ TEST(HipObjMinioHeader, FormatRdmaHeaderValue) {
   void* buf = reinterpret_cast<void*>(0x7f0000001000ULL);
   std::string header = hipObj::formatRdmaHeaderValue(encoded.c_str(), buf,
                                                      4096);
-  EXPECT_EQ(header, encoded + ":00007f0000001000:0000000000001000");
+  EXPECT_EQ(header, encoded);
 }
 
 TEST(HipObjMinioHeader, ParseRdmaReply200) {

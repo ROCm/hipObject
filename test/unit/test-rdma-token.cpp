@@ -20,6 +20,7 @@ TEST(RdmaToken, EncodeProducesHexString) {
   std::string encoded = hipObj::encodeRdmaToken(token);
 
   EXPECT_FALSE(encoded.empty());
+  EXPECT_EQ(encoded.size(), 88u);
   EXPECT_EQ(encoded.size() % 2, 0u);
   EXPECT_EQ(encoded[0], '0');
   EXPECT_EQ(encoded[1], '1');
@@ -89,10 +90,20 @@ TEST(RdmaReply, ParseHttp200WithPeerToken) {
 }
 
 TEST(RdmaToken, FormatHeaderValue) {
-  const char* token = "aa";
+  const char* token = "0011";
   void* buf = reinterpret_cast<void*>(0x7f0000001000ULL);
   std::string header = hipObj::formatRdmaHeaderValue(token, buf, 4096);
-  EXPECT_EQ(header, "aa:00007f0000001000:0000000000001000");
+  EXPECT_EQ(header, token);
+}
+
+TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue) {
+  hipObj::RdmaToken token;
+  memset(&token, 0, sizeof(token));
+  std::string encoded = hipObj::encodeRdmaToken(token);
+
+  hipObj::RdmaToken parsed;
+  EXPECT_FALSE(
+    hipObj::decodeRdmaTokenHex((encoded + ":1:2").c_str(), parsed));
 }
 
 TEST(RdmaReply, ParsePeerTokenFromReply) {
