@@ -37,6 +37,9 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
     target_link_libraries(${TEST_NAME} PRIVATE hipobj_v2_server_objects)
   endif()
   target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_UNIT_TESTS)
+  if(HIPOBJECT_V2_API)
+    target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJECT_V2_API)
+  endif()
   target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/shared

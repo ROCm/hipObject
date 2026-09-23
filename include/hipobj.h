@@ -74,8 +74,10 @@ typedef enum {
   hipObjDmabufNotSupported,
   hipObjSizeTooLarge,
   hipObjInternalError,
+#ifdef HIPOBJECT_V2_API
   hipObjNotSupported, /*!< Server explicitly does not support hipobj-rc-v2 */
   hipObjBusy,         /*!< Server backpressure (503) and retries exhausted */
+#endif
 } hipObjOpError_t;
 
 /*!
@@ -268,6 +270,8 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
  *  hipobj-rc-v2 (TWO-ROUND-TRIP CONTROL PROTOCOL)
  * ------------------------------------------------------- */
 
+#ifdef HIPOBJECT_V2_API
+
 /*!
  * @brief V2 control endpoint settings
  * @ingroup core
@@ -396,6 +400,8 @@ HIPOBJ_API hipObjError_t hipObjPutV2(const char* bucket, const char* key,
                                      const void* devPtr, uint64_t size,
                                      uint64_t offset, const char* query,
                                      hipObjOpsV2_t* ops, void* ctx);
+
+#endif /* HIPOBJECT_V2_API */
 
 /*!
  * @brief Mint a hex-encoded RC RDMA token for a registered buffer

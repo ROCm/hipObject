@@ -50,6 +50,8 @@ std::string clientNicFromToken(const char* token) {
 // endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
 // ---------------------------------------------------------------------------
 
+#ifdef HIPOBJECT_V2_API
+
 struct V2CallbackCtx {
   S3RdmaContext* sctx;
   std::string clientNic; // NIC hint derived from the client token
@@ -290,6 +292,8 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
   return (err.opError == hipObjSuccess) ? static_cast<ssize_t>(size) : -1;
 }
 
+#endif /* HIPOBJECT_V2_API */
+
 } // namespace
 
 ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
@@ -457,14 +461,17 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
 }
 
 ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
+#ifdef HIPOBJECT_V2_API
   // Try the v2 protocol first; fall back to v1 only when the server
   // explicitly signals it does not support hipobj-rc-v2.
   ssize_t ret = rdmaPutV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
     return ret;
   }
-
   ret = -1;
+#else
+  ssize_t ret = -1;
+#endif /* HIPOBJECT_V2_API */
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
     hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT,
@@ -482,12 +489,15 @@ ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
+#ifdef HIPOBJECT_V2_API
   ssize_t ret = rdmaGetV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
     return ret;
   }
-
   ret = -1;
+#else
+  ssize_t ret = -1;
+#endif /* HIPOBJECT_V2_API */
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
     hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET,

@@ -39,6 +39,12 @@ MACRO_EXPANSION        = YES
 PREDEFINED             = HIPOBJ_API= \
                          __attribute__(x)=
 
+# The hipobj-rc-v2 API surface in hipobj.h is gated on
+# HIPOBJECT_V2_API. CMake appends a "PREDEFINED +=" line
+# here when that build option is on (the default), so the
+# v2 declarations stay in the generated reference.
+@HIPOBJ_DOXYGEN_PREDEFINED@
+
 # Source browsing (available via Breathe)
 SOURCE_BROWSER         = YES
 INLINE_SOURCES         = NO

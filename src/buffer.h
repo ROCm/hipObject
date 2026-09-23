@@ -26,6 +26,7 @@ public:
   size_t lookupSize(void* devPtr) const;
   bool isRegistered(void* devPtr) const;
 
+#ifdef HIPOBJECT_V2_API
   /* v2: the shared device may close only when no MR and no
    * connection remain. Connections pin the buffers they transfer
    * with ref entries. */
@@ -33,6 +34,7 @@ public:
   bool releaseMrRef(void* devPtr);
   size_t mrRefCount(void* devPtr) const;
   bool anyPinned() const;
+#endif
   size_t size() const;
 
 private:
