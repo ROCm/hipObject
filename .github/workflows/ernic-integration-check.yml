@@ -58,6 +58,16 @@ jobs:
   ernic-integration:
     name: rocm-ernic two-container test
     runs-on: ubuntu-24.04
+    # TODO: re-enable once a guest-based topology replaces this one.  This
+    # container topology cannot work: rocm-ernic offers a vfio-user PCI
+    # function, and it takes a guest running the ionic/ionic_rdma drivers to
+    # turn that into a verbs device.  With no VM, /sys/class/infiniband stays
+    # empty, so HIPOBJ_NIC_HINT=ernic0 never resolves and hipObjInit returns
+    # hipObjRdmaError.  The missing piece is the guest, not the image tag.
+    # The replacement needs a qcow2 guest image carrying the ionic drivers,
+    # tracked in batesste-ci-images; the branch feat/rocm-ernic-based-ci has
+    # a working two-VM lane built on one.
+    if: false
 
     steps:
       - name: Checkout
