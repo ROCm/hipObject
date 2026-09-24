@@ -7,6 +7,11 @@
 
 include(FetchContent)
 
+# The minio-deps shim configs include this file from inside the
+# dependency lookups below; without a guard those re-entrant includes
+# re-run half-configured state and trip the tail FATAL checks.
+include_guard(GLOBAL)
+
 find_package(OpenSSL REQUIRED)
 if(NOT OpenSSL_FOUND)
   message(FATAL_ERROR
@@ -16,8 +21,10 @@ endif()
 find_package(ZLIB REQUIRED)
 find_package(CURL REQUIRED)
 
-find_package(nlohmann_json CONFIG QUIET)
-if(NOT nlohmann_json_FOUND)
+# Target-driven on purpose: the minio-deps shim configs satisfy the
+# lookups the fetched minio-cpp performs later, so a *_FOUND result
+# here must never gate whether the in-tree targets get created.
+if(NOT TARGET nlohmann_json::nlohmann_json)
   FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
@@ -26,8 +33,7 @@ if(NOT nlohmann_json_FOUND)
   FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-find_package(pugixml CONFIG QUIET)
-if(NOT pugixml_FOUND)
+if(NOT TARGET pugixml::pugixml)
   FetchContent_Declare(
     pugixml
     GIT_REPOSITORY https://github.com/zeux/pugixml.git
@@ -76,6 +82,12 @@ if(NOT TARGET unofficial::curlpp::curlpp)
       curlpp
       GIT_REPOSITORY https://github.com/jpbarrette/curlpp.git
       GIT_TAG v0.8.1
+      # v0.8.1 predates libcurl 7.85, which removed curl_closepolicy and
+      # CURLOPT_CLOSEPOLICY; drop the stale option trait so the source
+      # compiles against current libcurl (mirrors the distro patches).
+      PATCH_COMMAND sed -i
+        "/typedef curlpp::OptionTrait<curl_closepolicy, CURLOPT_CLOSEPOLICY>/d"
+        <SOURCE_DIR>/include/curlpp/Options.hpp
     )
     FetchContent_GetProperties(curlpp)
     if(NOT curlpp_POPULATED)

@@ -15,6 +15,7 @@
 #include <hip/hip_runtime.h>
 
 #include <miniocpp/client.h>
+#include <unistd.h>
 
 #include "hipobj_minio/client.h"
 
@@ -61,7 +62,8 @@ int main(int argc, char* argv[]) {
     bufptr = static_cast<char*>(dev_ptr);
     std::cout << "GPU buffer " << bufsize << " bytes\n";
   } else {
-    int res = posix_memalign(reinterpret_cast<void**>(&bufptr), getpagesize(),
+    int res = posix_memalign(reinterpret_cast<void**>(&bufptr),
+                             static_cast<size_t>(sysconf(_SC_PAGESIZE)),
                              bufsize);
     if (res != 0 || bufptr == nullptr) {
       std::cerr << "posix_memalign failed\n";

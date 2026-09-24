@@ -116,7 +116,8 @@ if(HIPOBJECT_V2_API)
     src/rdma/v2-clock.cpp
     src/rdma/v2-random.cpp
     src/rdma/v2-registry.cpp
-    src/rdma/v2-transport.cpp)
+    src/rdma/v2-transport.cpp
+    src/rdma/v2-client.cpp)
 endif()
 
 if(HIPOBJ_BNXT)

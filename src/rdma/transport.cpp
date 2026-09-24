@@ -53,10 +53,16 @@ int openRdmaDevice(int nicIndex, RcConnection& conn) {
     conn.ctx = nullptr;
     return -1;
   }
-  conn.gidIndex = SelectBestGid(conn.ctx, conn.portNum);
-  if (conn.gidIndex < 0) {
-    conn.gidIndex = 0;
+  /* GID selection allocates (sysfs path strings); an exception here
+   * must not escape with the context and PD open, or the caller's
+   * return-code cleanup cannot run. Treat a throw as "no best GID". */
+  int gidSel = 0;
+  try {
+    gidSel = SelectBestGid(conn.ctx, conn.portNum);
+  } catch (...) {
+    gidSel = -1;
   }
+  conn.gidIndex = gidSel < 0 ? 0 : gidSel;
   if (ibv.query_gid(conn.ctx, conn.portNum, conn.gidIndex, &conn.localGid) !=
       0) {
     ibv.dealloc_pd(conn.pd);
