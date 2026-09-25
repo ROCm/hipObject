@@ -1,15 +1,20 @@
-name: hipObject compile and test
+name: hipObject - Build
 
 on:
+  # The one lane that also fires post-merge: it is the cheapest thing that
+  # compiles the tree, so it is the canary for a develop that no single PR
+  # was tested against.
   push:
     branches: [develop]
     paths-ignore:
       - '**/*.md'
       - '**/*.rst'
   pull_request:
+    branches: [develop]
     paths-ignore:
       - '**/*.md'
       - '**/*.rst'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +25,7 @@ permissions:
 
 jobs:
   build:
+    name: Build
     runs-on: ubuntu-latest
     container:
       image: rocm/dev-ubuntu-24.04:10.0.0-full

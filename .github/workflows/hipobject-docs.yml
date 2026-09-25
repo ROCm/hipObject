@@ -1,14 +1,8 @@
-name: hipObject docs check
+name: hipObject - Docs
 
 on:
-  push:
-    branches: [develop]
-    paths:
-      - 'docs/**'
-      - 'include/**/*.h'
-      - 'README.md'
-      - '.github/workflows/hipobject-docs.yml'
   pull_request:
+    branches: [develop]
     paths:
       - 'docs/**'
       - 'include/**/*.h'
@@ -24,8 +18,8 @@ permissions:
   contents: read
 
 jobs:
-  sphinx:
-    name: sphinx-build
+  docs:
+    name: Docs
     runs-on: ubuntu-latest
     steps:
     - name: Check out code
@@ -44,7 +38,7 @@ jobs:
       run: cmake --build build --target sphinx-html
 
   rst-lint:
-    name: rst-lint
+    name: RST Lint
     runs-on: ubuntu-latest
     steps:
     - name: Check out code

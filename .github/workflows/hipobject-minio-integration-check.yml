@@ -1,10 +1,13 @@
-name: MinIO Integration Check
+name: hipObject - MinIO Integration Check
 
 on:
-  push:
-    branches: [develop]
   pull_request:
     branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -28,7 +31,9 @@ env:
 
 jobs:
   minio-integration:
+    name: MinIO Integration Check
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     container:
       image: rocm/dev-ubuntu-24.04:10.0.0-full
       options: --user root

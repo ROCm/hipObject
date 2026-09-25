@@ -41,19 +41,12 @@
 #   hipMalloc'd device buffer. See the comment above the job for the
 #   requirements this topology has; they are not obvious.
 
-name: eRNIC Integration Check
+name: hipObject - eRNIC Integration Check
 
 on:
-  push:
-    branches: [develop]
-    paths:
-      - "src/**"
-      - "include/**"
-      - "test/**"
-      - "examples/**"
-      - "integrations/**"
-      - "ci/ernic/**"
-      - ".github/workflows/ernic-integration-check.yml"
+  # PR-gated and manual only. These four jobs boot VMs and take tens of
+  # minutes; nothing reaches develop without passing them on the PR, so a
+  # second post-merge run would buy nothing but queue time.
   pull_request:
     branches: [develop]
     paths:
@@ -63,8 +56,12 @@ on:
       - "examples/**"
       - "integrations/**"
       - "ci/ernic/**"
-      - ".github/workflows/ernic-integration-check.yml"
+      - ".github/workflows/hipobject-ernic-integration-check.yml"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -91,7 +88,7 @@ env:
 
 jobs:
   ernic-integration:
-    name: rocm-ernic two-VM v2 protocol test
+    name: Two-VM v2 Protocol Test
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     # The previous container topology could not work and was gated off: with
@@ -551,8 +548,9 @@ jobs:
           rm -rf "${{ github.workspace }}/ernic-build" 2>/dev/null || true
 
   ernic-minio-v1:
-    name: rocm-ernic minio-cpp bridge v1 test (rocjitsu GPU)
+    name: MinIO Bridge v1 Test
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -702,8 +700,9 @@ jobs:
           rm -rf "${{ github.workspace }}/ernic-build-v1" 2>/dev/null || true
 
   ernic-s3-backend:
-    name: rocm-ernic S3 backend test
+    name: S3 Backend Test
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     # Run inside the same QEMU+libvfio-user image used by rocm-ernic's
     # s3-lane: has QEMU, oras, zstd, and libvfio-user pre-installed.
     container:
@@ -1134,7 +1133,7 @@ jobs:
   # eating the job timeout.
   # ---------------------------------------------------------------------
   ernic-rocjitsu-gpu:
-    name: rocm-ernic S3 + rocjitsu emulated GPU (VM)
+    name: GPU-Direct S3 Test
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
