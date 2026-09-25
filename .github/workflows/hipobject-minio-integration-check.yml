@@ -39,6 +39,9 @@ jobs:
       options: --user root
     env:
       ROCM_PATH: /opt/rocm
+      # The full ROCm image ships libamdhip64 in /opt/rocm/lib but leaves it out
+      # of the loader cache, so ctest binaries fail to start without this.
+      LD_LIBRARY_PATH: /opt/rocm/lib
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4

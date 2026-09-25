@@ -41,7 +41,7 @@
 #   hipMalloc'd device buffer. See the comment above the job for the
 #   requirements this topology has; they are not obvious.
 
-name: hipObject - eRNIC Integration Check
+name: hipObject - Emulated Hardware Check
 
 on:
   # PR-gated and manual only. These four jobs boot VMs and take tens of
@@ -56,7 +56,7 @@ on:
       - "examples/**"
       - "integrations/**"
       - "ci/ernic/**"
-      - ".github/workflows/hipobject-ernic-integration-check.yml"
+      - ".github/workflows/hipobject-emulated-hardware-check.yml"
   workflow_dispatch:
 
 concurrency:

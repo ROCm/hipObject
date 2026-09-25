@@ -2,7 +2,7 @@
 
 [![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![Build](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml)
-[![Docs](https://github.com/ROCm/hipObject/actions/workflows/hipobject-docs.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-docs.yml)
+[![Documentation Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-documentation-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-documentation-check.yml)
 [![Format Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-format-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-format-check.yml)
 [![Spell Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-spell-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-spell-check.yml)
 [![Ansible Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml)

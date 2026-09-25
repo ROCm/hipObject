@@ -1,4 +1,4 @@
-name: hipObject - Docs
+name: hipObject - Documentation Check
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - 'docs/**'
       - 'include/**/*.h'
       - 'README.md'
-      - '.github/workflows/hipobject-docs.yml'
+      - '.github/workflows/hipobject-documentation-check.yml'
   workflow_dispatch:
 
 concurrency:
@@ -18,8 +18,8 @@ permissions:
   contents: read
 
 jobs:
-  docs:
-    name: Docs
+  documentation-check:
+    name: Documentation Check
     runs-on: ubuntu-latest
     steps:
     - name: Check out code
