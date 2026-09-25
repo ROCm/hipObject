@@ -3,7 +3,11 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run the pre-built hipobj-rdma-test-server inside an ernic guest VM.
+# Run the pre-built hipobj-rdma-test-server inside an ernic guest VM, in v1
+# mode: the server answers S3 PUT/GET carrying x-amz-rdma-token and drives
+# the transfer over the verbs device. The v2 control protocol has its own
+# coverage in the unit tests and the v2-control-e2e ctest; this lane is here
+# for the v1 wire, which is what the minio-cpp bridge speaks.
 # The binary and its ROCm closure are built on the runner (ROCm container)
 # and copied into the guest at ${BUILD_DIR}; no compilation happens here.
 #
@@ -21,4 +25,4 @@ BUILD_DIR="${BUILD_DIR:-/tmp/hipobject-build}"
 export LD_LIBRARY_PATH="${BUILD_DIR}/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 exec "${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server" \
-    "${SERVER_PORT:-9000}" --v2
+    "${SERVER_PORT:-9000}"

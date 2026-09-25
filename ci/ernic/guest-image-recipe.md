@@ -2,8 +2,8 @@
 
 hipObject's CI needs one VM that has both an emulated AMD Pensando ionic RDMA
 NIC (served by `rocm-ernic`) and an emulated gfx1250 (served by `rocjitsu`).
-The `ernic-rocjitsu-gpu` lane in
-[`.github/workflows/hipobject-emulated-hardware-check.yml`](../../.github/workflows/hipobject-emulated-hardware-check.yml)
+The `gpu-direct` lane in
+[`.github/workflows/hipobject-gpu-direct-check.yml`](../../.github/workflows/hipobject-gpu-direct-check.yml)
 used to derive that guest at the start of every run — boot bare, install a
 kernel, patch and rebuild amdgpu, shut down, boot again with both vfio-user
 functions — at about fifteen minutes a run for the same result every time.

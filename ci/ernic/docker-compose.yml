@@ -4,9 +4,9 @@
 #
 # Two-container ernic integration tests.
 #
-# Default profile (v2 protocol):
-#   ernic-server: rocm-ernic loopback + hipobj-rdma-test-server --v2 on port 9000.
-#   ernic-client: rocm-ernic loopback + put-object / get-object / v2-data-client.
+# Default profile (two-VM v1 protocol, run here as two containers):
+#   ernic-server: rocm-ernic loopback + hipobj-rdma-test-server on port 9000.
+#   ernic-client: rocm-ernic loopback + minio-getput-rdma in nogpu mode.
 #
 # minio-v1 profile (v1 protocol, minio-cpp bridge):
 #   ernic-server-v1: rocm-ernic loopback + hipobj-rdma-test-server (v1 mode).
@@ -17,11 +17,11 @@
 #                    mode depending on whether the rocjitsu socket is present.
 #
 # Usage:
-#   docker compose up                          # v2 test
+#   docker compose up                          # v1 test
 #   docker compose --profile minio-v1 up      # v1 minio-cpp test with rocjitsu
 
 services:
-  # ── v2 protocol (default) ──────────────────────────────────────────────────
+  # ── v1 protocol (default) ──────────────────────────────────────────────────
 
   ernic-server:
     image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244}

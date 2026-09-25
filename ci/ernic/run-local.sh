@@ -6,8 +6,8 @@
 # Run ernic integration tests locally using pre-built or freshly-built binaries.
 #
 # Usage:
-#   ci/ernic/run-local.sh                       # v2 test, use build-v2 binaries
-#   ci/ernic/run-local.sh --rebuild             # v2 test, force ROCm container build
+#   ci/ernic/run-local.sh                       # two-VM v1 test, use build-v1 binaries
+#   ci/ernic/run-local.sh --rebuild             # two-VM v1 test, force ROCm container build
 #   ci/ernic/run-local.sh --minio-v1            # v1 minio-cpp test, use build-minio binaries
 #   ci/ernic/run-local.sh --minio-v1 --rebuild  # v1 minio-cpp test, force build
 #   ci/ernic/run-local.sh --s3-backend          # rocm-ernic --backend s3 test (requires --privileged)
@@ -33,24 +33,24 @@ for arg in "$@"; do
     esac
 done
 
-# ── v2 protocol test ──────────────────────────────────────────────────────────
+# ── two-VM v1 protocol test ───────────────────────────────────────────────────
 
-run_v2() {
-    local BUILD_DIR="${REPO}/build-v2"
+run_two_vm_v1() {
+    local BUILD_DIR="${REPO}/build-v1"
 
     if [ "${REBUILD}" = true ]; then
         BUILD_DIR=/tmp/ernic-rebuild
         mkdir -p "${BUILD_DIR}/rocm-libs"
-        echo "=== Rebuilding (v2) in ROCm container ==="
-        _rocm_build "${BUILD_DIR}" "OFF" \
-            "hipobj-rdma-test-server put-object get-object v2-data-client"
+        echo "=== Rebuilding (v1) in ROCm container ==="
+        _rocm_build "${BUILD_DIR}" "ON" \
+            "hipobj-rdma-test-server minio-getput-rdma"
     else
         if [ ! -x "${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server" ]; then
             echo "ERROR: ${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server not found"
-            echo "Run 'cmake --build build-v2 --target hipobj-rdma-test-server put-object get-object v2-data-client' first"
+            echo "Run 'cmake --build build-v1 --target hipobj-rdma-test-server minio-getput-rdma' first"
             exit 1
         fi
-        echo "=== Using existing build-v2 binaries ==="
+        echo "=== Using existing build-v1 binaries ==="
     fi
 
     chmod +x "${REPO}/ci/ernic/server-entrypoint.sh" \
@@ -59,14 +59,14 @@ run_v2() {
     docker network create ernic-local-net 2>/dev/null || true
 
     cleanup() {
-        echo "=== Server logs (v2) ==="
+        echo "=== Server logs (v1) ==="
         docker logs ernic-server-local 2>&1 || true
         docker rm -f ernic-server-local 2>/dev/null || true
         docker network rm ernic-local-net 2>/dev/null || true
     }
     trap cleanup EXIT
 
-    echo "=== Starting ernic server (v2) ==="
+    echo "=== Starting ernic server (v1) ==="
     docker run -d \
         --name ernic-server-local \
         --hostname ernic-server \
@@ -78,7 +78,7 @@ run_v2() {
 
     _wait_for_server ernic-server-local 9000
 
-    echo "=== Running ernic client (v2) ==="
+    echo "=== Running ernic client (v1) ==="
     docker run --rm \
         --name ernic-client-local \
         --network ernic-local-net \
@@ -268,5 +268,5 @@ if [ "${S3_BACKEND}" = true ]; then
 elif [ "${MINIO_V1}" = true ]; then
     run_minio_v1
 else
-    run_v2
+    run_two_vm_v1
 fi
