@@ -18,9 +18,9 @@
 # hipMalloc unconditionally, so they cannot run here. minio-getput-rdma's
 # nogpu mode drives the same v1 RDMA path from a page-aligned host buffer
 # and verifies the payload end to end. The GPU-buffer form of this transfer
-# is hipobject-gpu-direct-check.yml's job.
+# is hipobject-hardware-test-gpu-direct.yml's job.
 
-name: hipObject - Two-VM Protocol Check
+name: hipObject - Hardware Test - Two-VM Protocol
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -34,7 +34,7 @@ on:
       - "test/**"
       - "integrations/**"
       - "ci/ernic/**"
-      - ".github/workflows/hipobject-two-vm-protocol-check.yml"
+      - ".github/workflows/hipobject-hardware-test-two-vm-protocol.yml"
   workflow_dispatch:
 
 concurrency:
@@ -55,7 +55,7 @@ env:
 
 jobs:
   two-vm-protocol:
-    name: Two-VM v1 Protocol Test
+    name: Two-VM Protocol
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     # The previous container topology could not work and was gated off: with
@@ -128,7 +128,8 @@ jobs:
                 -DHIPOBJ_BNXT=OFF \
                 -DHIPOBJ_INTEGRATION_TESTS=ON \
                 -DHIPOBJ_MINIO_CLIENT=ON \
-                -DHIPOBJ_BUILD_DOCS=OFF && \
+                -DHIPOBJ_BUILD_DOCS=OFF \
+                -DCMAKE_SKIP_INSTALL_RULES=ON && \
               cmake --build /hipobject-build --parallel \$(nproc) \
                 --target hipobj-rdma-test-server minio-getput-rdma && \
               mkdir -p /hipobject-build/rocm-libs && \
@@ -142,9 +143,11 @@ jobs:
               done && \
               for b in /hipobject-build/test/integration/rdma-test-server/hipobj-rdma-test-server \
                        /hipobject-build/integrations/minio-cpp/minio-getput-rdma; do \
-                LD_LIBRARY_PATH=/hipobject-build/rocm-libs ldd \$b \
-                  | grep 'not found' && { echo 'staged closure incomplete'; exit 1; }; \
-              done; \
+                if LD_LIBRARY_PATH=/hipobject-build/rocm-libs ldd \$b \
+                     | grep 'not found'; then \
+                  echo 'staged closure incomplete'; exit 1; \
+                fi; \
+              done && \
               echo 'staged closure complete'
             "
 
@@ -434,6 +437,7 @@ jobs:
             $SCP "${BUILD}/integrations/minio-cpp/minio-getput-rdma" \
                  "${VM_USER}@localhost:/tmp/hipobject-build/integrations/minio-cpp/"
             $SCP ci/ernic/server-entrypoint.sh ci/ernic/client-entrypoint.sh \
+                 ci/ernic/assert-transfer.sh \
                  "${VM_USER}@localhost:/tmp/hipobject-build/"
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -p "$port" \
               "${VM_USER}@localhost" 'chmod +x /tmp/hipobject-build/*.sh \

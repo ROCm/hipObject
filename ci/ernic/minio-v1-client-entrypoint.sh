@@ -12,6 +12,8 @@
 #   TEST_SIZE          - transfer size in bytes       (default: 65536)
 #   ROCJITSU_SOCKET    - vfio-user socket for rocjitsu (default: /tmp/vfio-sockets/rocjitsu.sock)
 #   ROCJITSU_CONFIG    - rocjitsu GPU config JSON     (default: gfx950_mi355x.json)
+#   EXPECT_TRANSPORT   - rdma or http, asserted against the bridge's own
+#                        transfer counters                (default: http)
 
 set -euo pipefail
 
@@ -70,12 +72,20 @@ if [ "${ELAPSED_MS}" -gt 0 ]; then
     echo "Throughput: ${THROUGHPUT_MBPS} MB/s (PUT+GET ${TOTAL_BYTES} bytes in ${ELAPSED_MS} ms)"
 fi
 
-# Data correctness
-echo "${out}" | grep -q "Data integrity check passed" || {
-    echo "ERROR: minio-cpp bridge v1 payload verification failed (exit ${rc})"
+# Data correctness and transport. EXPECT_TRANSPORT defaults to http because
+# client and server are separate containers, each running its own loopback
+# rocm-ernic: there is no shared emulated wire between them, so the bridge
+# falls back to HTTP by construction. Asserting that explicitly is still worth
+# doing -- it pins the lane's coverage down instead of leaving "did this use
+# RDMA?" unanswered. The VM lanes are the ones that assert rdma.
+LOG=$(mktemp)
+printf '%s\n' "${out}" > "${LOG}"
+"$(dirname "$0")/assert-transfer.sh" "${LOG}" "${EXPECT_TRANSPORT:-http}" || {
+    echo "ERROR: minio-cpp bridge v1 verification failed (exit ${rc})"
     kill "${ERNIC_PID}" 2>/dev/null || true
     exit 1
 }
+rm -f "${LOG}"
 
 echo "--- ernic minio-v1 integration: PASS ---"
 kill "${ERNIC_PID}" 2>/dev/null || true

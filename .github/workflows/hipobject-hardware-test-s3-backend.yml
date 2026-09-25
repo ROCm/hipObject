@@ -15,7 +15,7 @@
 # This is the job that exercises the RDMA data path on host buffers: a
 # passing run carries x-amz-rdma-token / x-amz-rdma-reply on the wire.
 
-name: hipObject - S3 Backend Check
+name: hipObject - Hardware Test - S3 Backend
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -29,7 +29,7 @@ on:
       - "test/**"
       - "integrations/**"
       - "ci/ernic/**"
-      - ".github/workflows/hipobject-s3-backend-check.yml"
+      - ".github/workflows/hipobject-hardware-test-s3-backend.yml"
   workflow_dispatch:
 
 concurrency:
@@ -50,7 +50,7 @@ env:
 
 jobs:
   s3-backend:
-    name: S3 Backend Test
+    name: S3 Backend
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     # Run inside the same QEMU+libvfio-user image used by rocm-ernic's
@@ -123,10 +123,12 @@ jobs:
                 | awk '/=> \//{print \$3}' \
                 | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so' \
                 | xargs -r -I{} cp -L {} /hipobject-build/rocm-libs/ && \
-              LD_LIBRARY_PATH=/hipobject-build/rocm-libs \
-                ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
-                | grep 'not found' && { echo 'staged closure incomplete'; exit 1; } || \
-                echo 'staged closure complete'
+              if LD_LIBRARY_PATH=/hipobject-build/rocm-libs \
+                   ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
+                   | grep 'not found'; then \
+                echo 'staged closure incomplete'; exit 1; \
+              fi && \
+              echo 'staged closure complete'
             "
 
       - name: Extract rocm-ernic binary from ernic image
@@ -365,6 +367,10 @@ jobs:
             -P $SSH_PORT \
             "$MINIO_BIN" \
             "${VM_USER}@localhost:/tmp/minio-getput-rdma"
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -P $SSH_PORT \
+            ci/ernic/assert-transfer.sh \
+            "${VM_USER}@localhost:/tmp/assert-transfer.sh"
           # The guest has no ROCm install, so the binary's HIP runtime
           # closure (~30 MB, staged by the build step) has to travel with it.
           scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -405,7 +411,16 @@ jobs:
           # plain HTTP -- which the emulator rejects for a 64 KiB body.
           export HIPOBJ_NIC_HINT="${RDMA_DEVICE}"
           echo "=== Running minio-getput-rdma (HIPOBJ_NIC_HINT=$HIPOBJ_NIC_HINT) ==="
-          /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" minioadmin minioadmin 65536 nogpu
+          rc=0
+          /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
+            minioadmin minioadmin 65536 nogpu > /tmp/getput.log 2>&1 || rc=$?
+          cat /tmp/getput.log
+          [ "$rc" -eq 0 ] || exit "$rc"
+          # The bridge returns success when it silently falls back to plain
+          # HTTP, so the exit code is checked and then the run's own report of
+          # what it did -- payload verified, bytes over RDMA, no fallback.
+          chmod +x /tmp/assert-transfer.sh
+          /tmp/assert-transfer.sh /tmp/getput.log rdma
           EOFVM
 
       - name: Collect logs

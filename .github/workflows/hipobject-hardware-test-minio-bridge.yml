@@ -13,10 +13,16 @@
 #   ernic-minio-client: minio-getput-rdma in nogpu + HTTP-only mode, with
 #                       payload integrity verified end to end.
 #
+# HTTP-only is a property of the topology, not a setting: client and server
+# are separate containers, each running its own loopback rocm-ernic, so there
+# is no emulated wire between them and the bridge falls back to plain HTTP.
+# This lane therefore asserts the HTTP path; the three VM lanes are the ones
+# that assert the bytes moved over RDMA.
+#
 # The only lane in this set that needs no VM, and so the only one that runs
 # in minutes rather than tens of minutes.
 
-name: hipObject - MinIO Bridge Check
+name: hipObject - Hardware Test - MinIO Bridge
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -30,7 +36,7 @@ on:
       - "test/**"
       - "integrations/**"
       - "ci/ernic/**"
-      - ".github/workflows/hipobject-minio-bridge-check.yml"
+      - ".github/workflows/hipobject-hardware-test-minio-bridge.yml"
   workflow_dispatch:
 
 concurrency:
@@ -52,7 +58,7 @@ env:
 
 jobs:
   minio-bridge:
-    name: MinIO Bridge v1 Test
+    name: MinIO Bridge
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 
@@ -97,10 +103,12 @@ jobs:
                 | awk '/=> \//{print \$3}' \
                 | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so' \
                 | xargs -r -I{} cp -L {} /hipobject-build/rocm-libs/ && \
-              LD_LIBRARY_PATH=/hipobject-build/rocm-libs \
-                ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
-                | grep 'not found' && { echo 'staged closure incomplete'; exit 1; } || \
-                echo 'staged closure complete'
+              if LD_LIBRARY_PATH=/hipobject-build/rocm-libs \
+                   ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
+                   | grep 'not found'; then \
+                echo 'staged closure incomplete'; exit 1; \
+              fi && \
+              echo 'staged closure complete'
             "
 
       - name: Pull images

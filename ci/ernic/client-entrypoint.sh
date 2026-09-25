@@ -12,7 +12,7 @@
 # returns hipErrorNoDevice before any of the RDMA path is reached. nogpu mode
 # drives the same v1 transfer from a page-aligned host buffer and verifies
 # the payload, which is the part that depends on the emulated wire. The
-# GPU-buffer form is hipobject-gpu-direct-check.yml's job.
+# GPU-buffer form is hipobject-hardware-test-gpu-direct.yml's job.
 #
 # Environment variables (all have defaults):
 #   BUILD_DIR        - where the binaries were copied (default: /tmp/hipobject-build)
@@ -49,9 +49,12 @@ out=$("${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma" \
     "${TEST_SIZE}" nogpu 2>&1) || rc=$?
 echo "${out}"
 
-echo "${out}" | grep -q "Data integrity check passed" || {
-    echo "ERROR: v1 payload verification failed (exit ${rc})"
-    exit 1
-}
+LOG=$(mktemp)
+printf '%s\n' "${out}" > "${LOG}"
 
-echo "--- ernic two-VM v1 integration: PASS ---"
+# Exit code alone is not evidence: the bridge returns success when it falls
+# back to plain HTTP, so the assertion is on what the run reported doing.
+"$(dirname "$0")/assert-transfer.sh" "${LOG}" rdma || exit 1
+rm -f "${LOG}"
+
+echo "--- ernic two-VM v1 integration: PASS (exit ${rc}) ---"
