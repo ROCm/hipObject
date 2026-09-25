@@ -2,29 +2,32 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# MinIO bridge integration test (v1 protocol, minio-cpp, two VMs).
+# Two-VM GPU-direct integration test (v1 protocol, asymmetric guests).
 #
-# This lane used to be three containers, and it could not do what its name
-# claimed. rocm-ernic serves an emulated PCI function over vfio-user; turning
-# that into a verbs device takes a guest kernel's ionic/ionic_rdma drivers.
-# With client and server in separate containers -- each running its own
-# loopback emulator, with nothing between them -- /sys/class/infiniband stayed
-# empty, HIPOBJ_NIC_HINT resolved to nothing, and hipobj::minio::Client fell
-# back to plain HTTP and returned success. The lane went green over TCP.
+# The GPU Direct lane puts both emulated functions -- ernic's NIC and
+# rocjitsu's GPU -- in one guest and talks to rocm-ernic's own in-process S3
+# store. This lane splits them across two guests instead, which is the shape
+# a real deployment has: a client host with a GPU, a storage host without
+# one, and an RDMA fabric between them.
 #
-# So it is two VMs now, the same topology as the Two-VM Protocol lane: two
-# rocm-ernic instances joined by a tcp:manager / tcp:worker mesh, each bridged
-# onto ernicbr0 through its own tap and serving one emulated ionic function.
-# VM 1 (192.168.200.10) runs hipobj-rdma-test-server in v1 mode on port 9000;
-# VM 2 drives the minio-cpp bridge against it and asserts, from the bridge's
-# own counters, that every byte moved over RDMA.
+#   VM 1 (192.168.200.10): ernic NIC only. hipobj-rdma-test-server, v1, :9000.
+#   VM 2:                  ernic NIC + rocjitsu's emulated gfx1250, and
+#                          minio-getput-rdma driving a real hipMalloc'd
+#                          device buffer across the wire to VM 1.
 #
-# What it adds over Two-VM Protocol is the bridge entrypoint: round-trip
-# timing and a throughput figure per run, which is the number this lane
-# exists to watch. The GPU-buffer form of the same transfer is
-# hipobject-hardware-test-two-vm-gpu-direct.yml.
+# So the GPU is on one side of the transfer and not the other, and the bytes
+# cross an emulated fabric rather than a loopback inside one process. Nothing
+# else in the matrix covers that: Two-VM Protocol is two guests with host
+# buffers, GPU Direct is one guest with a device buffer.
+#
+# Two rocm-ernic instances on the runner, joined by a tcp:manager /
+# tcp:worker mesh and each bridged onto ernicbr0 through its own tap, serve
+# the NIC function apiece; rocjitsu runs as a sibling container and serves
+# VM 2's second vfio-user socket. ip_discovery.bin is generated at job time
+# from the same rocjitsu build that serves the socket -- it describes the
+# device, so it cannot come from anywhere else.
 
-name: hipObject - Hardware Test - MinIO Bridge
+name: hipObject - Hardware Test - Two-VM GPU Direct
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -38,7 +41,7 @@ on:
       - "test/**"
       - "integrations/**"
       - "ci/ernic/**"
-      - ".github/workflows/hipobject-hardware-test-minio-bridge.yml"
+      - ".github/workflows/hipobject-hardware-test-two-vm-gpu-direct.yml"
   workflow_dispatch:
 
 concurrency:
@@ -55,11 +58,16 @@ env:
   #   (<date>.<repo-sha>-<component>.<sha>-vfu.<sha>): immutable, so a rebuild
   #   cannot change what this lane tests underneath it.
   ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244
+  # ROCJITSU_IMAGE_GPU: the tag qemu-minimal's ernic-rocjitsu lane runs.
+  #   ip_discovery.bin must come from whichever rocjitsu build serves the
+  #   socket, and this lane generates it from this image, so the two cannot
+  #   drift apart.
+  ROCJITSU_IMAGE_GPU: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260924.gad7a357-rocjitsu.c85bb75
   ROCM_IMAGE: rocm/dev-ubuntu-24.04:10.0.0-full
 
 jobs:
-  minio-bridge:
-    name: MinIO Bridge
+  two-vm-gpu-direct:
+    name: Two-VM GPU Direct
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     # The previous container topology could not work and was gated off: with
@@ -164,6 +172,42 @@ jobs:
           chmod +x /usr/local/bin/rocm-ernic
           rocm-ernic --help > /tmp/ernic-help.txt
           head -3 /tmp/ernic-help.txt
+
+      - name: Generate ip_discovery.bin on the host
+        run: |
+          # The only firmware the guest does not bake, because it is the only
+          # piece that is not static: it describes the device the socket
+          # serves, so it must come from the rocjitsu build serving it. The
+          # gap stubs are in /lib/firmware/updates/amdgpu already.
+          mkdir -p "${GITHUB_WORKSPACE}/rj-fw"
+          chmod 777 "${GITHUB_WORKSPACE}/rj-fw"
+          docker run --rm -v "${{ github.workspace }}/rj-fw:/out" \
+            "$ROCJITSU_IMAGE_GPU" \
+            rj-ip-discovery gfx1250 /out/ip_discovery.bin
+          ls -l "${GITHUB_WORKSPACE}/rj-fw"
+
+      - name: Start the rocjitsu GPU server for VM 2
+        run: |
+          # rocjitsu runs as a sibling container, so its socket has to live on
+          # a path the host daemon can bind-mount AND this container can see.
+          # ${{ github.workspace }} is the host path; $GITHUB_WORKSPACE is the
+          # same directory as mounted in here. The ernic sockets need neither,
+          # since rocm-ernic runs in this container.
+          mkdir -p "${GITHUB_WORKSPACE}/vfu"
+          chmod 777 "${GITHUB_WORKSPACE}/vfu"
+          docker run -d --name rocjitsu-2vm \
+            -v "${{ github.workspace }}/vfu:/run/vfu" \
+            "$ROCJITSU_IMAGE_GPU" \
+            rocjitsu --config /usr/local/share/rocjitsu/configs/gfx1250_mi455x.json \
+                     --vfio-socket /run/vfu/rocjitsu.sock
+          for i in $(seq 1 45); do
+            [ -S "${GITHUB_WORKSPACE}/vfu/rocjitsu.sock" ] && break
+            sleep 2
+          done
+          [ -S "${GITHUB_WORKSPACE}/vfu/rocjitsu.sock" ] || {
+            echo "rocjitsu.sock never appeared"; docker logs rocjitsu-2vm || true; exit 1; }
+          chmod 666 "${GITHUB_WORKSPACE}/vfu/rocjitsu.sock" || true
+          echo "rocjitsu socket present"
 
       - name: Select QEMU accelerator and guest size
         run: |
@@ -309,6 +353,16 @@ jobs:
         run: |
           start_vm() {
             n=$1; disk=$2; port=$3
+            # Only VM 2 gets the GPU. rombar=0 because rocjitsu serves no
+            # option ROM, and a guest that goes looking for one oopses in the
+            # RAS VBIOS query.
+            gpu=""
+            # if/fi, not `[ ] && x=y`: under `sh -e` the failing test would be
+            # the whole command's status and kill the step for VM 1.
+            if [ "$n" = 2 ]; then
+              gpu='-device {"driver":"vfio-user-pci","rombar":0,"socket":{"type":"unix","path":"'"${GITHUB_WORKSPACE}"'/vfu/rocjitsu.sock"}}'
+            fi
+            # shellcheck disable=SC2086
             ${QEMU_PATH:-}qemu-system-x86_64 \
               -machine q35,accel=${QEMU_ACCEL},memory-backend=mem${n} \
               -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
@@ -318,6 +372,7 @@ jobs:
               -netdev user,id=net0,hostfwd=tcp::${port}-:22 \
               -device virtio-net-pci,netdev=net0 \
               -device '{"driver":"vfio-user-pci","socket":{"type":"unix","path":"/tmp/vfio-user-server'"$n"'.sock"}}' \
+              $gpu \
               -serial file:/tmp/qemu-vm${n}-console.log -monitor none \
               -qmp unix:/tmp/qmp-vm${n}.sock,server=on,wait=off > /tmp/qemu-vm${n}.log 2>&1 &
             echo "QEMU_PID${n}=$!" >> "$GITHUB_ENV"
@@ -380,9 +435,9 @@ jobs:
           cat > "$ERNIC_RUN_DIR/instances.json" << EOFJSON
           {
             "instances": [
-              { "id": 1, "vm": { "vm_name": "hipobj-bridge-1",
+              { "id": 1, "vm": { "vm_name": "hipobj-2vmgpu-1",
                                  "ssh_port": ${VM1_SSH_PORT}, "ssh_user": "${VM_USER}" } },
-              { "id": 2, "vm": { "vm_name": "hipobj-bridge-2",
+              { "id": 2, "vm": { "vm_name": "hipobj-2vmgpu-2",
                                  "ssh_port": ${VM2_SSH_PORT}, "ssh_user": "${VM_USER}" } }
             ]
           }
@@ -425,6 +480,74 @@ jobs:
             echo "RDMA_DEVICE_${n}=$DEV" >> "$GITHUB_ENV"
           done
 
+      - name: Verify VM 2 enumerated the GPU function
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p "$VM2_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' | tee /tmp/lspci-vm2.txt
+          # 1dd8:100a is the Pensando ionic NIC; 1002: is the rocjitsu GPU.
+          grep -q '1dd8:100a' /tmp/lspci-vm2.txt || {
+            echo "VM 2: emulated ionic NIC not enumerated"; exit 1; }
+          grep -qi '1002:' /tmp/lspci-vm2.txt || {
+            echo "VM 2: emulated rocjitsu GPU not enumerated"; exit 1; }
+          # VM 1 must NOT have one -- the asymmetry is the point of the lane.
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p "$VM1_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' > /tmp/lspci-vm1.txt
+          if grep -qi '1002:' /tmp/lspci-vm1.txt; then
+            echo "VM 1 has a GPU; this lane is supposed to be asymmetric"; exit 1
+          fi
+          echo "VM 2 has both functions, VM 1 has only the NIC"
+
+      - name: Stage ip_discovery.bin into VM 2
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          scp $SSH_OPTS -P "$VM2_SSH_PORT" "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
+            "${VM_USER}@localhost:/tmp/"
+          # updates/ takes precedence over the packaged firmware, and is where
+          # the guest's baked gap stubs already live.
+          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+            'sudo install -D -m 0644 /tmp/ip_discovery.bin \
+               /lib/firmware/updates/amdgpu/ip_discovery.bin && \
+             ls -l /lib/firmware/updates/amdgpu/'
+
+      - name: Load amdgpu in VM 2 via amdgpu-probe
+        timeout-minutes: 8
+        run: |
+          # Bounded at three layers -- guest-side timeout, ssh keepalive, step
+          # timeout -- so the hang qemu-minimal parks its lane on reports
+          # instead of eating the job budget.
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+              -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+              "sudo timeout 300 /usr/local/bin/amdgpu-probe"
+          echo "amdgpu-probe completed"
+
+      - name: Verify amdgpu bound a GPU in VM 2
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+            'lsmod | grep -q amdgpu' || { echo "amdgpu module not loaded"; exit 1; }
+          # /dev/kfd is not a valid assertion: kfd_chardev_init() creates it
+          # before amdgpu_init() registers the PCI driver, so it exists even
+          # when every probe failed. Node 0 is the CPU and has an empty name;
+          # a bound GPU adds a named node.
+          gpus=$(ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+            'cat /sys/class/kfd/kfd/topology/nodes/*/name 2>/dev/null | grep -c .')
+          [ "$gpus" -ge 1 ] || {
+            echo "amdgpu loaded but never bound the device"
+            ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+              'sudo dmesg | grep -i amdgpu | tail -40' || true
+            exit 1
+          }
+          echo "GPU KFD node present in VM 2 ($gpus)"
+
       - name: Copy hipObject binaries into both VMs
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
@@ -440,8 +563,7 @@ jobs:
                  "${VM_USER}@localhost:/tmp/hipobject-build/test/integration/rdma-test-server/"
             $SCP "${BUILD}/integrations/minio-cpp/minio-getput-rdma" \
                  "${VM_USER}@localhost:/tmp/hipobject-build/integrations/minio-cpp/"
-            $SCP ci/ernic/server-entrypoint.sh \
-                 ci/ernic/minio-v1-client-entrypoint.sh \
+            $SCP ci/ernic/server-entrypoint.sh ci/ernic/client-entrypoint.sh \
                  ci/ernic/assert-transfer.sh \
                  "${VM_USER}@localhost:/tmp/hipobject-build/"
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -p "$port" \
@@ -493,22 +615,21 @@ jobs:
             exit 1
           }
 
-      - name: Run the minio-cpp bridge client in VM 2
+      - name: Run the GPU-buffer v1 client in VM 2
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          # EXPECT_TRANSPORT=rdma is the whole point of the VM conversion: the
-          # bridge falls back to HTTP silently, so without this assertion a
-          # lane that lost its wire still passes.
+          # sudo: /dev/kfd and /dev/dri/render* are root:render 0660 and the
+          # guest's login user is in neither group, so the HIP runtime
+          # enumerates no agent and hipMalloc returns hipErrorNoDevice.
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
             -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
-            "HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
-             BUILD_DIR=/tmp/hipobject-build \
-             SERVER_ENDPOINT='http://${VM1_ADDR}:${SERVER_PORT}' \
-             TEST_SIZE='${TEST_SIZE}' \
-             GPU_MODE=nogpu \
-             EXPECT_TRANSPORT=rdma \
-             /tmp/hipobject-build/minio-v1-client-entrypoint.sh"
+            "sudo env HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
+               BUILD_DIR=/tmp/hipobject-build \
+               SERVER_ENDPOINT='http://${VM1_ADDR}:${SERVER_PORT}' \
+               TEST_SIZE='${TEST_SIZE}' \
+               GPU_MODE=gpu \
+               /tmp/hipobject-build/client-entrypoint.sh"
 
       - name: Collect logs
         if: always()
@@ -520,6 +641,11 @@ jobs:
             echo "=== qemu-vm${n}.log ==="       && cat "/tmp/qemu-vm${n}.log"             || true
             echo "=== qemu-vm${n}-console ===" && tail -200 "/tmp/qemu-vm${n}-console.log" || true
           done
+          echo "=== rocjitsu ===" && docker logs rocjitsu-2vm 2>&1 || true
+          echo "=== VM 2 amdgpu dmesg ==="
+          timeout 60 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+            'sudo dmesg | grep -i "amdgpu\|kfd" | tail -60' || true
           echo "=== VM 1 hipobj-server journal ==="
           timeout 60 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
             -o ConnectTimeout=10 -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
@@ -528,6 +654,7 @@ jobs:
       - name: Teardown
         if: always()
         run: |
+          docker rm -f rocjitsu-2vm 2>/dev/null || true
           kill "${QEMU_PID1:-}" "${QEMU_PID2:-}"   2>/dev/null || true
           kill "${ERNIC_PID1:-}" "${ERNIC_PID2:-}" 2>/dev/null || true
           docker run --rm -v "${{ github.workspace }}/ernic-build:/d" \

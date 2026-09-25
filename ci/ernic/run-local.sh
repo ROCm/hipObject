@@ -6,6 +6,11 @@
 # Run ernic integration tests locally using pre-built or freshly-built binaries.
 #
 # Usage:
+# Containers only, so no RDMA: a container has no guest kernel to bind the
+# emulated PCI function, so both paths below fall back to HTTP and assert
+# that (EXPECT_TRANSPORT=http). For the RDMA topologies see the
+# hipobject-hardware-test-*.yml lanes, which boot guest VMs.
+#
 #   ci/ernic/run-local.sh                       # two-VM v1 test, use build-v1 binaries
 #   ci/ernic/run-local.sh --rebuild             # two-VM v1 test, force ROCm container build
 #   ci/ernic/run-local.sh --minio-v1            # v1 minio-cpp test, use build-minio binaries
@@ -86,6 +91,8 @@ run_two_vm_v1() {
         -v "${REPO}:/hipobject:ro" \
         -e SERVER_ENDPOINT=http://ernic-server:9000 \
         -e TEST_SIZE=65536 \
+        -e START_ERNIC=true \
+        -e EXPECT_TRANSPORT=http \
         --entrypoint /hipobject/ci/ernic/client-entrypoint.sh \
         "$ERNIC_IMAGE"
 }
@@ -160,6 +167,8 @@ run_minio_v1() {
         -e SERVER_ENDPOINT=http://ernic-server:9000 \
         -e TEST_SIZE=65536 \
         -e ROCJITSU_SOCKET=/tmp/vfio-sockets/rocjitsu.sock \
+        -e START_ERNIC=true \
+        -e EXPECT_TRANSPORT=http \
         --entrypoint /hipobject/ci/ernic/minio-v1-client-entrypoint.sh \
         "$ERNIC_IMAGE"
 }

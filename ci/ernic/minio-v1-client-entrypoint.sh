@@ -3,41 +3,58 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run pre-built minio-getput-rdma inside the ernic+rocjitsu client container
-# against hipobj-rdma-test-server in v1 mode.  Binary built on runner, mounted
-# read-only at /hipobject-build.
+# Drive the minio-cpp bridge (minio-getput-rdma) against hipobj-rdma-test-server
+# in v1 mode, time the round trip, and assert what the transfer actually did.
+#
+# Two callers, and they differ in one thing only -- where the verbs device
+# comes from:
+#
+#   The MinIO Bridge CI lane runs this inside a guest VM whose ionic driver
+#   has bound an emulated PCI function served by a rocm-ernic instance on the
+#   runner, meshed to the server VM's. There is a real wire, so the defaults
+#   apply: do not start an emulator in here, and require RDMA.
+#
+#   docker-compose's minio-v1 profile runs it in a container, where
+#   START_ERNIC=true brings up a loopback rocm-ernic for the vfio-user socket
+#   but nothing binds it -- a container has no guest kernel, so
+#   /sys/class/infiniband stays empty and the bridge falls back to HTTP.
+#   That profile passes EXPECT_TRANSPORT=http and gets exactly that.
 #
 # Environment variables:
+#   BUILD_DIR          - where the binaries live     (default: /hipobject-build)
 #   SERVER_ENDPOINT    - http URL of the test server (default: http://ernic-server:9000)
-#   TEST_SIZE          - transfer size in bytes       (default: 65536)
-#   ROCJITSU_SOCKET    - vfio-user socket for rocjitsu (default: /tmp/vfio-sockets/rocjitsu.sock)
-#   ROCJITSU_CONFIG    - rocjitsu GPU config JSON     (default: gfx950_mi355x.json)
+#   TEST_SIZE          - transfer size in bytes      (default: 65536)
+#   GPU_MODE           - gpu or nogpu                (default: nogpu)
+#   START_ERNIC        - start a loopback rocm-ernic in here (default: false)
 #   EXPECT_TRANSPORT   - rdma or http, asserted against the bridge's own
-#                        transfer counters                (default: http)
+#                        transfer counters           (default: rdma)
+#   ROCJITSU_SOCKET    - vfio-user socket for rocjitsu, informational only
 
 set -euo pipefail
 
-export LD_LIBRARY_PATH=/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+BUILD_DIR="${BUILD_DIR:-/hipobject-build}"
+export LD_LIBRARY_PATH="${BUILD_DIR}/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-# Start rocm-ernic (emulated ionic NIC, loopback backend)
-rocm-ernic --backend loopback &
-ERNIC_PID=$!
-sleep 1
+ERNIC_PID=
+cleanup() {
+    if [ -n "${ERNIC_PID}" ]; then
+        kill "${ERNIC_PID}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+if [ "${START_ERNIC:-false}" = true ]; then
+    rocm-ernic --backend loopback &
+    ERNIC_PID=$!
+    sleep 1
+fi
 
 export HIPOBJ_NIC_HINT="${HIPOBJ_NIC_HINT:-ernic0}"
 echo "Using NIC hint: ${HIPOBJ_NIC_HINT}"
 
-# rocjitsu provides a vfio-user GPU socket, but the ernic container does not have
-# the /dev/kfd + /dev/dri devices that HIP requires for hipMalloc.  GPU mode
-# will be enabled once rocjitsu is integrated via a full VM setup.
-ROCJITSU_SOCKET="${ROCJITSU_SOCKET:-/tmp/vfio-sockets/rocjitsu.sock}"
-ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-gfx950_mi355x.json}"
-GPU_MODE="nogpu"
-echo "Running in nogpu mode (GPU mode requires /dev/kfd + /dev/dri)"
-
 SERVER_ENDPOINT="${SERVER_ENDPOINT:-http://ernic-server:9000}"
 TEST_SIZE="${TEST_SIZE:-65536}"
-BUILD_DIR=/hipobject-build
+GPU_MODE="${GPU_MODE:-nogpu}"
 
 SERVER_HOST="${SERVER_ENDPOINT#http://}"
 SERVER_HOST="${SERVER_HOST%%:*}"
@@ -47,8 +64,8 @@ echo "--- minio-cpp bridge v1 PUT + GET ---"
 echo "    server:   ${SERVER_ENDPOINT}"
 echo "    size:     ${TEST_SIZE} bytes"
 echo "    gpu mode: ${GPU_MODE}"
+echo "    expect:   ${EXPECT_TRANSPORT:-rdma}"
 
-# Throughput measurement: time the full PUT+GET round-trip
 T_START=$(date +%s%N)
 
 out=""
@@ -60,32 +77,23 @@ out=$("${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma" \
 echo "${out}"
 
 T_END=$(date +%s%N)
-ELAPSED_NS=$(( T_END - T_START ))
-ELAPSED_MS=$(( ELAPSED_NS / 1000000 ))
+ELAPSED_MS=$(( (T_END - T_START) / 1000000 ))
 
 # Two transfers (PUT + GET): total bytes transferred = 2 * TEST_SIZE
 TOTAL_BYTES=$(( 2 * TEST_SIZE ))
-# Throughput in MB/s (integer arithmetic; *1000 to avoid float)
 if [ "${ELAPSED_MS}" -gt 0 ]; then
-    THROUGHPUT_KBPS=$(( TOTAL_BYTES * 1000 / ELAPSED_MS / 1024 ))
-    THROUGHPUT_MBPS=$(( THROUGHPUT_KBPS / 1024 ))
+    THROUGHPUT_MBPS=$(( TOTAL_BYTES * 1000 / ELAPSED_MS / 1024 / 1024 ))
     echo "Throughput: ${THROUGHPUT_MBPS} MB/s (PUT+GET ${TOTAL_BYTES} bytes in ${ELAPSED_MS} ms)"
 fi
 
-# Data correctness and transport. EXPECT_TRANSPORT defaults to http because
-# client and server are separate containers, each running its own loopback
-# rocm-ernic: there is no shared emulated wire between them, so the bridge
-# falls back to HTTP by construction. Asserting that explicitly is still worth
-# doing -- it pins the lane's coverage down instead of leaving "did this use
-# RDMA?" unanswered. The VM lanes are the ones that assert rdma.
+# Exit code alone is not evidence: the bridge returns success when it falls
+# back to plain HTTP, so the assertion is on what the run reported doing.
 LOG=$(mktemp)
 printf '%s\n' "${out}" > "${LOG}"
-"$(dirname "$0")/assert-transfer.sh" "${LOG}" "${EXPECT_TRANSPORT:-http}" || {
+"$(dirname "$0")/assert-transfer.sh" "${LOG}" "${EXPECT_TRANSPORT:-rdma}" || {
     echo "ERROR: minio-cpp bridge v1 verification failed (exit ${rc})"
-    kill "${ERNIC_PID}" 2>/dev/null || true
     exit 1
 }
 rm -f "${LOG}"
 
-echo "--- ernic minio-v1 integration: PASS ---"
-kill "${ERNIC_PID}" 2>/dev/null || true
+echo "--- minio-cpp bridge v1 integration (${GPU_MODE}): PASS (exit ${rc}) ---"

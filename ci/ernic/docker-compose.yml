@@ -4,9 +4,17 @@
 #
 # Two-container ernic integration tests.
 #
-# Default profile (two-VM v1 protocol, run here as two containers):
+# Neither profile here does RDMA, and cannot: rocm-ernic serves an emulated
+# PCI function over vfio-user, and it takes a guest kernel's ionic/ionic_rdma
+# drivers to turn that into a verbs device. In a container
+# /sys/class/infiniband stays empty and the bridge falls back to plain HTTP,
+# so both profiles pass EXPECT_TRANSPORT=http and assert that path honestly.
+# The RDMA topologies live in the hipobject-hardware-test-*.yml CI lanes,
+# which boot guests; run-local.sh mirrors them.
+#
+# Default profile (v1 protocol, run here as two containers):
 #   ernic-server: rocm-ernic loopback + hipobj-rdma-test-server on port 9000.
-#   ernic-client: rocm-ernic loopback + minio-getput-rdma in nogpu mode.
+#   ernic-client: minio-getput-rdma in nogpu mode, HTTP fallback.
 #
 # minio-v1 profile (v1 protocol, minio-cpp bridge):
 #   ernic-server-v1: rocm-ernic loopback + hipobj-rdma-test-server (v1 mode).
@@ -57,6 +65,8 @@ services:
       ROCM_PATH: /opt/rocm
       SERVER_ENDPOINT: http://ernic-server:9000
       TEST_SIZE: "1048576"
+      START_ERNIC: "true"
+      EXPECT_TRANSPORT: http
     entrypoint: ["/bin/bash", "/hipobject/ci/ernic/client-entrypoint.sh"]
     networks:
       - ernic-net
@@ -121,6 +131,8 @@ services:
       TEST_SIZE: "65536"
       ROCJITSU_SOCKET: /tmp/vfio-sockets/rocjitsu.sock
       ROCJITSU_CONFIG: ${ROCJITSU_CONFIG:-gfx950_mi355x.json}
+      START_ERNIC: "true"
+      EXPECT_TRANSPORT: http
     entrypoint: ["/bin/bash", "/hipobject/ci/ernic/minio-v1-client-entrypoint.sh"]
     networks:
       - ernic-minio-net
