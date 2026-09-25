@@ -1,80 +1,73 @@
-# A guest image that carries both ionic_rdma and amdgpu
+# The guest image that carries both ionic_rdma and amdgpu
 
-hipObject's CI needs one VM that has both an emulated AMD Pensando ionic
-RDMA NIC (served by `rocm-ernic`) and an emulated gfx1250 (served by
-`rocjitsu`). No published guest image does that today, so the
-`ernic-rocjitsu-gpu` lane in `.github/workflows/ernic-integration-check.yml`
-builds one at the start of every run: it boots the rocjitsu guest bare,
-installs a kernel, patches and rebuilds amdgpu, shuts it down, and only then
-boots it again with both vfio-user functions attached. That costs about
-fifteen minutes per run and re-derives the same image every time.
+hipObject's CI needs one VM that has both an emulated AMD Pensando ionic RDMA
+NIC (served by `rocm-ernic`) and an emulated gfx1250 (served by `rocjitsu`).
+The `ernic-rocjitsu-gpu` lane in
+[`.github/workflows/ernic-integration-check.yml`](../../.github/workflows/ernic-integration-check.yml)
+used to derive that guest at the start of every run — boot bare, install a
+kernel, patch and rebuild amdgpu, shut down, boot again with both vfio-user
+functions — at about fifteen minutes a run for the same result every time.
 
-This is what that lane does, so it can be baked into the image instead. It
-is verified, not proposed: every step below is green in CI as of
-hipObject `f193923`, through `amdgpu 0000:00:05.0` binding, `kfd kfd: added
-device 1002:75c1`, `ionic` at `PORT_ACTIVE`, and a successful `hipMalloc` on
-the emulated device.
+That is now a published flavour, `ubuntu-qcow2-gen-ernic-rocjitsu`, and the
+lane boots it once. This page records what the flavour carries, so a probe
+failure can be attributed to the image or to the lane without re-deriving the
+history. The recipe it was built from was verified green in CI at hipObject
+`f193923`, through `amdgpu 0000:00:05.0` binding, `kfd kfd: added device
+1002:75c1`, `ionic` at `PORT_ACTIVE`, and a successful `hipMalloc` on the
+emulated device.
 
-## Base
-
-`docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-rocjitsu:20260921.g584b3f9-vm.resolute-rocjitsu-qm.5d68689-qcow2`
-
-Ships 7.0.0-31-generic and amdgpu DKMS 7.1.9-2403767.26.04.
+Pin a dated tag; `GUEST_ARTIFACT_TAG` in the lane is the one in use.
 
 ## Kernel
 
-Mainline **v7.2.4** from the Ubuntu mainline PPA — `linux-headers` (both the
-`all` and `-generic` debs), `linux-image-unsigned` and `linux-modules`.
-
-7.2 is a hard floor, not a preference: `ionic_rdma` calls `ib_umem_get_va`,
-a `static inline` that exists in 7.2.4 and does not exist in 7.0 or 7.1.13.
-
-**Before installing those debs**, set `AUTOINSTALL="no"` in
-`/usr/src/amdgpu-*/dkms.conf`. The kernel postinst runs `dkms autoinstall`,
-which builds the *unpatched* amdgpu against the 7.2.4 headers. That build
-fails, the failure propagates through `run-parts` into dpkg, and both kernel
-packages end up half-configured with `apt-get` returning 100. Build amdgpu
-explicitly after the reboot instead.
+Mainline **v7.2.4**. 7.2 is a hard floor, not a preference: `ionic_rdma` calls
+`ib_umem_get_va`, a `static inline` that exists in 7.2.4 and does not exist in
+7.0 or 7.1.13.
 
 ## ionic / ionic_rdma
 
-Nothing to do. The two `rocm-ernic` patches apply to v7.2.4 unmodified, the
-DKMS build is clean, and the device reaches `PORT_ACTIVE` / `LinkUp`.
+In-tree from 7.2.4, and the two `rocm-ernic` patches apply unmodified. The
+guest supplies the kernel, headers and toolchain; building `ionic-ernic` as a
+DKMS module stays with the lane, which does it through the ernic Ansible
+collection.
 
 ## amdgpu
 
-DKMS 7.1.9 does not build on 7.2.4 as shipped. Three patches, currently
-carried in `ci/ernic/patches/amdgpu/` in the hipObject repo with a README
-explaining each:
+DKMS 7.1.9 does not build on 7.2.4 as shipped. Three patches are applied in
+the image build, to `/usr/src/amdgpu-*` so they survive a later
+`dkms autoinstall`:
 
 | Patch | What it does |
 | --- | --- |
-| `0001-amdkfd-fail-closed-ptrace-gate-7.2.patch` | Version-gates the dumpability check in `kfd_process_queue_manager.c`; on >= 7.2 it fails closed on `ns_capable(CAP_SYS_PTRACE)`. **This one still wants a human sign-off** — it changes a security check, and it was written to build, not reviewed as policy. |
-| `0002-amdkcl-probe-panel-type-separately.patch` | Adds `AC_AMDGPU_DRM_DISPLAY_INFO_PANEL_TYPE` and `AC_AMDGPU_DRM_MODE_PANEL_TYPE_LCD` configure probes and guards both uses. |
-| `0003-amdgpu-ras-guard-vbios-query.patch` | Guards the RAS vbios query on `adev->mode_info.atom_context`, which is NULL under emulation. |
+| `0001-amdkfd-fail-closed-ptrace-gate-7.2` | Version-gates the dumpability check in `kfd_process_queue_manager.c`; on >= 7.2 it fails closed on `ns_capable(CAP_SYS_PTRACE)`. **Still wants a human sign-off** — it changes a security check, and it was written to build, not reviewed as policy. The guest records `"kfd_ptrace_gate_reviewed": false` in `/etc/ernic-rocjitsu-guest.json`; read that field rather than assuming the set is settled. |
+| `0002-amdkcl-probe-panel-type-separately` | Adds `AC_AMDGPU_DRM_DISPLAY_INFO_PANEL_TYPE` and `AC_AMDGPU_DRM_MODE_PANEL_TYPE_LCD` configure probes and guards both uses. |
+| `0003-amdgpu-ras-guard-vbios-query` | Guards the RAS vbios query on `adev->mode_info.atom_context`, which is NULL under emulation. |
 
-Then `dkms build` / `dkms install` against `7.2.4-070204-generic`.
-
-Those patches belong in the rocjitsu image build. When they land there, the
-`ci/ernic/patches/amdgpu/` directory and the patch step in the workflow go
-away.
+The copies this repo used to carry in `ci/ernic/patches/amdgpu/` are gone; the
+image build owns them, and `/etc/ernic-rocjitsu-guest.json` lists each applied
+patch as `name:sha256[0:16]`.
 
 ## Firmware
 
-Generated by the **same rocjitsu build that serves the socket** — a mismatch
-makes probe fail at -22 or -2:
+The `vfio_guest_firmware.py --set gap` output — `gc_12_1_0_imu.bin`,
+`gc_12_1_0_mes.bin`, `gc_12_1_0_mes1.bin` and a `rocjitsu-gap-manifest.json`
+— is baked into `/lib/firmware/updates/amdgpu`. That set is static: the
+generator's fixtures do not depend on which rocjitsu build serves the socket.
 
-- `vfio_guest_firmware.py --set gap` output, copied to
-  `/lib/firmware/updates/amdgpu/`
-- `gc_12_1_0_mes.bin` and `gc_12_1_0_mes1.bin`, both copied from the
-  `uni_mes` blob
-- `ip_discovery.bin` from `rj-ip-discovery gfx1250`
+`ip_discovery.bin` is **not** baked in and cannot be, because it describes the
+device the socket serves. It has to come from the same rocjitsu build the lane
+runs (`ROCJITSU_IMAGE_GPU`), via `rj-ip-discovery gfx1250`; a mismatch makes
+probe fail at -22 or -2. Generating and staging it is the lane's one remaining
+piece of in-guest setup.
 
 ## Probe parameters
 
+The guest ships them as `/usr/local/bin/amdgpu-probe`, and autoload is
+blacklisted, so nothing loads the driver until the lane calls that helper:
+
 ```
 emu_mode=1 discovery=2 fw_load_type=0 ip_block_mask=0x7f \
-vm_update_mode=3 gpu_recovery=0 vramlimit=256
+vm_update_mode=3 gpu_recovery=0 vramlimit=1024
 ```
 
 Two of these are easy to get wrong:
@@ -82,23 +75,27 @@ Two of these are easy to get wrong:
 - `ip_block_mask=0x7f`, not `0x3f`. This DKMS build enumerates an extra
   `ras_v1_0` at index 5, which pushes MES to 6. Masking it off makes
   `gfx_v12_1_xcc_cp_resume` dereference a NULL ring.
-- `vramlimit=256` must match `vram_aperture_bytes` in the rocjitsu profile.
+- `vramlimit=1024`. Not a performance knob: it is the budget ROCr provisions
+  queue scratch from, and 256 runs scratch-free kernels fine while making a
+  private-segment dispatch wait forever for an allocation that never arrives.
+  Unrelated to `vram_aperture_bytes` in the rocjitsu profile, which is the BAR
+  window.
+
+`amdgpu-probe` refuses, loudly, when amdgpu is already resident with different
+parameters — `modprobe` returns 0 in that case and silently discards
+everything you passed it.
+
+## Device node groups
+
+`/dev/kfd` and `/dev/dri/render*` are `root:render` 0660. The image puts the
+login user in `render` and `video`; without that the HIP runtime enumerates no
+agent and `hipMalloc` returns 100 (`hipErrorNoDevice`) with a healthy KFD node
+three lines up the log.
 
 ## Two things about the guest that are not the image's fault
 
-- **>= 4 vCPUs.** `IONIC_EQ_COUNT_MIN` is 4, and below that `ionic_rdma`
-  never registers the ibdev.
-- **The guest cannot be warm-rebooted with the rocjitsu function
-  attached** — the device reset wedges it. That is why the CI lane does its
-  kernel and DKMS work on a bare boot and attaches the vfio-user functions
-  only on the second boot. If the image ships pre-built, this stops
-  mattering for CI.
-
-## One thing the image should fix
-
-`/dev/kfd` and `/dev/dri/render*` are `root:render` 0660 and the guest's
-login user is in neither `render` nor `video`. The HIP runtime then
-enumerates no agent at all and `hipMalloc` returns 100 (`hipErrorNoDevice`)
-with a perfectly healthy KFD node three lines up the log — which is an
-expensive thing to debug. Add the login user to `render` and `video` in the
-image; CI currently works around it by running the payload under `sudo`.
+- **>= 4 vCPUs.** `IONIC_EQ_COUNT_MIN` is 4, and below that `ionic_rdma` never
+  registers the ibdev.
+- **The guest cannot be warm-rebooted with the rocjitsu function attached** —
+  the device reset wedges it. Nothing in the lane reboots; a step that starts
+  to is a bug, not a slow path.

@@ -22,7 +22,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: rocm/dev-ubuntu-24.04:7.2
+      image: rocm/dev-ubuntu-24.04:10.0.0-full
       options: --user root
     env:
       ROCM_PATH: /opt/rocm

@@ -15,9 +15,8 @@
 set -euo pipefail
 
 REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-ERNIC_IMAGE=${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
-ERNIC_IMAGE_LATEST=${ERNIC_IMAGE_LATEST:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:latest}
-ROCJITSU_IMAGE=${ROCJITSU_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:august-28-2026}
+ERNIC_IMAGE=${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244}
+ROCJITSU_IMAGE=${ROCJITSU_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260924.gad7a357-rocjitsu.c85bb75}
 ROCM_IMAGE=rocm/dev-ubuntu-24.04:7.14.0-full
 AMD_CA_CERT=/home/stebates/Projects/batesste-ci-images/common/amd-root-ca.crt
 
@@ -259,7 +258,7 @@ run_s3_backend() {
         -v "${REPO}:/hipobject:ro" \
         -e TEST_SIZE=65536 \
         --entrypoint /hipobject/ci/ernic/s3-backend-entrypoint.sh \
-        "$ERNIC_IMAGE_LATEST"
+        "$ERNIC_IMAGE"
 }
 
 # ── dispatch ──────────────────────────────────────────────────────────────────

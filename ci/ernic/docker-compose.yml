@@ -24,7 +24,7 @@ services:
   # ── v2 protocol (default) ──────────────────────────────────────────────────
 
   ernic-server:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244}
     container_name: ernic-server
     hostname: ernic-server
     expose:
@@ -45,7 +45,7 @@ services:
       - ernic-net
 
   ernic-client:
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244}
     container_name: ernic-client
     depends_on:
       ernic-server:
@@ -65,7 +65,7 @@ services:
 
   ernic-server-v1:
     profiles: [minio-v1]
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244}
     container_name: ernic-server-v1
     hostname: ernic-server
     expose:
@@ -87,7 +87,7 @@ services:
 
   rocjitsu:
     profiles: [minio-v1]
-    image: ${ROCJITSU_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:august-28-2026}
+    image: ${ROCJITSU_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260924.gad7a357-rocjitsu.c85bb75}
     container_name: rocjitsu
     # Expose the emulated GFX device via a vfio-user socket on the shared volume.
     # The client container picks it up via ROCJITSU_SOCKET.
@@ -104,7 +104,7 @@ services:
 
   ernic-minio-client:
     profiles: [minio-v1]
-    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic}
+    image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244}
     container_name: ernic-minio-client
     depends_on:
       ernic-server-v1:

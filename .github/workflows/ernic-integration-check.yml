@@ -71,19 +71,23 @@ permissions:
 
 env:
   # Bump these intentionally when the ernic or rocjitsu images are updated.
-  # ERNIC_IMAGE_IONIC: september-17-2026-ionic adds rdma-core 64.0 provider,
-  #   libdrm2, libdrm-amdgpu1, libnuma1, libpugixml1v5 — needed by minio-v1
-  #   and s3-backend jobs.
-  # ERNIC_IMAGE_LATEST: ernic.0b48aa1, the only build whose rocm-ernic carries
-  #   the s3 backend. Pinned to the immutable tag rather than :latest so a
-  #   rebuild cannot change what the lane tests underneath it.
-  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:september-17-2026-ionic
-  ERNIC_IMAGE_LATEST: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g4dcfc9e-ernic.0b48aa1-vfu.8039244
-  ROCJITSU_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:august-28-2026
+  # Every tag here is the date-prefixed, content-versioned one
+  # (<date>.<repo-sha>-<component>.<sha>-vfu.<sha>): immutable, so a rebuild
+  # cannot change what a lane tests underneath it, and legible about which
+  # rocm-ernic / rocjitsu / libvfio-user sources went into it. The older
+  # `september-17-2026-ionic` and `august-28-2026` date-word tags had no
+  # equivalent in that scheme and are gone.
+  # ERNIC_IMAGE: ernic.0b48aa1, the build whose rocm-ernic carries the s3
+  #   backend. One variable for every lane: the old ERNIC_IMAGE_LATEST split
+  #   existed only because ERNIC_IMAGE was held back on a date-word tag.
+  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244
+  ROCJITSU_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260924.gad7a357-rocjitsu.c85bb75
   # ROCJITSU_IMAGE_GPU: the tag qemu-minimal's ernic-rocjitsu lane runs, for
-  #   the VM-based emulated-GPU lane below.
-  ROCJITSU_IMAGE_GPU: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260921.gb3399b3-rocjitsu.8e01a5a
-  ROCM_IMAGE: rocm/dev-ubuntu-24.04:7.14.0-full
+  #   the VM-based emulated-GPU lane below. ip_discovery.bin must come from
+  #   whichever rocjitsu build serves the socket, and the lane generates it
+  #   from this image, so the two cannot drift apart.
+  ROCJITSU_IMAGE_GPU: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260924.gad7a357-rocjitsu.c85bb75
+  ROCM_IMAGE: rocm/dev-ubuntu-24.04:10.0.0-full
 
 jobs:
   ernic-integration:
@@ -98,13 +102,14 @@ jobs:
     # guest per NIC, hipObject's v2 server in the first and its clients in
     # the second.
     container:
-      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:latest
+      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
       # /dev/net/tun and NET_ADMIN are as load-bearing as /dev/kvm: without
       # them ionic_eth_net_send() has no fd and every guest frame is dropped,
       # which looks exactly like a healthy-but-silent link.
       options: --device /dev/kvm --device /dev/net/tun --cap-add=NET_ADMIN
     env:
-      GUEST_ARTIFACT_TAG: 20260916.g2cc8e79-vm.resolute-ionic-qm.5d68689-qcow2
+      GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
+      GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
       ERNIC_TAP_PREFIX: ernic-tap
       ERNIC_TAP_BRIDGE: ernicbr0
       TCP_PORT: 18515
@@ -175,7 +180,7 @@ jobs:
 
       - name: Extract rocm-ernic binary from ernic image
         run: |
-          docker create --name ernic-tmp-2vm "$ERNIC_IMAGE_LATEST"
+          docker create --name ernic-tmp-2vm "$ERNIC_IMAGE"
           # Not the workspace: it is mounted noexec in the job container.
           docker cp ernic-tmp-2vm:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
           docker rm ernic-tmp-2vm
@@ -207,6 +212,7 @@ jobs:
         id: guest_image
         uses: ./.github/actions/fetch-guest-vm
         with:
+          repo: ${{ env.GUEST_ARTIFACT_REPO }}
           tag: ${{ env.GUEST_ARTIFACT_TAG }}
 
       - name: Read VM info
@@ -701,11 +707,12 @@ jobs:
     # Run inside the same QEMU+libvfio-user image used by rocm-ernic's
     # s3-lane: has QEMU, oras, zstd, and libvfio-user pre-installed.
     container:
-      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:latest
+      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
       options: --device /dev/kvm
     env:
       # Matches the rocm-ernic s3-lane guest artifact.
-      GUEST_ARTIFACT_TAG: 20260916.g2cc8e79-vm.resolute-ionic-qm.5d68689-qcow2
+      GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
+      GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
       S3_ADDR: 192.168.200.1
       S3_PORT: 9000
       SSH_PORT: 2222
@@ -775,7 +782,7 @@ jobs:
 
       - name: Extract rocm-ernic binary from ernic image
         run: |
-          docker create --name ernic-tmp "$ERNIC_IMAGE_LATEST"
+          docker create --name ernic-tmp "$ERNIC_IMAGE"
           # Not the workspace: it is mounted noexec in the job container, so a
           # 0755 binary there still fails exec with EACCES.
           docker cp ernic-tmp:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
@@ -806,6 +813,7 @@ jobs:
         id: guest_image
         uses: ./.github/actions/fetch-guest-vm
         with:
+          repo: ${{ env.GUEST_ARTIFACT_REPO }}
           tag: ${{ env.GUEST_ARTIFACT_TAG }}
 
       - name: Read VM info
@@ -1078,28 +1086,20 @@ jobs:
   #
   # Modelled on qemu-minimal's ansible-playbook-test-ernic-rocjitsu lane,
   # with one deliberate difference: rather than baking a combined image with
-  # qemu-tool gen-vm (~50 min), it starts from the published rocjitsu guest
-  # artifact, which already carries the ROCm userspace and a
-  # KFD-atomics-patched amdgpu-dkms, and adds the ernic half at job time.
+  # qemu-tool gen-vm (~50 min), it starts from the published ernic-rocjitsu
+  # guest artifact.
   #
-  # That guest ships resolute GA's 7.0.0-31-generic, which ionic_rdma cannot
-  # build against (ib_umem_get_va is absent) -- driver_ionic.yml compares
-  # major.minor against the pinned ionic sources (v7.2.4) and fails by
-  # design. qemu-minimal solves this with its ionic_image_prep role, which
-  # installs the pinned mainline kernel and reboots; that role is
-  # dependency-free and ansible.builtin-only, so it is invoked directly here
-  # instead of importing vm-ernic.yml and dragging in the batesste collection.
+  # That guest bakes everything this lane used to derive at job time:
+  # mainline v7.2.4 (ionic_rdma calls ib_umem_get_va, absent before 7.2), the
+  # three amdgpu DKMS patches this repo used to carry (see
+  # ci/ernic/guest-image-recipe.md), the generated gfx1250 gap firmware, therock
+  # ROCm 10.0 userspace, render/video group membership and an amdgpu-probe
+  # helper holding the parameter set below. The prep boot -- install a
+  # pinned kernel, reboot, patch and rebuild amdgpu DKMS, ~15 min every run
+  # -- is gone with it, so the lane boots once, with both vfio-user
+  # functions attached.
   #
-  # Mainline v7.2.4 is a kernel both drivers can live on, established by
-  # building and loading both there by hand. ionic/ionic_rdma need no
-  # changes: the two rocm-ernic patches apply to v7.2.4 unmodified, the DKMS
-  # build is clean, and ionic_0 reaches PORT_ACTIVE / LinkUp. amdgpu DKMS
-  # 7.1.9 needs three patches, carried in ci/ernic/patches/amdgpu and applied
-  # to the guest below; that directory's README says what each one is for.
-  # Their real home is the rocjitsu image build, and the patch step goes away
-  # when they land there.
-  #
-  # Three hard requirements came out of that work and are reflected below.
+  # Two hard requirements came out of that work and are reflected below.
   #
   # 1. The vfio-user servers must run in the same container/namespace as
   #    QEMU. Running rocm-ernic on the host against a containerised QEMU is
@@ -1109,20 +1109,19 @@ jobs:
   #    holds with the GPU attached, and amdgpu binds the device.
   #
   # 2. amdgpu needs the full emulation parameter set -- fw_load_type=0 to
-  #    skip PSP, discovery=2, vm_update_mode=3, gpu_recovery=0,
-  #    vramlimit=256 (which must match vram_aperture_bytes in the rocjitsu
-  #    profile) and ip_block_mask=0x7f. Not 0x3f: this DKMS build enumerates
-  #    an extra ras_v1_0 at index 5, so MES sits at 6, and dropping it makes
-  #    gfx_v12_1_xcc_cp_resume dereference a NULL ring. It also needs
-  #    ip_discovery.bin and the gap firmware stubs generated by
-  #    rj-ip-discovery / vfio_guest_firmware.py from the SAME rocjitsu build
-  #    that serves the socket, or probe fails at -22 or -2.
+  #    skip PSP, discovery=2, vm_update_mode=3, gpu_recovery=0, vramlimit
+  #    and ip_block_mask=0x7f. Not 0x3f: this DKMS build enumerates an extra
+  #    ras_v1_0 at index 5, so MES sits at 6, and dropping it makes
+  #    gfx_v12_1_xcc_cp_resume dereference a NULL ring. The guest's
+  #    /usr/local/bin/amdgpu-probe carries that set, so the lane calls it
+  #    rather than restating the parameters. The gap firmware stubs are
+  #    baked into the guest; ip_discovery.bin is NOT, and must come from the
+  #    SAME rocjitsu build that serves the socket (ROCJITSU_IMAGE_GPU) or
+  #    probe fails at -22 or -2.
   #
-  # 3. The guest cannot be warm-rebooted with the rocjitsu function
-  #    attached -- the device reset wedges it. So the lane boots twice: once
-  #    bare to install the pinned kernel and rebuild amdgpu DKMS on it, then
-  #    again with both vfio-user functions after a clean poweroff. The disk
-  #    overlay carries the prep across.
+  # The guest also cannot be warm-rebooted with the rocjitsu function
+  # attached -- the device reset wedges it. Nothing below reboots, but a
+  # step that starts to is a bug, not a slow path.
   #
   # What previously parked this lane -- "amdgpu probe hangs in
   # amdgpu_ras_init -> amdgpu_atomfirmware_mem_ecc_supported" -- was neither
@@ -1139,15 +1138,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
-      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260919.g359579e-qemu11.1.1-vfu.8039244
+      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
       options: --device /dev/kvm -v /var/run/docker.sock:/var/run/docker.sock
     env:
-      # The rocjitsu guest: ROCm userspace + KFD-atomics-patched amdgpu-dkms.
-      GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-rocjitsu
-      GUEST_ARTIFACT_TAG: 20260921.g584b3f9-vm.resolute-rocjitsu-qm.5d68689-qcow2
-      # Must stay within a point release of the ionic sources the ernic
-      # collection builds; see qemu-minimal's ansible/playbooks/vars/ernic-pins.yml.
-      IONIC_KERNEL_PIN: v7.2.4
+      # The ernic-rocjitsu guest: mainline 7.2.4 (the ionic_rdma floor), the
+      # patched amdgpu-dkms, the generated gfx1250 gap firmware and therock
+      # ROCm 10.0 userspace, with render/video group membership. Only
+      # ip_discovery.bin is still the consumer's to stage, and it has to come
+      # from the rocjitsu build serving the socket (ROCJITSU_IMAGE_GPU).
+      GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
+      GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
       S3_ADDR: 192.168.200.1
       S3_PORT: 9000
       S3_BUCKET: hipobj-test
@@ -1163,13 +1163,6 @@ jobs:
           repository: ROCm/rocm-ernic
           ref: develop
           path: rocm-ernic
-
-      - name: Checkout qemu-minimal (ionic_image_prep role)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
-        with:
-          repository: sbates130272/qemu-minimal
-          ref: main
-          path: qemu-minimal
 
       - name: Install deps
         run: |
@@ -1220,7 +1213,7 @@ jobs:
 
       - name: Extract rocm-ernic binary from ernic image
         run: |
-          docker create --name ernic-tmp-gpu "$ERNIC_IMAGE_LATEST"
+          docker create --name ernic-tmp-gpu "$ERNIC_IMAGE"
           # Not the workspace: it is mounted noexec in the job container, so a
           # 0755 binary there still fails exec with EACCES.
           docker cp ernic-tmp-gpu:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
@@ -1278,200 +1271,18 @@ jobs:
           echo "vm_disk=$VM_DISK"         >> "$GITHUB_OUTPUT"
           echo "ssh_key=$SSH_KEY_PRIVATE" >> "$GITHUB_OUTPUT"
 
-      # ---- prep boot: no vfio-user functions attached ------------------
-      # The guest cannot be warm-rebooted with the rocjitsu function
-      # attached, and the kernel install below reboots, so the prep runs on
-      # a bare VM and the overlay carries the result into the real boot.
-
-      - name: Generate rocjitsu guest firmware on the host
+      - name: Generate ip_discovery.bin on the host
         run: |
-          # Must come from the same rocjitsu build that serves the socket --
-          # an ip_discovery.bin from a package describes a different device.
+          # The only firmware the guest does not bake, because it is the only
+          # piece that is not static: it describes the device the socket
+          # serves, so it must come from the rocjitsu build serving it. The
+          # gap stubs are in /lib/firmware/updates/amdgpu already.
           mkdir -p "${GITHUB_WORKSPACE}/rj-fw"
           chmod 777 "${GITHUB_WORKSPACE}/rj-fw"
           docker run --rm -v "${{ github.workspace }}/rj-fw:/out" \
             "$ROCJITSU_IMAGE_GPU" \
-            python3 /usr/local/bin/vfio_guest_firmware.py --output /out --set gap
-          docker run --rm -v "${{ github.workspace }}/rj-fw:/out" \
-            "$ROCJITSU_IMAGE_GPU" \
             rj-ip-discovery gfx1250 /out/ip_discovery.bin
           ls -l "${GITHUB_WORKSPACE}/rj-fw"
-
-      - name: Start the prep VM
-        run: |
-          ${QEMU_PATH:-}qemu-system-x86_64 \
-            -machine q35,accel=${QEMU_ACCEL},memory-backend=mem0 \
-            -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
-            -object memory-backend-memfd,id=mem0,share=on,size=${VM_MEM_MB}M \
-            -nographic \
-            -drive file="${{ steps.vm_info.outputs.vm_disk }}",format=qcow2,if=virtio \
-            -netdev user,id=net0,hostfwd=tcp::${SSH_PORT}-:22 \
-            -device virtio-net-pci,netdev=net0 \
-            -serial file:/tmp/qemu-prep-console.log -monitor none \
-            > /tmp/qemu-prep.log 2>&1 &
-          PREP_PID=$!
-          echo "PREP_PID=$PREP_PID" >> "$GITHUB_ENV"
-          sleep 5
-          kill -0 "$PREP_PID" 2>/dev/null || { cat /tmp/qemu-prep.log; exit 1; }
-
-      - name: Wait for the prep VM over SSH
-        run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          chmod 600 "$SSH_KEY"
-          for i in $(seq 1 60); do
-            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-                -o ConnectTimeout=5 -p $SSH_PORT "${VM_USER}@localhost" true \
-              2>/dev/null && break
-            sleep 5
-          done
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -p $SSH_PORT "${VM_USER}@localhost" echo PREP_READY || {
-            cat /tmp/qemu-prep-console.log; exit 1
-          }
-
-      - name: Disable amdgpu DKMS autoinstall in the prep VM
-        run: |
-          # The kernel .deb postinst runs `dkms autoinstall`, which tries to
-          # build the stock amdgpu 7.1.9 against the 7.2.4 headers. That build
-          # is exactly what the patches below exist to fix, so it fails, and
-          # its failure propagates out through run-parts into dpkg: the kernel
-          # packages end up half-configured and apt-get returns 100. Take
-          # amdgpu out of autoinstall first -- the patch step builds and
-          # installs it explicitly once the guest is on the new kernel.
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -p $SSH_PORT "${VM_USER}@localhost" 'bash -s' << 'EOFSH'
-          set -euo pipefail
-          for conf in /usr/src/amdgpu-*/dkms.conf; do
-            [ -e "$conf" ] || continue
-            if grep -q '^AUTOINSTALL=' "$conf"; then
-              sudo sed -i 's/^AUTOINSTALL=.*/AUTOINSTALL="no"/' "$conf"
-            else
-              echo 'AUTOINSTALL="no"' | sudo tee -a "$conf" > /dev/null
-            fi
-            echo "autoinstall disabled in $conf"
-          done
-          EOFSH
-
-      - name: Install the pinned mainline kernel (ionic_image_prep)
-        run: |
-          # The rocjitsu guest ships 7.0.0-31-generic; ionic_rdma needs the
-          # pinned 7.2.x. This role installs it and reboots the guest.
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          export ANSIBLE_HOST_KEY_CHECKING=false
-          export ANSIBLE_PRIVATE_KEY_FILE="$SSH_KEY"
-          export ANSIBLE_ROLES_PATH="${GITHUB_WORKSPACE}/qemu-minimal/ansible/playbooks/roles"
-          cat > /tmp/kernel-prep.yml << 'EOFPB'
-          ---
-          - name: Install the pinned mainline kernel for ionic_rdma
-            hosts: all
-            become: true
-            gather_facts: true
-            roles:
-              - role: ionic_image_prep
-          EOFPB
-          # No ansible_ssh_common_args: ansible-core's ssh plugin re-parses it
-          # with an argparse that chokes on the -o pairs
-          # ("argument -o: expected one argument") and kills the worker.
-          # ANSIBLE_HOST_KEY_CHECKING above is what that string was for.
-          ansible-playbook -i "localhost," /tmp/kernel-prep.yml \
-            -e ansible_user="$VM_USER" \
-            -e ansible_port="$SSH_PORT" \
-            -e ansible_connection=ssh \
-            -e ionic_image_kernel_ref="$IONIC_KERNEL_PIN"
-
-      - name: Wait for the prep VM after the kernel reboot
-        run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          for i in $(seq 1 60); do
-            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-                -o ConnectTimeout=5 -p $SSH_PORT "${VM_USER}@localhost" true \
-              2>/dev/null && break
-            sleep 5
-          done
-          KVER=$(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-                   -p $SSH_PORT "${VM_USER}@localhost" 'uname -r')
-          echo "guest kernel after reboot: $KVER"
-          # driver_ionic.yml compares major.minor, so assert the same thing
-          # here rather than letting a wall of DKMS output do it.
-          case "$KVER" in
-            "${IONIC_KERNEL_PIN#v}"*) ;;
-            *) echo "guest is on $KVER, expected ${IONIC_KERNEL_PIN#v}"; exit 1;;
-          esac
-
-      - name: Patch and rebuild the amdgpu DKMS module on the pinned kernel
-        run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          SSH="ssh -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -p $SSH_PORT"
-          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -P $SSH_PORT \
-            ci/ernic/patches/amdgpu/*.patch "${VM_USER}@localhost:/tmp/"
-          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -P $SSH_PORT \
-            "${GITHUB_WORKSPACE}"/rj-fw/* "${VM_USER}@localhost:/tmp/"
-          $SSH "${VM_USER}@localhost" bash -s << 'EOFVM'
-          set -e
-          SRC=$(ls -d /usr/src/amdgpu-*/ | tail -1)
-          cd "$SRC"
-          for p in /tmp/000*.patch; do
-            # Idempotent: a patch already carried by the image is not an error.
-            if sudo patch -p1 --dry-run --silent < "$p" > /dev/null 2>&1; then
-              sudo patch -p1 < "$p"
-              echo "applied $(basename "$p")"
-            else
-              echo "skipped $(basename "$p") (already applied or does not match)"
-              sudo patch -p1 -R --dry-run --silent < "$p" > /dev/null 2>&1 || {
-                echo "ERROR: $(basename "$p") neither applies nor is applied"; exit 1; }
-            fi
-          done
-          VER=$(dkms status amdgpu | awk -F'[,/]' 'NR==1{gsub(/ /,"",$2); print $2}')
-          sudo dkms build   amdgpu/"$VER" -k "$(uname -r)" --force
-          sudo dkms install amdgpu/"$VER" -k "$(uname -r)" --force
-          # /lib/firmware/updates takes precedence over the packaged copies.
-          sudo mkdir -p /lib/firmware/updates/amdgpu
-          sudo cp /tmp/*.bin /lib/firmware/updates/amdgpu/
-          # gc_12_1_0_mes{,1}.bin are requested by the gfx12.1 path but not
-          # emitted by vfio_guest_firmware.py; uni_mes is a valid stand-in.
-          for f in gc_12_1_0_mes.bin gc_12_1_0_mes1.bin; do
-            [ -f /lib/firmware/updates/amdgpu/$f ] || \
-              sudo cp /lib/firmware/updates/amdgpu/gc_12_1_0_uni_mes.bin \
-                      /lib/firmware/updates/amdgpu/$f
-          done
-          # The image's amdgpu-probe still carries ip_block_mask=0x3f, which
-          # drops MES on this build. Overwrite it rather than pass the
-          # parameters ad hoc, so the guest has one source of truth.
-          sudo tee /usr/local/bin/amdgpu-probe > /dev/null << 'EOFPROBE'
-          #!/bin/bash
-          exec modprobe amdgpu \
-            emu_mode=1 \
-            fw_load_type=0 \
-            discovery=2 \
-            ip_block_mask=0x7f \
-            vm_update_mode=3 \
-            gpu_recovery=0 \
-            vramlimit=256
-          EOFPROBE
-          sudo chmod +x /usr/local/bin/amdgpu-probe
-          echo "amdgpu DKMS rebuilt for $(uname -r)"
-          EOFVM
-
-      - name: Shut the prep VM down
-        run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -p $SSH_PORT "${VM_USER}@localhost" 'sudo systemctl poweroff' || true
-          for i in $(seq 1 60); do
-            kill -0 "$PREP_PID" 2>/dev/null || break
-            sleep 2
-          done
-          kill -0 "$PREP_PID" 2>/dev/null && { kill "$PREP_PID"; sleep 5; } || true
-          echo "PREP_PID=" >> "$GITHUB_ENV"
-
-      # ---- real boot: both vfio-user functions attached ----------------
 
       - name: Start rocm-ernic S3 backend and rocjitsu GPU server
         run: |
@@ -1619,6 +1430,20 @@ jobs:
           echo "RDMA_DEVICE=$DEVICE" >> "$GITHUB_ENV"
           echo "$DEVICE is PORT_ACTIVE"
 
+      - name: Stage ip_discovery.bin into the guest
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          scp $SSH_OPTS -P $SSH_PORT "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
+            "${VM_USER}@localhost:/tmp/"
+          # updates/ takes precedence over the packaged firmware, and is where
+          # the guest's baked gap stubs already live.
+          ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+            'sudo install -D -m 0644 /tmp/ip_discovery.bin \
+               /lib/firmware/updates/amdgpu/ip_discovery.bin && \
+             ls -l /lib/firmware/updates/amdgpu/'
+
       - name: Load amdgpu via amdgpu-probe
         timeout-minutes: 8
         run: |
@@ -1719,7 +1544,6 @@ jobs:
           echo "=== rocjitsu ==="      && docker logs rocjitsu-gpu   || true
           echo "=== qemu.log ==="      && cat /tmp/qemu.log          || true
           echo "=== qemu-console ==="  && cat /tmp/qemu-console.log  || true
-          echo "=== prep-console ===" && tail -100 /tmp/qemu-prep-console.log || true
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           timeout 60 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -1730,7 +1554,6 @@ jobs:
         if: always()
         run: |
           kill "${QEMU_PID:-}"  2>/dev/null || true
-          kill "${PREP_PID:-}"  2>/dev/null || true
           kill "${ERNIC_PID:-}" 2>/dev/null || true
           docker rm -f rocjitsu-gpu 2>/dev/null || true
           docker run --rm -v "${{ github.workspace }}/ernic-build-gpu:/d" \

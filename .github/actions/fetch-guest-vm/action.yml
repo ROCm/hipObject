@@ -6,7 +6,7 @@ inputs:
   repo:
     description: Artifact repository
     required: false
-    default: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ionic
+    default: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
   tag:
     description: Artifact tag; pin an immutable date-prefixed one in CI
     required: true
