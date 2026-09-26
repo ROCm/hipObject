@@ -403,6 +403,29 @@ HIPOBJ_API hipObjError_t hipObjPutV2(const char* bucket, const char* key,
 
 #endif /* HIPOBJECT_V2_API */
 
+/*! @brief hipObjBufSync direction: device -> staging buffer @ingroup io */
+#define HIPOBJ_SYNC_TO_HOST 0
+/*! @brief hipObjBufSync direction: staging buffer -> device @ingroup io */
+#define HIPOBJ_SYNC_TO_DEVICE 1
+
+/*!
+ * @brief Stage a registered buffer between device and host memory
+ *
+ * When a device pointer cannot be registered with the NIC directly (no
+ * dmabuf support, or a fabric with no peer-to-peer path to the GPU),
+ * hipObjBufRegister() registers a host staging buffer instead and the
+ * peer's RDMA reads and writes land there. Callers driving a transfer
+ * through hipObjGetRdmaToken() must therefore call this with
+ * HIPOBJ_SYNC_TO_HOST before a PUT and HIPOBJ_SYNC_TO_DEVICE after a
+ * GET. It is a no-op, reporting success, for a directly registered
+ * buffer; hipObjGet()/hipObjPut() and the V2 entry points do it
+ * themselves.
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjBufSync(void* devPtr, size_t size, off_t offset,
+                                       int direction);
+
 /*!
  * @brief Mint a hex-encoded RC RDMA token for a registered buffer
  *

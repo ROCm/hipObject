@@ -14,6 +14,13 @@ void hipOpsDefaults(HipOps& ops) {
   ops.hipHostMalloc = &hipHostMalloc;
   ops.hipFree = &hipFree;
   ops.hipDeviceSynchronize = &hipDeviceSynchronize;
+  ops.hipMemcpy = &hipMemcpy;
+  ops.hipMemcpyAsync = &hipMemcpyAsync;
+  ops.hipEventCreate = &hipEventCreate;
+  ops.hipEventRecord = &hipEventRecord;
+  ops.hipEventQuery = &hipEventQuery;
+  ops.hipEventDestroy = &hipEventDestroy;
+  ops.hipPointerGetAttributes = &hipPointerGetAttributes;
 }
 
 HipOps& hipOps() {
