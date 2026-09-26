@@ -18,7 +18,27 @@
 
 namespace hipobj::minio {
 
+using namespace ::minio;
+
 namespace {
+
+// A failed transfer used to surface as a bare -1 with no indication of which
+// of the dozen failure points produced it. Set HIPOBJ_RDMA_DEBUG=1 to get one.
+bool rdmaDebugEnabled() {
+  static const bool on = [] {
+    const char* v = std::getenv("HIPOBJ_RDMA_DEBUG");
+    return v != nullptr && v[0] != '\0' && v[0] != '0';
+  }();
+  return on;
+}
+
+#define RDMA_TRACE(...)                                                        \
+  do {                                                                         \
+    if (rdmaDebugEnabled()) {                                                  \
+      std::fprintf(stderr, "hipobj: rdma: " __VA_ARGS__);                      \
+      std::fputc('\n', stderr);                                                \
+    }                                                                          \
+  } while (0)
 
 int parseRdmaReply(const std::string& rdma_reply) {
   if (rdma_reply.empty()) {
@@ -49,6 +69,8 @@ std::string clientNicFromToken(const char* token) {
 // v2 callback context — carries the per-transfer minio credentials and
 // endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
 // ---------------------------------------------------------------------------
+
+#ifdef HIPOBJECT_V2_API
 
 struct V2CallbackCtx {
   S3RdmaContext* sctx;
@@ -83,10 +105,8 @@ minio::http::Response executeV2Request(
   sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
   sign_headers.Add("Content-Length", "0");
 
-  for (const auto& [k, vals] : extra_headers.map) {
-    for (const auto& v : vals) {
-      sign_headers.Add(k, v);
-    }
+  for (const auto& k : extra_headers.Keys()) {
+    sign_headers.Add(k, extra_headers.GetFront(k));
   }
 
   if (!creds.session_token.empty()) {
@@ -135,6 +155,8 @@ int v2SendPrepare(void* ctx, const hipObjTransferReqV2_t* req,
                                                req->key ? req->key : "", query);
 
   if (!res.error.empty() || res.status_code <= 0) {
+    RDMA_TRACE("v2 prepare: http failed (status=%d error='%s')",
+               res.status_code, res.error.c_str());
     return -1;
   }
 
@@ -174,6 +196,8 @@ int v2SendReady(void* ctx, const hipObjTransferReqV2_t* req,
                                                req->key ? req->key : "", query);
 
   if (!res.error.empty() || res.status_code <= 0) {
+    RDMA_TRACE("v2 ready: http failed (status=%d error='%s')", res.status_code,
+               res.error.c_str());
     return -1;
   }
 
@@ -234,6 +258,7 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
   hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT,
                                           &token);
   if (terr.opError != hipObjSuccess || !token) {
+    RDMA_TRACE("v2 put: token: %s", hipObjGetErrorString(terr.opError));
     return -1;
   }
 
@@ -246,6 +271,7 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
   std::string query;
   if (!sctx->uploadId.empty()) {
     if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
+      RDMA_TRACE("v2 put: part number %d out of range", sctx->partNumber);
       hipObjPutRdmaToken(token);
       return -1;
     }
@@ -260,9 +286,14 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
   hipObjPutRdmaToken(token);
 
   if (err.opError == hipObjNotSupported) {
+    RDMA_TRACE("v2 put: unsupported (client v2 is a stub); falling back to v1");
     return kRdmaNotSupported;
   }
-  return (err.opError == hipObjSuccess) ? static_cast<ssize_t>(size) : -1;
+  if (err.opError != hipObjSuccess) {
+    RDMA_TRACE("v2 put: hipObjPutV2: %s", hipObjGetErrorString(err.opError));
+    return -1;
+  }
+  return static_cast<ssize_t>(size);
 }
 
 ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
@@ -270,6 +301,7 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
   hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET,
                                           &token);
   if (terr.opError != hipObjSuccess || !token) {
+    RDMA_TRACE("v2 get: token: %s", hipObjGetErrorString(terr.opError));
     return -1;
   }
 
@@ -285,19 +317,30 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
   hipObjPutRdmaToken(token);
 
   if (err.opError == hipObjNotSupported) {
+    RDMA_TRACE("v2 get: unsupported (client v2 is a stub); falling back to v1");
     return kRdmaNotSupported;
   }
-  return (err.opError == hipObjSuccess) ? static_cast<ssize_t>(size) : -1;
+  if (err.opError != hipObjSuccess) {
+    RDMA_TRACE("v2 get: hipObjGetV2: %s", hipObjGetErrorString(err.opError));
+    return -1;
+  }
+  return static_cast<ssize_t>(size);
 }
+
+#endif /* HIPOBJECT_V2_API */
 
 } // namespace
 
 ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
                 size_t size) {
   char rdma_token[512];
-  std::snprintf(rdma_token, sizeof(rdma_token), "%s:%016lx:%016lx", token,
-                reinterpret_cast<uintptr_t>(buf),
+  // The ":<addr>:<len>" suffix overrides the address encoded in the token.
+  // The caller's pointer is not that address whenever hipObject had to
+  // register a host staging buffer instead of the caller's memory, so send
+  // zeros -- "no override" -- and let the token speak for itself.
+  std::snprintf(rdma_token, sizeof(rdma_token), "%s:%016lx:%016lx", token, 0UL,
                 static_cast<unsigned long>(size));
+  (void)buf;
 
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
   minio::creds::Credentials creds = sctx->provider->Fetch();
@@ -355,6 +398,8 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
 
   minio::http::Response res = req.Execute();
   if (!res.error.empty()) {
+    RDMA_TRACE("v1 put: http failed (status=%d error='%s')", res.status_code,
+               res.error.c_str());
     return -1;
   }
 
@@ -369,6 +414,8 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
     return kRdmaNotSupported;
   }
   if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyNoContent) {
+    RDMA_TRACE("v1 put: rdma reply %d (http status %d)", reply_code,
+               res.status_code);
     return -1;
   }
 
@@ -384,9 +431,13 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
 ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
                 size_t size) {
   char rdma_token[512];
-  std::snprintf(rdma_token, sizeof(rdma_token), "%s:%016lx:%016lx", token,
-                reinterpret_cast<uintptr_t>(buf),
+  // The ":<addr>:<len>" suffix overrides the address encoded in the token.
+  // The caller's pointer is not that address whenever hipObject had to
+  // register a host staging buffer instead of the caller's memory, so send
+  // zeros -- "no override" -- and let the token speak for itself.
+  std::snprintf(rdma_token, sizeof(rdma_token), "%s:%016lx:%016lx", token, 0UL,
                 static_cast<unsigned long>(size));
+  (void)buf;
 
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
   minio::creds::Credentials creds = sctx->provider->Fetch();
@@ -428,6 +479,8 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
 
   minio::http::Response res = req.Execute();
   if (!res.error.empty()) {
+    RDMA_TRACE("v1 get: http failed (status=%d error='%s')", res.status_code,
+               res.error.c_str());
     return -1;
   }
 
@@ -437,6 +490,8 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
   }
   if (reply_code != kRdmaReplySuccess &&
       reply_code != kRdmaReplyPartialContent) {
+    RDMA_TRACE("v1 get: rdma reply %d (http status %d)", reply_code,
+               res.status_code);
     return -1;
   }
 
@@ -457,19 +512,34 @@ ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
 }
 
 ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
+#ifdef HIPOBJECT_V2_API
   // Try the v2 protocol first; fall back to v1 only when the server
   // explicitly signals it does not support hipobj-rc-v2.
   ssize_t ret = rdmaPutV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
     return ret;
   }
-
   ret = -1;
+#else
+  ssize_t ret = -1;
+#endif /* HIPOBJECT_V2_API */
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
     hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT,
                                             &token);
     if (terr.opError != hipObjSuccess || token == nullptr) {
+      RDMA_TRACE("v1 put: token: %s", hipObjGetErrorString(terr.opError));
+      return -1;
+    }
+    // A buffer the NIC cannot reach directly is registered as a host
+    // staging buffer, so the bytes have to be there before the server
+    // reads it.
+    hipObjError_t serr = hipObjBufSync(const_cast<void*>(buf), size, 0,
+                                       HIPOBJ_SYNC_TO_HOST);
+    if (serr.opError != hipObjSuccess) {
+      RDMA_TRACE("v1 put: stage to host: %s",
+                 hipObjGetErrorString(serr.opError));
+      hipObjPutRdmaToken(token);
       return -1;
     }
     ret = rdmaPut(ctx, token, buf, size);
@@ -482,22 +552,35 @@ ssize_t rdmaPutWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
 }
 
 ssize_t rdmaGetWithRetry(S3RdmaContext* ctx, void* buf, size_t size) {
+#ifdef HIPOBJECT_V2_API
   ssize_t ret = rdmaGetV2(ctx, buf, size);
   if (ret != kRdmaNotSupported) {
     return ret;
   }
-
   ret = -1;
+#else
+  ssize_t ret = -1;
+#endif /* HIPOBJECT_V2_API */
   for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
     char* token = nullptr;
     hipObjError_t terr = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET,
                                             &token);
     if (terr.opError != hipObjSuccess || token == nullptr) {
+      RDMA_TRACE("v1 get: token: %s", hipObjGetErrorString(terr.opError));
       return -1;
     }
     ret = rdmaGet(ctx, token, buf, size);
     hipObjPutRdmaToken(token);
-    if (ret > 0 || ret == kRdmaNotSupported) {
+    if (ret > 0) {
+      hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
+      if (serr.opError != hipObjSuccess) {
+        RDMA_TRACE("v1 get: stage to device: %s",
+                   hipObjGetErrorString(serr.opError));
+        return -1;
+      }
+      return ret;
+    }
+    if (ret == kRdmaNotSupported) {
       return ret;
     }
   }

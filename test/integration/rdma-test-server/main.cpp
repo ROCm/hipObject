@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -23,9 +24,11 @@
 
 #include "http_server.h"
 #include "rdma_server.h"
+#ifdef HIPOBJECT_V2_API
 #include "v2_handlers.h"
 #include "v2_request.h"
 #include "v2_sigv4.h"
+#endif
 
 namespace {
 
@@ -41,7 +44,9 @@ std::string objectKey(const std::string& path) {
 int main(int argc, char* argv[]) {
   int port = 9000;
   bool v2Mode = false;
+#ifdef HIPOBJECT_V2_API
   bool hangAfterPrepare = false;
+#endif
   std::string accessKey = "hipobj-test-key";
   std::string secretKey = "hipobj-test-secret";
   for (int i = 1; i < argc; ++i) {
@@ -53,12 +58,15 @@ int main(int argc, char* argv[]) {
     } else if (arg == "--v2-secret-key" && i + 1 < argc) {
       secretKey = argv[++i];
     } else if (arg == "--hang-after-prepare") {
+#ifdef HIPOBJECT_V2_API
       hangAfterPrepare = true;
+#endif
     } else {
       port = std::atoi(arg.c_str());
     }
   }
 
+#ifdef HIPOBJECT_V2_API
   if (v2Mode) {
     /* v2 reference mode: control protocol on the threaded server.
      * RDMA objects are attached per session by the transport layer;
@@ -148,15 +156,23 @@ int main(int argc, char* argv[]) {
     }
     return 0;
   }
+#else
+  if (v2Mode) {
+    fprintf(stderr,
+            "hipobj-rdma-test-server: --v2 requested but this build was "
+            "configured with HIPOBJECT_V2_API=OFF\n");
+    return 1;
+  }
+#endif /* HIPOBJECT_V2_API */
 
   hipobj::test::RdmaTestServer rdma;
   if (!rdma.isReady()) {
-    fprintf(stderr,
-            "hipobj-rdma-test-server: RDMA not available (libibverbs/NIC)\n");
-    return 1;
+    fprintf(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
+                    "HTTP-only mode\n");
   }
 
   std::map<std::string, std::vector<uint8_t>> objects;
+  std::mutex objects_mu;
 
   hipobj::test::HttpServer server(port);
   server.setHandler(
@@ -184,12 +200,34 @@ int main(int argc, char* argv[]) {
 
       const std::string key = objectKey(req.path);
       auto tokenIt = req.headers.find("x-amz-rdma-token");
-      if (tokenIt == req.headers.end()) {
-        resp.status = 400;
-        resp.body = "missing x-amz-rdma-token";
+
+      // HTTP-only mode: RDMA token absent or RDMA not available.
+      if (tokenIt == req.headers.end() || !rdma.isReady()) {
+        if (req.method == "PUT") {
+          std::lock_guard<std::mutex> lk(objects_mu);
+          objects[key] = std::vector<uint8_t>(req.body.begin(), req.body.end());
+          resp.status = 200;
+          resp.headers["etag"] = "\"test\"";
+          return resp;
+        }
+        if (req.method == "GET") {
+          std::lock_guard<std::mutex> lk(objects_mu);
+          auto it = objects.find(key);
+          if (it == objects.end()) {
+            resp.status = 404;
+            resp.body = "not found";
+            return resp;
+          }
+          resp.status = 200;
+          resp.body = std::string(it->second.begin(), it->second.end());
+          return resp;
+        }
+        resp.status = 405;
+        resp.body = "method not allowed";
         return resp;
       }
 
+      // Reaching here: token present and RDMA ready — use RDMA path.
       if (req.method == "PUT") {
         std::vector<uint8_t> payload;
         std::string replyHeader;
@@ -205,7 +243,10 @@ int main(int argc, char* argv[]) {
           resp.body = "RDMA PUT failed";
           return resp;
         }
-        objects[key] = std::move(payload);
+        {
+          std::lock_guard<std::mutex> lk(objects_mu);
+          objects[key] = std::move(payload);
+        }
         resp.status = 200;
         resp.headers["x-amz-rdma-reply"] = replyHeader;
         resp.headers["etag"] = "\"test\"";
@@ -213,15 +254,19 @@ int main(int argc, char* argv[]) {
       }
 
       if (req.method == "GET") {
-        auto it = objects.find(key);
-        if (it == objects.end()) {
-          resp.status = 404;
-          resp.body = "not found";
-          return resp;
+        std::vector<uint8_t> data;
+        {
+          std::lock_guard<std::mutex> lk(objects_mu);
+          auto it = objects.find(key);
+          if (it == objects.end()) {
+            resp.status = 404;
+            resp.body = "not found";
+            return resp;
+          }
+          data = it->second;
         }
         std::string replyHeader;
-        if (rdma.rdmaWriteToClient(tokenIt->second, it->second, replyHeader) !=
-            0) {
+        if (rdma.rdmaWriteToClient(tokenIt->second, data, replyHeader) != 0) {
           resp.status = 500;
           resp.body = "RDMA GET failed";
           return resp;
@@ -229,7 +274,7 @@ int main(int argc, char* argv[]) {
         resp.status = 200;
         resp.headers["x-amz-rdma-reply"] = replyHeader;
         resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(
-          it->second.size());
+          data.size());
         return resp;
       }
 
@@ -238,9 +283,13 @@ int main(int argc, char* argv[]) {
       return resp;
     });
 
+  // Use the threaded server so large HTTP request bodies (e.g. HTTP-only
+  // PUT payloads) are received in full rather than truncated at the
+  // 65 KB single-recv limit of runOnce().
+  server.startThreaded();
   fprintf(stdout, "hipobj-rdma-test-server listening on port %d\n", port);
   for (;;) {
-    server.runOnce(1000);
+    std::this_thread::sleep_for(std::chrono::seconds(3600));
   }
   return 0;
 }

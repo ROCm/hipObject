@@ -26,14 +26,14 @@ enum TransportType : uint8_t {
 };
 
 struct RdmaToken {
-  uint32_t qpNum;
-  uint8_t gid[16];
-  uint32_t rkey;
-  uint64_t remoteAddr;
-  uint64_t length;
-  uint8_t transport;
-  uint8_t portNum;
-  uint16_t lid;
+  uint32_t qpNum = 0;
+  uint8_t gid[16] = {};
+  uint32_t rkey = 0;
+  uint64_t remoteAddr = 0;
+  uint64_t length = 0;
+  uint8_t transport = 0;
+  uint8_t portNum = 0;
+  uint16_t lid = 0;
 };
 
 std::string encodeRdmaToken(const RdmaToken& token);

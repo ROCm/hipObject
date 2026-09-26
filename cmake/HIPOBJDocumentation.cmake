@@ -79,6 +79,17 @@ if(HIPOBJ_BUILD_DOCS)
   set(HIPOBJ_DOXYFILE_INPUT
     "${CMAKE_SOURCE_DIR}/include")
 
+  # ── Preprocessor defines for Doxygen ─────────────────
+  # include/hipobj.h only declares the hipobj-rc-v2 API
+  # when HIPOBJECT_V2_API is defined, so Doxygen needs it
+  # too or those declarations vanish from the reference.
+  if(HIPOBJECT_V2_API)
+    set(HIPOBJ_DOXYGEN_PREDEFINED
+      "PREDEFINED            += HIPOBJECT_V2_API")
+  else()
+    set(HIPOBJ_DOXYGEN_PREDEFINED "")
+  endif()
+
   # Configure Doxyfile (substitutes @VARIABLES@)
   configure_file(
     ${CMAKE_SOURCE_DIR}/docs/Doxyfile.in

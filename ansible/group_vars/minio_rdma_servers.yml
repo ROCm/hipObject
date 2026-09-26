@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# MinIO AIStor RDMA server package URL (see STUFF.md in repository root).
+# MinIO AIStor RDMA server package URL.
 hipobj_minio_rdma_deb_url: >-
   https://dl.minio.io/aistor/minio/release/linux-amd64/minio.rdma_20260807183435.0.0_amd64.deb
 

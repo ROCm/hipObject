@@ -1,0 +1,547 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# GPU-direct S3-over-RDMA integration test (two vfio-user functions, one VM).
+# The long comment above the job is the important one: this topology has
+# requirements that are not obvious and were expensive to find.
+
+name: hipObject - Hardware Test - GPU Direct
+
+on:
+  # PR-gated and manual only. Nothing reaches develop without passing
+  # this on the PR, so a second post-merge run would buy nothing but
+  # queue time.
+  pull_request:
+    branches: [develop]
+    paths:
+      - "src/**"
+      - "include/**"
+      - "test/**"
+      - "integrations/**"
+      - "ci/ernic/**"
+      - ".github/workflows/hipobject-hardware-test-gpu-direct.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Bump these intentionally when the ernic or rocjitsu images are updated.
+  # ERNIC_IMAGE: ernic.0b48aa1, the build whose rocm-ernic carries the s3
+  #   backend. Every tag here is the date-prefixed, content-versioned one
+  #   (<date>.<repo-sha>-<component>.<sha>-vfu.<sha>): immutable, so a rebuild
+  #   cannot change what this lane tests underneath it.
+  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244
+  # ROCJITSU_IMAGE_GPU: the tag qemu-minimal's ernic-rocjitsu lane runs.
+  #   ip_discovery.bin must come from whichever rocjitsu build serves the
+  #   socket, and this lane generates it from this image, so the two cannot
+  #   drift apart.
+  ROCJITSU_IMAGE_GPU: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260924.gad7a357-rocjitsu.c85bb75
+  ROCM_IMAGE: rocm/dev-ubuntu-24.04:10.0.0-full
+
+jobs:
+  # ---------------------------------------------------------------------
+  # gpu-direct: the GPU-direct path, in a VM.
+  #
+  # The other three emulated-hardware lanes run the client on host buffers
+  # (hipobject-hardware-test-two-vm-protocol.yml, hipobject-hardware-test-minio-bridge.yml,
+  # hipobject-hardware-test-s3-backend.yml). This one attaches a
+  # SECOND vfio-user function -- rocjitsu's emulated gfx1250 -- beside the
+  # ernic NIC, so the same S3-over-RDMA transfer can be driven from a real
+  # hipMalloc'd device buffer. That is the product claim, and this is the
+  # only lane that exercises it.
+  #
+  # Modelled on qemu-minimal's ansible-playbook-test-ernic-rocjitsu lane,
+  # with one deliberate difference: rather than baking a combined image with
+  # qemu-tool gen-vm (~50 min), it starts from the published ernic-rocjitsu
+  # guest artifact.
+  #
+  # That guest bakes everything this lane used to derive at job time:
+  # mainline v7.2.4 (ionic_rdma calls ib_umem_get_va, absent before 7.2), the
+  # three amdgpu DKMS patches this repo used to carry (see
+  # ci/ernic/guest-image-recipe.md), the generated gfx1250 gap firmware, therock
+  # ROCm 10.0 userspace, render/video group membership and an amdgpu-probe
+  # helper holding the parameter set below. The prep boot -- install a
+  # pinned kernel, reboot, patch and rebuild amdgpu DKMS, ~15 min every run
+  # -- is gone with it, so the lane boots once, with both vfio-user
+  # functions attached.
+  #
+  # Two hard requirements came out of that work and are reflected below.
+  #
+  # 1. The vfio-user servers must run in the same container/namespace as
+  #    QEMU. Running rocm-ernic on the host against a containerised QEMU is
+  #    what produced the handle_dma_map SIGSEGV and the double-errp abort
+  #    this comment used to blame on the two-device combination. It is not a
+  #    two-device bug: both functions enumerate in one guest, PORT_ACTIVE
+  #    holds with the GPU attached, and amdgpu binds the device.
+  #
+  # 2. amdgpu needs the full emulation parameter set -- fw_load_type=0 to
+  #    skip PSP, discovery=2, vm_update_mode=3, gpu_recovery=0, vramlimit
+  #    and ip_block_mask=0x7f. Not 0x3f: this DKMS build enumerates an extra
+  #    ras_v1_0 at index 5, so MES sits at 6, and dropping it makes
+  #    gfx_v12_1_xcc_cp_resume dereference a NULL ring. The guest's
+  #    /usr/local/bin/amdgpu-probe carries that set, so the lane calls it
+  #    rather than restating the parameters. The gap firmware stubs are
+  #    baked into the guest; ip_discovery.bin is NOT, and must come from the
+  #    SAME rocjitsu build that serves the socket (ROCJITSU_IMAGE_GPU) or
+  #    probe fails at -22 or -2.
+  #
+  # The guest also cannot be warm-rebooted with the rocjitsu function
+  # attached -- the device reset wedges it. Nothing below reboots, but a
+  # step that starts to is a bug, not a slow path.
+  #
+  # What previously parked this lane -- "amdgpu probe hangs in
+  # amdgpu_ras_init -> amdgpu_atomfirmware_mem_ecc_supported" -- was neither
+  # a hang nor a kernel problem. rocjitsu serves no option ROM, so
+  # adev->mode_info.atom_context is NULL and the RAS VBIOS query oopses on
+  # it. 0003-amdgpu-ras-guard-vbios-query fixes that; with it, plus
+  # ip_block_mask=0x7f, modprobe returns 0 and KFD reports gfx_target_version
+  # 120500. The probe step is still bounded at all three layers -- guest
+  # command, ssh session and step -- so a regression reports instead of
+  # eating the job timeout.
+  # ---------------------------------------------------------------------
+  gpu-direct:
+    name: GPU Direct
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
+      options: --device /dev/kvm -v /var/run/docker.sock:/var/run/docker.sock
+    env:
+      # The ernic-rocjitsu guest: mainline 7.2.4 (the ionic_rdma floor), the
+      # patched amdgpu-dkms, the generated gfx1250 gap firmware and therock
+      # ROCm 10.0 userspace, with render/video group membership. Only
+      # ip_discovery.bin is still the consumer's to stage, and it has to come
+      # from the rocjitsu build serving the socket (ROCJITSU_IMAGE_GPU).
+      GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
+      GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
+      S3_ADDR: 192.168.200.1
+      S3_PORT: 9000
+      S3_BUCKET: hipobj-test
+      SSH_PORT: 2222
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - name: Checkout rocm-ernic (Ansible collection + guest driver sources)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          repository: ROCm/rocm-ernic
+          ref: develop
+          path: rocm-ernic
+
+      - name: Install deps
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq iproute2 libibverbs1 libnl-3-200 libnl-route-3-200 \
+            ansible python3-jmespath
+          for attempt in 1 2 3; do
+            ansible-galaxy collection install community.general && break
+            echo "::warning::galaxy install failed (attempt ${attempt}/3)"
+            sleep $((attempt * 20))
+          done
+
+      - name: Build minio-getput-rdma (ROCm container)
+        run: |
+          docker run --rm --user root \
+            -v "${{ github.workspace }}:/hipobject:ro" \
+            -v "${{ github.workspace }}/ernic-build-gpu:/hipobject-build" \
+            -e ROCM_PATH=/opt/rocm \
+            "$ROCM_IMAGE" \
+            bash -c "
+              apt-get update -qq && \
+              apt-get install -y -qq git cmake ninja-build libibverbs-dev libnuma-dev \
+                libcurl4-openssl-dev libssl-dev nlohmann-json3-dev libpugixml-dev && \
+              cmake -B /hipobject-build -G Ninja -S /hipobject \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH=/opt/rocm \
+                -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
+                -DBUILD_TESTING=ON \
+                -DHIPOBJ_IONIC=ON \
+                -DHIPOBJ_BNXT=OFF \
+                -DHIPOBJ_INTEGRATION_TESTS=ON \
+                -DHIPOBJ_MINIO_CLIENT=ON \
+                -DHIPOBJ_BUILD_DOCS=OFF \
+                -DCMAKE_SKIP_INSTALL_RULES=ON && \
+              cmake --build /hipobject-build --parallel \$(nproc) \
+                --target minio-getput-rdma && \
+              mkdir -p /hipobject-build/rocm-libs && \
+              export LD_LIBRARY_PATH=/opt/rocm/lib && \
+              ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
+                | awk '/=> \//{print \$3}' \
+                | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so' \
+                | xargs -r -I{} cp -L {} /hipobject-build/rocm-libs/ && \
+              if LD_LIBRARY_PATH=/hipobject-build/rocm-libs \
+                   ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
+                   | grep 'not found'; then \
+                echo 'staged closure incomplete'; exit 1; \
+              fi && \
+              echo 'staged closure complete'
+            "
+
+      - name: Extract rocm-ernic binary from ernic image
+        run: |
+          docker create --name ernic-tmp-gpu "$ERNIC_IMAGE"
+          # Not the workspace: it is mounted noexec in the job container, so a
+          # 0755 binary there still fails exec with EACCES.
+          docker cp ernic-tmp-gpu:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
+          docker rm ernic-tmp-gpu
+          chmod +x /usr/local/bin/rocm-ernic
+          # No pipe here: under `sh -e` a failure in a non-final pipeline
+          # element is ignored, which is how the EACCES above reached the
+          # next step disguised as a missing socket.
+          rocm-ernic --help > /tmp/ernic-help.txt
+          head -3 /tmp/ernic-help.txt
+
+      - name: Select QEMU accelerator and guest size
+        run: |
+          if [ -c /dev/kvm ] && ${QEMU_PATH:-}qemu-system-x86_64 -accel help 2>/dev/null | grep -qw kvm; then
+            echo "QEMU_ACCEL=kvm" >> "$GITHUB_ENV"
+            echo "QEMU_CPU=host"  >> "$GITHUB_ENV"
+          else
+            echo "QEMU_ACCEL=tcg"  >> "$GITHUB_ENV"
+            echo "QEMU_CPU=qemu64" >> "$GITHUB_ENV"
+          fi
+          HOST_MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
+          # ionic_create_rdma_admin() hard-fails below 4 online CPUs
+          # (IONIC_EQ_COUNT_MIN), so 4 is a floor, not a preference.
+          VM_VCPUS=$(( $(nproc) - 1 )); [ "$VM_VCPUS" -lt 4 ] && VM_VCPUS=4
+          VM_MEM_MB=$(( HOST_MEM_MB * 3 / 4 )); [ "$VM_MEM_MB" -gt 6144 ] && VM_MEM_MB=6144
+          echo "VM_VCPUS=$VM_VCPUS" >> "$GITHUB_ENV"
+          echo "VM_MEM_MB=$VM_MEM_MB" >> "$GITHUB_ENV"
+
+      - name: Fetch rocjitsu guest VM image
+        id: guest_image
+        uses: ./.github/actions/fetch-guest-vm
+        with:
+          repo: ${{ env.GUEST_ARTIFACT_REPO }}
+          tag: ${{ env.GUEST_ARTIFACT_TAG }}
+
+      - name: Read VM info
+        id: vm_info
+        run: |
+          OUT="${{ steps.guest_image.outputs.output_dir }}"
+          eval "$(python3 - "$OUT" <<'PYEOF'
+          import json, os, shlex, sys
+          out = sys.argv[1]
+          d = json.load(open(os.path.join(out, "vm-info.json")))
+          here = lambda p: os.path.join(out, os.path.basename(p)) if p else ""
+          keys = {
+            "VM_USER": d.get("username", "ci"),
+            "VM_DISK": here(d.get("image_path", "")),
+            "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
+          }
+          for k, v in keys.items():
+            print(f"{k}={shlex.quote(str(v))}")
+          PYEOF
+          )"
+          echo "vm_user=$VM_USER"         >> "$GITHUB_OUTPUT"
+          echo "vm_disk=$VM_DISK"         >> "$GITHUB_OUTPUT"
+          echo "ssh_key=$SSH_KEY_PRIVATE" >> "$GITHUB_OUTPUT"
+
+      - name: Generate ip_discovery.bin on the host
+        run: |
+          # The only firmware the guest does not bake, because it is the only
+          # piece that is not static: it describes the device the socket
+          # serves, so it must come from the rocjitsu build serving it. The
+          # gap stubs are in /lib/firmware/updates/amdgpu already.
+          mkdir -p "${GITHUB_WORKSPACE}/rj-fw"
+          chmod 777 "${GITHUB_WORKSPACE}/rj-fw"
+          docker run --rm -v "${{ github.workspace }}/rj-fw:/out" \
+            "$ROCJITSU_IMAGE_GPU" \
+            rj-ip-discovery gfx1250 /out/ip_discovery.bin
+          ls -l "${GITHUB_WORKSPACE}/rj-fw"
+
+      - name: Start rocm-ernic S3 backend and rocjitsu GPU server
+        run: |
+          # rocjitsu runs as a sibling container, so its socket has to live on
+          # a path the host daemon can bind-mount AND this container can see.
+          # ${{ github.workspace }} is the host path; $GITHUB_WORKSPACE is the
+          # same directory as mounted in here.
+          mkdir -p "${GITHUB_WORKSPACE}/vfu"
+          chmod 777 "${GITHUB_WORKSPACE}/vfu"
+
+          rocm-ernic \
+            --socket "${GITHUB_WORKSPACE}/vfu/ernic.sock" \
+            --backend "s3:ip=${S3_ADDR},port=${S3_PORT},bucket=${S3_BUCKET}" \
+            --verbose > /tmp/ernic-s3.log 2>&1 &
+          echo "ERNIC_PID=$!" >> "$GITHUB_ENV"
+
+          docker run -d --name rocjitsu-gpu \
+            -v "${{ github.workspace }}/vfu:/run/vfu" \
+            "$ROCJITSU_IMAGE_GPU" \
+            rocjitsu --config /usr/local/share/rocjitsu/configs/gfx1250_mi455x.json \
+                     --vfio-socket /run/vfu/rocjitsu.sock
+
+          for i in $(seq 1 45); do
+            [ -S "${GITHUB_WORKSPACE}/vfu/ernic.sock" ] && \
+            [ -S "${GITHUB_WORKSPACE}/vfu/rocjitsu.sock" ] && break
+            sleep 2
+          done
+          for s in ernic rocjitsu; do
+            [ -S "${GITHUB_WORKSPACE}/vfu/${s}.sock" ] || {
+              echo "${s}.sock never appeared"
+              cat /tmp/ernic-s3.log || true
+              docker logs rocjitsu-gpu || true
+              exit 1
+            }
+            chmod 666 "${GITHUB_WORKSPACE}/vfu/${s}.sock" || true
+          done
+          echo "both vfio-user sockets present"
+
+      - name: Start QEMU VM with both vfio-user devices
+        run: |
+          ${QEMU_PATH:-}qemu-system-x86_64 \
+            -machine q35,accel=${QEMU_ACCEL},memory-backend=mem0 \
+            -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
+            -object memory-backend-memfd,id=mem0,share=on,size=${VM_MEM_MB}M \
+            -nographic \
+            -drive file="${{ steps.vm_info.outputs.vm_disk }}",format=qcow2,if=virtio \
+            -netdev user,id=net0,hostfwd=tcp::${SSH_PORT}-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -device '{"driver":"vfio-user-pci","rombar":0,"socket":{"type":"unix","path":"'"${GITHUB_WORKSPACE}"'/vfu/ernic.sock"}}' \
+            -device '{"driver":"vfio-user-pci","rombar":0,"socket":{"type":"unix","path":"'"${GITHUB_WORKSPACE}"'/vfu/rocjitsu.sock"}}' \
+            -serial file:/tmp/qemu-console.log -monitor none \
+            -qmp unix:/tmp/qmp.sock,server=on,wait=off > /tmp/qemu.log 2>&1 &
+          QEMU_PID=$!
+          echo "QEMU_PID=$QEMU_PID" >> "$GITHUB_ENV"
+          sleep 5
+          kill -0 "$QEMU_PID" 2>/dev/null || { cat /tmp/qemu.log; exit 1; }
+
+      - name: Wait for VM SSH
+        run: |
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          chmod 600 "$SSH_KEY"
+          for i in $(seq 1 60); do
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -o ConnectTimeout=5 -p $SSH_PORT "${VM_USER}@localhost" echo VM_READY \
+              2>/dev/null && break
+            sleep 5
+          done
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p $SSH_PORT "${VM_USER}@localhost" echo VM_READY || {
+            cat /tmp/qemu-console.log; exit 1
+          }
+
+      - name: Verify both emulated functions are present
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p $SSH_PORT "${VM_USER}@localhost" 'lspci -nn' | tee /tmp/lspci.txt
+          # 1dd8:100a is the Pensando ionic NIC; 1002: is the rocjitsu GPU.
+          grep -q '1dd8:100a' /tmp/lspci.txt || {
+            echo "emulated ionic NIC not enumerated"; exit 1; }
+          grep -qi '1002:' /tmp/lspci.txt || {
+            echo "emulated rocjitsu GPU not enumerated"; exit 1; }
+          echo "both emulated PCI functions enumerated"
+
+      - name: Provision the VM with the ernic Ansible collection
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ERNIC_RUN_DIR=/tmp/ernic-ci
+          mkdir -p "$ERNIC_RUN_DIR"
+          cat > "$ERNIC_RUN_DIR/instances.json" << EOFJSON
+          {
+            "instances": [
+              {
+                "id": 1,
+                "vm": {
+                  "vm_name": "hipobj-gpu-vm1",
+                  "ssh_port": ${SSH_PORT},
+                  "ssh_user": "${VM_USER}"
+                }
+              }
+            ]
+          }
+          EOFJSON
+          export ANSIBLE_HOST_KEY_CHECKING=false
+          export ANSIBLE_PRIVATE_KEY_FILE="$SSH_KEY"
+          PROJECT_ROOT="${GITHUB_WORKSPACE}/rocm-ernic"
+          export ANSIBLE_ROLES_PATH="${PROJECT_ROOT}/ansible/roles"
+          cd "${PROJECT_ROOT}/ansible"
+          ansible-playbook ci-site.yml --tags guest-setup \
+            -e ernic_project_root="$PROJECT_ROOT" \
+            -e ernic_run_dir="$ERNIC_RUN_DIR" \
+            -e ernic_instances=1 \
+            -e ernic_vm_ssh_base_port="$SSH_PORT" \
+            -e ernic_vm_ssh_user="$VM_USER" \
+            -e ernic_gpu_passthrough=false \
+            -e ernic_guest_agent=false \
+            -e ernic_set_hostname=false
+
+      - name: Verify the RDMA device and the object store
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          kill -0 "$ERNIC_PID" 2>/dev/null || {
+            echo "rocm-ernic is no longer running"; tail -30 /tmp/ernic-s3.log; exit 1; }
+          grep -q "s3 bucket '${S3_BUCKET}'" /tmp/ernic-s3.log || {
+            echo "no s3 store banner for '${S3_BUCKET}'"
+            grep -i s3 /tmp/ernic-s3.log || tail -40 /tmp/ernic-s3.log
+            exit 1
+          }
+          DEVICE=$(ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" 'sh -s' \
+            < "${GITHUB_WORKSPACE}/rocm-ernic/scripts/find-rdma-device.sh" | tr -d '\r') || true
+          [ -n "$DEVICE" ] || {
+            echo "RDMA device not found in the guest"
+            ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+              'ibv_devices; lsmod | grep ionic; dmesg | grep -i ionic | tail -30' || true
+            exit 1
+          }
+          ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+            "ibv_devinfo -d $DEVICE" | tee /dev/stderr | grep -q PORT_ACTIVE || {
+            echo "$DEVICE never reached PORT_ACTIVE"; exit 1; }
+          echo "RDMA_DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          echo "$DEVICE is PORT_ACTIVE"
+
+      - name: Stage ip_discovery.bin into the guest
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          scp $SSH_OPTS -P $SSH_PORT "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
+            "${VM_USER}@localhost:/tmp/"
+          # updates/ takes precedence over the packaged firmware, and is where
+          # the guest's baked gap stubs already live.
+          ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+            'sudo install -D -m 0644 /tmp/ip_discovery.bin \
+               /lib/firmware/updates/amdgpu/ip_discovery.bin && \
+             ls -l /lib/firmware/updates/amdgpu/'
+
+      - name: Load amdgpu via amdgpu-probe
+        timeout-minutes: 8
+        run: |
+          # qemu-minimal parks its lane on this step hanging with no output.
+          # Bounded at three layers so a recurrence reports instead of eating
+          # the job timeout: guest-side timeout, ssh keepalive, step timeout.
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+              -p $SSH_PORT "${VM_USER}@localhost" \
+              "sudo timeout 300 /usr/local/bin/amdgpu-probe"
+          echo "amdgpu-probe completed"
+
+      - name: Verify amdgpu loaded and a GPU KFD node is present
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" 'lsmod | grep -q amdgpu' || {
+            echo "amdgpu module not loaded"; exit 1; }
+          # /dev/kfd is not a valid assertion: kfd_chardev_init() creates it
+          # before amdgpu_init() registers the PCI driver, so it exists even
+          # when every probe failed. Node 0 is the CPU and has an empty name;
+          # a bound GPU adds a named node.
+          gpus=$(ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+            'cat /sys/class/kfd/kfd/topology/nodes/*/name 2>/dev/null | grep -c .')
+          [ "$gpus" -ge 1 ] || {
+            echo "amdgpu loaded but never bound the device"
+            ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+              'sudo dmesg | grep -i amdgpu | tail -40' || true
+            exit 1
+          }
+          echo "GPU KFD node present ($gpus)"
+
+      - name: Copy minio binary to VM
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -P $SSH_PORT \
+            "${GITHUB_WORKSPACE}/ernic-build-gpu/integrations/minio-cpp/minio-getput-rdma" \
+            "${VM_USER}@localhost:/tmp/minio-getput-rdma"
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -P $SSH_PORT \
+            ci/ernic/assert-transfer.sh \
+            "${VM_USER}@localhost:/tmp/assert-transfer.sh"
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -P $SSH_PORT -r \
+            "${GITHUB_WORKSPACE}/ernic-build-gpu/rocm-libs" \
+            "${VM_USER}@localhost:/tmp/rocm-libs"
+
+      - name: Run GPU-direct S3 PUT+GET test in VM
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p $SSH_PORT "${VM_USER}@localhost" \
+              "S3_ADDR='${S3_ADDR}' S3_PORT='${S3_PORT}' RDMA_DEVICE='${RDMA_DEVICE}' bash -s" << 'EOFVM'
+          set -e
+          chmod +x /tmp/minio-getput-rdma
+          export LD_LIBRARY_PATH=/tmp/rocm-libs
+          ldd /tmp/minio-getput-rdma | grep -E 'not found' && {
+            echo "ERROR: unresolved shared libraries in guest"; exit 1; } || true
+          echo "=== Waiting for the in-band S3 endpoint ==="
+          ready=
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "http://${S3_ADDR}:${S3_PORT}/" 2>/dev/null) || code=
+            case "$code" in [234]*) ready=1; break;; esac
+            sleep 2
+          done
+          [ -n "$ready" ] || {
+            echo "ERROR: S3 endpoint never answered"; ip -4 -br addr show; exit 1; }
+          export HIPOBJ_NIC_HINT="${RDMA_DEVICE}"
+          echo "=== KFD access ==="
+          id
+          ls -l /dev/kfd /dev/dri/ 2>&1 || true
+          # Run it as root. The KFD node comes up (this step is gated on that)
+          # but /dev/kfd and /dev/dri/render* are root:render 0660 and the
+          # guest's login user is in neither group, so the HIP runtime
+          # enumerates no agent and hipMalloc returns 100, hipErrorNoDevice.
+          #
+          # "gpu", not "nogpu": the payload is a hipMalloc'd device buffer, so
+          # this is the GPU-direct path rather than a host-buffer transfer.
+          echo "=== minio-getput-rdma, GPU buffer (NIC $HIPOBJ_NIC_HINT) ==="
+          rc=0
+          sudo env LD_LIBRARY_PATH=/tmp/rocm-libs \
+              HIPOBJ_NIC_HINT="$HIPOBJ_NIC_HINT" \
+              /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
+              minioadmin minioadmin 65536 gpu > /tmp/getput.log 2>&1 || rc=$?
+          cat /tmp/getput.log
+          if [ "$rc" -ne 0 ]; then
+            echo "=== HIP saw no device; agent enumeration ==="
+            command -v rocminfo > /dev/null && \
+              sudo env LD_LIBRARY_PATH=/tmp/rocm-libs rocminfo 2>&1 | head -40
+            sudo dmesg | grep -i 'kfd\|amdgpu' | tail -20 || true
+            exit "$rc"
+          fi
+          # A green exit is not enough: the bridge falls back to plain HTTP on
+          # a failed RDMA transfer and still returns success. This asserts the
+          # GET returned what the PUT wrote and that both moved over RDMA.
+          chmod +x /tmp/assert-transfer.sh
+          /tmp/assert-transfer.sh /tmp/getput.log rdma
+          EOFVM
+
+      - name: Collect logs
+        if: always()
+        run: |
+          echo "=== ernic-s3.log ==="  && cat /tmp/ernic-s3.log     || true
+          echo "=== rocjitsu ==="      && docker logs rocjitsu-gpu   || true
+          echo "=== qemu.log ==="      && cat /tmp/qemu.log          || true
+          echo "=== qemu-console ==="  && cat /tmp/qemu-console.log  || true
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          timeout 60 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 -p $SSH_PORT "${VM_USER}@localhost" \
+            'sudo dmesg | tail -200' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          kill "${QEMU_PID:-}"  2>/dev/null || true
+          kill "${ERNIC_PID:-}" 2>/dev/null || true
+          docker rm -f rocjitsu-gpu 2>/dev/null || true
+          docker run --rm -v "${{ github.workspace }}/ernic-build-gpu:/d" \
+            busybox sh -c "rm -rf /d/*" 2>/dev/null || true
+          rm -rf "${{ github.workspace }}/ernic-build-gpu" \
+                 "${GITHUB_WORKSPACE}/vfu" "${GITHUB_WORKSPACE}/rj-fw" 2>/dev/null || true

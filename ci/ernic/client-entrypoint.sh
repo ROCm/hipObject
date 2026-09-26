@@ -3,88 +3,68 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run pre-built hipObject example and v2-data-client binaries inside the
-# ernic container against hipobj-rdma-test-server.  All binaries are built
-# on the runner (ROCm container) and mounted read-only at /hipobject-build.
+# Run the pre-built minio-getput-rdma inside an ernic guest VM against
+# hipobj-rdma-test-server (v1 mode) running in a second guest. All binaries
+# are built on the runner (ROCm container) and copied into the guest at
+# ${BUILD_DIR}.
+#
+# GPU_MODE defaults to nogpu because the plain two-VM lane emulates a NIC and
+# nothing else: hipMalloc returns hipErrorNoDevice before any of the RDMA path
+# is reached, and nogpu drives the same v1 transfer from a page-aligned host
+# buffer. The two-VM GPU lane attaches rocjitsu's emulated GPU to this guest
+# as a second vfio-user function and passes GPU_MODE=gpu, which makes the
+# payload a real hipMalloc'd device buffer.
 #
 # Environment variables (all have defaults):
-#   SERVER_ENDPOINT  - http URL of the test server (default: http://ernic-server:9000)
+#   BUILD_DIR        - where the binaries were copied (default: /tmp/hipobject-build)
+#   SERVER_ENDPOINT  - http URL of the test server (default: http://192.168.200.10:9000)
 #   TEST_SIZE        - object size in bytes         (default: 1048576)
+#   GPU_MODE         - gpu or nogpu                 (default: nogpu)
+#   EXPECT_TRANSPORT - rdma or http, asserted against the bridge's own
+#                      transfer counters             (default: rdma). Only
+#                      docker-compose's container profile passes http: a
+#                      container has no guest kernel to bind the emulated PCI
+#                      function, so there is no verbs device and the client
+#                      falls back over TCP.
+#   HIPOBJ_NIC_HINT  - verbs device to bind to. The caller should pass the
+#                      device find-rdma-device.sh discovered: udev renames
+#                      ionic_%d twice, so the final name is not predictable.
 
 set -euo pipefail
 
-export LD_LIBRARY_PATH=/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+BUILD_DIR="${BUILD_DIR:-/tmp/hipobject-build}"
+export LD_LIBRARY_PATH="${BUILD_DIR}/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-rocm-ernic --backend loopback &
-sleep 1
-
-# Pass the rocm-ernic device name as a NIC hint so hipObjInit can find
-# the device without GPU topology. rocm-ernic registers as ernic0.
 export HIPOBJ_NIC_HINT="${HIPOBJ_NIC_HINT:-ernic0}"
 echo "Using NIC hint: ${HIPOBJ_NIC_HINT}"
 
-SERVER_ENDPOINT="${SERVER_ENDPOINT:-http://ernic-server:9000}"
+SERVER_ENDPOINT="${SERVER_ENDPOINT:-http://192.168.200.10:9000}"
 TEST_SIZE="${TEST_SIZE:-1048576}"
-BUILD_DIR=/hipobject-build
-BUCKET=hipobj-ci
-OBJECT=ernic-test-object
+GPU_MODE="${GPU_MODE:-nogpu}"
 
 SERVER_HOST="${SERVER_ENDPOINT#http://}"
 SERVER_HOST="${SERVER_HOST%%:*}"
 SERVER_PORT="${SERVER_ENDPOINT##*:}"
 
-# Layer 2: control-plane PUT + GET via curl ops
-echo "--- RDMA PUT ---"
-put_out=""
-put_rc=0
-put_out=$("${BUILD_DIR}/examples/put-object" \
-    "${TEST_SIZE}" \
-    --live "${SERVER_ENDPOINT}" \
-    "${BUCKET}" "${OBJECT}" 2>&1) || put_rc=$?
-echo "${put_out}"
-echo "${put_out}" | grep -q "PUT ok\|succeeded" || {
-    echo "ERROR: PUT did not complete successfully (exit ${put_rc})"
-    echo "Output: ${put_out}"
-    exit 1
-}
+echo "--- v1 PUT + GET over the emulated wire ---"
+echo "    server: ${SERVER_ENDPOINT}"
+echo "    size:   ${TEST_SIZE} bytes"
+echo "    buffer: ${GPU_MODE}"
 
-echo "--- RDMA GET ---"
-get_out=""
-get_rc=0
-get_out=$("${BUILD_DIR}/examples/get-object" \
-    "${TEST_SIZE}" \
-    --live "${SERVER_ENDPOINT}" \
-    "${BUCKET}" "${OBJECT}" 2>&1) || get_rc=$?
-echo "${get_out}"
-echo "${get_out}" | grep -q "GET ok\|succeeded\|Data integrity" || {
-    echo "ERROR: GET did not complete successfully (exit ${get_rc})"
-    echo "Output: ${get_out}"
-    exit 1
-}
+out=""
+rc=0
+out=$("${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma" \
+    "${SERVER_HOST}:${SERVER_PORT}" \
+    minioadmin minioadmin \
+    "${TEST_SIZE}" "${GPU_MODE}" 2>&1) || rc=$?
+echo "${out}"
 
-# Layer 3: data-plane transfer with payload verification
-echo "--- RDMA data-plane PUT (payload verification) ---"
-dp_put_out=""
-dp_put_rc=0
-dp_put_out=$("${BUILD_DIR}/test/integration/rdma-test-server/v2-data-client" \
-    "${SERVER_HOST}" "${SERVER_PORT}" \
-    PUT /bucket/dp-test 4096 2>&1) || dp_put_rc=$?
-echo "${dp_put_out}"
-if [ "${dp_put_rc}" -ne 0 ]; then
-    echo "ERROR: data-plane PUT failed (exit ${dp_put_rc})"
-    exit 1
-fi
+LOG=$(mktemp)
+printf '%s\n' "${out}" > "${LOG}"
 
-echo "--- RDMA data-plane GET (payload verification) ---"
-dp_get_out=""
-dp_get_rc=0
-dp_get_out=$("${BUILD_DIR}/test/integration/rdma-test-server/v2-data-client" \
-    "${SERVER_HOST}" "${SERVER_PORT}" \
-    GET /bucket/dp-test 4096 2>&1) || dp_get_rc=$?
-echo "${dp_get_out}"
-echo "${dp_get_out}" | grep -q "payload verified" || {
-    echo "ERROR: data-plane GET payload verification failed (exit ${dp_get_rc})"
-    exit 1
-}
+# Exit code alone is not evidence: the bridge returns success when it falls
+# back to plain HTTP, so the assertion is on what the run reported doing.
+"$(dirname "$0")/assert-transfer.sh" "${LOG}" "${EXPECT_TRANSPORT:-rdma}" || exit 1
+rm -f "${LOG}"
 
-echo "--- ernic integration: PASS ---"
+echo "--- ernic two-VM v1 integration (${GPU_MODE}): PASS (exit ${rc}) ---"

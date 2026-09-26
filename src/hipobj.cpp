@@ -22,8 +22,10 @@
 #include "state.h"
 #include "token.h"
 #include "transport.h"
+#ifdef HIPOBJECT_V2_API
 #include "v2-registry.h"
 #include "v2-transport.h"
+#endif
 
 namespace hipObj {
 
@@ -54,7 +56,7 @@ static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
   token.qpNum = g_conn.qp->qp_num;
   std::memcpy(token.gid, g_conn.localGid.raw, 16);
   token.rkey = mr->rkey;
-  token.remoteAddr = reinterpret_cast<uint64_t>(mr->addr) +
+  token.remoteAddr = g_bufferMap.lookupRemoteAddr(const_cast<void*>(devPtr)) +
                      static_cast<uint64_t>(offset);
   token.length = static_cast<uint64_t>(size);
   token.portNum = g_conn.portNum;
@@ -63,9 +65,9 @@ static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
 }
 
 static int finishTransferAfterReply(const char* reply, size_t replyLen,
-                                    bool requiresDeviceSync) {
-  RdmaToken peerToken;
-  int httpCode = 0;
+                                   bool requiresDeviceSync) {
+ RdmaToken peerToken{};
+ int httpCode = 0;
   if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
     if (connectRcPeer(g_conn, peerToken) != 0) {
       return -1;
@@ -85,12 +87,32 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen,
   return (err == hipSuccess) ? 0 : -1;
 }
 
+static hipObjError_t stageBuffer(void* devPtr, size_t size, off_t offset,
+                                 bool toDevice) {
+  void* hostBuf = g_bufferMap.lookupHostBuf(devPtr);
+  if (!hostBuf) {
+    return HIPOBJ_SUCCESS; /* the NIC reads and writes the caller's memory */
+  }
+  size_t regSize = g_bufferMap.lookupSize(devPtr);
+  if (offset < 0 || static_cast<size_t>(offset) + size > regSize) {
+    return {hipObjInvalidValue, 0};
+  }
+  void* host = static_cast<char*>(hostBuf) + offset;
+  void* dev = static_cast<char*>(devPtr) + offset;
+  hipError_t err = toDevice ? hipOps().hipMemcpy(dev, host, size,
+                                                 hipMemcpyHostToDevice)
+                            : hipOps().hipMemcpy(host, dev, size,
+                                                 hipMemcpyDeviceToHost);
+  return (err == hipSuccess) ? HIPOBJ_SUCCESS
+                             : hipObjError_t{hipObjInternalError, 0};
+}
+
 static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
                                      off_t offset, hipObjOps_t* ops,
                                      void* ctx) {
   bool requiresDeviceSync = g_bufferMap.requiresDeviceSync(
     const_cast<void*>(devPtr));
-  RdmaToken token;
+  RdmaToken token{};
   if (!buildRdmaToken(devPtr, size, offset, token)) {
     return {hipObjRdmaError, 0};
   }
@@ -142,10 +164,12 @@ const char* hipObjGetErrorString(hipObjOpError_t err) {
         return "Size too large";
       case hipObjInternalError:
         return "Internal error";
+#ifdef HIPOBJECT_V2_API
       case hipObjNotSupported:
         return "hipobj-rc-v2 not supported by server";
       case hipObjBusy:
         return "Server busy (backpressure)";
+#endif /* HIPOBJECT_V2_API */
       default:
         return "Unknown error";
     }
@@ -165,16 +189,18 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   if (!hipObj::ibv.is_initialized) {
     return {hipObjRdmaError, 0};
   }
+  const bool haveNicHint = config->nicHint && config->nicHint[0] != '\0';
   int gpuDevice = config->gpuDevice;
   if (gpuDevice < 0) {
     hipError_t err = hipObj::hipOps().hipGetDevice(&gpuDevice);
     if (err != hipSuccess) {
-      if (err == hipErrorNoDevice && config->nicHint &&
-          config->nicHint[0] != '\0') {
-        gpuDevice = -1;
-      } else {
+      // No GPU to infer a device from. That is only fatal when we also have
+      // no NIC hint -- with a hint the topology lookup below is skipped
+      // entirely, so an absent GPU is not an error.
+      if (err != hipErrorNoDevice || !haveNicHint) {
         return {hipObjRdmaError, static_cast<int>(err)};
       }
+      gpuDevice = -1;
     }
   }
   const char* devName = nullptr;
@@ -189,7 +215,7 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
     // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
     // hint is provided, try opening it directly without GPU topology so the
     // library works in GPU-less environments (e.g. CI with emulated RDMA).
-    if (config->nicHint && config->nicHint[0] != '\0') {
+    if (haveNicHint) {
       devName = config->nicHint;
       nicIndex = 0;
     } else {
@@ -228,6 +254,7 @@ hipObjError_t hipObjShutdown(void) try {
   if (!state.initialized) {
     return HIPOBJ_SUCCESS;
   }
+#ifdef HIPOBJECT_V2_API
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
   /* v2 first: release every connection (destroy retries included);
    * leftover poison must stop the teardown so the failure is
@@ -247,6 +274,7 @@ hipObjError_t hipObjShutdown(void) try {
   if (poisonLeft || reg.size() > 0) {
     return {hipObjRdmaError, 0};
   }
+#endif /* HIPOBJECT_V2_API */
   hipObj::g_bufferMap.deregisterAll();
   hipObj::closeRdmaDevice(hipObj::g_conn);
   state.initialized = false;
@@ -335,7 +363,11 @@ hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr, size_t size,
   if (!hipObj::g_bufferMap.lookupMr(devPtr)) {
     return {hipObjBufNotRegistered, 0};
   }
-  return hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
+  hipObjError_t err = hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
+  if (err.opError != hipObjSuccess) {
+    return err;
+  }
+  return hipObj::stageBuffer(devPtr, size, offset, true);
 } catch (...) {
   return hipObj::handleException();
 }
@@ -353,7 +385,31 @@ hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr, size_t size,
   if (!hipObj::g_bufferMap.lookupMr(const_cast<void*>(devPtr))) {
     return {hipObjBufNotRegistered, 0};
   }
+  hipObjError_t serr = hipObj::stageBuffer(const_cast<void*>(devPtr), size,
+                                           offset, false);
+  if (serr.opError != hipObjSuccess) {
+    return serr;
+  }
   return hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
+} catch (...) {
+  return hipObj::handleException();
+}
+
+hipObjError_t hipObjBufSync(void* devPtr, size_t size, off_t offset,
+                            int direction) try {
+  hipObj::DriverState& state = hipObj::getState();
+  if (!state.initialized) {
+    return {hipObjNotInitialized, 0};
+  }
+  if (!devPtr || (direction != HIPOBJ_SYNC_TO_HOST &&
+                  direction != HIPOBJ_SYNC_TO_DEVICE)) {
+    return {hipObjInvalidValue, 0};
+  }
+  if (!hipObj::g_bufferMap.isRegistered(devPtr)) {
+    return {hipObjBufNotRegistered, 0};
+  }
+  return hipObj::stageBuffer(devPtr, size, offset,
+                             direction == HIPOBJ_SYNC_TO_DEVICE);
 } catch (...) {
   return hipObj::handleException();
 }
@@ -373,7 +429,7 @@ hipObjError_t hipObjGetRdmaToken(const void* devPtr, size_t size, int op,
   if (!hipObj::g_bufferMap.lookupMr(const_cast<void*>(devPtr))) {
     return {hipObjBufNotRegistered, 0};
   }
-  hipObj::RdmaToken token;
+  hipObj::RdmaToken token{};
   if (!hipObj::buildRdmaToken(devPtr, size, 0, token)) {
     return {hipObjRdmaError, 0};
   }
@@ -434,6 +490,17 @@ const char* hipObjGetVersionString(void) try {
   return buf;
 } catch (...) {
   return "0.0.0";
+}
+
+// Not yet implemented — callers fall back to the v1 RDMA path.
+hipObjError_t hipObjPutV2(const char*, const char*, const void*, uint64_t,
+                          uint64_t, const char*, hipObjOpsV2_t*, void*) {
+  return {hipObjNotSupported, 0};
+}
+
+hipObjError_t hipObjGetV2(const char*, const char*, void*, uint64_t, uint64_t,
+                          const char*, hipObjOpsV2_t*, void*) {
+  return {hipObjNotSupported, 0};
 }
 
 } // extern "C"

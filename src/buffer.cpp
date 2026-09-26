@@ -58,7 +58,8 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
                IBV_ACCESS_LOCAL_WRITE;
   struct ibv_mr* mr = ibv.reg_mr(pd, devPtr, size, access);
   if (mr) {
-    entries_[key] = {mr, size, true, false};
+    entries_[key] = {mr, size, true, false, static_cast<uint64_t>(key),
+                     nullptr};
     return 0;
   }
   void* hostBuf = nullptr;
@@ -72,7 +73,8 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
     freeOwnedHostBuffer(hostBuf);
     return -1;
   }
-  entries_[key] = {mr, size, false, true};
+  entries_[key] = {mr, size, false, true,
+                   reinterpret_cast<uint64_t>(hostBuf), hostBuf};
   return 0;
 }
 
@@ -89,8 +91,15 @@ int BufferMap::registerHostBuffer(void* hostPtr, size_t size,
   if (!mr) {
     return -1;
   }
-  entries_[key] = {mr, size, false, false};
+  entries_[key] = {mr, size, false, false,
+                   reinterpret_cast<uint64_t>(hostPtr), nullptr};
   return 0;
+}
+
+uint64_t BufferMap::lookupRemoteAddr(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  return it == entries_.end() ? 0 : it->second.remoteAddr;
 }
 
 int BufferMap::deregisterBuffer(void* devPtr) {
@@ -103,10 +112,9 @@ int BufferMap::deregisterBuffer(void* devPtr) {
     return -1; /* pinned by a live v2 connection */
   }
   BufEntry& ent = it->second;
-  void* hostBuf = ent.ownsHostBuf ? ent.mr->addr : nullptr;
   ibv.dereg_mr(ent.mr);
-  if (hostBuf) {
-    freeOwnedHostBuffer(hostBuf);
+  if (ent.ownsHostBuf && ent.hostBuf) {
+    freeOwnedHostBuffer(ent.hostBuf);
   }
   entries_.erase(it);
   return 0;
@@ -114,10 +122,9 @@ int BufferMap::deregisterBuffer(void* devPtr) {
 
 void BufferMap::deregisterAll() {
   for (auto& [key, ent] : entries_) {
-    void* hostBuf = ent.ownsHostBuf ? ent.mr->addr : nullptr;
     ibv.dereg_mr(ent.mr);
-    if (hostBuf) {
-      freeOwnedHostBuffer(hostBuf);
+    if (ent.ownsHostBuf && ent.hostBuf) {
+      freeOwnedHostBuffer(ent.hostBuf);
     }
   }
   entries_.clear();
@@ -130,6 +137,12 @@ struct ibv_mr* BufferMap::lookupMr(void* devPtr) {
     return nullptr;
   }
   return it->second.mr;
+}
+
+void* BufferMap::lookupHostBuf(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  return it == entries_.end() ? nullptr : it->second.hostBuf;
 }
 
 size_t BufferMap::lookupSize(void* devPtr) const {
@@ -152,6 +165,7 @@ bool BufferMap::requiresDeviceSync(void* devPtr) const {
   return it != entries_.end() && it->second.isDmabuf;
 }
 
+#ifdef HIPOBJECT_V2_API
 bool BufferMap::acquireMrRef(void* devPtr) {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   auto it = entries_.find(key);
@@ -186,6 +200,7 @@ bool BufferMap::anyPinned() const {
   }
   return false;
 }
+#endif /* HIPOBJECT_V2_API */
 
 size_t BufferMap::size() const {
   return entries_.size();

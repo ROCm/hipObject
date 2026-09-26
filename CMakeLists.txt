@@ -23,6 +23,14 @@ option(HIPOBJ_DOCS_ONLY
   "Only configure documentation targets (no HIP/ROCm)"
   OFF)
 
+# Declared out here, ahead of the HIPOBJ_DOCS_ONLY guard,
+# because the documentation module reads it on every
+# configure path: include/hipobj.h gates the v2 API
+# declarations on this macro, so Doxygen has to agree with
+# the library about whether that surface exists.
+option(HIPOBJECT_V2_API
+  "Build the hipobj-rc-v2 control protocol" ON)
+
 if(HIPOBJ_DOCS_ONLY)
   project(hipobj
     VERSION ${HIPOBJ_LIBRARY_VERSION}
@@ -66,7 +74,7 @@ message(STATUS
 option(HIPOBJ_BNXT
   "Build BNXT (Thor-2) RDMA provider" ON)
 option(HIPOBJ_IONIC
-  "Build IONIC (Pensando) RDMA provider" OFF)
+  "Build IONIC (Pensando) RDMA provider" ON)
 
 set(OFFLOAD_ARCH "" CACHE STRING
   "GPU arch (e.g. gfx942)")
@@ -99,13 +107,17 @@ set(HIPOBJ_SOURCES
   src/common/rdma-numa-wrapper.cpp
   src/rdma/transport.cpp
   src/rdma/token.cpp
-  src/rdma/v2-wire.cpp
-  src/rdma/v2-state.cpp
-  src/rdma/v2-clock.cpp
-  src/rdma/v2-random.cpp
-  src/rdma/v2-registry.cpp
-  src/rdma/v2-transport.cpp
   src/s3/control.cpp)
+
+if(HIPOBJECT_V2_API)
+  list(APPEND HIPOBJ_SOURCES
+    src/rdma/v2-wire.cpp
+    src/rdma/v2-state.cpp
+    src/rdma/v2-clock.cpp
+    src/rdma/v2-random.cpp
+    src/rdma/v2-registry.cpp
+    src/rdma/v2-transport.cpp)
+endif()
 
 if(HIPOBJ_BNXT)
   list(APPEND HIPOBJ_SOURCES
@@ -149,6 +161,13 @@ endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_IONIC)
+endif()
+if(HIPOBJECT_V2_API)
+  # PUBLIC: include/hipobj.h only declares the V2 API surface when this
+  # macro is defined, so consumers linking hipobj::hipobj (in-tree or via
+  # the exported CMake package) need it on their own translation units too.
+  target_compile_definitions(hipobj
+    PUBLIC HIPOBJECT_V2_API)
 endif()
 
 if(BUILD_TESTING)

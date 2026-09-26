@@ -15,6 +15,7 @@ void hipOpsDefaults(HipOps& ops) {
   ops.hipHostFree = &hipHostFree;
   ops.hipFree = &hipFree;
   ops.hipDeviceSynchronize = &hipDeviceSynchronize;
+  ops.hipMemcpy = &hipMemcpy;
 }
 
 HipOps& hipOps() {
