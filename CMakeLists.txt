@@ -74,7 +74,7 @@ message(STATUS
 option(HIPOBJ_BNXT
   "Build BNXT (Thor-2) RDMA provider" ON)
 option(HIPOBJ_IONIC
-  "Build IONIC (Pensando) RDMA provider" OFF)
+  "Build IONIC (Pensando) RDMA provider" ON)
 
 set(OFFLOAD_ARCH "" CACHE STRING
   "GPU arch (e.g. gfx942)")

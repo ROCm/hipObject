@@ -12,8 +12,10 @@ void hipOpsDefaults(HipOps& ops) {
   ops.hipGetDevice = &hipGetDevice;
   ops.hipDeviceGetPCIBusId = &hipDeviceGetPCIBusId;
   ops.hipHostMalloc = &hipHostMalloc;
+  ops.hipHostFree = &hipHostFree;
   ops.hipFree = &hipFree;
   ops.hipDeviceSynchronize = &hipDeviceSynchronize;
+  ops.hipMemcpy = &hipMemcpy;
 }
 
 HipOps& hipOps() {

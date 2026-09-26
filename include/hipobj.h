@@ -213,10 +213,25 @@ HIPOBJ_API hipObjError_t hipObjShutdown(void);
 HIPOBJ_API hipObjError_t hipObjBufRegister(void* devPtr, size_t size);
 
 /*!
- * @brief Deregister a previously registered GPU buffer
+ * @brief Register a host buffer for RDMA transfers
+ *
+ * Registers user-owned CPU RAM, such as a buffer allocated
+ * with malloc() or hipHostMalloc(), with the RDMA NIC.
+ * hipObject does not allocate or free the host buffer.
+ * Maximum 4 GiB per registration.
+ *
+ * @param hostPtr  Pointer to CPU-accessible memory
+ * @param size     Size of the buffer in bytes
+ * @return hipObjError_t
+ * @ingroup buffer
+ */
+HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void* hostPtr, size_t size);
+
+/*!
+ * @brief Deregister a previously registered buffer
  *
  * @param devPtr  Pointer previously passed to
- *                hipObjBufRegister
+ *                hipObjBufRegister or hipObjBufRegisterHost
  * @return hipObjError_t
  * @ingroup buffer
  */
@@ -227,14 +242,14 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void* devPtr);
  * ------------------------------------------------------- */
 
 /*!
- * @brief GET: fetch an S3 object into GPU memory via
- *        RDMA
+ * @brief GET: fetch an S3 object into a registered
+ *        buffer via RDMA
  *
  * The server performs an RDMA WRITE to push data into
- * the registered GPU buffer.
+ * the registered buffer.
  *
  * @param handle  S3 object handle (from application)
- * @param devPtr  Registered GPU buffer
+ * @param devPtr  Registered GPU or host buffer
  * @param size    Number of bytes to transfer
  * @param offset  Byte offset into the S3 object
  * @param ops     S3 SDK callbacks
@@ -247,14 +262,14 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr,
                                    void* ctx);
 
 /*!
- * @brief PUT: store GPU memory to an S3 object via
- *        RDMA
+ * @brief PUT: store a registered buffer to an S3 object
+ *        via RDMA
  *
  * The server performs an RDMA READ to pull data from
- * the registered GPU buffer.
+ * the registered buffer.
  *
  * @param handle  S3 object handle (from application)
- * @param devPtr  Registered GPU buffer
+ * @param devPtr  Registered GPU or host buffer
  * @param size    Number of bytes to transfer
  * @param offset  Byte offset into the S3 object
  * @param ops     S3 SDK callbacks
@@ -402,6 +417,29 @@ HIPOBJ_API hipObjError_t hipObjPutV2(const char* bucket, const char* key,
                                      hipObjOpsV2_t* ops, void* ctx);
 
 #endif /* HIPOBJECT_V2_API */
+
+/*! @brief hipObjBufSync direction: device -> staging buffer @ingroup io */
+#define HIPOBJ_SYNC_TO_HOST 0
+/*! @brief hipObjBufSync direction: staging buffer -> device @ingroup io */
+#define HIPOBJ_SYNC_TO_DEVICE 1
+
+/*!
+ * @brief Stage a registered buffer between device and host memory
+ *
+ * When a device pointer cannot be registered with the NIC directly (no
+ * dmabuf support, or a fabric with no peer-to-peer path to the GPU),
+ * hipObjBufRegister() registers a host staging buffer instead and the
+ * peer's RDMA reads and writes land there. Callers driving a transfer
+ * through hipObjGetRdmaToken() must therefore call this with
+ * HIPOBJ_SYNC_TO_HOST before a PUT and HIPOBJ_SYNC_TO_DEVICE after a
+ * GET. It is a no-op, reporting success, for a directly registered
+ * buffer; hipObjGet()/hipObjPut() and the V2 entry points do it
+ * themselves.
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjBufSync(void* devPtr, size_t size, off_t offset,
+                                       int direction);
 
 /*!
  * @brief Mint a hex-encoded RC RDMA token for a registered buffer

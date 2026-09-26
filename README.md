@@ -2,10 +2,10 @@
 
 [![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 [![Build](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml)
-[![Docs](https://github.com/ROCm/hipObject/actions/workflows/hipobject-docs.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-docs.yml)
-[![clang-format](https://github.com/ROCm/hipObject/actions/workflows/hipobject-clang-format.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-clang-format.yml)
-[![codespell](https://github.com/ROCm/hipObject/actions/workflows/hipobject-codespell.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-codespell.yml)
-[![Ansible](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml)
+[![Documentation Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-documentation-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-documentation-check.yml)
+[![Format Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-format-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-format-check.yml)
+[![Spell Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-spell-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-spell-check.yml)
+[![Ansible Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](INSTALL.md)
 [![ROCm](https://img.shields.io/badge/ROCm-supported-green.svg)](https://rocm.docs.amd.com)
 [![Language](https://img.shields.io/badge/language-HIP%20%7C%20C-orange.svg)](https://rocm.docs.amd.com/projects/HIP/en/latest/)
@@ -93,6 +93,11 @@ hipObjBufDeregister(gpu_buf);
 hipObjShutdown();
 hipFree(gpu_buf);
 ```
+
+For CPU-based transfers, allocate a host buffer (for example with `malloc()` or
+`hipHostMalloc()`) and register it with `hipObjBufRegisterHost()`. On GPU-less
+hosts, set `config.nicHint` to the RDMA device name so `hipObjInit()` can open
+that NIC without GPU topology discovery.
 
 ## Architecture
 

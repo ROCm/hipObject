@@ -1,9 +1,8 @@
-name: hipObject codespell
+name: hipObject - Spell Check
 
 on:
-  push:
-    branches: [develop]
   pull_request:
+    branches: [develop]
   workflow_dispatch:
 
 concurrency:
@@ -14,8 +13,8 @@ permissions:
   contents: read
 
 jobs:
-  codespell:
-    name: codespell
+  spell-check:
+    name: Spell Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

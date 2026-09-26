@@ -1,15 +1,11 @@
 # Validates Ansible layout on stock GitHub runners. Full site.yml is not
 # executed here: batesste rocm_setup / rdma_setup and GPU S3 smoke tests need
 # bare-metal lab hosts.
-name: hipObject Ansible check
+name: hipObject - Ansible Check
 
 on:
-  push:
-    branches: [develop]
-    paths:
-      - "ansible/**"
-      - ".github/workflows/hipobject-ansible.yml"
   pull_request:
+    branches: [develop]
     paths:
       - "ansible/**"
       - ".github/workflows/hipobject-ansible.yml"
@@ -23,8 +19,8 @@ permissions:
   contents: read
 
 jobs:
-  ansible-validate:
-    name: Galaxy, syntax-check, ansible-lint
+  ansible-check:
+    name: Ansible Check
     runs-on: ubuntu-latest
     defaults:
       run:

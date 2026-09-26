@@ -5,18 +5,61 @@
 
 /* AMD port of minio-cpp GetPutRDMA: PUT + GET over hipObject RDMA */
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
 #include <miniocpp/client.h>
+#include <unistd.h>
 
 #include "hipobj_minio/client.h"
+
+namespace {
+
+/* A position-dependent pattern, not a constant fill.
+ *
+ * This used to memset the buffer to 'A' and check afterwards that every byte
+ * was still 'A', which cannot distinguish a correct transfer from a
+ * byte-swapped, misaligned, short, duplicated or scattered one -- every one
+ * of those returns a buffer full of 'A'. A cheap LCG keyed on the offset
+ * makes each byte depend on where it is, so any of those failures shows up
+ * as a mismatch at a specific offset, which is also the first thing you want
+ * to know when it does. */
+uint8_t PatternByte(size_t offset, uint32_t seed) {
+  uint64_t x = (static_cast<uint64_t>(offset) + 1) * 6364136223846793005ULL +
+               seed;
+  x ^= x >> 33;
+  x *= 0xff51afd7ed558ccdULL;
+  x ^= x >> 33;
+  return static_cast<uint8_t>(x & 0xff);
+}
+
+void FillPattern(char* buf, size_t size, uint32_t seed) {
+  for (size_t i = 0; i < size; ++i) {
+    buf[i] = static_cast<char>(PatternByte(i, seed));
+  }
+}
+
+/* Returns the offset of the first mismatch, or size if the blob read back
+ * matches the blob written byte for byte. */
+size_t FirstMismatch(const char* buf, size_t size, uint32_t seed) {
+  for (size_t i = 0; i < size; ++i) {
+    if (static_cast<uint8_t>(buf[i]) != PatternByte(i, seed)) {
+      return i;
+    }
+  }
+  return size;
+}
+
+} // namespace
 
 int main(int argc, char* argv[]) {
   if (argc < 4) {
@@ -38,6 +81,15 @@ int main(int argc, char* argv[]) {
     gpu_enabled = std::string(argv[5]) == "gpu";
   }
 
+  /* Seeded per run, and printed, so a stale object left in the store by an
+   * earlier run cannot satisfy the readback. */
+  const uint32_t seed = static_cast<uint32_t>(::getpid()) ^
+                        static_cast<uint32_t>(std::time(nullptr));
+  std::cout << "Pattern seed " << seed << "\n";
+
+  std::vector<char> expected(bufsize);
+  FillPattern(expected.data(), bufsize, seed);
+
   minio::s3::BaseUrl base_url(host, false, "us-east-1");
   minio::creds::StaticProvider provider(access_key, secret_key);
   hipobj::minio::Client client(base_url, &provider);
@@ -51,9 +103,9 @@ int main(int argc, char* argv[]) {
       std::cerr << "hipMalloc failed: " << err << std::endl;
       return 1;
     }
-    err = hipMemset(dev_ptr, 'A', bufsize);
+    err = hipMemcpy(dev_ptr, expected.data(), bufsize, hipMemcpyHostToDevice);
     if (err != hipSuccess) {
-      std::cerr << "hipMemset failed: " << err << std::endl;
+      std::cerr << "hipMemcpy H2D failed: " << err << std::endl;
       (void)hipFree(dev_ptr);
       return 1;
     }
@@ -67,7 +119,7 @@ int main(int argc, char* argv[]) {
       std::cerr << "posix_memalign failed\n";
       return 1;
     }
-    std::memset(bufptr, 'A', bufsize);
+    std::memcpy(bufptr, expected.data(), bufsize);
     std::cout << "Host buffer " << bufsize << " bytes\n";
   }
 
@@ -89,11 +141,14 @@ int main(int argc, char* argv[]) {
   }
   std::cout << "PUT ok etag=" << presp.etag << std::endl;
 
+  /* Clobber the buffer before the GET. Without this the readback could be
+   * satisfied by whatever the PUT left behind, and a GET that transferred
+   * nothing at all would still verify. */
   if (gpu_enabled) {
-    (void)hipMemset(dev_ptr, 'U', bufsize);
+    (void)hipMemset(dev_ptr, 0x55, bufsize);
     (void)hipDeviceSynchronize();
   } else {
-    std::memset(bufptr, 'U', bufsize);
+    std::memset(bufptr, 0x55, bufsize);
   }
 
   minio::s3::GetObjectArgs gargs;
@@ -153,15 +208,25 @@ int main(int argc, char* argv[]) {
   out.close();
   std::cout << "Wrote output.bin (" << bufsize << " bytes)\n";
 
-  bool ok = true;
-  for (size_t i = 0; i < bufsize; ++i) {
-    if (hostptr[i] != 'A') {
-      ok = false;
-      break;
-    }
+  size_t bad = FirstMismatch(hostptr, bufsize, seed);
+  bool ok = bad == bufsize;
+  if (ok) {
+    std::cout << "Data integrity check passed (" << bufsize << " bytes, seed "
+              << seed << ")\n";
+  } else {
+    std::cout << "Data integrity check FAILED at offset " << bad
+              << ": expected 0x" << std::hex
+              << static_cast<int>(PatternByte(bad, seed)) << " got 0x"
+              << static_cast<int>(static_cast<uint8_t>(hostptr[bad]))
+              << std::dec << "\n";
   }
-  std::cout << (ok ? "Data integrity check passed\n"
-                   : "Data integrity check FAILED\n");
+
+  /* Whether the transfers actually used RDMA. The client falls back to
+   * ordinary HTTP silently when no NIC is available, so without this a lane
+   * that is meant to be exercising the RDMA data path passes over TCP. */
+  std::cout << hipobj::minio::TransferStatsLine(
+                 hipobj::minio::TransferStatsSnapshot())
+            << "\n";
 
   free(hostptr);
   if (gpu_enabled) {
