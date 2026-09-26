@@ -1,0 +1,535 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# MinIO bridge integration test (v1 protocol, minio-cpp, two VMs).
+#
+# This lane used to be three containers, and it could not do what its name
+# claimed. rocm-ernic serves an emulated PCI function over vfio-user; turning
+# that into a verbs device takes a guest kernel's ionic/ionic_rdma drivers.
+# With client and server in separate containers -- each running its own
+# loopback emulator, with nothing between them -- /sys/class/infiniband stayed
+# empty, HIPOBJ_NIC_HINT resolved to nothing, and hipobj::minio::Client fell
+# back to plain HTTP and returned success. The lane went green over TCP.
+#
+# So it is two VMs now, the same topology as the Two-VM Protocol lane: two
+# rocm-ernic instances joined by a tcp:manager / tcp:worker mesh, each bridged
+# onto ernicbr0 through its own tap and serving one emulated ionic function.
+# VM 1 (192.168.200.10) runs hipobj-rdma-test-server in v1 mode on port 9000;
+# VM 2 drives the minio-cpp bridge against it and asserts, from the bridge's
+# own counters, that every byte moved over RDMA.
+#
+# What it adds over Two-VM Protocol is the bridge entrypoint: round-trip
+# timing and a throughput figure per run, which is the number this lane
+# exists to watch. The GPU-buffer form of the same transfer is
+# hipobject-hardware-test-two-vm-gpu-direct.yml.
+
+name: hipObject - Hardware Test - MinIO Bridge
+
+on:
+  # PR-gated and manual only. Nothing reaches develop without passing
+  # this on the PR, so a second post-merge run would buy nothing but
+  # queue time.
+  pull_request:
+    branches: [develop]
+    paths:
+      - "src/**"
+      - "include/**"
+      - "test/**"
+      - "integrations/**"
+      - "ci/ernic/**"
+      - ".github/workflows/hipobject-hardware-test-minio-bridge.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Bump these intentionally when the ernic or rocjitsu images are updated.
+  # ERNIC_IMAGE: ernic.0b48aa1, the build whose rocm-ernic carries the s3
+  #   backend. Every tag here is the date-prefixed, content-versioned one
+  #   (<date>.<repo-sha>-<component>.<sha>-vfu.<sha>): immutable, so a rebuild
+  #   cannot change what this lane tests underneath it.
+  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244
+  ROCM_IMAGE: rocm/dev-ubuntu-24.04:10.0.0-full
+
+jobs:
+  minio-bridge:
+    name: MinIO Bridge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    # The previous container topology could not work and was gated off: with
+    # no VM in the picture the container's /sys/class/infiniband stays empty,
+    # so HIPOBJ_NIC_HINT=ernic0 never resolved. The missing piece was the
+    # guest, not the image tag. This is that topology, taken from rocm-ernic's
+    # own system-test-two-vms lane: two emulated NICs on one bridge, one
+    # guest per NIC, hipObject's v1 server in the first and the minio-cpp
+    # bridge client in the second.
+    container:
+      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
+      # /dev/net/tun and NET_ADMIN are as load-bearing as /dev/kvm: without
+      # them ionic_eth_net_send() has no fd and every guest frame is dropped,
+      # which looks exactly like a healthy-but-silent link.
+      options: --device /dev/kvm --device /dev/net/tun --cap-add=NET_ADMIN
+    env:
+      GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
+      GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
+      ERNIC_TAP_PREFIX: ernic-tap
+      ERNIC_TAP_BRIDGE: ernicbr0
+      TCP_PORT: 18515
+      VM1_SSH_PORT: 2222
+      VM2_SSH_PORT: 2223
+      # ernic_guest_setup derives guest addresses as <subnet>.<10 * index>.
+      VM1_ADDR: 192.168.200.10
+      SERVER_PORT: 9000
+      TEST_SIZE: 1048576
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - name: Checkout rocm-ernic (Ansible collection + guest driver sources)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          repository: ROCm/rocm-ernic
+          ref: develop
+          path: rocm-ernic
+
+      - name: Install deps
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq iproute2 sudo libibverbs1 libnl-3-200 \
+            libnl-route-3-200 ansible python3-jmespath
+          for attempt in 1 2 3; do
+            ansible-galaxy collection install community.general && break
+            echo "::warning::galaxy install failed (attempt ${attempt}/3)"
+            sleep $((attempt * 20))
+          done
+
+      - name: Build hipObject binaries (ROCm container)
+        run: |
+          docker run --rm \
+            --user root \
+            -v "${{ github.workspace }}:/hipobject:ro" \
+            -v "${{ github.workspace }}/ernic-build:/hipobject-build" \
+            -e ROCM_PATH=/opt/rocm \
+            "$ROCM_IMAGE" \
+            bash -c "
+              apt-get update -qq && \
+              apt-get install -y -qq git cmake ninja-build libibverbs-dev libnuma-dev \
+                libcurl4-openssl-dev libssl-dev \
+                nlohmann-json3-dev libpugixml-dev && \
+              cmake -B /hipobject-build -G Ninja -S /hipobject \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH=/opt/rocm \
+                -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
+                -DBUILD_TESTING=ON \
+                -DHIPOBJ_IONIC=ON \
+                -DHIPOBJ_BNXT=OFF \
+                -DHIPOBJ_INTEGRATION_TESTS=ON \
+                -DHIPOBJ_MINIO_CLIENT=ON \
+                -DHIPOBJ_BUILD_DOCS=OFF \
+                -DCMAKE_SKIP_INSTALL_RULES=ON && \
+              cmake --build /hipobject-build --parallel \$(nproc) \
+                --target hipobj-rdma-test-server minio-getput-rdma && \
+              mkdir -p /hipobject-build/rocm-libs && \
+              export LD_LIBRARY_PATH=/opt/rocm/lib && \
+              for b in /hipobject-build/test/integration/rdma-test-server/hipobj-rdma-test-server \
+                       /hipobject-build/integrations/minio-cpp/minio-getput-rdma; do \
+                ldd \$b \
+                  | awk '/=> \//{print \$3}' \
+                  | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so' \
+                  | xargs -r -I{} cp -L {} /hipobject-build/rocm-libs/; \
+              done && \
+              for b in /hipobject-build/test/integration/rdma-test-server/hipobj-rdma-test-server \
+                       /hipobject-build/integrations/minio-cpp/minio-getput-rdma; do \
+                if LD_LIBRARY_PATH=/hipobject-build/rocm-libs ldd \$b \
+                     | grep 'not found'; then \
+                  echo 'staged closure incomplete'; exit 1; \
+                fi; \
+              done && \
+              echo 'staged closure complete'
+            "
+
+      - name: Extract rocm-ernic binary from ernic image
+        run: |
+          docker create --name ernic-tmp-2vm "$ERNIC_IMAGE"
+          # Not the workspace: it is mounted noexec in the job container.
+          docker cp ernic-tmp-2vm:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
+          docker rm ernic-tmp-2vm
+          chmod +x /usr/local/bin/rocm-ernic
+          rocm-ernic --help > /tmp/ernic-help.txt
+          head -3 /tmp/ernic-help.txt
+
+      - name: Select QEMU accelerator and guest size
+        run: |
+          if [ -c /dev/kvm ] && ${QEMU_PATH:-}qemu-system-x86_64 -accel help 2>/dev/null | grep -qw kvm; then
+            echo "QEMU_ACCEL=kvm" >> "$GITHUB_ENV"
+            echo "QEMU_CPU=host"  >> "$GITHUB_ENV"
+          else
+            echo "QEMU_ACCEL=tcg"  >> "$GITHUB_ENV"
+            echo "QEMU_CPU=qemu64" >> "$GITHUB_ENV"
+          fi
+          HOST_MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
+          # IONIC_EQ_COUNT_MIN is 4: a guest with fewer online CPUs can never
+          # register the ibdev, so 4 is a floor and not a preference, even
+          # when that means oversubscribing the runner.
+          VM_VCPUS=$(( ($(nproc) - 1) / 2 )); [ "$VM_VCPUS" -lt 4 ] && VM_VCPUS=4
+          VM_MEM_MB=$(( HOST_MEM_MB * 3 / 4 / 2 ))
+          [ "$VM_MEM_MB" -lt 1024 ] && VM_MEM_MB=1024
+          [ "$VM_MEM_MB" -gt 4096 ] && VM_MEM_MB=4096
+          echo "VM_VCPUS=$VM_VCPUS"   >> "$GITHUB_ENV"
+          echo "VM_MEM_MB=$VM_MEM_MB" >> "$GITHUB_ENV"
+
+      - name: Fetch guest VM image
+        id: guest_image
+        uses: ./.github/actions/fetch-guest-vm
+        with:
+          repo: ${{ env.GUEST_ARTIFACT_REPO }}
+          tag: ${{ env.GUEST_ARTIFACT_TAG }}
+
+      - name: Read VM info
+        id: vm_info
+        run: |
+          OUT="${{ steps.guest_image.outputs.output_dir }}"
+          eval "$(python3 - "$OUT" <<'PYEOF'
+          import json, os, shlex, sys
+          out = sys.argv[1]
+          d = json.load(open(os.path.join(out, "vm-info.json")))
+          here = lambda p: os.path.join(out, os.path.basename(p)) if p else ""
+          keys = {
+            "VM_USER": d.get("username", "ci"),
+            "VM_DISK": here(d.get("image_path", "")),
+            "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
+          }
+          for k, v in keys.items():
+            print(f"{k}={shlex.quote(str(v))}")
+          PYEOF
+          )"
+          chmod 600 "$SSH_KEY_PRIVATE"
+          echo "vm_user=$VM_USER"         >> "$GITHUB_OUTPUT"
+          echo "vm_disk=$VM_DISK"         >> "$GITHUB_OUTPUT"
+          echo "ssh_key=$SSH_KEY_PRIVATE" >> "$GITHUB_OUTPUT"
+
+      - name: Create the per-VM disk overlays
+        id: overlays
+        run: |
+          # Overlays, not copies. Both VMs get one including the first: with
+          # VM 1 writing to the base directly, VM 2's backing file would
+          # mutate underneath it.
+          BASE="${{ steps.vm_info.outputs.vm_disk }}"
+          STEM="$(dirname "$BASE")/$(basename "$BASE" .qcow2)"
+          for n in 1 2; do
+            DISK="${STEM}.${n}.qcow2"
+            rm -f "$DISK"
+            qemu-img create -f qcow2 -F qcow2 -b "$BASE" "$DISK" > /dev/null
+            echo "vm_disk_${n}=$DISK" >> "$GITHUB_OUTPUT"
+            qemu-img info "$DISK" | head -4
+          done
+
+      - name: Create the host bridge and per-instance TAPs
+        run: |
+          # ernic_host_setup owns this; run the role rather than open-coding
+          # `ip tuntap`. Order matters -- rocm-ernic treats a missing --tap
+          # as a startup failure, so the interfaces have to exist first.
+          PROJECT_ROOT="${GITHUB_WORKSPACE}/rocm-ernic"
+          export ANSIBLE_ROLES_PATH="${PROJECT_ROOT}/ansible/roles"
+          cd "${PROJECT_ROOT}/ansible"
+          ansible-playbook playbooks/host-setup.yml \
+            -e ernic_project_root="$PROJECT_ROOT" \
+            -e ernic_build=false \
+            -e ernic_install_service=false \
+            -e ernic_gpu_passthrough=false \
+            -e ernic_instances=2 \
+            -e ernic_tap_owner=root \
+            -e ernic_tap_bridge="${ERNIC_TAP_BRIDGE}" \
+            -e ernic_tap_prefix="${ERNIC_TAP_PREFIX}"
+          ip -o link show "${ERNIC_TAP_BRIDGE}"
+          for n in 1 2; do ip -o link show "${ERNIC_TAP_PREFIX}${n}"; done
+
+      - name: Start the two rocm-ernic instances
+        run: |
+          # --backend is the RDMA data path, --tap the Ethernet one; both are
+          # needed. --mac is not optional once two instances share a bridge:
+          # the emulator's built-in address is a constant, so without it both
+          # guests come up on the same MAC and ARP can never resolve.
+          for n in 1 2; do rm -f "/tmp/vfio-user-server${n}.sock"; done
+
+          rocm-ernic \
+            --socket /tmp/vfio-user-server1.sock \
+            --backend "tcp:manager:listen:${TCP_PORT}" \
+            --tap "${ERNIC_TAP_PREFIX}1" \
+            --mac 02:a0:d1:00:00:01 \
+            --verbose > /tmp/server1.log 2>&1 &
+          echo "ERNIC_PID1=$!" >> "$GITHUB_ENV"
+
+          for i in $(seq 1 30); do
+            timeout 1 bash -c "echo > /dev/tcp/localhost/${TCP_PORT}" 2>/dev/null && break
+            sleep 1
+          done
+          timeout 1 bash -c "echo > /dev/tcp/localhost/${TCP_PORT}" 2>/dev/null || {
+            echo "manager never listened on ${TCP_PORT}"; cat /tmp/server1.log; exit 1; }
+
+          rocm-ernic \
+            --socket /tmp/vfio-user-server2.sock \
+            --backend "tcp:worker:localhost:${TCP_PORT}" \
+            --tap "${ERNIC_TAP_PREFIX}2" \
+            --mac 02:a0:d1:00:00:02 \
+            --verbose > /tmp/server2.log 2>&1 &
+          echo "ERNIC_PID2=$!" >> "$GITHUB_ENV"
+
+          for n in 1 2; do
+            for i in $(seq 1 45); do
+              [ -S "/tmp/vfio-user-server${n}.sock" ] && break
+              sleep 1
+            done
+            [ -S "/tmp/vfio-user-server${n}.sock" ] || {
+              echo "server${n} socket never appeared"; cat "/tmp/server${n}.log"; exit 1; }
+            chmod 666 "/tmp/vfio-user-server${n}.sock"
+          done
+
+      - name: Verify the TCP mesh formed
+        run: |
+          for i in $(seq 1 30); do
+            grep -q "TCP: Registered with manager" /tmp/server2.log && \
+            grep -q "TCP: Registered node" /tmp/server1.log && break
+            sleep 2
+          done
+          grep -q "TCP: Registered with manager" /tmp/server2.log || {
+            echo "worker never registered"
+            tail -40 /tmp/server1.log; tail -40 /tmp/server2.log; exit 1; }
+          grep -m1 "TCP: Registered node" /tmp/server1.log
+          grep -m1 "TCP: Received mesh topology" /tmp/server2.log || true
+
+      - name: Start the two QEMU VMs
+        run: |
+          start_vm() {
+            n=$1; disk=$2; port=$3
+            ${QEMU_PATH:-}qemu-system-x86_64 \
+              -machine q35,accel=${QEMU_ACCEL},memory-backend=mem${n} \
+              -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
+              -object memory-backend-memfd,id=mem${n},share=on,size=${VM_MEM_MB}M \
+              -nographic \
+              -drive file="$disk",format=qcow2,if=virtio \
+              -netdev user,id=net0,hostfwd=tcp::${port}-:22 \
+              -device virtio-net-pci,netdev=net0 \
+              -device '{"driver":"vfio-user-pci","socket":{"type":"unix","path":"/tmp/vfio-user-server'"$n"'.sock"}}' \
+              -serial file:/tmp/qemu-vm${n}-console.log -monitor none \
+              -qmp unix:/tmp/qmp-vm${n}.sock,server=on,wait=off > /tmp/qemu-vm${n}.log 2>&1 &
+            echo "QEMU_PID${n}=$!" >> "$GITHUB_ENV"
+          }
+          start_vm 1 "${{ steps.overlays.outputs.vm_disk_1 }}" "$VM1_SSH_PORT"
+          start_vm 2 "${{ steps.overlays.outputs.vm_disk_2 }}" "$VM2_SSH_PORT"
+          sleep 5
+          for pid in $(awk -F= '/^QEMU_PID/{print $2}' "$GITHUB_ENV"); do
+            kill -0 "$pid" 2>/dev/null || { cat /tmp/qemu-vm1.log /tmp/qemu-vm2.log; exit 1; }
+          done
+
+      - name: Wait for both VMs over SSH
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
+            for i in $(seq 1 60); do
+              ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+                  -o ConnectTimeout=5 -p "$port" "${VM_USER}@localhost" true \
+                2>/dev/null && break
+              sleep 5
+            done
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -p "$port" "${VM_USER}@localhost" echo "VM_READY on $port" || {
+              cat "/tmp/qemu-vm1-console.log" "/tmp/qemu-vm2-console.log"; exit 1; }
+          done
+
+      - name: Install kernel headers and build tools in both VMs
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -p "$port" "${VM_USER}@localhost" bash -s << 'EOFVM'
+          set -e
+          KVER=$(uname -r)
+          # A guest on a mainline kernel already has its headers from the
+          # .deb, and kernel.ubuntu.com has no Packages index behind it.
+          HEADER_PKG=""
+          [ -d "/lib/modules/${KVER}/build" ] || HEADER_PKG="linux-headers-${KVER}"
+          APT_LOCK_WAIT="-o DPkg::Lock::Timeout=300"
+          for i in 1 2 3; do sudo apt-get $APT_LOCK_WAIT update -qq && break || sleep 5; done
+          for i in 1 2 3 4 5; do
+            sudo DEBIAN_FRONTEND=noninteractive apt-get $APT_LOCK_WAIT install -y -qq \
+              ${HEADER_PKG} dkms git build-essential cmake ninja-build \
+              pkg-config libnl-3-dev libnl-route-3-dev libudev-dev && break
+            [ "$i" -eq 5 ] && { echo "apt-get install failed after 5 attempts"; exit 1; }
+            sleep 10
+          done
+          echo "Kernel packages installed for ${KVER}"
+          EOFVM
+          done
+
+      - name: Provision both VMs with the ernic Ansible collection
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ERNIC_RUN_DIR=/tmp/ernic-ci
+          mkdir -p "$ERNIC_RUN_DIR"
+          cat > "$ERNIC_RUN_DIR/instances.json" << EOFJSON
+          {
+            "instances": [
+              { "id": 1, "vm": { "vm_name": "hipobj-bridge-1",
+                                 "ssh_port": ${VM1_SSH_PORT}, "ssh_user": "${VM_USER}" } },
+              { "id": 2, "vm": { "vm_name": "hipobj-bridge-2",
+                                 "ssh_port": ${VM2_SSH_PORT}, "ssh_user": "${VM_USER}" } }
+            ]
+          }
+          EOFJSON
+          export ANSIBLE_HOST_KEY_CHECKING=false
+          export ANSIBLE_PRIVATE_KEY_FILE="$SSH_KEY"
+          PROJECT_ROOT="${GITHUB_WORKSPACE}/rocm-ernic"
+          export ANSIBLE_ROLES_PATH="${PROJECT_ROOT}/ansible/roles"
+          cd "${PROJECT_ROOT}/ansible"
+          ansible-playbook ci-site.yml --tags guest-setup \
+            -e ernic_project_root="$PROJECT_ROOT" \
+            -e ernic_run_dir="$ERNIC_RUN_DIR" \
+            -e ernic_instances=2 \
+            -e ernic_vm_ssh_base_port="$VM1_SSH_PORT" \
+            -e ernic_vm_ssh_user="$VM_USER" \
+            -e ernic_gpu_passthrough=false \
+            -e ernic_guest_agent=false \
+            -e ernic_set_hostname=false
+
+      - name: Verify the RDMA device in both VMs
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          for spec in "1:${VM1_SSH_PORT}" "2:${VM2_SSH_PORT}"; do
+            n=${spec%%:*}; port=${spec##*:}
+            # By PCI vendor ID, never by name: the kernel registers ionic_%d
+            # and udev rewrites it twice.
+            DEV=$(ssh $SSH_OPTS -p "$port" "${VM_USER}@localhost" 'sh -s' \
+              < "${GITHUB_WORKSPACE}/rocm-ernic/scripts/find-rdma-device.sh" | tr -d '\r') || true
+            [ -n "$DEV" ] || {
+              echo "VM ${n}: no RDMA device"
+              ssh $SSH_OPTS -p "$port" "${VM_USER}@localhost" \
+                'ibv_devices; lsmod | grep ionic; dmesg | grep -i ionic | tail -30' || true
+              exit 1
+            }
+            ssh $SSH_OPTS -p "$port" "${VM_USER}@localhost" "ibv_devinfo -d $DEV" \
+              | grep -q PORT_ACTIVE || { echo "VM ${n}: $DEV not PORT_ACTIVE"; exit 1; }
+            echo "VM ${n}: $DEV is PORT_ACTIVE"
+            echo "RDMA_DEVICE_${n}=$DEV" >> "$GITHUB_ENV"
+          done
+
+      - name: Copy hipObject binaries into both VMs
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          BUILD="${GITHUB_WORKSPACE}/ernic-build"
+          for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
+            SCP="scp -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -P $port"
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -p "$port" \
+              "${VM_USER}@localhost" \
+              'mkdir -p /tmp/hipobject-build/test/integration/rdma-test-server /tmp/hipobject-build/integrations/minio-cpp'
+            $SCP -r "${BUILD}/rocm-libs" "${VM_USER}@localhost:/tmp/hipobject-build/rocm-libs"
+            $SCP "${BUILD}/test/integration/rdma-test-server/hipobj-rdma-test-server" \
+                 "${VM_USER}@localhost:/tmp/hipobject-build/test/integration/rdma-test-server/"
+            $SCP "${BUILD}/integrations/minio-cpp/minio-getput-rdma" \
+                 "${VM_USER}@localhost:/tmp/hipobject-build/integrations/minio-cpp/"
+            $SCP ci/ernic/server-entrypoint.sh \
+                 ci/ernic/minio-v1-client-entrypoint.sh \
+                 ci/ernic/assert-transfer.sh \
+                 "${VM_USER}@localhost:/tmp/hipobject-build/"
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -p "$port" \
+              "${VM_USER}@localhost" 'chmod +x /tmp/hipobject-build/*.sh \
+                 /tmp/hipobject-build/integrations/minio-cpp/* \
+                 /tmp/hipobject-build/test/integration/rdma-test-server/*'
+          done
+
+      - name: Start hipobj-rdma-test-server in VM 1
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          # systemd-run, not `nohup ... &` over ssh: a backgrounded remote
+          # command leaves nothing to ask about afterwards. If it dies at
+          # startup the only evidence is an empty log file, which is exactly
+          # how the first run of this lane failed.
+          ssh $SSH_OPTS -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
+            "sudo systemd-run --unit=hipobj-server \
+               --setenv=HIPOBJ_NIC_HINT='${RDMA_DEVICE_1}' \
+               --setenv=SERVER_PORT='${SERVER_PORT}' \
+               /tmp/hipobject-build/server-entrypoint.sh"
+
+          dump_server() {
+            echo "=== VM 1: systemctl status hipobj-server ==="
+            ssh $SSH_OPTS -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
+              'systemctl status hipobj-server --no-pager -l || true
+               sudo journalctl -u hipobj-server --no-pager | tail -60
+               ss -ltnp 2>/dev/null | head -20
+               ip -4 -br addr show' || true
+          }
+
+          # From VM 2, not from VM 1: the point of the probe is that the
+          # listener is reachable across the emulated wire.
+          for i in $(seq 1 45); do
+            ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+              "timeout 2 bash -c 'echo > /dev/tcp/${VM1_ADDR}/${SERVER_PORT}'" \
+              2>/dev/null && { echo "server reachable at ${VM1_ADDR}:${SERVER_PORT}"; break; }
+            # No point waiting out the loop once the unit has given up.
+            ssh $SSH_OPTS -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
+              'systemctl is-active --quiet hipobj-server' || {
+              echo "hipobj-server is no longer running"; dump_server; exit 1; }
+            sleep 2
+          done
+          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+            "timeout 2 bash -c 'echo > /dev/tcp/${VM1_ADDR}/${SERVER_PORT}'" || {
+            echo "VM 2 cannot reach the test server"
+            dump_server
+            exit 1
+          }
+
+      - name: Run the minio-cpp bridge client in VM 2
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          # EXPECT_TRANSPORT=rdma is the whole point of the VM conversion: the
+          # bridge falls back to HTTP silently, so without this assertion a
+          # lane that lost its wire still passes.
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+            "HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
+             BUILD_DIR=/tmp/hipobject-build \
+             SERVER_ENDPOINT='http://${VM1_ADDR}:${SERVER_PORT}' \
+             TEST_SIZE='${TEST_SIZE}' \
+             GPU_MODE=nogpu \
+             EXPECT_TRANSPORT=rdma \
+             /tmp/hipobject-build/minio-v1-client-entrypoint.sh"
+
+      - name: Collect logs
+        if: always()
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          for n in 1 2; do
+            echo "=== server${n}.log ==="        && tail -100 "/tmp/server${n}.log"        || true
+            echo "=== qemu-vm${n}.log ==="       && cat "/tmp/qemu-vm${n}.log"             || true
+            echo "=== qemu-vm${n}-console ===" && tail -200 "/tmp/qemu-vm${n}-console.log" || true
+          done
+          echo "=== VM 1 hipobj-server journal ==="
+          timeout 60 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
+            'sudo journalctl -u hipobj-server --no-pager | tail -100' || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          kill "${QEMU_PID1:-}" "${QEMU_PID2:-}"   2>/dev/null || true
+          kill "${ERNIC_PID1:-}" "${ERNIC_PID2:-}" 2>/dev/null || true
+          docker run --rm -v "${{ github.workspace }}/ernic-build:/d" \
+            busybox sh -c "rm -rf /d/*" 2>/dev/null || true
+          rm -rf "${{ github.workspace }}/ernic-build" 2>/dev/null || true

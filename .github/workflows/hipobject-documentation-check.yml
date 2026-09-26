@@ -1,19 +1,13 @@
-name: hipObject docs check
+name: hipObject - Documentation Check
 
 on:
-  push:
+  pull_request:
     branches: [develop]
     paths:
       - 'docs/**'
       - 'include/**/*.h'
       - 'README.md'
-      - '.github/workflows/hipobject-docs.yml'
-  pull_request:
-    paths:
-      - 'docs/**'
-      - 'include/**/*.h'
-      - 'README.md'
-      - '.github/workflows/hipobject-docs.yml'
+      - '.github/workflows/hipobject-documentation-check.yml'
   workflow_dispatch:
 
 concurrency:
@@ -24,8 +18,8 @@ permissions:
   contents: read
 
 jobs:
-  sphinx:
-    name: sphinx-build
+  documentation-check:
+    name: Documentation Check
     runs-on: ubuntu-latest
     steps:
     - name: Check out code
@@ -44,7 +38,7 @@ jobs:
       run: cmake --build build --target sphinx-html
 
   rst-lint:
-    name: rst-lint
+    name: RST Lint
     runs-on: ubuntu-latest
     steps:
     - name: Check out code

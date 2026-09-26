@@ -1,16 +1,27 @@
-name: MinIO Integration Check
+name: hipObject - MinIO Integration Check
 
 on:
-  push:
-    branches: [develop]
   pull_request:
     branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 env:
-  MINIO_DEB_URL: https://dl.min.io/aistor/minio/release/linux-amd64/minio_20260919170525.0.0_amd64.deb
+  # dl.min.io returns HTTP 410 for all binaries and the minio/minio and
+  # minio/mc images were withdrawn from Docker Hub, so both binaries now come
+  # from the GitHub release assets. MinIO stopped attaching assets to releases
+  # after the tags below, so these are the last downloadable builds -- pinned
+  # with digests rather than tracking a moving "latest".
+  MINIO_RELEASE: RELEASE.2025-09-07T16-13-09Z
+  MINIO_SHA256: 7c5bd8512c6e966455b1d198209358b2d191c77a83ab377c4073281065fb855f
+  MC_RELEASE: RELEASE.2025-08-13T08-35-41Z
+  MC_SHA256: 01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891
   MINIO_ROOT_USER: minioadmin
   MINIO_ROOT_PASSWORD: minioadmin
   MINIO_ENDPOINT: http://127.0.0.1:9000
@@ -20,13 +31,17 @@ env:
 
 jobs:
   minio-integration:
-    if: false  # TODO: MinIO (AIStor) downloads now require accepting a license that fails CI; re-enable once resolved
+    name: MinIO Integration Check
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     container:
-      image: rocm/dev-ubuntu-24.04:7.2
+      image: rocm/dev-ubuntu-24.04:10.0.0-full
       options: --user root
     env:
       ROCM_PATH: /opt/rocm
+      # The full ROCm image ships libamdhip64 in /opt/rocm/lib but leaves it out
+      # of the loader cache, so ctest binaries fail to start without this.
+      LD_LIBRARY_PATH: /opt/rocm/lib
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
@@ -44,29 +59,34 @@ jobs:
             libnuma-dev
 
       - name: Install mc (MinIO client)
-        run: |
-          curl -fsSL https://dl.min.io/aistor/mc/release/linux-amd64/mc \
-            -o /usr/local/bin/mc
-          chmod +x /usr/local/bin/mc
-
-      - name: Install MinIO RDMA server
         shell: bash
         run: |
-          curl -fsSL "$MINIO_DEB_URL" -o /tmp/minio.rdma.deb
-          dpkg --contents /tmp/minio.rdma.deb | grep -i minio || true
-          apt-get install -y /tmp/minio.rdma.deb
-          find / -name minio -type f 2>/dev/null || true
+          curl -fsSL \
+            "https://github.com/minio/mc/releases/download/${MC_RELEASE}/mc.linux-amd64.${MC_RELEASE}" \
+            -o /usr/local/bin/mc
+          echo "${MC_SHA256}  /usr/local/bin/mc" | sha256sum -c -
+          chmod +x /usr/local/bin/mc
+          mc --version
+
+      - name: Install MinIO server
+        shell: bash
+        run: |
+          # Community MinIO: it has no RDMA data plane, which is what the
+          # control-plane fallback assertions below expect.
+          curl -fsSL \
+            "https://github.com/minio/minio/releases/download/${MINIO_RELEASE}/minio.linux-amd64.${MINIO_RELEASE}" \
+            -o /usr/local/bin/minio
+          echo "${MINIO_SHA256}  /usr/local/bin/minio" | sha256sum -c -
+          chmod +x /usr/local/bin/minio
+          minio --version
 
       - name: Start MinIO
         shell: bash
         run: |
           mkdir -p /tmp/minio-data
-          MINIO_BIN="$(find -L /usr/local/bin /usr/bin -name 'minio' -type f -executable 2>/dev/null | head -1)"
-          if [ -z "$MINIO_BIN" ]; then echo "minio binary not found"; exit 1; fi
-          echo "Using minio at $MINIO_BIN"
           MINIO_ROOT_USER=$MINIO_ROOT_USER \
           MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD \
-            "$MINIO_BIN" server /tmp/minio-data \
+            /usr/local/bin/minio server /tmp/minio-data \
               --address 127.0.0.1:9000 \
               --console-address 127.0.0.1:9001 \
               &>/tmp/minio.log &

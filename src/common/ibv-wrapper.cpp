@@ -9,6 +9,7 @@
 
 #include "ibv-wrapper.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 
@@ -219,16 +220,21 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length,
     if (status != HSA_STATUS_SUCCESS) {
       fprintf(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: %d\n",
               status);
-      return nullptr;
+    } else {
+      struct ibv_mr* mr = funcs_.reg_dmabuf_mr(pd, offset, length,
+                                               (uint64_t)(uintptr_t)addr, fd,
+                                               access);
+      if (mr) {
+        dmabuf_fd_map_[(uintptr_t)mr] = fd;
+        return mr;
+      }
+      fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n",
+              strerror(errno));
+      close(fd);
     }
-
-    struct ibv_mr* mr = funcs_.reg_dmabuf_mr(pd, offset, length,
-                                             (uint64_t)(uintptr_t)addr, fd,
-                                             access);
-    if (mr)
-      dmabuf_fd_map_[(uintptr_t)mr] = fd;
-
-    return mr;
+    // Fall through to the plain path: it fails too for device memory, but
+    // the caller distinguishes "no MR" from "wrong MR" and we must not
+    // invent a registration here.
   }
 
   int is_access_const = __builtin_constant_p(

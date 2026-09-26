@@ -38,7 +38,7 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
                IBV_ACCESS_LOCAL_WRITE;
   struct ibv_mr* mr = ibv.reg_mr(pd, devPtr, size, access);
   if (mr) {
-    entries_[key] = {mr, size, true};
+    entries_[key] = {mr, size, true, static_cast<uint64_t>(key), nullptr};
     return 0;
   }
   void* hostBuf = nullptr;
@@ -52,8 +52,15 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
     (void)hipHostFree(hostBuf);
     return -1;
   }
-  entries_[key] = {mr, size, false};
+  entries_[key] = {mr, size, false, reinterpret_cast<uint64_t>(hostBuf),
+                   hostBuf};
   return 0;
+}
+
+uint64_t BufferMap::lookupRemoteAddr(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  return it == entries_.end() ? 0 : it->second.remoteAddr;
 }
 
 int BufferMap::deregisterBuffer(void* devPtr) {
@@ -66,10 +73,9 @@ int BufferMap::deregisterBuffer(void* devPtr) {
     return -1; /* pinned by a live v2 connection */
   }
   BufEntry& ent = it->second;
-  void* hostBuf = (!ent.isDmabuf) ? ent.mr->addr : nullptr;
   ibv.dereg_mr(ent.mr);
-  if (hostBuf) {
-    (void)hipHostFree(hostBuf);
+  if (ent.hostBuf) {
+    (void)hipHostFree(ent.hostBuf);
   }
   entries_.erase(it);
   return 0;
@@ -77,10 +83,9 @@ int BufferMap::deregisterBuffer(void* devPtr) {
 
 void BufferMap::deregisterAll() {
   for (auto& [key, ent] : entries_) {
-    void* hostBuf = (!ent.isDmabuf) ? ent.mr->addr : nullptr;
     ibv.dereg_mr(ent.mr);
-    if (hostBuf) {
-      (void)hipHostFree(hostBuf);
+    if (ent.hostBuf) {
+      (void)hipHostFree(ent.hostBuf);
     }
   }
   entries_.clear();
@@ -93,6 +98,12 @@ struct ibv_mr* BufferMap::lookupMr(void* devPtr) {
     return nullptr;
   }
   return it->second.mr;
+}
+
+void* BufferMap::lookupHostBuf(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  return it == entries_.end() ? nullptr : it->second.hostBuf;
 }
 
 size_t BufferMap::lookupSize(void* devPtr) const {
