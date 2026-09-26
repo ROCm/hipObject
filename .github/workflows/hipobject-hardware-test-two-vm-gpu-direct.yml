@@ -12,13 +12,15 @@
 #
 #   VM 1 (192.168.200.10): ernic NIC only. hipobj-rdma-test-server, v1, :9000.
 #   VM 2:                  ernic NIC + rocjitsu's emulated gfx1250, and
-#                          minio-getput-rdma driving a real hipMalloc'd
-#                          device buffer across the wire to VM 1.
+#                          minio-getput-rdma driving either a real hipMalloc'd
+#                          device buffer or an explicit host buffer across the
+#                          wire to VM 1.
 #
 # So the GPU is on one side of the transfer and not the other, and the bytes
 # cross an emulated fabric rather than a loopback inside one process. Nothing
 # else in the matrix covers that: Two-VM Protocol is two guests with host
-# buffers, GPU Direct is one guest with a device buffer.
+# buffers, GPU Direct is one guest. This workflow now runs the asymmetric
+# topology in both host-buffer and device-buffer modes.
 #
 # Two rocm-ernic instances on the runner, joined by a tcp:manager /
 # tcp:worker mesh and each bridged onto ernicbr0 through its own tap, serve
@@ -67,9 +69,17 @@ env:
 
 jobs:
   two-vm-gpu-direct:
-    name: Two-VM GPU Direct
+    name: Two-VM GPU Direct (${{ matrix.buffer_label }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - buffer_label: GPU buffer
+            gpu_mode: gpu
+          - buffer_label: Host buffer
+            gpu_mode: nogpu
     # The previous container topology could not work and was gated off: with
     # no VM in the picture the container's /sys/class/infiniband stays empty,
     # so HIPOBJ_NIC_HINT=ernic0 never resolved. The missing piece was the
@@ -615,20 +625,18 @@ jobs:
             exit 1
           }
 
-      - name: Run the GPU-buffer v1 client in VM 2
+      - name: Run the ${{ matrix.buffer_label }} v1 client in VM 2
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          # sudo: /dev/kfd and /dev/dri/render* are root:render 0660 and the
-          # guest's login user is in neither group, so the HIP runtime
-          # enumerates no agent and hipMalloc returns hipErrorNoDevice.
+          GPU_MODE="${{ matrix.gpu_mode }}"
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
             -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
             "sudo env HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
                BUILD_DIR=/tmp/hipobject-build \
                SERVER_ENDPOINT='http://${VM1_ADDR}:${SERVER_PORT}' \
                TEST_SIZE='${TEST_SIZE}' \
-               GPU_MODE=gpu \
+               GPU_MODE='${GPU_MODE}' \
                /tmp/hipobject-build/client-entrypoint.sh"
 
       - name: Collect logs

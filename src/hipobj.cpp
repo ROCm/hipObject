@@ -65,9 +65,9 @@ static bool buildRdmaToken(const void* devPtr, size_t size, off_t offset,
 }
 
 static int finishTransferAfterReply(const char* reply, size_t replyLen,
-                                   bool requiresDeviceSync) {
- RdmaToken peerToken{};
- int httpCode = 0;
+                                    bool requiresDeviceSync) {
+  RdmaToken peerToken{};
+  int httpCode = 0;
   if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
     if (connectRcPeer(g_conn, peerToken) != 0) {
       return -1;

@@ -58,7 +58,7 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
                IBV_ACCESS_LOCAL_WRITE;
   struct ibv_mr* mr = ibv.reg_mr(pd, devPtr, size, access);
   if (mr) {
-    entries_[key] = {mr, size, true, false, static_cast<uint64_t>(key),
+    entries_[key] = {mr,     size, true, false, static_cast<uint64_t>(key),
                      nullptr};
     return 0;
   }
@@ -73,8 +73,8 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
     freeOwnedHostBuffer(hostBuf);
     return -1;
   }
-  entries_[key] = {mr, size, false, true,
-                   reinterpret_cast<uint64_t>(hostBuf), hostBuf};
+  entries_[key] = {
+    mr, size, false, true, reinterpret_cast<uint64_t>(hostBuf), hostBuf};
   return 0;
 }
 
@@ -91,8 +91,8 @@ int BufferMap::registerHostBuffer(void* hostPtr, size_t size,
   if (!mr) {
     return -1;
   }
-  entries_[key] = {mr, size, false, false,
-                   reinterpret_cast<uint64_t>(hostPtr), nullptr};
+  entries_[key] = {
+    mr, size, false, false, reinterpret_cast<uint64_t>(hostPtr), nullptr};
   return 0;
 }
 
