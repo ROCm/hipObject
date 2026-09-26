@@ -484,20 +484,27 @@ jobs:
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -p "$VM2_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' | tee /tmp/lspci-vm2.txt
-          # 1dd8:100a is the Pensando ionic NIC; 1002: is the rocjitsu GPU.
-          grep -q '1dd8:100a' /tmp/lspci-vm2.txt || {
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          # Count by sysfs vendor/device, never by parsing lspci. lspci needs
+          # /usr/share/misc/pci.ids, and a guest this early is still running
+          # the boot's apt work -- one run caught pciutils mid-rewrite, and
+          # lspci bailed with "Parse error at line 28286" after one device,
+          # which reads exactly like a function that never attached.
+          count() {
+            ssh $SSH_OPTS -p "$2" "${VM_USER}@localhost" \
+              "grep -lix '$1' /sys/bus/pci/devices/*/vendor 2>/dev/null | wc -l" | tr -d '\r'
+          }
+          # 0x1dd8 is Pensando (the emulated ionic NIC), 0x1002 is AMD (rocjitsu).
+          [ "$(count 0x1dd8 "$VM2_SSH_PORT")" -ge 1 ] || {
             echo "VM 2: emulated ionic NIC not enumerated"; exit 1; }
-          grep -qi '1002:' /tmp/lspci-vm2.txt || {
+          [ "$(count 0x1002 "$VM2_SSH_PORT")" -ge 1 ] || {
             echo "VM 2: emulated rocjitsu GPU not enumerated"; exit 1; }
           # VM 1 must NOT have one -- the asymmetry is the point of the lane.
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -p "$VM1_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' > /tmp/lspci-vm1.txt
-          if grep -qi '1002:' /tmp/lspci-vm1.txt; then
+          if [ "$(count 0x1002 "$VM1_SSH_PORT")" -ne 0 ]; then
             echo "VM 1 has a GPU; this lane is supposed to be asymmetric"; exit 1
           fi
           echo "VM 2 has both functions, VM 1 has only the NIC"
+          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' || true
 
       - name: Stage ip_discovery.bin into VM 2
         run: |

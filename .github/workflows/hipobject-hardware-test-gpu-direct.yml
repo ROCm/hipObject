@@ -334,14 +334,23 @@ jobs:
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -p $SSH_PORT "${VM_USER}@localhost" 'lspci -nn' | tee /tmp/lspci.txt
-          # 1dd8:100a is the Pensando ionic NIC; 1002: is the rocjitsu GPU.
-          grep -q '1dd8:100a' /tmp/lspci.txt || {
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          # Count by sysfs vendor/device, never by parsing lspci. lspci needs
+          # /usr/share/misc/pci.ids, and a guest this early is still running
+          # the boot's apt work -- the two-VM lane caught pciutils mid-rewrite,
+          # and lspci bailed with "Parse error at line 28286" after one device,
+          # which reads exactly like a function that never attached.
+          count() {
+            ssh $SSH_OPTS -p "$SSH_PORT" "${VM_USER}@localhost" \
+              "grep -lix '$1' /sys/bus/pci/devices/*/vendor 2>/dev/null | wc -l" | tr -d '\r'
+          }
+          # 0x1dd8 is Pensando (the emulated ionic NIC), 0x1002 is AMD (rocjitsu).
+          [ "$(count 0x1dd8)" -ge 1 ] || {
             echo "emulated ionic NIC not enumerated"; exit 1; }
-          grep -qi '1002:' /tmp/lspci.txt || {
+          [ "$(count 0x1002)" -ge 1 ] || {
             echo "emulated rocjitsu GPU not enumerated"; exit 1; }
           echo "both emulated PCI functions enumerated"
+          ssh $SSH_OPTS -p "$SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' || true
 
       - name: Provision the VM with the ernic Ansible collection
         run: |
