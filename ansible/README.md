@@ -1,7 +1,7 @@
 # Ansible: MinIO S3-over-RDMA server and hipObject client
 
 This directory provisions two classes of hosts: a **MinIO RDMA server**
-(AIStor `.deb` URL from [STUFF.md](../STUFF.md)) and an **AMD GPU client**
+(AIStor `.deb` URL in `group_vars/minio_rdma_servers.yml`) and an **AMD GPU client**
 that applies `sbates130272.batesste` roles (`rdma_setup`, `rocm_setup`),
 builds hipObject with `HIPOBJ_MINIO_CLIENT`, and runs the
 `minio-getput-rdma` example against GPU memory per
