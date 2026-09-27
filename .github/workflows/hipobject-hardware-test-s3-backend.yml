@@ -1,0 +1,440 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# S3-backend integration test (rocm-ernic --backend s3, one guest VM).
+#
+# rocm-ernic runs on the runner with an in-process S3 object store whose
+# HTTP endpoint is terminated in-band on the emulated wire, so one guest VM
+# and one server are a complete object fabric -- no tap, no second VM. The
+# VM attaches the vfio-user function, is provisioned with the ionic DKMS
+# driver by rocm-ernic's own Ansible collection, and then runs
+# minio-getput-rdma against the store with HIPOBJ_NIC_HINT set to the
+# discovered device.
+#
+# This is the job that exercises the RDMA data path on host buffers: a
+# passing run carries x-amz-rdma-token / x-amz-rdma-reply on the wire.
+
+name: hipObject - Hardware Test - S3 Backend
+
+on:
+  # PR-gated and manual only. Nothing reaches develop without passing
+  # this on the PR, so a second post-merge run would buy nothing but
+  # queue time.
+  pull_request:
+    branches: [develop]
+    paths:
+      - "src/**"
+      - "include/**"
+      - "test/**"
+      - "integrations/**"
+      - "ci/ernic/**"
+      - ".github/workflows/hipobject-hardware-test-s3-backend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Bump these intentionally when the ernic or rocjitsu images are updated.
+  # ERNIC_IMAGE: ernic.0b48aa1, the build whose rocm-ernic carries the s3
+  #   backend. Every tag here is the date-prefixed, content-versioned one
+  #   (<date>.<repo-sha>-<component>.<sha>-vfu.<sha>): immutable, so a rebuild
+  #   cannot change what this lane tests underneath it.
+  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244
+  ROCM_IMAGE: rocm/dev-ubuntu-24.04:10.0.0-full
+
+jobs:
+  s3-backend:
+    name: S3 Backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # Run inside the same QEMU+libvfio-user image used by rocm-ernic's
+    # s3-lane: has QEMU, oras, zstd, and libvfio-user pre-installed.
+    container:
+      image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
+      options: --device /dev/kvm
+    env:
+      # Matches the rocm-ernic s3-lane guest artifact.
+      GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
+      GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
+      S3_ADDR: 192.168.200.1
+      S3_PORT: 9000
+      SSH_PORT: 2222
+      # getput-rdma hardcodes this bucket, and the backend defaults to
+      # "ernic", so it has to be passed explicitly or every PUT 400s.
+      S3_BUCKET: hipobj-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+
+      - name: Checkout rocm-ernic (Ansible collection + guest driver sources)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          repository: ROCm/rocm-ernic
+          ref: develop
+          path: rocm-ernic
+
+      - name: Install deps
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq iproute2 libibverbs1 libnl-3-200 libnl-route-3-200 \
+            ansible python3-jmespath
+          # Galaxy drops connections often enough to fail a lane on its own.
+          for attempt in 1 2 3; do
+            ansible-galaxy collection install community.general && break
+            echo "::warning::galaxy install failed (attempt ${attempt}/3)"
+            sleep $((attempt * 20))
+          done
+
+      - name: Build minio-getput-rdma (ROCm container)
+        run: |
+          docker run --rm \
+            --user root \
+            -v "${{ github.workspace }}:/hipobject:ro" \
+            -v "${{ github.workspace }}/ernic-build-s3:/hipobject-build" \
+            -e ROCM_PATH=/opt/rocm \
+            "$ROCM_IMAGE" \
+            bash -c "
+              apt-get update -qq && \
+              apt-get install -y -qq git cmake ninja-build libibverbs-dev libnuma-dev \
+                libcurl4-openssl-dev libssl-dev nlohmann-json3-dev libpugixml-dev && \
+              cmake -B /hipobject-build -G Ninja -S /hipobject \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH=/opt/rocm \
+                -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
+                -DBUILD_TESTING=ON \
+                -DHIPOBJ_IONIC=ON \
+                -DHIPOBJ_BNXT=OFF \
+                -DHIPOBJ_INTEGRATION_TESTS=ON \
+                -DHIPOBJ_MINIO_CLIENT=ON \
+                -DHIPOBJ_BUILD_DOCS=OFF \
+                -DCMAKE_SKIP_INSTALL_RULES=ON && \
+              cmake --build /hipobject-build --parallel \$(nproc) \
+                --target minio-getput-rdma && \
+              mkdir -p /hipobject-build/rocm-libs && \
+              export LD_LIBRARY_PATH=/opt/rocm/lib && \
+              ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
+                | awk '/=> \//{print \$3}' \
+                | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so' \
+                | xargs -r -I{} cp -L {} /hipobject-build/rocm-libs/ && \
+              if LD_LIBRARY_PATH=/hipobject-build/rocm-libs \
+                   ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
+                   | grep 'not found'; then \
+                echo 'staged closure incomplete'; exit 1; \
+              fi && \
+              echo 'staged closure complete'
+            "
+
+      - name: Extract rocm-ernic binary from ernic image
+        run: |
+          docker create --name ernic-tmp "$ERNIC_IMAGE"
+          # Not the workspace: it is mounted noexec in the job container, so a
+          # 0755 binary there still fails exec with EACCES.
+          docker cp ernic-tmp:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
+          docker rm ernic-tmp
+          chmod +x /usr/local/bin/rocm-ernic
+          # No pipe here: under `sh -e` a failure in a non-final pipeline
+          # element is ignored, which is how the EACCES above reached the
+          # next step disguised as a missing socket.
+          rocm-ernic --help > /tmp/ernic-help.txt
+          head -3 /tmp/ernic-help.txt
+
+      - name: Select QEMU accelerator and guest size
+        run: |
+          if [ -c /dev/kvm ] && ${QEMU_PATH:-}qemu-system-x86_64 -accel help 2>/dev/null | grep -qw kvm; then
+            echo "QEMU_ACCEL=kvm"  >> "$GITHUB_ENV"
+            echo "QEMU_CPU=host"   >> "$GITHUB_ENV"
+          else
+            echo "QEMU_ACCEL=tcg"       >> "$GITHUB_ENV"
+            echo "QEMU_CPU=qemu64"      >> "$GITHUB_ENV"
+          fi
+          HOST_MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
+          VM_VCPUS=$(( ($(nproc) - 1) )); [ "$VM_VCPUS" -lt 4 ] && VM_VCPUS=4
+          VM_MEM_MB=$(( HOST_MEM_MB * 3 / 4 )); [ "$VM_MEM_MB" -gt 4096 ] && VM_MEM_MB=4096
+          echo "VM_VCPUS=$VM_VCPUS" >> "$GITHUB_ENV"
+          echo "VM_MEM_MB=$VM_MEM_MB" >> "$GITHUB_ENV"
+
+      - name: Fetch guest VM image
+        id: guest_image
+        uses: ./.github/actions/fetch-guest-vm
+        with:
+          repo: ${{ env.GUEST_ARTIFACT_REPO }}
+          tag: ${{ env.GUEST_ARTIFACT_TAG }}
+
+      - name: Read VM info
+        id: vm_info
+        run: |
+          OUT="${{ steps.guest_image.outputs.output_dir }}"
+          eval "$(python3 - "$OUT" <<'PYEOF'
+          import json, os, shlex, sys
+          out = sys.argv[1]
+          d = json.load(open(os.path.join(out, "vm-info.json")))
+          here = lambda p: os.path.join(out, os.path.basename(p)) if p else ""
+          keys = {
+            "VM_USER": d.get("username", "ci"),
+            "VM_DISK": here(d.get("image_path", "")),
+            "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
+          }
+          for k, v in keys.items():
+            print(f"{k}={shlex.quote(str(v))}")
+          PYEOF
+          )"
+          echo "vm_user=$VM_USER"         >> "$GITHUB_OUTPUT"
+          echo "vm_disk=$VM_DISK"         >> "$GITHUB_OUTPUT"
+          echo "ssh_key=$SSH_KEY_PRIVATE" >> "$GITHUB_OUTPUT"
+
+      - name: Start rocm-ernic S3 backend (no tap)
+        run: |
+          rm -f /tmp/vfio-user-rocm-ernic.sock
+          rocm-ernic \
+            --socket /tmp/vfio-user-rocm-ernic.sock \
+            --backend "s3:ip=${S3_ADDR},port=${S3_PORT},bucket=${S3_BUCKET}" \
+            --verbose > /tmp/ernic-s3.log 2>&1 &
+          echo "ERNIC_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            [ -S /tmp/vfio-user-rocm-ernic.sock ] && { chmod 666 /tmp/vfio-user-rocm-ernic.sock; echo "Server ready"; break; }
+            sleep 1
+          done
+          [ -S /tmp/vfio-user-rocm-ernic.sock ] || { cat /tmp/ernic-s3.log; exit 1; }
+
+      - name: Start QEMU VM
+        run: |
+          ${QEMU_PATH:-}qemu-system-x86_64 \
+            -machine q35,accel=${QEMU_ACCEL},memory-backend=mem0 \
+            -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
+            -object memory-backend-memfd,id=mem0,share=on,size=${VM_MEM_MB}M \
+            -nographic \
+            -drive file="${{ steps.vm_info.outputs.vm_disk }}",format=qcow2,if=virtio \
+            -netdev user,id=net0,hostfwd=tcp::${SSH_PORT}-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -device '{"driver":"vfio-user-pci","socket":{"type":"unix","path":"/tmp/vfio-user-rocm-ernic.sock"}}' \
+            -serial file:/tmp/qemu-console.log -monitor none \
+            -qmp unix:/tmp/qmp.sock,server=on,wait=off > /tmp/qemu.log 2>&1 &
+          QEMU_PID=$!
+          echo "QEMU_PID=$QEMU_PID" >> "$GITHUB_ENV"
+          sleep 5
+          kill -0 "$QEMU_PID" 2>/dev/null || { cat /tmp/qemu.log; exit 1; }
+
+      - name: Wait for VM SSH
+        run: |
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          chmod 600 "$SSH_KEY"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5"
+          for i in $(seq 1 60); do
+            ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" echo VM_READY 2>/dev/null && {
+              echo "VM_USER=$VM_USER"   >> "$GITHUB_ENV"
+              echo "SSH_KEY=$SSH_KEY"   >> "$GITHUB_ENV"
+              echo "SSH_OPTS=$SSH_OPTS" >> "$GITHUB_ENV"
+              break
+            }
+            sleep 5
+          done
+          ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" echo VM_READY || {
+            cat /tmp/qemu-console.log; exit 1
+          }
+
+      - name: Install kernel headers and build tools in VM
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p $SSH_PORT "${VM_USER}@localhost" bash -s << 'EOFVM'
+          set -e
+          KVER=$(uname -r)
+          # A guest on a mainline kernel already has its headers from the
+          # .deb, and kernel.ubuntu.com has no Packages index behind it, so
+          # asking apt for linux-headers-$(uname -r) would 404.
+          HEADER_PKG=""
+          if [ -d "/lib/modules/${KVER}/build" ]; then
+            echo "Kernel headers already present for ${KVER}"
+          else
+            HEADER_PKG="linux-headers-${KVER}"
+          fi
+          APT_LOCK_WAIT="-o DPkg::Lock::Timeout=300"
+          for i in 1 2 3; do
+            sudo apt-get $APT_LOCK_WAIT update -qq && break || sleep 5
+          done
+          for i in 1 2 3 4 5; do
+            sudo DEBIAN_FRONTEND=noninteractive apt-get $APT_LOCK_WAIT install -y -qq \
+              ${HEADER_PKG} dkms git build-essential cmake ninja-build \
+              pkg-config libnl-3-dev libnl-route-3-dev libudev-dev && break
+            [ "$i" -eq 5 ] && { echo "apt-get install failed after 5 attempts"; exit 1; }
+            sleep 10
+          done
+          echo "Kernel packages installed for ${KVER}"
+          EOFVM
+
+      - name: Provision the VM with the ernic Ansible collection
+        run: |
+          # The guest image bakes the kernel and the rdma-core userspace but
+          # NOT the ionic DKMS driver or the udev naming rules -- a pristine
+          # image has no ionic module and no /sys/class/infiniband entry at
+          # all. Without this step there is no RDMA device to hint at.
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ERNIC_RUN_DIR=/tmp/ernic-ci
+          mkdir -p "$ERNIC_RUN_DIR"
+          cat > "$ERNIC_RUN_DIR/instances.json" << EOFJSON
+          {
+            "instances": [
+              {
+                "id": 1,
+                "vm": {
+                  "vm_name": "hipobj-s3-vm1",
+                  "ssh_port": ${SSH_PORT},
+                  "ssh_user": "${VM_USER}"
+                }
+              }
+            ]
+          }
+          EOFJSON
+          export ANSIBLE_HOST_KEY_CHECKING=false
+          export ANSIBLE_PRIVATE_KEY_FILE="$SSH_KEY"
+          PROJECT_ROOT="${GITHUB_WORKSPACE}/rocm-ernic"
+          export ANSIBLE_ROLES_PATH="${PROJECT_ROOT}/ansible/roles"
+          cd "${PROJECT_ROOT}/ansible"
+          # ernic_configure_nic is left at its default (true): without an
+          # IPv4 address on the emulated NIC the guest has no route to the
+          # endpoint, and ionic_rdma populates no RoCEv2 GID for the client
+          # to mint into its x-amz-rdma-token.
+          ansible-playbook ci-site.yml --tags guest-setup \
+            -e ernic_project_root="$PROJECT_ROOT" \
+            -e ernic_run_dir="$ERNIC_RUN_DIR" \
+            -e ernic_instances=1 \
+            -e ernic_vm_ssh_base_port="$SSH_PORT" \
+            -e ernic_vm_ssh_user="$VM_USER" \
+            -e ernic_gpu_passthrough=false \
+            -e ernic_guest_agent=false \
+            -e ernic_set_hostname=false
+
+      - name: Verify the RDMA device and the object store
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+
+          kill -0 "$ERNIC_PID" 2>/dev/null || {
+            echo "rocm-ernic (PID $ERNIC_PID) is no longer running"
+            tail -30 /tmp/ernic-s3.log || true
+            exit 1
+          }
+          # The store banner is the earliest proof the backend parsed its
+          # options and came up on the address the guest will ARP for.
+          grep -q "s3 bucket '${S3_BUCKET}'" /tmp/ernic-s3.log || {
+            echo "Server log carries no s3 store banner for '${S3_BUCKET}'"
+            grep -i s3 /tmp/ernic-s3.log || tail -40 /tmp/ernic-s3.log
+            exit 1
+          }
+          grep -m1 "s3 bucket" /tmp/ernic-s3.log
+
+          # By PCI vendor ID, never by name: the kernel registers ionic_%d,
+          # 60-rdma-persistent-naming.rules rewrites it to rocep<bus>s<slot>,
+          # then 99-rocm-ernic.rules rewrites it again to rocm-rdma-ernic<n>.
+          DEVICE=$(ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" 'sh -s' \
+            < "${GITHUB_WORKSPACE}/rocm-ernic/scripts/find-rdma-device.sh" | tr -d '\r') || true
+          [ -n "$DEVICE" ] || {
+            echo "RDMA device not found in the guest"
+            ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+              'ibv_devices; lsmod | grep ionic; dmesg | grep -i ionic | tail -30' || true
+            exit 1
+          }
+          ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" \
+            "ibv_devinfo -d $DEVICE" | tee /dev/stderr | grep -q PORT_ACTIVE || {
+            echo "$DEVICE never reached PORT_ACTIVE"; exit 1
+          }
+          echo "RDMA_DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          echo "$DEVICE is PORT_ACTIVE and the object store is up"
+
+      - name: Copy minio binary to VM
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          # In a container job, ${{ github.workspace }} resolves to the runner
+          # host path but inside the container it is mounted at /__w/.
+          # The minio binary was built into ernic-build-s3 which is a subdir
+          # of the workspace, accessible inside the container via the same
+          # relative path from GITHUB_WORKSPACE.
+          MINIO_BIN="${GITHUB_WORKSPACE}/ernic-build-s3/integrations/minio-cpp/minio-getput-rdma"
+          ROCM_LIBS="${GITHUB_WORKSPACE}/ernic-build-s3/rocm-libs"
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -P $SSH_PORT \
+            "$MINIO_BIN" \
+            "${VM_USER}@localhost:/tmp/minio-getput-rdma"
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -P $SSH_PORT \
+            ci/ernic/assert-transfer.sh \
+            "${VM_USER}@localhost:/tmp/assert-transfer.sh"
+          # The guest has no ROCm install, so the binary's HIP runtime
+          # closure (~30 MB, staged by the build step) has to travel with it.
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -P $SSH_PORT -r \
+            "$ROCM_LIBS" \
+            "${VM_USER}@localhost:/tmp/rocm-libs"
+
+      - name: Run S3 PUT+GET test in VM
+        run: |
+          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
+          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p $SSH_PORT "${VM_USER}@localhost" \
+              "S3_ADDR='${S3_ADDR}' S3_PORT='${S3_PORT}' RDMA_DEVICE='${RDMA_DEVICE}' bash -s" << 'EOFVM'
+          set -e
+          chmod +x /tmp/minio-getput-rdma
+          export LD_LIBRARY_PATH=/tmp/rocm-libs
+          echo "=== Runtime linkage ==="
+          ldd /tmp/minio-getput-rdma | grep -E 'not found' && {
+            echo "ERROR: unresolved shared libraries in guest"; exit 1
+          } || true
+          echo "=== Waiting for the in-band S3 endpoint ==="
+          ready=
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "http://${S3_ADDR}:${S3_PORT}/" 2>/dev/null) || code=
+            case "$code" in [234]*) ready=1; break;; esac
+            sleep 2
+          done
+          [ -n "$ready" ] || {
+            echo "ERROR: S3 endpoint http://${S3_ADDR}:${S3_PORT}/ never answered"
+            ip -4 -br addr show; ip route
+            exit 1
+          }
+          echo "Endpoint answered with HTTP ${code}"
+          # Without a hint hipObjInit has no GPU topology to walk in this
+          # GPU-less guest, so it finds no NIC and the bridge falls back to
+          # plain HTTP -- which the emulator rejects for a 64 KiB body.
+          export HIPOBJ_NIC_HINT="${RDMA_DEVICE}"
+          echo "=== Running minio-getput-rdma (HIPOBJ_NIC_HINT=$HIPOBJ_NIC_HINT) ==="
+          rc=0
+          /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
+            minioadmin minioadmin 65536 nogpu > /tmp/getput.log 2>&1 || rc=$?
+          cat /tmp/getput.log
+          [ "$rc" -eq 0 ] || exit "$rc"
+          # The bridge returns success when it silently falls back to plain
+          # HTTP, so the exit code is checked and then the run's own report of
+          # what it did -- payload verified, bytes over RDMA, no fallback.
+          chmod +x /tmp/assert-transfer.sh
+          /tmp/assert-transfer.sh /tmp/getput.log rdma
+          EOFVM
+
+      - name: Collect logs
+        if: always()
+        run: |
+          echo "=== ernic-s3.log ===" && cat /tmp/ernic-s3.log    || true
+          echo "=== qemu.log ==="     && cat /tmp/qemu.log         || true
+          echo "=== qemu-console ===" && cat /tmp/qemu-console.log || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          kill "$QEMU_PID"  2>/dev/null || true
+          kill "$ERNIC_PID" 2>/dev/null || true
+          docker run --rm -v "${{ github.workspace }}/ernic-build-s3:/d" \
+            busybox sh -c "rm -rf /d/*" 2>/dev/null || true
+          rm -rf "${{ github.workspace }}/ernic-build-s3" 2>/dev/null || true

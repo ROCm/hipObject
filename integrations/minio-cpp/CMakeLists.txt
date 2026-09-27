@@ -29,6 +29,10 @@ add_library(hipobj_minio STATIC
 
 target_compile_features(hipobj_minio PUBLIC cxx_std_17)
 
+if(HIPOBJECT_V2_API)
+  target_compile_definitions(hipobj_minio PRIVATE HIPOBJECT_V2_API)
+endif()
+
 target_include_directories(hipobj_minio
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

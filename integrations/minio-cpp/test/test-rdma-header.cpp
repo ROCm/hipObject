@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <cstring>
-
 #include <gtest/gtest.h>
 #include <hipobj.h>
 
@@ -12,7 +10,6 @@
 
 TEST(HipObjMinioHeader, FormatRdmaHeaderValue) {
   hipObj::RdmaToken token;
-  std::memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_RC;
   token.qpNum = 42;
   token.remoteAddr = 0x7f0000001000ULL;
@@ -44,7 +41,6 @@ TEST(HipObjMinioHeader, ParseRdmaReplyInvalid) {
 
 TEST(HipObjMinioHeader, TokenClientNicFromGid) {
   hipObj::RdmaToken token;
-  std::memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_RC;
   token.gid[10] = 0xff;
   token.gid[11] = 0xff;

@@ -7,6 +7,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <sstream>
@@ -122,6 +123,11 @@ HttpServer::HttpServer(int port) {
   addr.sin_addr.s_addr = INADDR_ANY;
   addr.sin_port = htons(static_cast<uint16_t>(port));
   if (bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    /* Silence here is what made a busy port look like a crash: the object
+     * went on being constructed, and the abort arrived later from select().
+     * Say which port and why, once, where it happened. */
+    fprintf(stderr, "hipobj-rdma-test-server: cannot bind port %d: %s\n", port,
+            strerror(errno));
     close(listen_fd_);
     listen_fd_ = -1;
     return;
@@ -170,16 +176,28 @@ int HttpServer::runOnce(int timeoutMs) {
   return 1;
 }
 
-void HttpServer::startThreaded() {
+bool HttpServer::startThreaded() {
+  if (listen_fd_ < 0) {
+    return false;
+  }
   acceptLoop_ = std::thread([this] {
     runThreaded();
   });
+  return true;
 }
 
 void HttpServer::runThreaded() {
   /* Accept loop; runs on the tracked thread created by
    * startThreaded() so stop() can join it as the production
    * barrier. */
+  if (listen_fd_ < 0) {
+    /* runOnce() has always checked this; this loop did not, and FD_SET(-1)
+     * is a glibc fortify abort -- so a failed bind killed the process with
+     * "bit out of range 0 - FD_SETSIZE on fd_set" and no mention of a port.
+     * startThreaded() refuses to spawn the thread now, but the loop must
+     * hold the invariant itself: it is also reachable directly. */
+    return;
+  }
   while (!stopping_.load()) {
     fd_set fds;
     FD_ZERO(&fds);

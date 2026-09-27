@@ -14,10 +14,10 @@
 namespace hipobj::minio {
 
 struct S3RdmaContext {
-  minio::creds::Provider* provider = nullptr;
+  ::minio::creds::Provider* provider = nullptr;
   std::string bucket;
   std::string object;
-  minio::s3::BaseUrl url;
+  ::minio::s3::BaseUrl url;
   std::string region;
   std::string uploadId;
   unsigned int partNumber = 0;

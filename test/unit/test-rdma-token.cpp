@@ -3,15 +3,12 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <cstring>
-
 #include <gtest/gtest.h>
 
 #include "token.h"
 
 TEST(RdmaToken, EncodeProducesHexString) {
   hipObj::RdmaToken token;
-  memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_RC;
   token.qpNum = 42;
   token.rkey = 0xDEADBEEF;
@@ -31,7 +28,6 @@ TEST(RdmaToken, EncodeProducesHexString) {
 
 TEST(RdmaToken, EncodeRcTransportByte) {
   hipObj::RdmaToken token;
-  memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_RC;
 
   std::string enc = hipObj::encodeRdmaToken(token);
@@ -41,7 +37,6 @@ TEST(RdmaToken, EncodeRcTransportByte) {
 
 TEST(RdmaToken, EncodeDcTransportByte) {
   hipObj::RdmaToken token;
-  memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_DC;
 
   std::string enc = hipObj::encodeRdmaToken(token);
@@ -86,7 +81,6 @@ TEST(RdmaReply, ParseHttp206) {
 
 TEST(RdmaReply, ParseHttp200WithPeerToken) {
   hipObj::RdmaToken peer;
-  memset(&peer, 0, sizeof(peer));
   peer.qpNum = 7;
   std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
   int code = 0;
@@ -114,7 +108,6 @@ TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue) {
 
 TEST(RdmaReply, ParsePeerTokenFromReply) {
   hipObj::RdmaToken peer;
-  memset(&peer, 0, sizeof(peer));
   peer.transport = hipObj::TRANSPORT_RC;
   peer.qpNum = 99;
   std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
@@ -135,7 +128,6 @@ TEST(RdmaReply, LegacyOkHasNoPeerToken) {
 
 TEST(RdmaToken, ParseClientNicFromGid) {
   hipObj::RdmaToken token;
-  memset(&token, 0, sizeof(token));
   token.transport = hipObj::TRANSPORT_RC;
   token.gid[10] = 0xff;
   token.gid[11] = 0xff;

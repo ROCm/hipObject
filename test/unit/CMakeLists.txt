@@ -17,26 +17,28 @@ endforeach()
 
 add_library(hipobj_test_objects OBJECT ${HIPOBJ_TEST_SOURCES})
 
-# Server-side v2 sources for the session/handler unit tests.
-set(HIPOBJ_V2_SERVER_SOURCES
-  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_request.cpp
-  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_session.cpp
-  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_handlers.cpp
-  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_data_phase.cpp
-  ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_backend.cpp)
-
 target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 
-add_library(hipobj_v2_server_objects OBJECT ${HIPOBJ_V2_SERVER_SOURCES})
-target_compile_features(hipobj_v2_server_objects PRIVATE cxx_std_17)
-target_include_directories(hipobj_v2_server_objects
-  PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/shared
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/common
-    ${CMAKE_SOURCE_DIR}/src/rdma
-    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server)
+if(HIPOBJECT_V2_API)
+  # Server-side v2 sources for the session/handler unit tests.
+  set(HIPOBJ_V2_SERVER_SOURCES
+    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_request.cpp
+    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_session.cpp
+    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_handlers.cpp
+    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_data_phase.cpp
+    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_backend.cpp)
+
+  add_library(hipobj_v2_server_objects OBJECT ${HIPOBJ_V2_SERVER_SOURCES})
+  target_compile_features(hipobj_v2_server_objects PRIVATE cxx_std_17)
+  target_include_directories(hipobj_v2_server_objects
+    PRIVATE
+      ${CMAKE_SOURCE_DIR}/include
+      ${CMAKE_SOURCE_DIR}/shared
+      ${CMAKE_SOURCE_DIR}/src
+      ${CMAKE_SOURCE_DIR}/src/common
+      ${CMAKE_SOURCE_DIR}/src/rdma
+      ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server)
+endif()
 
 target_include_directories(hipobj_test_objects
   PRIVATE
@@ -58,6 +60,9 @@ if(HIPOBJ_BNXT)
 endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_IONIC)
+endif()
+if(HIPOBJECT_V2_API)
+  target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJECT_V2_API)
 endif()
 
 set_source_files_properties(
@@ -85,26 +90,28 @@ if(CURL_FOUND)
   set_tests_properties(test-s3-curl-ops PROPERTIES TIMEOUT 60)
 endif()
 
-hipobj_add_test(test-v2-wire
-  test-v2-wire.cpp)
+if(HIPOBJECT_V2_API)
+  hipobj_add_test(test-v2-wire
+    test-v2-wire.cpp)
 
-hipobj_add_test(test-v2-state
-  test-v2-state.cpp)
+  hipobj_add_test(test-v2-state
+    test-v2-state.cpp)
 
-hipobj_add_test(test-v2-registry
-  test-v2-registry.cpp)
+  hipobj_add_test(test-v2-registry
+    test-v2-registry.cpp)
 
-hipobj_add_test(test-v2-random
-  test-v2-random.cpp)
+  hipobj_add_test(test-v2-random
+    test-v2-random.cpp)
 
-hipobj_add_test(test-v2-conflict
-  test-v2-conflict.cpp)
+  hipobj_add_test(test-v2-conflict
+    test-v2-conflict.cpp)
 
-hipobj_add_test(test-v2-server
-  test-v2-server.cpp)
+  hipobj_add_test(test-v2-server
+    test-v2-server.cpp)
 
-hipobj_add_test(test-v2-connref
-  test-v2-connref.cpp)
+  hipobj_add_test(test-v2-connref
+    test-v2-connref.cpp)
+endif()
 
 hipobj_add_test(test-seams
   test-seams.cpp)
