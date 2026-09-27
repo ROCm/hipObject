@@ -479,6 +479,16 @@ jobs:
 
       - name: Run GPU-direct S3 PUT+GET test in VM
         id: client
+        # Bounded at three layers, as the two-VM lane: guest-side timeout, ssh
+        # keepalive, step timeout. Unbounded, this step wedged for the whole
+        # 120-minute job budget at 76a300f -- the client printed its banner
+        # and then produced nothing for 110 minutes. That is not merely slow:
+        # a job-level timeout CANCELS the step rather than failing it, so
+        # continue-on-error below does not apply, steps.client.outcome is
+        # 'cancelled' rather than 'failure', and the reporting step is
+        # skipped. A wedge has to become a non-zero exit for any of the
+        # non-fatal handling to engage.
+        timeout-minutes: 10
         # TEMPORARY. This lane passed until HIPOBJ_REQUIRE_GPU_DIRECT stopped
         # the client staging a device buffer through host memory and calling
         # that GPU-direct; the honest run fails. Non-fatal so the rest of the
@@ -490,6 +500,7 @@ jobs:
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
               -p $SSH_PORT "${VM_USER}@localhost" \
               "S3_ADDR='${S3_ADDR}' S3_PORT='${S3_PORT}' RDMA_DEVICE='${RDMA_DEVICE}' bash -s" << 'EOFVM'
           set -e
@@ -524,12 +535,16 @@ jobs:
           # registration silently stages through host memory and still moves
           # the right bytes, so this lane would pass while testing the one
           # thing it exists to rule out.
-          sudo env LD_LIBRARY_PATH=/tmp/rocm-libs \
+          # timeout 300: a 65536-byte transfer takes seconds, so anything past
+          # five minutes is a hang, and a hang has to exit non-zero (124) to
+          # be reportable rather than silently eating the job budget.
+          sudo timeout 300 env LD_LIBRARY_PATH=/tmp/rocm-libs \
               HIPOBJ_NIC_HINT="$HIPOBJ_NIC_HINT" \
               HIPOBJ_REQUIRE_GPU_DIRECT=1 \
               /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
               minioadmin minioadmin 65536 gpu > /tmp/getput.log 2>&1 || rc=$?
           cat /tmp/getput.log
+          if [ "$rc" -eq 124 ]; then echo "client hung and was killed after 300s"; fi
           if [ "$rc" -ne 0 ]; then
             echo "=== HIP saw no device; agent enumeration ==="
             command -v rocminfo > /dev/null && \
@@ -557,8 +572,14 @@ jobs:
 
           This lane was green until `HIPOBJ_REQUIRE_GPU_DIRECT=1` stopped the
           client falling back to host staging for a device pointer. The green
-          runs were not testing GPU-direct; this red one is. It fails at 65536
-          bytes with `RDMA PUT failed (-1)`.
+          runs were not testing GPU-direct; this red one is.
+
+          Two signatures seen so far, and it is not known whether they share a
+          cause. `RDMA PUT failed (-1)` at 65536 bytes, immediately; and a hang
+          with no output at all after the client acquires a KFD VM, which the
+          `timeout 300` in the step above converts into exit 124. Check the
+          step log for `client hung and was killed after 300s` to tell them
+          apart.
           EOF
 
       - name: Collect logs
