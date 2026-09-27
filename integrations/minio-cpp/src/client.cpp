@@ -5,8 +5,16 @@
 
 #include "hipobj_minio/client.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
 #include <mutex>
 #include <sstream>
+
+#include <hip/hip_runtime_api.h>
 
 #include <hipobj.h>
 #include <miniocpp/baseclient.h>
@@ -17,7 +25,46 @@
 
 namespace hipobj::minio {
 
+using namespace ::minio;
+
 namespace {
+
+/* Monotonic, process-wide, and deliberately not per-Client: a caller that
+ * wants to know whether the RDMA path was taken does not want to thread a
+ * Client reference through its assertions. */
+std::atomic<uint64_t> g_rdmaPuts{0};
+std::atomic<uint64_t> g_rdmaGets{0};
+std::atomic<uint64_t> g_httpPuts{0};
+std::atomic<uint64_t> g_httpGets{0};
+std::atomic<uint64_t> g_rdmaBytes{0};
+std::atomic<uint64_t> g_httpBytes{0};
+
+void CountRdmaPut(size_t n) {
+  g_rdmaPuts.fetch_add(1, std::memory_order_relaxed);
+  g_rdmaBytes.fetch_add(n, std::memory_order_relaxed);
+}
+void CountRdmaGet(size_t n) {
+  g_rdmaGets.fetch_add(1, std::memory_order_relaxed);
+  g_rdmaBytes.fetch_add(n, std::memory_order_relaxed);
+}
+void CountHttpPut(size_t n) {
+  g_httpPuts.fetch_add(1, std::memory_order_relaxed);
+  g_httpBytes.fetch_add(n, std::memory_order_relaxed);
+}
+void CountHttpGet(size_t n) {
+  g_httpGets.fetch_add(1, std::memory_order_relaxed);
+  g_httpBytes.fetch_add(n, std::memory_order_relaxed);
+}
+
+bool IsDevicePointer(const void* ptr) {
+  hipPointerAttribute_t attr{};
+  if (hipPointerGetAttributes(&attr, ptr) != hipSuccess) {
+    // An unregistered host pointer is an error here, not an answer.
+    (void)hipGetLastError();
+    return false;
+  }
+  return attr.type == hipMemoryTypeDevice;
+}
 
 class HipObjRuntime {
 public:
@@ -43,6 +90,13 @@ public:
     cfg.endpoint = endpoint_storage_.c_str();
     cfg.region = base_url.region.c_str();
     cfg.gpuDevice = -1;
+    // Without a GPU there is no topology to walk, so hipObjInit can only find
+    // a NIC if it is named explicitly. Same variable the examples read.
+    if (const char* hint = std::getenv("HIPOBJ_NIC_HINT");
+        hint != nullptr && hint[0] != '\0') {
+      nic_hint_storage_ = hint;
+      cfg.nicHint = nic_hint_storage_.c_str();
+    }
     hipObjError_t err = hipObjInit(&cfg);
     if (err.opError == hipObjSuccess) {
       initialized_ = true;
@@ -63,6 +117,7 @@ private:
   bool initialized_ = false;
   std::string active_key_;
   std::string endpoint_storage_;
+  std::string nic_hint_storage_;
 };
 
 struct ScopedBufRegistration {
@@ -78,6 +133,40 @@ struct ScopedBufRegistration {
 };
 
 } // namespace
+
+TransferStats TransferStatsSnapshot() {
+  TransferStats s;
+  s.rdmaPuts = g_rdmaPuts.load(std::memory_order_relaxed);
+  s.rdmaGets = g_rdmaGets.load(std::memory_order_relaxed);
+  s.httpPuts = g_httpPuts.load(std::memory_order_relaxed);
+  s.httpGets = g_httpGets.load(std::memory_order_relaxed);
+  s.rdmaBytes = g_rdmaBytes.load(std::memory_order_relaxed);
+  s.httpBytes = g_httpBytes.load(std::memory_order_relaxed);
+  return s;
+}
+
+void TransferStatsReset() {
+  g_rdmaPuts.store(0, std::memory_order_relaxed);
+  g_rdmaGets.store(0, std::memory_order_relaxed);
+  g_httpPuts.store(0, std::memory_order_relaxed);
+  g_httpGets.store(0, std::memory_order_relaxed);
+  g_rdmaBytes.store(0, std::memory_order_relaxed);
+  g_httpBytes.store(0, std::memory_order_relaxed);
+}
+
+std::string TransferStatsLine(const TransferStats& stats) {
+  char buf[256];
+  std::snprintf(buf, sizeof(buf),
+                "hipobj-stats: rdma_put=%llu rdma_get=%llu http_put=%llu "
+                "http_get=%llu rdma_bytes=%llu http_bytes=%llu",
+                static_cast<unsigned long long>(stats.rdmaPuts),
+                static_cast<unsigned long long>(stats.rdmaGets),
+                static_cast<unsigned long long>(stats.httpPuts),
+                static_cast<unsigned long long>(stats.httpGets),
+                static_cast<unsigned long long>(stats.rdmaBytes),
+                static_cast<unsigned long long>(stats.httpBytes));
+  return buf;
+}
 
 Client::Client(minio::s3::BaseUrl base_url, minio::creds::Provider* provider)
   : base_url_(base_url), provider_(provider), s3_client_(base_url, provider) {
@@ -101,9 +190,19 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
   hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_,
                                                                 provider_);
   if (init_err.opError != hipObjSuccess) {
-    return minio::s3::PutObjectResponse(
-      minio::error::Error("hipObject init failed: " +
-                          std::string(hipObjGetErrorString(init_err.opError))));
+    // RDMA not available (no NIC or no GPU topology) — fall back to HTTP PUT.
+    // Copy the buffer into a std::stringstream so minio-cpp can seek in it.
+    const char* src = static_cast<const char*>(args.buf);
+    std::string content(src, size);
+    std::stringstream ss(content, std::ios_base::in | std::ios_base::binary);
+    minio::s3::PutObjectArgs http_args = args;
+    http_args.stream = &ss;
+    http_args.buf = nullptr;
+    http_args.size = std::nullopt;
+    http_args.object_size = static_cast<long>(size);
+    http_args.part_size = 0;
+    CountHttpPut(size);
+    return s3_client_.PutObject(http_args);
   }
 
   bool registered_here = false;
@@ -135,10 +234,22 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
 
   ssize_t ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
   if (ret > 0) {
+    CountRdmaPut(static_cast<size_t>(ret));
     minio::s3::PutObjectResponse resp;
     resp.etag = put_ctx.etag;
     return resp;
   }
+
+  // The fallback below streams the buffer from the host, so it cannot be
+  // taken for device memory, and it turns a GPU-direct transfer into an
+  // ordinary one. A caller that handed us a device pointer asked for RDMA.
+  if (IsDevicePointer(args.buf)) {
+    return minio::s3::PutObjectResponse(minio::error::Error(
+      "RDMA PUT failed (" + std::to_string(ret) +
+      ") and the payload is device memory; no HTTP fallback is possible"));
+  }
+  std::cerr << "hipobj: RDMA PUT failed (" << ret << "); falling back to HTTP"
+            << std::endl;
 
   minio::s3::PutObjectArgs http_args = args;
   std::stringstream ss(std::ios_base::in | std::ios_base::out |
@@ -148,6 +259,10 @@ minio::s3::PutObjectResponse Client::PutObject(minio::s3::PutObjectArgs args) {
   http_args.buf = nullptr;
   http_args.size = std::nullopt;
   http_args.object_size = static_cast<long>(size);
+  // Validate() clamped part_size down to the object size on the way in, and
+  // anything under 5MiB fails the next Validate. Let it be recomputed.
+  http_args.part_size = 0;
+  CountHttpPut(size);
   return s3_client_.PutObject(http_args);
 }
 
@@ -165,9 +280,24 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
   hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_,
                                                                 provider_);
   if (init_err.opError != hipObjSuccess) {
-    return minio::s3::GetObjectResponse(
-      minio::error::Error("hipObject init failed: " +
-                          std::string(hipObjGetErrorString(init_err.opError))));
+    // RDMA not available — fall back to HTTP GET.
+    // Accumulate response into a string, then memcpy to the caller's buffer.
+    std::string received;
+    received.reserve(size);
+    minio::s3::GetObjectArgs http_args = args;
+    http_args.datafunc = [&](minio::http::DataFunctionArgs chunk) -> bool {
+      received.append(chunk.datachunk);
+      return true;
+    };
+    http_args.buf = nullptr;
+    http_args.size = std::nullopt;
+    minio::s3::GetObjectResponse resp = s3_client_.GetObject(http_args);
+    if (resp) {
+      size_t copy_len = std::min(received.size(), size);
+      std::memcpy(args.buf, received.data(), copy_len);
+    }
+    CountHttpGet(size);
+    return resp;
   }
 
   bool registered_here = false;
@@ -199,21 +329,35 @@ minio::s3::GetObjectResponse Client::GetObject(minio::s3::GetObjectArgs args) {
 
   ssize_t ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
   if (ret > 0) {
+    CountRdmaGet(static_cast<size_t>(ret));
     minio::s3::GetObjectResponse resp;
     resp.etag = get_ctx.etag;
     return resp;
   }
 
+  // As in PutObject: the fallback memcpys into args.buf from the host.
+  if (IsDevicePointer(args.buf)) {
+    return minio::s3::GetObjectResponse(minio::error::Error(
+      "RDMA GET failed (" + std::to_string(ret) +
+      ") and the destination is device memory; no HTTP fallback is possible"));
+  }
+  std::cerr << "hipobj: RDMA GET failed (" << ret << "); falling back to HTTP"
+            << std::endl;
+
   minio::s3::GetObjectArgs http_args = args;
-  std::stringstream ss(std::ios_base::in | std::ios_base::out |
-                       std::ios_base::binary);
-  ss.rdbuf()->pubsetbuf(args.buf, static_cast<std::streamsize>(size));
-  http_args.datafunc = [&ss](minio::http::DataFunctionArgs chunk) -> bool {
-    ss << chunk.datachunk;
+  char* dst = static_cast<char*>(args.buf);
+  size_t offset = 0;
+  http_args.datafunc = [&](minio::http::DataFunctionArgs chunk) -> bool {
+    size_t len = chunk.datachunk.size();
+    if (offset + len > size)
+      len = size - offset;
+    std::memcpy(dst + offset, chunk.datachunk.data(), len);
+    offset += len;
     return true;
   };
   http_args.buf = nullptr;
   http_args.size = std::nullopt;
+  CountHttpGet(size);
   return s3_client_.GetObject(http_args);
 }
 

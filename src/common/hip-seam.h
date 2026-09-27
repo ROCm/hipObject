@@ -29,6 +29,15 @@ using HipDeviceGetPCIBusIdFn = hipError_t (*)(char*, int, int);
 using HipHostMallocFn = hipError_t (*)(void**, size_t, unsigned int);
 using HipFreeFn = hipError_t (*)(void*);
 using HipDeviceSynchronizeFn = hipError_t (*)();
+using HipMemcpyFn = hipError_t (*)(void*, const void*, size_t, hipMemcpyKind);
+using HipMemcpyAsyncFn = hipError_t (*)(void*, const void*, size_t,
+                                        hipMemcpyKind, hipStream_t);
+using HipEventCreateFn = hipError_t (*)(hipEvent_t*);
+using HipEventRecordFn = hipError_t (*)(hipEvent_t, hipStream_t);
+using HipEventQueryFn = hipError_t (*)(hipEvent_t);
+using HipEventDestroyFn = hipError_t (*)(hipEvent_t);
+using HipPointerGetAttributesFn = hipError_t (*)(hipPointerAttribute_t*,
+                                                 const void*);
 
 struct HipOps {
   HipGetDeviceFn hipGetDevice = nullptr;
@@ -36,6 +45,13 @@ struct HipOps {
   HipHostMallocFn hipHostMalloc = nullptr;
   HipFreeFn hipFree = nullptr;
   HipDeviceSynchronizeFn hipDeviceSynchronize = nullptr;
+  HipMemcpyFn hipMemcpy = nullptr;
+  HipMemcpyAsyncFn hipMemcpyAsync = nullptr;
+  HipEventCreateFn hipEventCreate = nullptr;
+  HipEventRecordFn hipEventRecord = nullptr;
+  HipEventQueryFn hipEventQuery = nullptr;
+  HipEventDestroyFn hipEventDestroy = nullptr;
+  HipPointerGetAttributesFn hipPointerGetAttributes = nullptr;
 };
 
 /* Populates a table with the real HIP entry points. Called once for the

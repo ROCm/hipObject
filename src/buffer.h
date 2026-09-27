@@ -23,7 +23,14 @@ public:
   int deregisterBuffer(void* devPtr);
   void deregisterAll();
   struct ibv_mr* lookupMr(void* devPtr);
+  /* Address to advertise to the peer. Not mr->addr: ibv_reg_dmabuf_mr
+   * leaves that NULL, and on the bounce path it is the host staging
+   * buffer rather than the caller's pointer. */
+  uint64_t lookupRemoteAddr(void* devPtr) const;
   size_t lookupSize(void* devPtr) const;
+  /* Host staging buffer, or null when the NIC reaches the caller's
+   * memory directly. */
+  void* lookupHostBuf(void* devPtr) const;
   bool isRegistered(void* devPtr) const;
 
 #ifdef HIPOBJECT_V2_API
@@ -42,6 +49,8 @@ private:
     struct ibv_mr* mr;
     size_t size;
     bool isDmabuf;
+    uint64_t remoteAddr;
+    void* hostBuf;       /* non-null only on the bounce path */
     size_t refCount = 0; /* pinned by live v2 connections */
   };
 

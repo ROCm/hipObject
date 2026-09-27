@@ -52,8 +52,11 @@ public:
    * each on its own thread. Responses are completed with the
    * afterSend finalizer contract. The loop always runs on the
    * tracked thread created here, so stop() has a join barrier
-   * before waiting on the worker count. */
-  void startThreaded();
+   * before waiting on the worker count.
+   *
+   * Returns false when the constructor never got a listening socket.
+   * Callers must not announce a port they are not listening on. */
+  bool startThreaded();
   void stop();
 
   int fd() const {

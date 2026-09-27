@@ -5,6 +5,7 @@
 
 #include "rdma_server.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -19,6 +20,15 @@ namespace {
 constexpr int IBV_ACCESS_LOCAL_WRITE = 0x4;
 constexpr int IBV_ACCESS_REMOTE_READ = 0x1;
 constexpr int IBV_ACCESS_REMOTE_WRITE = 0x2;
+
+/* Every failure below used to be a bare `return -1`, which the HTTP layer
+ * turns into "500 RDMA PUT failed" with no reply header -- indistinguishable,
+ * from the client, from a server that does not speak the RDMA extension at
+ * all. Six different faults reported as one. Name which one it was. */
+int rdmaFail(const char* op, const char* why) {
+  fprintf(stderr, "hipobj-rdma-test-server: %s failed: %s\n", op, why);
+  return -1;
+}
 
 bool parseTokenHeader(const std::string& header, hipObj::RdmaToken& token,
                       uint64_t& remoteAddr, size_t& size) {
@@ -118,6 +128,27 @@ struct RdmaTestServer::Impl {
   size_t stagingSize = 64 * 1024 * 1024;
   bool ready = false;
 
+  /* One QP serves every request in turn, so it has to come back to INIT
+   * between them -- an RC QP already in RTS cannot be moved to RTR for the
+   * next client. Only the success paths used to do this, which meant a
+   * single failed transfer wedged the server for every client after it:
+   * each one got "could not connect the RC QP to the client", naming the
+   * wrong fault and hiding the real one. Run it on every path that touched
+   * the QP, failure included. */
+  void resetQp() {
+    if (!conn.qp) {
+      return;
+    }
+    hipObj::ibv.destroy_qp(conn.qp);
+    conn.qp = nullptr;
+    if (hipObj::createRcQp(conn, 256, 128, 128) != 0 ||
+        hipObj::transitionQpToInit(conn) != 0) {
+      fprintf(stderr, "hipobj-rdma-test-server: could not rebuild the RC QP; "
+                      "the server can no longer serve RDMA\n");
+      ready = false;
+    }
+  }
+
   ~Impl() {
     if (stagingMr) {
       hipObj::ibv.dereg_mr(stagingMr);
@@ -174,38 +205,39 @@ int RdmaTestServer::rdmaWriteToClient(const std::string& tokenHeader,
                                       const std::vector<uint8_t>& data,
                                       std::string& replyHeader) {
   if (!isReady()) {
-    return -1;
+    return rdmaFail("GET", "server RDMA not initialised");
   }
   hipObj::RdmaToken clientToken{};
   uint64_t remoteAddr = 0;
   size_t xferSize = 0;
   if (!parseTokenHeader(tokenHeader, clientToken, remoteAddr, xferSize)) {
-    return -1;
+    return rdmaFail("GET", "x-amz-rdma-token did not parse");
   }
   if (xferSize == 0) {
     xferSize = data.size();
   }
   if (data.size() < xferSize || xferSize > impl_->stagingSize) {
+    fprintf(stderr,
+            "hipobj-rdma-test-server: GET failed: %zu bytes requested of a %zu "
+            "byte object, %zu byte staging buffer\n",
+            xferSize, data.size(), impl_->stagingSize);
     return -1;
   }
 
   std::memcpy(impl_->stagingBuf, data.data(), xferSize);
   if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
-    return -1;
+    impl_->resetQp();
+    return rdmaFail("GET", "could not connect the RC QP to the client");
   }
   if (postRdmaWrite(impl_->conn, impl_->stagingMr, xferSize, clientToken) !=
       0) {
-    return -1;
+    impl_->resetQp();
+    return rdmaFail("GET", "RDMA WRITE to the client buffer did not complete");
   }
   hipObj::RdmaToken serverToken = buildServerToken(impl_->conn,
                                                    impl_->stagingMr, xferSize);
   replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken);
-  if (impl_->conn.qp) {
-    hipObj::ibv.destroy_qp(impl_->conn.qp);
-    impl_->conn.qp = nullptr;
-    hipObj::createRcQp(impl_->conn, 256, 128, 128);
-    hipObj::transitionQpToInit(impl_->conn);
-  }
+  impl_->resetQp();
   return 0;
 }
 
@@ -213,13 +245,13 @@ int RdmaTestServer::rdmaReadFromClient(const std::string& tokenHeader,
                                        size_t size, std::vector<uint8_t>& data,
                                        std::string& replyHeader) {
   if (!isReady()) {
-    return -1;
+    return rdmaFail("PUT", "server RDMA not initialised");
   }
   hipObj::RdmaToken clientToken{};
   uint64_t remoteAddr = 0;
   size_t xferSize = 0;
   if (!parseTokenHeader(tokenHeader, clientToken, remoteAddr, xferSize)) {
-    return -1;
+    return rdmaFail("PUT", "x-amz-rdma-token did not parse");
   }
   if (size != 0) {
     xferSize = size;
@@ -228,26 +260,27 @@ int RdmaTestServer::rdmaReadFromClient(const std::string& tokenHeader,
     xferSize = static_cast<size_t>(clientToken.length);
   }
   if (xferSize > impl_->stagingSize) {
+    fprintf(stderr,
+            "hipobj-rdma-test-server: PUT failed: %zu bytes exceeds the %zu "
+            "byte staging buffer\n",
+            xferSize, impl_->stagingSize);
     return -1;
   }
 
   if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
-    return -1;
+    impl_->resetQp();
+    return rdmaFail("PUT", "could not connect the RC QP to the client");
   }
   if (postRdmaRead(impl_->conn, impl_->stagingMr, xferSize, clientToken) != 0) {
-    return -1;
+    impl_->resetQp();
+    return rdmaFail("PUT", "RDMA READ from the client buffer did not complete");
   }
   data.assign(static_cast<uint8_t*>(impl_->stagingBuf),
               static_cast<uint8_t*>(impl_->stagingBuf) + xferSize);
   hipObj::RdmaToken serverToken = buildServerToken(impl_->conn,
                                                    impl_->stagingMr, xferSize);
   replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken);
-  if (impl_->conn.qp) {
-    hipObj::ibv.destroy_qp(impl_->conn.qp);
-    impl_->conn.qp = nullptr;
-    hipObj::createRcQp(impl_->conn, 256, 128, 128);
-    hipObj::transitionQpToInit(impl_->conn);
-  }
+  impl_->resetQp();
   return 0;
 }
 
