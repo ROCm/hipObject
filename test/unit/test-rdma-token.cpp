@@ -103,7 +103,7 @@ TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue) {
   hipObj::RdmaToken parsed{};
   EXPECT_FALSE(hipObj::decodeRdmaTokenHex((encoded + ":1:2").c_str(), parsed));
   EXPECT_FALSE(hipObj::decodeRdmaTokenHex(
-      (encoded + ":00007f0000001000:0000000000001000").c_str(), parsed));
+    (encoded + ":00007f0000001000:0000000000001000").c_str(), parsed));
   EXPECT_TRUE(hipObj::decodeRdmaTokenHex(encoded.c_str(), parsed));
 }
 
