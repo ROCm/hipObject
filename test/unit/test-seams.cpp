@@ -9,6 +9,7 @@
  */
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -40,6 +41,10 @@ hipError_t fakeDeviceGetPCIBusId(char* bus_id, int len, int device) {
 
 hipError_t fakeDeviceSynchronize() {
   return hipSuccess;
+}
+
+hipError_t fakeGetDeviceNoDevice(int*) {
+  return hipErrorNoDevice;
 }
 
 class HipSeamTest : public ::testing::Test {
@@ -245,5 +250,250 @@ TEST_F(IbvSeamTest, QpCreationAndTeardownUseTheTable) {
   EXPECT_EQ(conn.qp, nullptr);
   EXPECT_EQ(conn.ctx, nullptr);
 }
+
+namespace {
+
+struct ApiTransferLog {
+  int sendRequestCalls = 0;
+  int recvReplyCalls = 0;
+  int synchronizeCalls = 0;
+};
+
+ApiTransferLog g_apiTransferLog;
+
+struct ibv_device* g_fakeIbvDevices[] = {reinterpret_cast<struct ibv_device*>(
+                                           0x1),
+                                         nullptr};
+
+struct ibv_device** fakeGetDeviceList(int* num_devices) {
+  if (num_devices) {
+    *num_devices = 1;
+  }
+  return g_fakeIbvDevices;
+}
+
+void fakeFreeDeviceList(struct ibv_device**) {
+}
+
+struct ibv_context* fakeOpenDevice(struct ibv_device*) {
+  return reinterpret_cast<struct ibv_context*>(0x2);
+}
+
+struct ibv_pd* fakeAllocPd(struct ibv_context*) {
+  return reinterpret_cast<struct ibv_pd*>(0x3);
+}
+
+int fakeQueryPort(struct ibv_context*, uint8_t, struct ibv_port_attr*) {
+  return 0;
+}
+
+int fakeQueryGid(struct ibv_context*, uint8_t, int, union ibv_gid* gid) {
+  if (gid) {
+    std::memset(gid, 0, sizeof(*gid));
+  }
+  return 0;
+}
+
+const char* fakeGetDeviceName(struct ibv_device*) {
+  return "mlx5_0";
+}
+
+struct ibv_mr* fakeTransferRegisterMr(struct ibv_pd*, void* addr, size_t, int) {
+  auto* mr = static_cast<struct ibv_mr*>(std::calloc(1, sizeof(struct ibv_mr)));
+  if (mr) {
+    mr->addr = addr;
+    mr->rkey = 0x1234;
+  }
+  return mr;
+}
+
+struct ibv_mr* fakeTransferRegisterMrIova2(struct ibv_pd* pd, void* addr,
+                                           size_t size, uintptr_t, int access) {
+  return fakeTransferRegisterMr(pd, addr, size, access);
+}
+
+int fakeTransferDeregisterMr(struct ibv_mr* mr) {
+  std::free(mr);
+  return 0;
+}
+
+struct ibv_cq* fakeTransferCreateCq(struct ibv_context*, int, void*,
+                                    struct ibv_comp_channel*, int) {
+  return reinterpret_cast<struct ibv_cq*>(0x4);
+}
+
+struct ibv_qp* fakeTransferCreateQp(struct ibv_pd*, struct ibv_qp_init_attr*) {
+  auto* qp = static_cast<struct ibv_qp*>(std::calloc(1, sizeof(struct ibv_qp)));
+  if (qp) {
+    qp->qp_num = 0x55;
+  }
+  return qp;
+}
+
+int fakeModifyQp(struct ibv_qp*, struct ibv_qp_attr*, int) {
+  return 0;
+}
+
+int fakePollCq(struct ibv_cq*, int, struct ibv_wc* wc) {
+  if (wc) {
+    std::memset(wc, 0, sizeof(*wc));
+    wc->status = IBV_WC_SUCCESS;
+  }
+  return 1;
+}
+
+int fakeTransferDestroyQp(struct ibv_qp* qp) {
+  std::free(qp);
+  return 0;
+}
+
+hipError_t fakeSynchronizeNoDevice() {
+  ++g_apiTransferLog.synchronizeCalls;
+  return hipErrorNoDevice;
+}
+
+hipError_t fakeSynchronizeSuccess() {
+  ++g_apiTransferLog.synchronizeCalls;
+  return hipSuccess;
+}
+
+int fakeSendRequest(void*, const char*, size_t) {
+  ++g_apiTransferLog.sendRequestCalls;
+  return 0;
+}
+
+int fakeRecvReply(void*, char* reply, size_t* replyLen) {
+  static constexpr char kReply[] = "200";
+  ++g_apiTransferLog.recvReplyCalls;
+  if (!replyLen || *replyLen < sizeof(kReply)) {
+    return -1;
+  }
+  std::memcpy(reply, kReply, sizeof(kReply));
+  *replyLen = sizeof(kReply);
+  return 0;
+}
+
+class InitAndTransferTest : public ::testing::Test {
+protected:
+  using Funcs = hipObj::IbvFuncs;
+
+  void SetUp() override {
+    savedState_ = hipObj::setStateForTest(&state_);
+    savedEnumerator_ = hipObj::setNicEnumerator(&enumerator_);
+    enumerator_.nics_.clear();
+
+    savedHipOps_ = hipObj::hipOps();
+    hipObj::HipOps ops = savedHipOps_;
+    ops.hipGetDevice = &fakeGetDeviceNoDevice;
+    ops.hipDeviceGetPCIBusId = &fakeDeviceGetPCIBusId;
+    ops.hipDeviceSynchronize = &fakeSynchronizeNoDevice;
+    hipObj::hipOps() = ops;
+
+    auto& funcs = hipObj::ibv.funcsForTest();
+    savedFuncs_ = funcs;
+    funcs.get_device_list = &fakeGetDeviceList;
+    funcs.free_device_list = &fakeFreeDeviceList;
+    funcs.open_device = &fakeOpenDevice;
+    funcs.close_device = &fakeCloseDevice;
+    funcs.get_device_name = &fakeGetDeviceName;
+    funcs.query_port = &fakeQueryPort;
+    funcs.query_gid = &fakeQueryGid;
+    funcs.alloc_pd = &fakeAllocPd;
+    funcs.dealloc_pd = &fakeDeallocPd;
+    funcs.reg_mr = &fakeTransferRegisterMr;
+    funcs.reg_mr_iova2 = &fakeTransferRegisterMrIova2;
+    funcs.dereg_mr = &fakeTransferDeregisterMr;
+    funcs.create_cq = &fakeTransferCreateCq;
+    funcs.destroy_cq = &fakeDestroyCq;
+    funcs.create_qp = &fakeTransferCreateQp;
+    funcs.modify_qp = &fakeModifyQp;
+    funcs.destroy_qp = &fakeTransferDestroyQp;
+    funcs.poll_cq = &fakePollCq;
+
+    savedIbvInitialized_ = hipObj::ibv.is_initialized;
+    hipObj::ibv.is_initialized = true;
+    g_apiTransferLog = {};
+    g_calls = IbvCallLog();
+  }
+
+  void TearDown() override {
+    (void)hipObjShutdown();
+    hipObj::ibv.is_initialized = savedIbvInitialized_;
+    hipObj::ibv.funcsForTest() = savedFuncs_;
+    hipObj::hipOps() = savedHipOps_;
+    hipObj::setNicEnumerator(savedEnumerator_);
+    hipObj::setStateForTest(savedState_);
+  }
+
+  hipObjConfig_t makeConfig() {
+    hipObjConfig_t config = {};
+    config.gpuDevice = -1;
+    config.nicHint = "mlx5_0";
+    return config;
+  }
+
+  hipObj::DriverState state_;
+  hipObj::DriverState* savedState_ = nullptr;
+  FakeNicEnumerator enumerator_;
+  hipObj::NicEnumerator* savedEnumerator_ = nullptr;
+  Funcs savedFuncs_ = {};
+  hipObj::HipOps savedHipOps_;
+  bool savedIbvInitialized_ = false;
+};
+
+TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint) {
+  hipObjConfig_t config = makeConfig();
+
+  hipObjError_t err = hipObjInit(&config);
+
+  EXPECT_EQ(err.opError, hipObjSuccess);
+  EXPECT_TRUE(state_.initialized);
+  EXPECT_EQ(state_.gpuDevice, -1);
+  EXPECT_EQ(state_.nicHint, "mlx5_0");
+}
+
+TEST_F(InitAndTransferTest, HostTransfersSkipDeviceSynchronizeWithoutGpu) {
+  hipObjConfig_t config = makeConfig();
+  ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+
+  char hostBuf[32] = {};
+  ASSERT_EQ(hipObjBufRegisterHost(hostBuf, sizeof(hostBuf)).opError,
+            hipObjSuccess);
+
+  hipObjOps_t ops = {};
+  ops.sendRequest = &fakeSendRequest;
+  ops.recvReply = &fakeRecvReply;
+
+  hipObjError_t err = hipObjGet(nullptr, hostBuf, sizeof(hostBuf), 0, &ops,
+                                nullptr);
+
+  EXPECT_EQ(err.opError, hipObjSuccess);
+  EXPECT_EQ(g_apiTransferLog.sendRequestCalls, 1);
+  EXPECT_EQ(g_apiTransferLog.recvReplyCalls, 1);
+  EXPECT_EQ(g_apiTransferLog.synchronizeCalls, 0);
+}
+
+TEST_F(InitAndTransferTest, GpuRegisteredTransfersStillSynchronize) {
+  hipObjConfig_t config = makeConfig();
+  ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+
+  hipObj::HipOps opsTable = hipObj::hipOps();
+  opsTable.hipDeviceSynchronize = &fakeSynchronizeSuccess;
+  hipObj::hipOps() = opsTable;
+
+  void* gpuBuf = reinterpret_cast<void*>(0x1000);
+  ASSERT_EQ(hipObjBufRegister(gpuBuf, 64).opError, hipObjSuccess);
+
+  hipObjOps_t ops = {};
+  ops.sendRequest = &fakeSendRequest;
+  ops.recvReply = &fakeRecvReply;
+
+  hipObjError_t err = hipObjPut(nullptr, gpuBuf, 64, 0, &ops, nullptr);
+
+  EXPECT_EQ(err.opError, hipObjSuccess);
+  EXPECT_EQ(g_apiTransferLog.synchronizeCalls, 1);
+}
+
+} // namespace
 
 } // namespace

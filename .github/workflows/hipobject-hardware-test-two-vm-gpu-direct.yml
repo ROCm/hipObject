@@ -2,9 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Two-VM GPU-direct integration test (v1 protocol, asymmetric guests).
+# Two-VM GPU-buffer/host-buffer integration test
+# (v1 protocol, asymmetric guests).
 #
-# The GPU Direct lane puts both emulated functions -- ernic's NIC and
+# The single-VM AIS lane puts both emulated functions -- ernic's NIC and
 # rocjitsu's GPU -- in one guest and talks to rocm-ernic's own in-process S3
 # store. This lane splits them across two guests instead, which is the shape
 # a real deployment has: a client host with a GPU, a storage host without
@@ -12,13 +13,15 @@
 #
 #   VM 1 (192.168.200.10): ernic NIC only. hipobj-rdma-test-server, v1, :9000.
 #   VM 2:                  ernic NIC + rocjitsu's emulated gfx1250, and
-#                          minio-getput-rdma driving a real hipMalloc'd
-#                          device buffer across the wire to VM 1.
+#                          minio-getput-rdma driving either a real hipMalloc'd
+#                          device buffer or an explicit host buffer across the
+#                          wire to VM 1.
 #
 # So the GPU is on one side of the transfer and not the other, and the bytes
 # cross an emulated fabric rather than a loopback inside one process. Nothing
 # else in the matrix covers that: Two-VM Protocol is two guests with host
-# buffers, GPU Direct is one guest with a device buffer.
+# buffers, while the single-VM AIS lane is one guest. This workflow runs the
+# asymmetric topology in both host-buffer and device-buffer modes.
 #
 # Two rocm-ernic instances on the runner, joined by a tcp:manager /
 # tcp:worker mesh and each bridged onto ernicbr0 through its own tap, serve
@@ -27,7 +30,7 @@
 # from the same rocjitsu build that serves the socket -- it describes the
 # device, so it cannot come from anywhere else.
 
-name: hipObject - Hardware Test - Two-VM GPU Direct
+name: hipObject - Hardware Test - Two-VM AIS and Host Buffers
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -67,7 +70,17 @@ env:
 
 jobs:
   two-vm-gpu-direct:
-    name: Two-VM GPU Direct
+    name: Two-VM RDMA (${{ matrix.buffer_label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - buffer_label: GPU Buffer
+            gpu_mode: gpu
+            allow_failure: true
+          - buffer_label: Host Buffer
+            gpu_mode: nogpu
+            allow_failure: false
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     # The previous container topology could not work and was gated off: with
@@ -631,7 +644,7 @@ jobs:
             exit 1
           }
 
-      - name: Run the GPU-buffer v1 client in VM 2
+      - name: Run the ${{ matrix.buffer_label }} v1 client in VM 2
         id: client
         timeout-minutes: 10
         # TEMPORARY. This lane has never passed: the remote read of the
@@ -640,10 +653,11 @@ jobs:
         # held behind it -- everything up to this point is still fatal, so a
         # regression in the build, the guests, the NIC or the GPU enumeration
         # still fails the job. Remove this the moment the transfer works.
-        continue-on-error: true
+        continue-on-error: ${{ matrix.allow_failure }}
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          GPU_MODE="${{ matrix.gpu_mode }}"
           # Bounded at three layers, as amdgpu-probe above: guest-side timeout,
           # ssh keepalive, step timeout. Unbounded, this step wedged for the
           # full 120-minute job budget at 60dc91f -- the client never returned
@@ -654,21 +668,21 @@ jobs:
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
             -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
             -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
-            "sudo timeout 420 env HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
+            "cmd=\"sudo timeout 420 env HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
                BUILD_DIR=/tmp/hipobject-build \
                SERVER_ENDPOINT='http://${VM1_ADDR}:${SERVER_PORT}' \
                TEST_SIZE='${TEST_SIZE}' \
-               GPU_MODE=gpu \
-               HIPOBJ_REQUIRE_GPU_DIRECT=1 \
-               /tmp/hipobject-build/client-entrypoint.sh"
+               GPU_MODE='${GPU_MODE}'\"; \
+             if [ \"${GPU_MODE}\" = gpu ]; then cmd=\"\$cmd HIPOBJ_REQUIRE_GPU_DIRECT=1\"; fi; \
+             eval \"\$cmd /tmp/hipobject-build/client-entrypoint.sh\""
 
-      - name: Report the known GPU-direct failure
-        if: steps.client.outcome == 'failure'
+      - name: Report the known AIS failure
+        if: steps.client.outcome == 'failure' && matrix.gpu_mode == 'gpu'
         run: |
-          echo "::warning title=Known failure::Two-VM GPU Direct transfer failed. \
+          echo "::warning title=Known failure::Two-VM AIS GPU-buffer transfer failed. \
           The job is green only because the client step is continue-on-error."
           cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
-          ### Two-VM GPU Direct: KNOWN FAILING
+          ### Two-VM AIS GPU Buffer: KNOWN FAILING
 
           The GPU-buffer transfer failed and the step is `continue-on-error`,
           so this job reports success. **It did not pass.**
@@ -682,7 +696,6 @@ jobs:
           accelerator, `ip_discovery.bin`, the message-size cap and BAR
           placement. The one component not yet swapped is `rocm-ernic` itself.
           EOF
-
       - name: Collect logs
         if: always()
         run: |

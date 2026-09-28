@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# GPU-direct S3-over-RDMA integration test (two vfio-user functions, one VM).
+# Single-VM GPU-buffer/host-buffer S3-over-RDMA integration test
+# (two vfio-user functions, one VM).
 # The long comment above the job is the important one: this topology has
 # requirements that are not obvious and were expensive to find.
 
-name: hipObject - Hardware Test - GPU Direct
+name: hipObject - Hardware Test - AIS and Host Buffers
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -46,15 +47,16 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------
-  # gpu-direct: the GPU-direct path, in a VM.
+  # gpu-capable: the GPU-capable topology, in a VM.
   #
   # The other three emulated-hardware lanes run the client on host buffers
   # (hipobject-hardware-test-two-vm-protocol.yml, hipobject-hardware-test-minio-bridge.yml,
   # hipobject-hardware-test-s3-backend.yml). This one attaches a
   # SECOND vfio-user function -- rocjitsu's emulated gfx1250 -- beside the
-  # ernic NIC, so the same S3-over-RDMA transfer can be driven from a real
-  # hipMalloc'd device buffer. That is the product claim, and this is the
-  # only lane that exercises it.
+  # ernic NIC, so the same S3-over-RDMA transfer can be driven from either a
+  # real hipMalloc'd device buffer or an explicit host buffer on the same
+  # topology. The GPU-buffer matrix entry exercises AMD Infinity Storage (AIS);
+  # the host-buffer one keeps that topology covered without depending on VRAM.
   #
   # Modelled on qemu-minimal's ansible-playbook-test-ernic-rocjitsu lane,
   # with one deliberate difference: rather than baking a combined image with
@@ -106,7 +108,17 @@ jobs:
   # eating the job timeout.
   # ---------------------------------------------------------------------
   gpu-direct:
-    name: GPU Direct
+    name: GPU-Capable RDMA (${{ matrix.buffer_label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - buffer_label: GPU Buffer
+            gpu_mode: gpu
+            allow_failure: true
+          - buffer_label: Host Buffer
+            gpu_mode: nogpu
+            allow_failure: false
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
@@ -477,7 +489,7 @@ jobs:
             "${GITHUB_WORKSPACE}/ernic-build-gpu/rocm-libs" \
             "${VM_USER}@localhost:/tmp/rocm-libs"
 
-      - name: Run GPU-direct S3 PUT+GET test in VM
+      - name: Run ${{ matrix.buffer_label }} S3 PUT+GET test in VM
         id: client
         # Bounded at three layers, as the two-VM lane: guest-side timeout, ssh
         # keepalive, step timeout. Unbounded, this step wedged for the whole
@@ -491,18 +503,20 @@ jobs:
         timeout-minutes: 10
         # TEMPORARY. This lane passed until HIPOBJ_REQUIRE_GPU_DIRECT stopped
         # the client staging a device buffer through host memory and calling
-        # that GPU-direct; the honest run fails. Non-fatal so the rest of the
+        # that AIS; the honest run fails. Non-fatal so the rest of the
         # PR is not held behind it -- every step before this one is still
         # fatal, so the build, the guest, the NIC and the KFD node are all
         # still enforced. Remove this the moment the transfer works.
-        continue-on-error: true
+        continue-on-error: ${{ matrix.allow_failure }}
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          GPU_MODE="${{ matrix.gpu_mode }}"
+          BUFFER_LABEL="${{ matrix.buffer_label }}"
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
               -p $SSH_PORT "${VM_USER}@localhost" \
-              "S3_ADDR='${S3_ADDR}' S3_PORT='${S3_PORT}' RDMA_DEVICE='${RDMA_DEVICE}' bash -s" << 'EOFVM'
+              "S3_ADDR='${S3_ADDR}' S3_PORT='${S3_PORT}' RDMA_DEVICE='${RDMA_DEVICE}' GPU_MODE='${GPU_MODE}' BUFFER_LABEL='${BUFFER_LABEL}' bash -s" << 'EOFVM'
           set -e
           chmod +x /tmp/minio-getput-rdma
           export LD_LIBRARY_PATH=/tmp/rocm-libs
@@ -526,30 +540,29 @@ jobs:
           # but /dev/kfd and /dev/dri/render* are root:render 0660 and the
           # guest's login user is in neither group, so the HIP runtime
           # enumerates no agent and hipMalloc returns 100, hipErrorNoDevice.
-          #
-          # "gpu", not "nogpu": the payload is a hipMalloc'd device buffer, so
-          # this is the GPU-direct path rather than a host-buffer transfer.
-          echo "=== minio-getput-rdma, GPU buffer (NIC $HIPOBJ_NIC_HINT) ==="
+          echo "=== minio-getput-rdma, ${BUFFER_LABEL} (NIC $HIPOBJ_NIC_HINT) ==="
           rc=0
-          # HIPOBJ_REQUIRE_GPU_DIRECT: without it a failed device-memory
-          # registration silently stages through host memory and still moves
-          # the right bytes, so this lane would pass while testing the one
-          # thing it exists to rule out.
-          # timeout 300: a 65536-byte transfer takes seconds, so anything past
-          # five minutes is a hang, and a hang has to exit non-zero (124) to
-          # be reportable rather than silently eating the job budget.
-          sudo timeout 300 env LD_LIBRARY_PATH=/tmp/rocm-libs \
-              HIPOBJ_NIC_HINT="$HIPOBJ_NIC_HINT" \
-              HIPOBJ_REQUIRE_GPU_DIRECT=1 \
-              /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
-              minioadmin minioadmin 65536 gpu > /tmp/getput.log 2>&1 || rc=$?
+          if [ "$GPU_MODE" = gpu ]; then
+            sudo timeout 300 env LD_LIBRARY_PATH=/tmp/rocm-libs \
+                HIPOBJ_NIC_HINT="$HIPOBJ_NIC_HINT" \
+                HIPOBJ_REQUIRE_GPU_DIRECT=1 \
+                /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
+                minioadmin minioadmin 65536 gpu > /tmp/getput.log 2>&1 || rc=$?
+          else
+            sudo timeout 300 env LD_LIBRARY_PATH=/tmp/rocm-libs \
+                HIPOBJ_NIC_HINT="$HIPOBJ_NIC_HINT" \
+                /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
+                minioadmin minioadmin 65536 "${GPU_MODE}" > /tmp/getput.log 2>&1 || rc=$?
+          fi
           cat /tmp/getput.log
           if [ "$rc" -eq 124 ]; then echo "client hung and was killed after 300s"; fi
           if [ "$rc" -ne 0 ]; then
-            echo "=== HIP saw no device; agent enumeration ==="
-            command -v rocminfo > /dev/null && \
-              sudo env LD_LIBRARY_PATH=/tmp/rocm-libs rocminfo 2>&1 | head -40
-            sudo dmesg | grep -i 'kfd\|amdgpu' | tail -20 || true
+            if [ "$GPU_MODE" = gpu ]; then
+              echo "=== HIP saw no device; agent enumeration ==="
+              command -v rocminfo > /dev/null && \
+                sudo env LD_LIBRARY_PATH=/tmp/rocm-libs rocminfo 2>&1 | head -40
+              sudo dmesg | grep -i 'kfd\|amdgpu' | tail -20 || true
+            fi
             exit "$rc"
           fi
           # A green exit is not enough: the bridge falls back to plain HTTP on
@@ -559,20 +572,20 @@ jobs:
           /tmp/assert-transfer.sh /tmp/getput.log rdma
           EOFVM
 
-      - name: Report the known GPU-direct failure
-        if: steps.client.outcome == 'failure'
+      - name: Report the known AIS failure
+        if: steps.client.outcome == 'failure' && matrix.gpu_mode == 'gpu'
         run: |
-          echo "::warning title=Known failure::GPU-direct transfer failed. \
+          echo "::warning title=Known failure::AIS GPU-buffer transfer failed. \
           The job is green only because the client step is continue-on-error."
           cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
-          ### GPU Direct: KNOWN FAILING
+          ### AIS GPU Buffer: KNOWN FAILING
 
           The GPU-buffer transfer failed and the step is `continue-on-error`,
           so this job reports success. **It did not pass.**
 
           This lane was green until `HIPOBJ_REQUIRE_GPU_DIRECT=1` stopped the
           client falling back to host staging for a device pointer. The green
-          runs were not testing GPU-direct; this red one is.
+          runs were not testing AIS; this red one is.
 
           Two signatures seen so far, and it is not known whether they share a
           cause. `RDMA PUT failed (-1)` at 65536 bytes, immediately; and a hang
@@ -581,7 +594,6 @@ jobs:
           step log for `client hung and was killed after 300s` to tell them
           apart.
           EOF
-
       - name: Collect logs
         if: always()
         run: |

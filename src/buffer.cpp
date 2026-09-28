@@ -23,6 +23,19 @@ constexpr int IBV_ACCESS_REMOTE_READ = 0x1;
 constexpr int IBV_ACCESS_REMOTE_WRITE = 0x2;
 constexpr int IBV_ACCESS_LOCAL_WRITE = 0x4;
 
+int validateRegistration(bool isRegistered, size_t entryCount, size_t size) {
+  if (size > MAX_MR_SIZE) {
+    return -1;
+  }
+  if (isRegistered) {
+    return -1;
+  }
+  if (entryCount >= BufferMap::kMaxEntries) {
+    return -1;
+  }
+  return 0;
+}
+
 /* Is this pointer device memory? Answered through the seam so unit tests can
  * drive both branches without a GPU. A runtime that cannot tell us is treated
  * as "not device memory": the strict check below must not fail a host buffer
@@ -54,24 +67,32 @@ bool requireGpuDirect() {
   return required;
 }
 
+void freeOwnedHostBuffer(void* hostBuf) {
+  if (!hostBuf) {
+    return;
+  }
+  auto freeFn = hipObj::hipOps().hipHostFree;
+  if (freeFn) {
+    (void)freeFn(hostBuf);
+    return;
+  }
+  (void)hipHostFree(hostBuf);
+}
+
 } // namespace
 
 int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
-  if (size > MAX_MR_SIZE) {
-    return -1;
-  }
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-  if (entries_.find(key) != entries_.end()) {
-    return -1;
-  }
-  if (entries_.size() >= kMaxEntries) {
+  if (validateRegistration(entries_.find(key) != entries_.end(),
+                           entries_.size(), size) != 0) {
     return -1;
   }
   int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
                IBV_ACCESS_LOCAL_WRITE;
   struct ibv_mr* mr = ibv.reg_mr(pd, devPtr, size, access);
   if (mr) {
-    entries_[key] = {mr, size, true, static_cast<uint64_t>(key), nullptr};
+    entries_[key] = {mr,     size, true, false, static_cast<uint64_t>(key),
+                     nullptr};
     return 0;
   }
 
@@ -100,14 +121,31 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
   }
   mr = ibv.reg_mr_host(pd, hostBuf, size, access);
   if (!mr) {
-    (void)hipHostFree(hostBuf);
+    freeOwnedHostBuffer(hostBuf);
     return -1;
   }
-  entries_[key] = {mr, size, false, reinterpret_cast<uint64_t>(hostBuf),
-                   hostBuf};
+  entries_[key] = {
+    mr, size, false, true, reinterpret_cast<uint64_t>(hostBuf), hostBuf};
   return 0;
 }
 
+int BufferMap::registerHostBuffer(void* hostPtr, size_t size,
+                                  struct ibv_pd* pd) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(hostPtr);
+  if (validateRegistration(entries_.find(key) != entries_.end(),
+                           entries_.size(), size) != 0) {
+    return -1;
+  }
+  int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE |
+               IBV_ACCESS_LOCAL_WRITE;
+  struct ibv_mr* mr = ibv.reg_mr_host(pd, hostPtr, size, access);
+  if (!mr) {
+    return -1;
+  }
+  entries_[key] = {
+    mr, size, false, false, reinterpret_cast<uint64_t>(hostPtr), nullptr};
+  return 0;
+}
 uint64_t BufferMap::lookupRemoteAddr(void* devPtr) const {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   auto it = entries_.find(key);
@@ -125,8 +163,8 @@ int BufferMap::deregisterBuffer(void* devPtr) {
   }
   BufEntry& ent = it->second;
   ibv.dereg_mr(ent.mr);
-  if (ent.hostBuf) {
-    (void)hipHostFree(ent.hostBuf);
+  if (ent.ownsHostBuf && ent.hostBuf) {
+    freeOwnedHostBuffer(ent.hostBuf);
   }
   entries_.erase(it);
   return 0;
@@ -135,8 +173,8 @@ int BufferMap::deregisterBuffer(void* devPtr) {
 void BufferMap::deregisterAll() {
   for (auto& [key, ent] : entries_) {
     ibv.dereg_mr(ent.mr);
-    if (ent.hostBuf) {
-      (void)hipHostFree(ent.hostBuf);
+    if (ent.ownsHostBuf && ent.hostBuf) {
+      freeOwnedHostBuffer(ent.hostBuf);
     }
   }
   entries_.clear();
@@ -169,6 +207,12 @@ size_t BufferMap::lookupSize(void* devPtr) const {
 bool BufferMap::isRegistered(void* devPtr) const {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   return entries_.find(key) != entries_.end();
+}
+
+bool BufferMap::requiresDeviceSync(void* devPtr) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+  auto it = entries_.find(key);
+  return it != entries_.end() && it->second.isDmabuf;
 }
 
 #ifdef HIPOBJECT_V2_API
