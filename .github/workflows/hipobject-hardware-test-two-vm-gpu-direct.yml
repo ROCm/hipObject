@@ -2,9 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Two-VM GPU-direct integration test (v1 protocol, asymmetric guests).
+# Two-VM GPU-buffer/host-buffer integration test
+# (v1 protocol, asymmetric guests).
 #
-# The GPU Direct lane puts both emulated functions -- ernic's NIC and
+# The single-VM AIS lane puts both emulated functions -- ernic's NIC and
 # rocjitsu's GPU -- in one guest and talks to rocm-ernic's own in-process S3
 # store. This lane splits them across two guests instead, which is the shape
 # a real deployment has: a client host with a GPU, a storage host without
@@ -19,8 +20,8 @@
 # So the GPU is on one side of the transfer and not the other, and the bytes
 # cross an emulated fabric rather than a loopback inside one process. Nothing
 # else in the matrix covers that: Two-VM Protocol is two guests with host
-# buffers, GPU Direct is one guest. This workflow runs the asymmetric topology
-# in both host-buffer and device-buffer modes.
+# buffers, while the single-VM AIS lane is one guest. This workflow runs the
+# asymmetric topology in both host-buffer and device-buffer modes.
 #
 # Two rocm-ernic instances on the runner, joined by a tcp:manager /
 # tcp:worker mesh and each bridged onto ernicbr0 through its own tap, serve
@@ -29,7 +30,7 @@
 # from the same rocjitsu build that serves the socket -- it describes the
 # device, so it cannot come from anywhere else.
 
-name: hipObject - Hardware Test - Two-VM GPU Direct
+name: hipObject - Hardware Test - Two-VM AIS and Host Buffers
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -69,15 +70,15 @@ env:
 
 jobs:
   two-vm-gpu-direct:
-    name: Two-VM GPU Direct (${{ matrix.buffer_label }})
+    name: Two-VM RDMA (${{ matrix.buffer_label }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - buffer_label: GPU buffer
+          - buffer_label: GPU Buffer
             gpu_mode: gpu
             allow_failure: true
-          - buffer_label: Host buffer
+          - buffer_label: Host Buffer
             gpu_mode: nogpu
             allow_failure: false
     runs-on: ubuntu-24.04
@@ -675,13 +676,13 @@ jobs:
              if [ \"${GPU_MODE}\" = gpu ]; then cmd=\"\$cmd HIPOBJ_REQUIRE_GPU_DIRECT=1\"; fi; \
              eval \"\$cmd /tmp/hipobject-build/client-entrypoint.sh\""
 
-      - name: Report the known GPU-direct failure
+      - name: Report the known AIS failure
         if: steps.client.outcome == 'failure' && matrix.gpu_mode == 'gpu'
         run: |
-          echo "::warning title=Known failure::Two-VM GPU Direct transfer failed. \
+          echo "::warning title=Known failure::Two-VM AIS GPU-buffer transfer failed. \
           The job is green only because the client step is continue-on-error."
           cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
-          ### Two-VM GPU Direct: KNOWN FAILING
+          ### Two-VM AIS GPU Buffer: KNOWN FAILING
 
           The GPU-buffer transfer failed and the step is `continue-on-error`,
           so this job reports success. **It did not pass.**

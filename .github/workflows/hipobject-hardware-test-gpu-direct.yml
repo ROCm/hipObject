@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# GPU-direct S3-over-RDMA integration test (two vfio-user functions, one VM).
+# Single-VM GPU-buffer/host-buffer S3-over-RDMA integration test
+# (two vfio-user functions, one VM).
 # The long comment above the job is the important one: this topology has
 # requirements that are not obvious and were expensive to find.
 
-name: hipObject - Hardware Test - GPU Direct
+name: hipObject - Hardware Test - AIS and Host Buffers
 
 on:
   # PR-gated and manual only. Nothing reaches develop without passing
@@ -46,7 +47,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------
-  # gpu-direct: the GPU-capable topology, in a VM.
+  # gpu-capable: the GPU-capable topology, in a VM.
   #
   # The other three emulated-hardware lanes run the client on host buffers
   # (hipobject-hardware-test-two-vm-protocol.yml, hipobject-hardware-test-minio-bridge.yml,
@@ -54,8 +55,8 @@ jobs:
   # SECOND vfio-user function -- rocjitsu's emulated gfx1250 -- beside the
   # ernic NIC, so the same S3-over-RDMA transfer can be driven from either a
   # real hipMalloc'd device buffer or an explicit host buffer on the same
-  # topology. The GPU-buffer matrix entry is the product claim; the host-buffer
-  # one keeps that topology covered without depending on VRAM.
+  # topology. The GPU-buffer matrix entry exercises AMD Infinity Storage (AIS);
+  # the host-buffer one keeps that topology covered without depending on VRAM.
   #
   # Modelled on qemu-minimal's ansible-playbook-test-ernic-rocjitsu lane,
   # with one deliberate difference: rather than baking a combined image with
@@ -107,15 +108,15 @@ jobs:
   # eating the job timeout.
   # ---------------------------------------------------------------------
   gpu-direct:
-    name: GPU Direct (${{ matrix.buffer_label }})
+    name: GPU-Capable RDMA (${{ matrix.buffer_label }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - buffer_label: GPU buffer
+          - buffer_label: GPU Buffer
             gpu_mode: gpu
             allow_failure: true
-          - buffer_label: Host buffer
+          - buffer_label: Host Buffer
             gpu_mode: nogpu
             allow_failure: false
     runs-on: ubuntu-24.04
@@ -502,7 +503,7 @@ jobs:
         timeout-minutes: 10
         # TEMPORARY. This lane passed until HIPOBJ_REQUIRE_GPU_DIRECT stopped
         # the client staging a device buffer through host memory and calling
-        # that GPU-direct; the honest run fails. Non-fatal so the rest of the
+        # that AIS; the honest run fails. Non-fatal so the rest of the
         # PR is not held behind it -- every step before this one is still
         # fatal, so the build, the guest, the NIC and the KFD node are all
         # still enforced. Remove this the moment the transfer works.
@@ -571,20 +572,20 @@ jobs:
           /tmp/assert-transfer.sh /tmp/getput.log rdma
           EOFVM
 
-      - name: Report the known GPU-direct failure
+      - name: Report the known AIS failure
         if: steps.client.outcome == 'failure' && matrix.gpu_mode == 'gpu'
         run: |
-          echo "::warning title=Known failure::GPU-direct transfer failed. \
+          echo "::warning title=Known failure::AIS GPU-buffer transfer failed. \
           The job is green only because the client step is continue-on-error."
           cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
-          ### GPU Direct: KNOWN FAILING
+          ### AIS GPU Buffer: KNOWN FAILING
 
           The GPU-buffer transfer failed and the step is `continue-on-error`,
           so this job reports success. **It did not pass.**
 
           This lane was green until `HIPOBJ_REQUIRE_GPU_DIRECT=1` stopped the
           client falling back to host staging for a device pointer. The green
-          runs were not testing GPU-direct; this red one is.
+          runs were not testing AIS; this red one is.
 
           Two signatures seen so far, and it is not known whether they share a
           cause. `RDMA PUT failed (-1)` at 65536 bytes, immediately; and a hang
