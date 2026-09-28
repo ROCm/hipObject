@@ -391,7 +391,8 @@ TEST(S3CurlOps, RequestContract) {
 
   const std::string& req = server.lastRequest();
   EXPECT_NE(std::string::npos, req.find("GET /test/object HTTP/1.1"));
-  EXPECT_NE(std::string::npos, req.find("x-amz-rdma-token:"));
+  EXPECT_NE(std::string::npos,
+            req.find(std::string("x-amz-rdma-token: ") + kToken + "\r\n"));
 }
 
 TEST(S3CurlOps, ConnectionRefusedFails) {

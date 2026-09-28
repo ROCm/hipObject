@@ -333,13 +333,11 @@ ssize_t rdmaGetV2(S3RdmaContext* sctx, void* buf, size_t size) {
 
 ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
                 size_t size) {
-  char rdma_token[512];
-  // The ":<addr>:<len>" suffix overrides the address encoded in the token.
-  // The caller's pointer is not that address whenever hipObject had to
-  // register a host staging buffer instead of the caller's memory, so send
-  // zeros -- "no override" -- and let the token speak for itself.
-  std::snprintf(rdma_token, sizeof(rdma_token), "%s:%016lx:%016lx", token, 0UL,
-                static_cast<unsigned long>(size));
+  // The header carries one fixed-width token and nothing else; a
+  // ":<addr>:<len>" suffix would override the address the token already
+  // advertises, and on the staging path the caller's pointer is not that
+  // address. See docs/interop.rst.
+  const std::string rdma_token(token ? token : "");
   (void)buf;
 
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
@@ -430,13 +428,11 @@ ssize_t rdmaPut(S3RdmaContext* sctx, const char* token, const void* buf,
 
 ssize_t rdmaGet(S3RdmaContext* sctx, const char* token, const void* buf,
                 size_t size) {
-  char rdma_token[512];
-  // The ":<addr>:<len>" suffix overrides the address encoded in the token.
-  // The caller's pointer is not that address whenever hipObject had to
-  // register a host staging buffer instead of the caller's memory, so send
-  // zeros -- "no override" -- and let the token speak for itself.
-  std::snprintf(rdma_token, sizeof(rdma_token), "%s:%016lx:%016lx", token, 0UL,
-                static_cast<unsigned long>(size));
+  // The header carries one fixed-width token and nothing else; a
+  // ":<addr>:<len>" suffix would override the address the token already
+  // advertises, and on the staging path the caller's pointer is not that
+  // address. See docs/interop.rst.
+  const std::string rdma_token(token ? token : "");
   (void)buf;
 
   minio::utils::UtcTime date = minio::utils::UtcTime::Now();
