@@ -11,13 +11,13 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
 #include <dlfcn.h>
-#include <sys/utsname.h>
 #include <unistd.h>
 
 namespace hipObj {
@@ -76,50 +76,28 @@ IBVWrapper::~IBVWrapper() {
 }
 
 void IBVWrapper::init_dmabuf_support_flag() {
+  const char* dbg = getenv("HIPOBJ_RDMA_DEBUG");
+  dmabuf_debug_ = dbg && *dbg && dbg[0] != '0';
+
+  const char* env = getenv("HIPOBJ_DMABUF");
+  if (env && (env[0] == '0' || env[0] == 'n' || env[0] == 'N')) {
+    dmabuf_enabled_ = 0;
+  }
   if (!dmabuf_enabled_) {
     dmabuf_is_supported_ = 0;
     return;
   }
 
-  if (!funcs_.reg_dmabuf_mr) {
-    dmabuf_is_supported_ = 0;
-    return;
-  }
-
-  const char kernel_opt1[] = "CONFIG_DMABUF_MOVE_NOTIFY=y";
-  const char kernel_opt2[] = "CONFIG_PCI_P2PDMA=y";
-  int found_opt1 = 0;
-  int found_opt2 = 0;
-  struct utsname utsname;
-  char kernel_conf_file[128];
-  char buf[256];
-
-  if (uname(&utsname) == -1) {
-    dmabuf_is_supported_ = 0;
-    return;
-  }
-
-  snprintf(kernel_conf_file, sizeof(kernel_conf_file), "/boot/config-%s",
-           utsname.release);
-  FILE* fp = fopen(kernel_conf_file, "r");
-  if (!fp) {
-    dmabuf_is_supported_ = 0;
-    return;
-  }
-
-  while (fgets(buf, sizeof(buf), fp)) {
-    if (strstr(buf, kernel_opt1))
-      found_opt1 = 1;
-    if (strstr(buf, kernel_opt2))
-      found_opt2 = 1;
-    if (found_opt1 && found_opt2) {
-      dmabuf_is_supported_ = 1;
-      fclose(fp);
-      return;
-    }
-  }
-  fclose(fp);
-  dmabuf_is_supported_ = 0;
+  /* The only gate that can be answered here. Whether a given GPU can export
+   * a dmabuf and a given NIC can register it is answered by trying, in
+   * reg_mr(): both calls report their own failure and fall through. This
+   * used to additionally require CONFIG_DMABUF_MOVE_NOTIFY=y and
+   * CONFIG_PCI_P2PDMA=y from /boot/config-$(uname -r), which is a false
+   * negative on any kernel that registers dmabuf MRs without move-notify --
+   * the mainline builds the emulated-hardware CI lanes run on do exactly
+   * that, and lost GPU-direct to a grep. A config file is a prediction; the
+   * registration call is the fact. */
+  dmabuf_is_supported_ = funcs_.reg_dmabuf_mr ? 1 : 0;
 }
 
 bool IBVWrapper::is_dmabuf_supported() {
@@ -218,8 +196,13 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length,
     hsa_status_t status = hsa_amd_portable_export_dmabuf(addr, length, &fd,
                                                          &offset);
     if (status != HSA_STATUS_SUCCESS) {
-      fprintf(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: %d\n",
-              status);
+      /* Not an error worth a line on stderr by default: this is also the
+       * answer for a host pointer, and the host-buffer paths register far
+       * more often than the device ones. The plain path below handles it. */
+      if (dmabuf_debug_) {
+        fprintf(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: %d\n",
+                status);
+      }
     } else {
       struct ibv_mr* mr = funcs_.reg_dmabuf_mr(pd, offset, length,
                                                (uint64_t)(uintptr_t)addr, fd,

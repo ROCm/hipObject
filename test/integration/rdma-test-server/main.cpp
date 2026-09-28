@@ -146,8 +146,12 @@ int main(int argc, char* argv[]) {
         resp.headers["X-Amz-Rdma-Protocol-Status"] = "unsupported";
         return resp;
       });
+    if (!server.startThreaded()) {
+      fprintf(stderr, "hipobj-rdma-test-server: v2 not listening on port %d\n",
+              port);
+      return 1;
+    }
     fprintf(stdout, "hipobj-rdma-test-server v2 listening on port %d\n", port);
-    server.startThreaded();
     /* Block until external termination. Signals terminate the
      * process without unwinding (no destructor runs); a graceful
      * return would drain via the HttpServer destructor. */
@@ -286,7 +290,13 @@ int main(int argc, char* argv[]) {
   // Use the threaded server so large HTTP request bodies (e.g. HTTP-only
   // PUT payloads) are received in full rather than truncated at the
   // 65 KB single-recv limit of runOnce().
-  server.startThreaded();
+  /* "listening on port N" is what every caller waits for before it starts
+   * sending. Printing it without checking made a dead server look ready. */
+  if (!server.startThreaded()) {
+    fprintf(stderr, "hipobj-rdma-test-server: not listening on port %d\n",
+            port);
+    return 1;
+  }
   fprintf(stdout, "hipobj-rdma-test-server listening on port %d\n", port);
   for (;;) {
     std::this_thread::sleep_for(std::chrono::seconds(3600));

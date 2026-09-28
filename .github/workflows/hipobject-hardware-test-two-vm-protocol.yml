@@ -489,12 +489,18 @@ jobs:
           }
 
       - name: Run the v1 client in VM 2
+        timeout-minutes: 10
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           VM_USER="${{ steps.vm_info.outputs.vm_user }}"
+          # Bounded at three layers: guest-side timeout, ssh keepalive, step
+          # timeout. This lane passes today, but its twin in the Two-VM GPU
+          # Direct workflow wedged for the full 120-minute job budget on the
+          # same unbounded ssh -- the bound belongs on both.
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
             -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
-            "HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
+            "timeout 420 env HIPOBJ_NIC_HINT='${RDMA_DEVICE_2}' \
              SERVER_ENDPOINT='http://${VM1_ADDR}:${SERVER_PORT}' \
              TEST_SIZE='${TEST_SIZE}' \
              /tmp/hipobject-build/client-entrypoint.sh"

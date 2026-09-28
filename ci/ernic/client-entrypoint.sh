@@ -51,16 +51,17 @@ echo "    server: ${SERVER_ENDPOINT}"
 echo "    size:   ${TEST_SIZE} bytes"
 echo "    buffer: ${GPU_MODE}"
 
-out=""
+LOG=$(mktemp)
 rc=0
-out=$("${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma" \
+# Streamed, not captured: a command substitution holds every line until the
+# binary exits, so a client that wedges mid-transfer prints nothing at all and
+# the log cannot say which stage it died in. stdbuf keeps libc line-buffered --
+# stdout is a pipe here either way, and block buffering loses the same evidence
+# tee was added to preserve.
+stdbuf -oL -eL "${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma" \
     "${SERVER_HOST}:${SERVER_PORT}" \
     minioadmin minioadmin \
-    "${TEST_SIZE}" "${GPU_MODE}" 2>&1) || rc=$?
-echo "${out}"
-
-LOG=$(mktemp)
-printf '%s\n' "${out}" > "${LOG}"
+    "${TEST_SIZE}" "${GPU_MODE}" 2>&1 | tee "${LOG}" || rc=$?
 
 # Exit code alone is not evidence: the bridge returns success when it falls
 # back to plain HTTP, so the assertion is on what the run reported doing.

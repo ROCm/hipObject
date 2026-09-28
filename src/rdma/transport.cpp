@@ -6,6 +6,7 @@
 #include "transport.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <thread>
 
@@ -240,6 +241,15 @@ int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs) {
       continue;
     }
     if (wc.status != IBV_WC_SUCCESS) {
+      /* The NIC has told us exactly why the transfer died, and this is the
+       * only place that number exists. Dropping it here is what turns a
+       * specific fault -- a bad rkey, a protection violation, an unreachable
+       * remote -- into an indistinguishable -1 several layers up. */
+      fprintf(stderr,
+              "hipObj: work completion failed: status=%d opcode=%d "
+              "vendor_err=0x%x wr_id=%llu\n",
+              static_cast<int>(wc.status), static_cast<int>(wc.opcode),
+              wc.vendor_err, static_cast<unsigned long long>(wc.wr_id));
       return -1;
     }
     if (expectedOpcode < 0 || wc.opcode == expectedOpcode) {
@@ -249,6 +259,10 @@ int pollCompletion(RcConnection& conn, int expectedOpcode, int timeoutMs) {
   // A timeout is a failure: no completion arrived for the awaited work
   // request, so the transfer outcome is unknown and must not be reported
   // as success.
+  fprintf(stderr,
+          "hipObj: no work completion within %d ms (awaiting opcode %d); the "
+          "transfer outcome is unknown\n",
+          timeoutMs, expectedOpcode);
   return -1;
 }
 

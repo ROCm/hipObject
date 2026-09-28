@@ -5,10 +5,12 @@
 
 #include "hipobj.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -87,6 +89,95 @@ static int finishTransferAfterReply(const char* reply, size_t replyLen,
   return (err == hipSuccess) ? 0 : -1;
 }
 
+/* Milliseconds to wait for a staging copy before giving up. A 1 MiB copy is
+ * single-digit milliseconds on real hardware and ~170 ms on the emulated GPU
+ * the CI lanes use, so the default is several orders of magnitude of slack.
+ * It exists for one reason: a DMA that never completes must not become an
+ * unkillable process. ROCm waits on the completion signal with
+ * BusyWaitSignal::WaitRelaxed, which spins in userspace rather than blocking,
+ * so a wedged copy shows up as a busy core and no kernel log at all -- there
+ * is no other layer that will ever time this out. */
+static long stageTimeoutMs() {
+  static long ms = [] {
+    const char* env = getenv("HIPOBJ_STAGE_TIMEOUT_MS");
+    if (!env || !*env) {
+      return 30000L;
+    }
+    char* end = nullptr;
+    long v = strtol(env, &end, 10);
+    return (end && *end == '\0' && v > 0) ? v : 30000L;
+  }();
+  return ms;
+}
+
+/* hipMemcpy with a deadline. Async copy plus a recorded event polled to a
+ * wall-clock bound: on timeout the event and the copy are abandoned
+ * deliberately -- the copy owns the staging buffer and the stream, and there
+ * is no safe way to reclaim either while the DMA may still land. The caller
+ * gets an error instead of a hang, which is the whole point. */
+static hipObjError_t stageCopyWithDeadline(void* dev, void* host, size_t size,
+                                           bool toDevice) {
+  HipOps& ops = hipOps();
+  const hipMemcpyKind kind = toDevice ? hipMemcpyHostToDevice
+                                      : hipMemcpyDeviceToHost;
+  void* dst = toDevice ? dev : host;
+  const void* src = toDevice ? host : dev;
+
+  /* Unbounded fallback, for a table that cannot express the bounded form --
+   * a test seam with only the classic entries, or a HIP runtime too old to
+   * have events. */
+  auto blockingCopy = [&]() -> hipObjError_t {
+    if (!ops.hipMemcpy) {
+      return {hipObjInternalError, 0};
+    }
+    hipError_t err = ops.hipMemcpy(dst, src, size, kind);
+    return (err == hipSuccess) ? HIPOBJ_SUCCESS
+                               : hipObjError_t{hipObjInternalError, 0};
+  };
+
+  if (!ops.hipMemcpyAsync || !ops.hipEventCreate || !ops.hipEventRecord ||
+      !ops.hipEventQuery || !ops.hipEventDestroy) {
+    return blockingCopy();
+  }
+
+  hipEvent_t done = nullptr;
+  if (ops.hipEventCreate(&done) != hipSuccess) {
+    return blockingCopy();
+  }
+
+  hipError_t err = ops.hipMemcpyAsync(dst, src, size, kind, nullptr);
+  if (err == hipSuccess) {
+    err = ops.hipEventRecord(done, nullptr);
+  }
+  if (err != hipSuccess) {
+    (void)ops.hipEventDestroy(done);
+    return {hipObjInternalError, 0};
+  }
+
+  const long timeoutMs = stageTimeoutMs();
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeoutMs);
+  for (;;) {
+    hipError_t q = ops.hipEventQuery(done);
+    if (q == hipSuccess) {
+      (void)ops.hipEventDestroy(done);
+      return HIPOBJ_SUCCESS;
+    }
+    if (q != hipErrorNotReady) {
+      (void)ops.hipEventDestroy(done);
+      return {hipObjInternalError, 0};
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      fprintf(stderr,
+              "hipObj: staging %s copy of %zu bytes did not complete within "
+              "%ld ms; abandoning it. The GPU never signalled completion -- "
+              "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
+              toDevice ? "host-to-device" : "device-to-host", size, timeoutMs);
+      return {hipObjInternalError, 0};
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
 static hipObjError_t stageBuffer(void* devPtr, size_t size, off_t offset,
                                  bool toDevice) {
   void* hostBuf = g_bufferMap.lookupHostBuf(devPtr);
@@ -99,12 +190,7 @@ static hipObjError_t stageBuffer(void* devPtr, size_t size, off_t offset,
   }
   void* host = static_cast<char*>(hostBuf) + offset;
   void* dev = static_cast<char*>(devPtr) + offset;
-  hipError_t err = toDevice ? hipOps().hipMemcpy(dev, host, size,
-                                                 hipMemcpyHostToDevice)
-                            : hipOps().hipMemcpy(host, dev, size,
-                                                 hipMemcpyDeviceToHost);
-  return (err == hipSuccess) ? HIPOBJ_SUCCESS
-                             : hipObjError_t{hipObjInternalError, 0};
+  return stageCopyWithDeadline(dev, host, size, toDevice);
 }
 
 static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,

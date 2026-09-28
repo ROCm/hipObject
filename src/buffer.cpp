@@ -5,6 +5,8 @@
 
 #include "buffer.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include <hip/hip_runtime.h>
@@ -34,6 +36,37 @@ int validateRegistration(bool isRegistered, size_t entryCount, size_t size) {
   return 0;
 }
 
+/* Is this pointer device memory? Answered through the seam so unit tests can
+ * drive both branches without a GPU. A runtime that cannot tell us is treated
+ * as "not device memory": the strict check below must not fail a host buffer
+ * it merely failed to classify. */
+bool isDevicePointer(void* ptr) {
+  HipOps& ops = hipOps();
+  if (!ops.hipPointerGetAttributes) {
+    return false;
+  }
+  hipPointerAttribute_t attr{};
+  if (ops.hipPointerGetAttributes(&attr, ptr) != hipSuccess) {
+    return false;
+  }
+  return attr.type == hipMemoryTypeDevice;
+}
+
+/* Strict GPU-direct mode. Registering a device buffer is supposed to hand the
+ * NIC the device memory itself; when that fails we silently fall back to a
+ * host staging buffer and copy through it, which still transfers the right
+ * bytes and so passes every assertion a test can make -- a GPU-direct lane
+ * that quietly stopped being GPU-direct reports success. CI sets this so the
+ * fallback is a hard failure there, while a production host without dmabuf
+ * keeps working. */
+bool requireGpuDirect() {
+  static bool required = [] {
+    const char* env = getenv("HIPOBJ_REQUIRE_GPU_DIRECT");
+    return env && *env && env[0] != '0' && env[0] != 'n' && env[0] != 'N';
+  }();
+  return required;
+}
+
 void freeOwnedHostBuffer(void* hostBuf) {
   if (!hostBuf) {
     return;
@@ -58,10 +91,28 @@ int BufferMap::registerBuffer(void* devPtr, size_t size, struct ibv_pd* pd) {
                IBV_ACCESS_LOCAL_WRITE;
   struct ibv_mr* mr = ibv.reg_mr(pd, devPtr, size, access);
   if (mr) {
-    entries_[key] = {mr,     size, true, false, static_cast<uint64_t>(key),
-                     nullptr};
+    entries_[key] = {
+      mr, size, true, false, static_cast<uint64_t>(key), nullptr};
     return 0;
   }
+
+  const bool deviceMemory = isDevicePointer(devPtr);
+  if (deviceMemory) {
+    if (requireGpuDirect()) {
+      fprintf(stderr,
+              "hipObj: GPU-direct registration of %zu bytes at %p failed and "
+              "HIPOBJ_REQUIRE_GPU_DIRECT is set; refusing to stage through "
+              "host memory.\n",
+              size, devPtr);
+      return -1;
+    }
+    fprintf(stderr,
+            "hipObj: GPU-direct registration of %zu bytes at %p failed; "
+            "falling back to a host staging buffer. This transfer is no "
+            "longer GPU-direct.\n",
+            size, devPtr);
+  }
+
   void* hostBuf = nullptr;
   hipError_t err = hipObj::hipOps().hipHostMalloc(&hostBuf, size,
                                                   hipHostMallocDefault);
@@ -95,7 +146,6 @@ int BufferMap::registerHostBuffer(void* hostPtr, size_t size,
     mr, size, false, false, reinterpret_cast<uint64_t>(hostPtr), nullptr};
   return 0;
 }
-
 uint64_t BufferMap::lookupRemoteAddr(void* devPtr) const {
   uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
   auto it = entries_.find(key);

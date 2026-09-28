@@ -91,6 +91,7 @@ private:
   IbvFuncs funcs_ = {};
   int dmabuf_enabled_ = 1;
   int dmabuf_is_supported_ = 0;
+  bool dmabuf_debug_ = false;
   std::map<uintptr_t, int> dmabuf_fd_map_;
 
 #ifdef HIPOBJ_UNIT_TESTS
