@@ -19,3 +19,5 @@ RUN apt-get update \
         zlib1g-dev=1:1.3.dfsg-3.1ubuntu2.1 \
         libcurl4-openssl-dev=8.5.0-2ubuntu10.9 \
     && rm -rf /var/lib/apt/lists/*
+
+USER ubuntu
