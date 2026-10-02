@@ -342,6 +342,48 @@ jobs:
             cat /tmp/qemu-console.log; exit 1
           }
 
+      - name: Disable the guest's amdgpu driver apt source
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+        run: |
+          # The guest image's build added repo.radeon.com/amdgpu/31.60 as an
+          # apt source to install amdgpu-dkms, and that tree has since
+          # disappeared from repo.radeon.com. Nothing here installs from it --
+          # the driver is baked into the image -- but every apt-get update in
+          # the guest, the ernic Ansible collection's included, fails on its
+          # missing Release file. Mark the stanza "Enabled: no" rather than
+          # deleting it, so the change is visible from inside the guest. On an
+          # image without the source this does nothing; remove it once
+          # GUEST_ARTIFACT_TAG names such an image.
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -p "$SSH_PORT" "${VM_USER}@localhost" bash -s << 'EOFVM'
+          set -euo pipefail
+          shopt -s nullglob
+          for f in /etc/apt/sources.list.d/*.sources; do
+            grep -q 'repo\.radeon\.com/amdgpu/' "$f" || continue
+            tmp=$(mktemp)
+            # deb822 field names are case-insensitive, and the stanza may
+            # already carry an Enabled field (possibly "yes"): rewrite that
+            # one to "no", and append the field only when there is none.
+            awk 'BEGIN { RS = ""; ORS = "\n\n" }
+                 /repo\.radeon\.com\/amdgpu\// {
+                   n = split($0, line, "\n"); s = ""; found = 0
+                   for (i = 1; i <= n; i++) {
+                     if (line[i] ~ /^[Ee][Nn][Aa][Bb][Ll][Ee][Dd][ \t]*:/) {
+                       line[i] = "Enabled: no"; found = 1
+                     }
+                     s = s (i > 1 ? "\n" : "") line[i]
+                   }
+                   $0 = found ? s : s "\nEnabled: no"
+                 }
+                 { print }' "$f" > "$tmp"
+            sudo install -m 0644 "$tmp" "$f"
+            rm -f "$tmp"
+            echo "Disabled the amdgpu driver apt source in $f"
+          done
+          EOFVM
+
       - name: Verify both emulated functions are present
         run: |
           SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
