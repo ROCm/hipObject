@@ -63,6 +63,16 @@ std::string buildUrl(const hipObjS3CurlCtx* cfg) {
   return url;
 }
 
+// Returns the HTTP status code of the last transfer, or -1 if libcurl
+// cannot report one.
+long responseCode(CURL* curl) {
+  long code = 0;
+  if (curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code) != CURLE_OK) {
+    return -1;
+  }
+  return code;
+}
+
 } // namespace
 
 extern "C" {
@@ -94,10 +104,7 @@ int hipObjS3CurlSendRequest(void* ctx, const char* token, size_t tokenLen) {
   curl_easy_setopt(curl, CURLOPT_HEADERDATA, &state);
 
   CURLcode rc = curl_easy_perform(curl);
-  long httpCode = 0;
-  if (rc == CURLE_OK) {
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-  }
+  const long httpCode = rc == CURLE_OK ? responseCode(curl) : -1;
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
   if (rc != CURLE_OK) {
