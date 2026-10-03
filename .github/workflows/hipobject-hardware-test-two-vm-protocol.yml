@@ -186,7 +186,7 @@ jobs:
 
       - name: Fetch guest VM image
         id: guest_image
-        uses: ./.github/actions/fetch-guest-vm
+        uses: $/.github/actions/fetch-guest-vm
         with:
           repo: ${{ env.GUEST_ARTIFACT_REPO }}
           tag: ${{ env.GUEST_ARTIFACT_TAG }}
