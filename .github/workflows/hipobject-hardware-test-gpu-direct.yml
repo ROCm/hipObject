@@ -240,8 +240,10 @@ jobs:
 
       - name: Read VM info
         id: vm_info
+        env:
+          GUEST_OUTPUT_DIR: ${{ steps.guest_image.outputs.output_dir }}
         run: |
-          OUT="${{ steps.guest_image.outputs.output_dir }}"
+          OUT="${GUEST_OUTPUT_DIR}"
           eval "$(python3 - "$OUT" <<'PYEOF'
           import json, os, shlex, sys
           out = sys.argv[1]
@@ -311,13 +313,15 @@ jobs:
           echo "both vfio-user sockets present"
 
       - name: Start QEMU VM with both vfio-user devices
+        env:
+          VM_DISK: ${{ steps.vm_info.outputs.vm_disk }}
         run: |
           ${QEMU_PATH:-}qemu-system-x86_64 \
             -machine q35,accel=${QEMU_ACCEL},memory-backend=mem0 \
             -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
             -object memory-backend-memfd,id=mem0,share=on,size=${VM_MEM_MB}M \
             -nographic \
-            -drive file="${{ steps.vm_info.outputs.vm_disk }}",format=qcow2,if=virtio \
+            -drive file="${VM_DISK}",format=qcow2,if=virtio \
             -netdev user,id=net0,hostfwd=tcp::${SSH_PORT}-:22 \
             -device virtio-net-pci,netdev=net0 \
             -device '{"driver":"vfio-user-pci","rombar":0,"socket":{"type":"unix","path":"'"${GITHUB_WORKSPACE}"'/vfu/ernic.sock"}}' \
@@ -330,9 +334,10 @@ jobs:
           kill -0 "$QEMU_PID" 2>/dev/null || { cat /tmp/qemu.log; exit 1; }
 
       - name: Wait for VM SSH
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
           chmod 600 "$SSH_KEY"
           for i in $(seq 1 60); do
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -388,9 +393,10 @@ jobs:
           EOFVM
 
       - name: Verify both emulated functions are present
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           # Count by sysfs vendor/device, never by parsing lspci. lspci needs
           # /usr/share/misc/pci.ids, and a guest this early is still running
@@ -410,9 +416,10 @@ jobs:
           ssh $SSH_OPTS -p "$SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' || true
 
       - name: Provision the VM with the ernic Ansible collection
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           ERNIC_RUN_DIR=/tmp/ernic-ci
           mkdir -p "$ERNIC_RUN_DIR"
           cat > "$ERNIC_RUN_DIR/instances.json" << EOFJSON
@@ -445,9 +452,10 @@ jobs:
             -e ernic_set_hostname=false
 
       - name: Verify the RDMA device and the object store
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           kill -0 "$ERNIC_PID" 2>/dev/null || {
             echo "rocm-ernic is no longer running"; tail -30 /tmp/ernic-s3.log; exit 1; }
@@ -471,9 +479,10 @@ jobs:
           echo "$DEVICE is PORT_ACTIVE"
 
       - name: Stage ip_discovery.bin into the guest
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           scp $SSH_OPTS -P $SSH_PORT "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
             "${VM_USER}@localhost:/tmp/"
@@ -486,12 +495,13 @@ jobs:
 
       - name: Load amdgpu via amdgpu-probe
         timeout-minutes: 8
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
           # qemu-minimal parks its lane on this step hanging with no output.
           # Bounded at three layers so a recurrence reports instead of eating
           # the job timeout: guest-side timeout, ssh keepalive, step timeout.
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
               -p $SSH_PORT "${VM_USER}@localhost" \
@@ -499,9 +509,10 @@ jobs:
           echo "amdgpu-probe completed"
 
       - name: Verify amdgpu loaded and a GPU KFD node is present
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           ssh $SSH_OPTS -p $SSH_PORT "${VM_USER}@localhost" 'lsmod | grep -q amdgpu' || {
             echo "amdgpu module not loaded"; exit 1; }
@@ -520,9 +531,10 @@ jobs:
           echo "GPU KFD node present ($gpus)"
 
       - name: Copy minio binary to VM
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -P $SSH_PORT \
             "${GITHUB_WORKSPACE}/ernic-build-gpu/integrations/minio-cpp/minio-getput-rdma" \
             "${VM_USER}@localhost:/tmp/minio-getput-rdma"
@@ -553,9 +565,10 @@ jobs:
         # fatal, so the build, the guest, the NIC and the KFD node are all
         # still enforced. Remove this the moment the transfer works.
         continue-on-error: ${{ matrix.allow_failure }}
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           GPU_MODE="${{ matrix.gpu_mode }}"
           BUFFER_LABEL="${{ matrix.buffer_label }}"
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -641,13 +654,14 @@ jobs:
           EOF
       - name: Collect logs
         if: always()
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
           echo "=== ernic-s3.log ==="  && cat /tmp/ernic-s3.log     || true
           echo "=== rocjitsu ==="      && docker logs rocjitsu-gpu   || true
           echo "=== qemu.log ==="      && cat /tmp/qemu.log          || true
           echo "=== qemu-console ==="  && cat /tmp/qemu-console.log  || true
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           timeout 60 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
             -o ConnectTimeout=10 -p $SSH_PORT "${VM_USER}@localhost" \
             'sudo dmesg | tail -200' || true

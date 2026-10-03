@@ -263,8 +263,10 @@ jobs:
 
       - name: Read VM info
         id: vm_info
+        env:
+          GUEST_OUTPUT_DIR: ${{ steps.guest_image.outputs.output_dir }}
         run: |
-          OUT="${{ steps.guest_image.outputs.output_dir }}"
+          OUT="${GUEST_OUTPUT_DIR}"
           eval "$(python3 - "$OUT" <<'PYEOF'
           import json, os, shlex, sys
           out = sys.argv[1]
@@ -286,11 +288,13 @@ jobs:
 
       - name: Create the per-VM disk overlays
         id: overlays
+        env:
+          VM_DISK: ${{ steps.vm_info.outputs.vm_disk }}
         run: |
           # Overlays, not copies. Both VMs get one including the first: with
           # VM 1 writing to the base directly, VM 2's backing file would
           # mutate underneath it.
-          BASE="${{ steps.vm_info.outputs.vm_disk }}"
+          BASE="${VM_DISK}"
           STEM="$(dirname "$BASE")/$(basename "$BASE" .qcow2)"
           for n in 1 2; do
             DISK="${STEM}.${n}.qcow2"
@@ -375,6 +379,9 @@ jobs:
           grep -m1 "TCP: Received mesh topology" /tmp/server2.log || true
 
       - name: Start the two QEMU VMs
+        env:
+          VM_DISK_1: ${{ steps.overlays.outputs.vm_disk_1 }}
+          VM_DISK_2: ${{ steps.overlays.outputs.vm_disk_2 }}
         run: |
           start_vm() {
             n=$1; disk=$2; port=$3
@@ -402,17 +409,18 @@ jobs:
               -qmp unix:/tmp/qmp-vm${n}.sock,server=on,wait=off > /tmp/qemu-vm${n}.log 2>&1 &
             echo "QEMU_PID${n}=$!" >> "$GITHUB_ENV"
           }
-          start_vm 1 "${{ steps.overlays.outputs.vm_disk_1 }}" "$VM1_SSH_PORT"
-          start_vm 2 "${{ steps.overlays.outputs.vm_disk_2 }}" "$VM2_SSH_PORT"
+          start_vm 1 "${VM_DISK_1}" "$VM1_SSH_PORT"
+          start_vm 2 "${VM_DISK_2}" "$VM2_SSH_PORT"
           sleep 5
           for pid in $(awk -F= '/^QEMU_PID/{print $2}' "$GITHUB_ENV"); do
             kill -0 "$pid" 2>/dev/null || { cat /tmp/qemu-vm1.log /tmp/qemu-vm2.log; exit 1; }
           done
 
       - name: Wait for both VMs over SSH
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             for i in $(seq 1 60); do
               ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -470,9 +478,10 @@ jobs:
           done
 
       - name: Install kernel headers and build tools in both VMs
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -p "$port" "${VM_USER}@localhost" bash -s << 'EOFVM'
@@ -496,9 +505,10 @@ jobs:
           done
 
       - name: Provision both VMs with the ernic Ansible collection
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           ERNIC_RUN_DIR=/tmp/ernic-ci
           mkdir -p "$ERNIC_RUN_DIR"
           cat > "$ERNIC_RUN_DIR/instances.json" << EOFJSON
@@ -527,9 +537,10 @@ jobs:
             -e ernic_set_hostname=false
 
       - name: Verify the RDMA device in both VMs
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           for spec in "1:${VM1_SSH_PORT}" "2:${VM2_SSH_PORT}"; do
             n=${spec%%:*}; port=${spec##*:}
@@ -550,9 +561,10 @@ jobs:
           done
 
       - name: Verify VM 2 enumerated the GPU function
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           # Count by sysfs vendor/device, never by parsing lspci. lspci needs
           # /usr/share/misc/pci.ids, and a guest this early is still running
@@ -576,9 +588,10 @@ jobs:
           ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' || true
 
       - name: Stage ip_discovery.bin into VM 2
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           scp $SSH_OPTS -P "$VM2_SSH_PORT" "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
             "${VM_USER}@localhost:/tmp/"
@@ -591,12 +604,13 @@ jobs:
 
       - name: Load amdgpu in VM 2 via amdgpu-probe
         timeout-minutes: 8
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
           # Bounded at three layers -- guest-side timeout, ssh keepalive, step
           # timeout -- so the hang qemu-minimal parks its lane on reports
           # instead of eating the job budget.
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
               -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
@@ -604,9 +618,10 @@ jobs:
           echo "amdgpu-probe completed"
 
       - name: Verify amdgpu bound a GPU in VM 2
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
             'lsmod | grep -q amdgpu' || { echo "amdgpu module not loaded"; exit 1; }
@@ -625,9 +640,10 @@ jobs:
           echo "GPU KFD node present in VM 2 ($gpus)"
 
       - name: Copy hipObject binaries into both VMs
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           BUILD="${GITHUB_WORKSPACE}/ernic-build"
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             SCP="scp -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -P $port"
@@ -649,9 +665,10 @@ jobs:
           done
 
       - name: Start hipobj-rdma-test-server in VM 1
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           # systemd-run, not `nohup ... &` over ssh: a backgrounded remote
           # command leaves nothing to ask about afterwards. If it dies at
@@ -701,9 +718,10 @@ jobs:
         # regression in the build, the guests, the NIC or the GPU enumeration
         # still fails the job. Remove this the moment the transfer works.
         continue-on-error: ${{ matrix.allow_failure }}
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           GPU_MODE="${{ matrix.gpu_mode }}"
           # Bounded at three layers, as amdgpu-probe above: guest-side timeout,
           # ssh keepalive, step timeout. Unbounded, this step wedged for the
@@ -745,9 +763,10 @@ jobs:
           EOF
       - name: Collect logs
         if: always()
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           for n in 1 2; do
             echo "=== server${n}.log ==="        && tail -100 "/tmp/server${n}.log"        || true
             echo "=== qemu-vm${n}.log ==="       && cat "/tmp/qemu-vm${n}.log"             || true

@@ -197,8 +197,10 @@ jobs:
 
       - name: Read VM info
         id: vm_info
+        env:
+          GUEST_OUTPUT_DIR: ${{ steps.guest_image.outputs.output_dir }}
         run: |
-          OUT="${{ steps.guest_image.outputs.output_dir }}"
+          OUT="${GUEST_OUTPUT_DIR}"
           eval "$(python3 - "$OUT" <<'PYEOF'
           import json, os, shlex, sys
           out = sys.argv[1]
@@ -220,11 +222,13 @@ jobs:
 
       - name: Create the per-VM disk overlays
         id: overlays
+        env:
+          VM_DISK: ${{ steps.vm_info.outputs.vm_disk }}
         run: |
           # Overlays, not copies. Both VMs get one including the first: with
           # VM 1 writing to the base directly, VM 2's backing file would
           # mutate underneath it.
-          BASE="${{ steps.vm_info.outputs.vm_disk }}"
+          BASE="${VM_DISK}"
           STEM="$(dirname "$BASE")/$(basename "$BASE" .qcow2)"
           for n in 1 2; do
             DISK="${STEM}.${n}.qcow2"
@@ -309,6 +313,9 @@ jobs:
           grep -m1 "TCP: Received mesh topology" /tmp/server2.log || true
 
       - name: Start the two QEMU VMs
+        env:
+          VM_DISK_1: ${{ steps.overlays.outputs.vm_disk_1 }}
+          VM_DISK_2: ${{ steps.overlays.outputs.vm_disk_2 }}
         run: |
           start_vm() {
             n=$1; disk=$2; port=$3
@@ -325,17 +332,18 @@ jobs:
               -qmp unix:/tmp/qmp-vm${n}.sock,server=on,wait=off > /tmp/qemu-vm${n}.log 2>&1 &
             echo "QEMU_PID${n}=$!" >> "$GITHUB_ENV"
           }
-          start_vm 1 "${{ steps.overlays.outputs.vm_disk_1 }}" "$VM1_SSH_PORT"
-          start_vm 2 "${{ steps.overlays.outputs.vm_disk_2 }}" "$VM2_SSH_PORT"
+          start_vm 1 "${VM_DISK_1}" "$VM1_SSH_PORT"
+          start_vm 2 "${VM_DISK_2}" "$VM2_SSH_PORT"
           sleep 5
           for pid in $(awk -F= '/^QEMU_PID/{print $2}' "$GITHUB_ENV"); do
             kill -0 "$pid" 2>/dev/null || { cat /tmp/qemu-vm1.log /tmp/qemu-vm2.log; exit 1; }
           done
 
       - name: Wait for both VMs over SSH
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             for i in $(seq 1 60); do
               ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -393,9 +401,10 @@ jobs:
           done
 
       - name: Install kernel headers and build tools in both VMs
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -p "$port" "${VM_USER}@localhost" bash -s << 'EOFVM'
@@ -419,9 +428,10 @@ jobs:
           done
 
       - name: Provision both VMs with the ernic Ansible collection
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           ERNIC_RUN_DIR=/tmp/ernic-ci
           mkdir -p "$ERNIC_RUN_DIR"
           cat > "$ERNIC_RUN_DIR/instances.json" << EOFJSON
@@ -450,9 +460,10 @@ jobs:
             -e ernic_set_hostname=false
 
       - name: Verify the RDMA device in both VMs
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           for spec in "1:${VM1_SSH_PORT}" "2:${VM2_SSH_PORT}"; do
             n=${spec%%:*}; port=${spec##*:}
@@ -473,9 +484,10 @@ jobs:
           done
 
       - name: Copy hipObject binaries into both VMs
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           BUILD="${GITHUB_WORKSPACE}/ernic-build"
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             SCP="scp -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -P $port"
@@ -498,9 +510,10 @@ jobs:
           done
 
       - name: Start hipobj-rdma-test-server in VM 1
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
           # systemd-run, not `nohup ... &` over ssh: a backgrounded remote
           # command leaves nothing to ask about afterwards. If it dies at
@@ -542,9 +555,10 @@ jobs:
 
       - name: Run the minio-cpp bridge client in VM 2
         timeout-minutes: 10
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           # EXPECT_TRANSPORT=rdma is the whole point of the VM conversion: the
           # bridge falls back to HTTP silently, so without this assertion a
           # lane that lost its wire still passes.
@@ -565,9 +579,10 @@ jobs:
 
       - name: Collect logs
         if: always()
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_KEY="${{ steps.vm_info.outputs.ssh_key }}"
-          VM_USER="${{ steps.vm_info.outputs.vm_user }}"
           for n in 1 2; do
             echo "=== server${n}.log ==="        && tail -100 "/tmp/server${n}.log"        || true
             echo "=== qemu-vm${n}.log ==="       && cat "/tmp/qemu-vm${n}.log"             || true
