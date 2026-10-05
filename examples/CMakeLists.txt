@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 function(hipobj_add_example name)
-  add_executable(${name} ${ARGN})
+  hipobj_add_executable(
+    NAME ${name}
+    SRCS ${ARGN})
   target_include_directories(${name} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/src

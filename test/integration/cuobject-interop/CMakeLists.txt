@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: MIT
 
-add_executable(hipobj-cuobject-probe main.cpp)
-
-target_compile_features(hipobj-cuobject-probe PRIVATE cxx_std_17)
+hipobj_add_test_executable(
+  NAME hipobj-cuobject-probe
+  SRCS main.cpp)
 
 target_link_libraries(hipobj-cuobject-probe PRIVATE
   cuobjserver::cuobjserver)

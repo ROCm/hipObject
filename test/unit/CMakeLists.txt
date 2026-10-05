@@ -15,7 +15,10 @@ foreach(SRC IN LISTS HIPOBJ_SOURCES)
   list(APPEND HIPOBJ_TEST_SOURCES ${CMAKE_SOURCE_DIR}/${SRC})
 endforeach()
 
-add_library(hipobj_test_objects OBJECT ${HIPOBJ_TEST_SOURCES})
+hipobj_add_library(
+  NAME hipobj_test_objects
+  TYPE OBJECT
+  SRCS ${HIPOBJ_TEST_SOURCES})
 
 target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 
@@ -28,8 +31,10 @@ if(HIPOBJECT_V2_API)
     ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_data_phase.cpp
     ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_backend.cpp)
 
-  add_library(hipobj_v2_server_objects OBJECT ${HIPOBJ_V2_SERVER_SOURCES})
-  target_compile_features(hipobj_v2_server_objects PRIVATE cxx_std_17)
+  hipobj_add_library(
+    NAME hipobj_v2_server_objects
+    TYPE OBJECT
+    SRCS ${HIPOBJ_V2_SERVER_SOURCES})
   target_include_directories(hipobj_v2_server_objects
     PRIVATE
       ${CMAKE_SOURCE_DIR}/include
