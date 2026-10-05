@@ -10,9 +10,9 @@ options.
 - **ROCm**: `ROCM_PATH` defaults to `/opt/rocm`. Put `/opt/rocm/bin` on `PATH`
   and include `/opt/rocm/lib` in `LD_LIBRARY_PATH` when running binaries you
   build.
-- **HIP compiler**: CI and the cloud image configure CMake with
-  `-DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang` (see
-  [.github/workflows/build-check.yml](.github/workflows/build-check.yml)).
+- **Compiler**: hipObject is host-only C/C++ (no GPU kernels), so any C++17
+  compiler works. The HIP runtime headers and library come from the
+  `hip::host` CMake target, not from compiling sources as HIP.
 
 ## Configure and build (default agent flow)
 
@@ -21,7 +21,6 @@ From the repository root, match CI:
 ```bash
 cmake -B build \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
   -DBUILD_TESTING=ON \
   -DHIPOBJ_BNXT=ON \
   -DHIPOBJ_IONIC=ON

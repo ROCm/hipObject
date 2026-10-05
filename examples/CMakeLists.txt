@@ -4,8 +4,6 @@
 
 function(hipobj_add_example name)
   add_executable(${name} ${ARGN})
-  set_source_files_properties(
-    ${ARGN} PROPERTIES LANGUAGE HIP)
   target_include_directories(${name} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/src

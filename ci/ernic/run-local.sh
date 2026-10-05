@@ -205,7 +205,6 @@ _rocm_build() {
           cmake -B /hipobject-build -G Ninja -S /hipobject \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
-            -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_IONIC=ON \
             -DHIPOBJ_BNXT=OFF \
