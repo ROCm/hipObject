@@ -290,7 +290,13 @@ struct ibv_pd* fakeAllocPd(struct ibv_context*) {
   return reinterpret_cast<struct ibv_pd*>(0x3);
 }
 
-int fakeQueryPort(struct ibv_context*, uint8_t, struct ibv_port_attr*) {
+int fakeQueryPort(struct ibv_context*, uint8_t, struct ibv_port_attr* attr) {
+  /* Like the real ibv_query_port, fill every field. Callers do not
+   * initialize the struct, so gid_tbl_len would otherwise be stack
+   * garbage and drive the GID scan for billions of iterations. */
+  if (attr) {
+    std::memset(attr, 0, sizeof(*attr));
+  }
   return 0;
 }
 
