@@ -20,6 +20,7 @@ namespace hipObj {
 
 class HipRuntime;
 class NicTopology;
+class RcListener;
 class Verbs;
 
 /* The outside world the library calls: the HIP runtime, libibverbs, and
@@ -107,7 +108,9 @@ Options parseOptions(const EnvLookup &lookup);
  * both. */
 struct Instance final {
     Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions) noexcept;
-    ~Instance() = default;
+    /* Stops the RC-CM listener, before the members are destroyed: before
+     * the buffers are deregistered and the connection is closed */
+    ~Instance();
 
     /* Lives in a shared_ptr, and isn't copied or moved */
     Instance(const Instance &)            = delete;
@@ -126,6 +129,15 @@ struct Instance final {
     std::string nicHint{};
     int         nicIndex = -1;
     uint32_t    flags    = 0;
+    /* True when initWith() ran the HIPOBJ_RC_LISTEN_IP self-managed path,
+     * where conn.ctx/pd just alias the RC-CM listener's own device/PD
+     * rather than being independently owned by conn (see initWith()). */
+    bool listenerSelfManaged = false;
+
+    // hipObject only ever manages one RC-CM listener at a time (one per
+    // Instance, see initWith()) even though RcListener itself supports
+    // several concurrently -- this is that one instance's handle.
+    RcListener *listener = nullptr;
 
     RcConnection conn{};
     BufferMap    buffers;
@@ -135,6 +147,37 @@ struct Instance final {
  * the API lock held (see ApiGuard), or while no other thread can call the
  * library. */
 std::shared_ptr<Instance> currentInstance();
+
+// Selects the RDMA control-plane wire format hipObjGet()/hipObjPut()/
+// hipObjGetRdmaToken() use: v3 (default -- RC-CM dial-back, see
+// v3-wire.h) or v1 (QP number/GID/LID exchanged directly, see
+// token.h), for interop with peers that only understand the older
+// format. Fixed at compile time via -DHIPOBJ_RDMA_WIRE_V1 (CMakeLists.txt's
+// HIPOBJ_RDMA_WIRE_V1 option): hipobj is built for one wire format or the
+// other, not switchable at runtime.
+constexpr bool
+useV1Wire()
+{
+#ifdef HIPOBJ_RDMA_WIRE_V1
+    return true;
+#else
+    return false;
+#endif
+}
+
+// Best-effort extraction of the IPv4 address hipObject's own GID
+// encodes (RoCEv2 IPv4-mapped GIDs only); empty when not available.
+// Mirrors parseClientNicFromTokenHex()'s convention (token.cpp), just
+// read straight off the live connection instead of a decoded v1 token.
+//
+// HIPOBJ_RC_LISTEN_IP overrides this outright: conn.localGid isn't
+// always populated by the time the v3 token is built (there is no
+// longer an active QP handshake to source it from -- the RC-CM
+// listener is passive, see rc-listener.h), and even when it is, GID
+// extraction only works for RoCEv2 IPv4-mapped GIDs. Set it to the
+// address the peer should actually dial back to when auto-detection
+// comes up empty or picks the wrong interface.
+std::string localNicIp(const ibv_gid &localGid);
 
 /* hipObjInit(), with its platform and options given: builds an Instance
  * that holds them, and makes it the current one. The caller holds the API

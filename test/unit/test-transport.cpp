@@ -19,7 +19,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 #include <sys/types.h>
 
 #include "fake-device.h"
@@ -44,7 +48,9 @@ using hipObjTest::modifyQpCalls;
 using hipObjTest::peerToken;
 using hipObjTest::resetFake;
 using hipObjTest::setReply;
+#ifdef HIPOBJ_RDMA_WIRE_V1
 using hipObjTest::setReplyWithPeerToken;
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 void *const kDevBuf = hipObjTest::fakeDevBuf();
 
@@ -381,10 +387,18 @@ TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
 
 TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
 {
-    for (bool hipObjTest::Faults::*fault :
-         {&hipObjTest::Faults::getDeviceList, &hipObjTest::Faults::openDevice, &hipObjTest::Faults::allocPd,
-          &hipObjTest::Faults::queryPort, &hipObjTest::Faults::queryGid, &hipObjTest::Faults::createCq,
-          &hipObjTest::Faults::createQp}) {
+    for (bool hipObjTest::Faults::*fault : {
+             &hipObjTest::Faults::getDeviceList,
+             &hipObjTest::Faults::openDevice,
+             &hipObjTest::Faults::allocPd,
+             &hipObjTest::Faults::queryPort,
+             &hipObjTest::Faults::queryGid,
+#ifdef HIPOBJ_RDMA_WIRE_V1
+             /* Only v1's hipObjInit() creates a CQ and a QP */
+             &hipObjTest::Faults::createCq,
+             &hipObjTest::Faults::createQp,
+#endif
+         }) {
         resetFake();
         fake().fail.*fault    = true;
         hipObjConfig_t config = makeConfig();
@@ -394,6 +408,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
     }
 }
 
+#ifdef HIPOBJ_RDMA_WIRE_V1
 TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenInitTransitionFails)
 {
     fake().fail.modifyQpToState = IBV_QPS_INIT;
@@ -402,6 +417,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenInitTransitionFails)
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
     expectNothingLeaked();
 }
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 TEST_F(TransportTest, InitFailsForUnknownNic)
 {
@@ -416,7 +432,9 @@ TEST_F(TransportTest, ShutdownReleasesEverything)
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
+#ifdef HIPOBJ_RDMA_WIRE_V1
     EXPECT_EQ(fake().log.createQp, 1);
+#endif
     expectNothingLeaked();
 }
 
@@ -448,6 +466,7 @@ failRecvReply(void *, char *, size_t *)
     return 5;
 }
 
+#ifdef HIPOBJ_RDMA_WIRE_V1
 /* What recordSendRequest() was passed: the token's length, and its bytes
  * up to and including the one after it */
 struct SentToken {
@@ -465,6 +484,7 @@ recordSendRequest(void *ctx, const char *token, size_t tokenLen)
     }
     return 0;
 }
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 class TransportTransferTest : public TransportTest, public ::testing::WithParamInterface<TransferFn> {
 protected:
@@ -475,6 +495,7 @@ protected:
     }
 };
 
+#ifdef HIPOBJ_RDMA_WIRE_V1
 TEST_P(TransportTransferTest, ConnectsToPeerInReply)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
@@ -520,6 +541,7 @@ TEST_P(TransportTransferTest, FailsOnErrorCompletion)
     fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
 }
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 TEST_P(TransportTransferTest, FailsWhenDeviceSyncFails)
 {
@@ -546,9 +568,12 @@ TEST_P(TransportTransferTest, ReportsS3Failures)
         setReply(reply);
         EXPECT_EQ(transfer().opError, hipObjS3Error) << "reply \"" << reply << "\"";
     }
+#ifdef HIPOBJ_RDMA_WIRE_V1
     EXPECT_EQ(fake().modifyQpCount, 1U);
+#endif
 }
 
+#ifdef HIPOBJ_RDMA_WIRE_V1
 TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
@@ -576,6 +601,7 @@ TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
         EXPECT_EQ(token->length, kSize);
     }
 }
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 INSTANTIATE_TEST_SUITE_P(Transport, TransportTransferTest, ::testing::Values(&callGet, &callPut),
                          [](const ::testing::TestParamInfo<TransferFn> &paramInfo) {

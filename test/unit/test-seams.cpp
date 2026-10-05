@@ -21,8 +21,12 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
 #include <hsa/hsa_ext_amd.h>
+#endif
 
 #include "fake-device.h"
 #include "fake-ibv.h"
@@ -36,6 +40,7 @@
 #include "rdma-topology.h"
 #include "state.h"
 #include "transport.h"
+#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -71,8 +76,10 @@ TEST(HipSeamTest, OverrideRedirectsHip)
     EXPECT_NE(&hipObj::hip(), &fake);
 }
 
+#ifndef HIPOBJ_CPU_RDMA
 /* SystemHip passes each call straight to HIP or HSA, so it gets the same
- * answer as calling them directly, whether or not there's a GPU */
+ * answer as calling them directly, whether or not there's a GPU. The
+ * CPU-only build has neither: hip-shim.h stands in for HIP. */
 TEST(HipSeamTest, SystemHipForwardsEachCall)
 {
     const hipObj::SystemHip system;
@@ -144,6 +151,7 @@ TEST(HipSeamTest, SystemHipForwardsEachCall)
                   hsa_amd_portable_export_dmabuf(source.data(), source.size(), &fdDirect, &offsetDirect)));
     EXPECT_EQ(system.closeDmabuf(fdViaSystem), static_cast<int>(hsa_amd_portable_close_dmabuf(fdDirect)));
 }
+#endif /* HIPOBJ_CPU_RDMA */
 
 // ---- NIC topology seam -------------------------------------------
 
@@ -619,13 +627,28 @@ namespace {
 
     int fakeRecvReply(void *, char *reply, size_t *replyLen)
     {
-        static constexpr auto kReply = std::to_array("200");
         ++g_apiTransferLog.recvReplyCalls;
-        if (!replyLen || *replyLen < kReply.size()) {
+        // Mirrors state.h's useV1Wire(): HIPOBJ_RDMA_WIRE_V1 is a compile-time
+        // choice (hipobj is built for v1 XOR v3), so this fake's reply format
+        // must track whichever one hipobj_test_objects was built with here.
+#ifdef HIPOBJ_RDMA_WIRE_V1
+        // v1 wire format (see token.cpp's parseRdmaReplyHttpCode()): "ok" is
+        // its own special-cased success reply, with no peer QP/GID/LID.
+        static const std::string kReply = "ok";
+#else
+        // v3 wire format (see v3-wire.h): built via encodeRdmaReplyV3() itself
+        // (which uses kFieldDelim) rather than a hand-rolled literal, so this
+        // fake can't drift from the real encoder if the format ever changes.
+        static const std::string kReply = hipObj::v3::encodeRdmaReplyV3({200, 0});
+#endif
+        if (!replyLen || *replyLen < kReply.size() + 1) {
             return -1;
         }
-        std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).begin());
-        *replyLen = kReply.size();
+        /* The reply and its NUL */
+        const std::span<char> out = hipObj::spanFromPointer(reply, *replyLen);
+        std::ranges::copy(kReply, out.begin());
+        out[kReply.size()] = '\0';
+        *replyLen          = kReply.size() + 1;
         return 0;
     }
 

@@ -370,7 +370,13 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
 HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction);
 
 /*!
- * @brief Mint a hex-encoded RC RDMA token for a registered buffer
+ * @brief Mint a hipobj-rc-v3 token for a registered buffer
+ *
+ * Returns the same string hipObjPut()/hipObjGet() send as the
+ * x-amz-rdma-token header value: the RC-CM listener's address plus
+ * the buffer's rkey/remoteAddr/length. It carries no QP number, GID
+ * or LID -- the peer dials the listener and RDMA CM negotiates the
+ * connection itself (see rc-listener.h, v3-wire.h).
  *
  * The caller must release @p *outToken with hipObjPutRdmaToken().
  * @p op is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved).
@@ -397,6 +403,23 @@ HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char *token);
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char *reply, size_t replyLen, int *httpCode);
+
+/*!
+ * @brief Parse an x-amz-rc-rdma-reply header value (hipobj-rc-v3 only)
+ *
+ * Distinct from hipObjParseRdmaReply(): the v3 reply format is
+ * "<httpStatus>:<bytesTransferred-hex16>" (see v3-wire.h), not the bare
+ * status code v1/v2 use, so it also returns @p bytesTransferred. Use
+ * this for tokens minted for the RC-CM listener path
+ * (HIPOBJ_RC_LISTEN_IP / hipObjGetRdmaToken() against that listener),
+ * hipObjParseRdmaReply() for v1/v2.
+ *
+ * @concurrent
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjParseRdmaReplyV3(const char* reply,
+                                                size_t replyLen, int* httpCode,
+                                                uint64_t* bytesTransferred);
 
 /*!
  * @brief Extract client NIC IPv4 from a minted RDMA token

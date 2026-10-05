@@ -34,10 +34,17 @@ target_include_directories(hipobj-rdma-test-server PRIVATE
   ${PROJECT_SOURCE_DIR}/src/s3
   ${CMAKE_CURRENT_SOURCE_DIR})
 
+if(HIPOBJ_CPU_RDMA)
+target_compile_definitions(hipobj-rdma-test-server PRIVATE HIPOBJ_CPU_RDMA)
+target_link_libraries(hipobj-rdma-test-server PRIVATE
+  dl
+  numa)
+else()
 target_link_libraries(hipobj-rdma-test-server PRIVATE
   dl
   hip::host
   hsa-runtime64::hsa-runtime64)
+endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(hipobj-rdma-test-server PRIVATE Threads::Threads)

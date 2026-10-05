@@ -12,12 +12,11 @@
 #include <system_error>
 #include <utility>
 
-#include <hip/hip_runtime_api.h>
-
 #include "hip-seam.h"
 #include "hipobj-private.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
+#include "pd-lock.h"
 
 namespace hipObj {
 
@@ -161,8 +160,16 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
         return -1;
     }
-    int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr     = registerDeviceMemory(ibv(), hip(), pd, devPtr, size, access, dmabuf_);
+    int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    /* Serialized against the RC-CM listener's own QP/CQ create/destroy on
+     * this same PD (see PdLockGuard's doc comment in pd-lock.h):
+     * libibverbs/mlx5 don't guarantee thread safety for concurrent object
+     * lifecycle calls sharing one PD across threads. */
+    IbvMrPtr mr;
+    {
+        PdLockGuard pdLock;
+        mr = registerDeviceMemory(ibv(), hip(), pd, devPtr, size, access, dmabuf_);
+    }
     if (mr) {
         BufEntry &entry  = entries_[key];
         entry.mr         = std::move(mr);
@@ -195,7 +202,10 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     HostBufPtr hostBuf(rawHostBuf);
-    mr.reset(ibv().reg_mr(pd, hostBuf.get(), size, access));
+    {
+        PdLockGuard pdLock;
+        mr.reset(ibv().reg_mr(pd, hostBuf.get(), size, access));
+    }
     if (!mr) {
         return -1;
     }
@@ -217,7 +227,11 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr(ibv().reg_mr(pd, hostPtr, size, access));
+    IbvMrPtr mr;
+    {
+        PdLockGuard pdLock;
+        mr.reset(ibv().reg_mr(pd, hostPtr, size, access));
+    }
     if (!mr) {
         return -1;
     }
@@ -237,8 +251,13 @@ BufferMap::deregisterBuffer(void *devPtr)
     if (it == entries_.end()) {
         return -1;
     }
-    /* Deregisters the MR, then frees any staging buffer */
-    entries_.erase(it);
+    /* Deregisters the MR, then frees any staging buffer. Serialized against
+     * the RC-CM listener's own QP/CQ create/destroy on this same PD; see the
+     * PdLockGuard doc comment in pd-lock.h. */
+    {
+        PdLockGuard pdLock;
+        entries_.erase(it);
+    }
     return 0;
 }
 

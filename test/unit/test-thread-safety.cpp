@@ -36,6 +36,7 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "state.h"
+#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -74,7 +75,14 @@ plainSendRequest(void *, const char *, size_t)
 int
 plainRecvReply(void *, char *reply, size_t *replyLen)
 {
+#ifdef HIPOBJ_RDMA_WIRE_V1
     static constexpr std::string_view kReply = "200";
+#else
+    // v3 wire format (see v3-wire.h): built via encodeRdmaReplyV3() itself
+    // (which uses kFieldDelim) rather than a hand-rolled literal, so this
+    // fake can't drift from the real encoder if the format ever changes.
+    const std::string kReply = hipObj::v3::encodeRdmaReplyV3({200, 0});
+#endif
     if (!reply || !replyLen || *replyLen < kReply.size()) {
         return -1;
     }
@@ -376,8 +384,11 @@ TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
             EXPECT_EQ(hipObjParseRdmaReply(kReply.data(), kReply.size(), &code).opError, hipObjSuccess);
             EXPECT_EQ(code, 206);
 
+#ifdef HIPOBJ_RDMA_WIRE_V1
+            /* Only v1 tokens carry the client NIC */
             std::array<char, 32> nicIp{};
             EXPECT_EQ(hipObjTokenClientNic(token, nicIp.data(), nicIp.size()).opError, hipObjSuccess);
+#endif
         }
     });
 

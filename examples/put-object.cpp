@@ -16,7 +16,11 @@
 #include <cstring>
 #include <memory>
 
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 
 #include "hipobj.h"
 
