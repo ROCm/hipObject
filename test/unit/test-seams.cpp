@@ -140,25 +140,32 @@ TEST_F(NicSeamTest, HcaFilterIsForwarded) {
 class StateSeamTest : public ::testing::Test {
 protected:
   void TearDown() override {
-    hipObj::setStateForTest(nullptr);
+    hipObj::setStateForTest(savedState_);
   }
+
+  // A fixture member rather than a test-body local, so the override
+  // stays valid until TearDown() even if the body exits early.
+  hipObj::DriverState fresh_;
+  hipObj::DriverState* savedState_ = nullptr;
 };
 
 TEST_F(StateSeamTest, OverrideRedirectsGetState) {
-  hipObj::DriverState fresh;
-  fresh.initialized = true;
-  fresh.gpuDevice = 3;
-  fresh.endpoint = "http://example";
+  fresh_.initialized = true;
+  fresh_.gpuDevice = 3;
+  fresh_.endpoint = "http://example";
 
-  hipObj::DriverState* previous = hipObj::setStateForTest(&fresh);
-  EXPECT_EQ(previous, nullptr);
+  // Installed here rather than in SetUp() so the return value can be
+  // checked.
+  savedState_ = hipObj::setStateForTest(&fresh_);
+  EXPECT_EQ(savedState_, nullptr);
 
   hipObj::DriverState& state = hipObj::getState();
-  EXPECT_EQ(&state, &fresh);
+  EXPECT_EQ(&state, &fresh_);
   EXPECT_TRUE(state.initialized);
   EXPECT_EQ(state.gpuDevice, 3);
+  EXPECT_EQ(state.endpoint, "http://example");
 
-  EXPECT_EQ(hipObj::setStateForTest(nullptr), &fresh);
+  EXPECT_EQ(hipObj::setStateForTest(savedState_), &fresh_);
 }
 
 // ---- IBV function table seam -------------------------------------
