@@ -23,11 +23,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniocpp_upstream)
 
-add_library(hipobj_minio STATIC
-  src/rdma.cpp
-  src/client.cpp)
-
-target_compile_features(hipobj_minio PUBLIC cxx_std_17)
+hipobj_add_library(
+  NAME hipobj_minio
+  TYPE STATIC
+  SRCS
+    src/rdma.cpp
+    src/client.cpp)
 
 if(HIPOBJECT_V2_API)
   target_compile_definitions(hipobj_minio PRIVATE HIPOBJECT_V2_API)
@@ -50,10 +51,10 @@ if(BUILD_TESTING)
   add_subdirectory(test)
 endif()
 
-add_executable(minio-getput-rdma
-  examples/getput-rdma.cpp)
+hipobj_add_executable(
+  NAME minio-getput-rdma
+  SRCS examples/getput-rdma.cpp)
 
-target_compile_features(minio-getput-rdma PUBLIC cxx_std_17)
 target_link_libraries(minio-getput-rdma PRIVATE
   hipobj_minio
   hipobj

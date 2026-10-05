@@ -51,10 +51,16 @@ list(APPEND CMAKE_MODULE_PATH
 if(NOT HIPOBJ_DOCS_ONLY)
 
 include(HIPOBJUseROCmCMake)
-include(HIPOBJCompilerOptions)
 include(HIPOBJSanitizers)
 include(HIPOBJClangTidy)
+include(HIPOBJAddLibraries)
+include(HIPOBJAddExecutable)
 include(HIPOBJFetchCuObject)
+
+set(HIPOBJ_CXX_STANDARD "17" CACHE STRING
+  "C++ standard to build with")
+set_property(CACHE HIPOBJ_CXX_STANDARD
+  PROPERTY STRINGS "17" "20" "23")
 
 option(BUILD_SHARED_LIBS
   "Build using shared libraries" OFF)
@@ -107,7 +113,10 @@ if(HIPOBJ_IONIC)
     src/rdma/ionic/ionic-backend.cpp)
 endif()
 
-add_library(hipobj STATIC ${HIPOBJ_SOURCES})
+hipobj_add_library(
+  NAME hipobj
+  TYPE STATIC
+  SRCS ${HIPOBJ_SOURCES})
 
 target_include_directories(hipobj
   PUBLIC

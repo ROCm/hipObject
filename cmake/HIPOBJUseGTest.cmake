@@ -4,7 +4,13 @@
 
 # Fetch or find GTest for unit testing
 
+# This module fetches GoogleTest and applies settings to its
+# targets, so it must run exactly once.
+include_guard(GLOBAL)
+
 include(FetchContent)
+include(HIPOBJAddExecutable)
+include(HIPOBJSanitizers)
 
 find_package(GTest QUIET)
 if(NOT GTest_FOUND)
@@ -21,10 +27,20 @@ if(NOT GTest_FOUND)
   set(BUILD_GMOCK ON
     CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
+
+  # GoogleTest runs in the same process as the tests, so
+  # instrument it when we build it from source.
+  if(HIPOBJ_USE_SANITIZERS)
+    foreach(gtest_target gtest gtest_main gmock gmock_main)
+      hipobj_add_sanitizers(${gtest_target})
+    endforeach()
+  endif()
 endif()
 
 function(hipobj_add_test TEST_NAME TEST_SOURCE)
-  add_executable(${TEST_NAME} ${TEST_SOURCE})
+  hipobj_add_test_executable(
+    NAME ${TEST_NAME}
+    SRCS ${TEST_SOURCE})
   # Link the unit-test object build (HIPOBJ_UNIT_TESTS), not the
   # shipped library, so tests can swap seam tables. The macro must
   # also be set on the test TU so headers declare the accessors.

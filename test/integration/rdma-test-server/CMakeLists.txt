@@ -36,9 +36,9 @@ if(HIPOBJECT_V2_API)
     ${CMAKE_SOURCE_DIR}/src/rdma/v2-wire.cpp)
 endif()
 
-add_executable(hipobj-rdma-test-server ${HIPOBJ_TEST_SERVER_SOURCES})
-
-target_compile_features(hipobj-rdma-test-server PRIVATE cxx_std_17)
+hipobj_add_test_executable(
+  NAME hipobj-rdma-test-server
+  SRCS ${HIPOBJ_TEST_SERVER_SOURCES})
 
 target_include_directories(hipobj-rdma-test-server PRIVATE
   ${CMAKE_SOURCE_DIR}/include
@@ -76,17 +76,24 @@ if(HIPOBJECT_V2_API)
 endif()
 
 if(HIPOBJECT_V2_API)
-  add_executable(v2-client-harness v2_client_harness.cpp v2_sigv4.cpp
-    ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
+  hipobj_add_test_executable(
+    NAME v2-client-harness
+    SRCS
+      v2_client_harness.cpp
+      v2_sigv4.cpp
+      ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
   target_include_directories(v2-client-harness PRIVATE
     ${CMAKE_SOURCE_DIR}/src/common)
 
-  add_executable(v2-data-client v2_data_client.cpp v2_sigv4.cpp)
-  target_compile_features(v2-data-client PRIVATE cxx_std_17)
+  hipobj_add_test_executable(
+    NAME v2-data-client
+    SRCS
+      v2_data_client.cpp
+      v2_sigv4.cpp
+      ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
   target_include_directories(v2-data-client PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src/common)
-  target_sources(v2-data-client PRIVATE ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
   target_link_libraries(v2-data-client PRIVATE OpenSSL::Crypto)
 
   find_library(IBVERBS_LIB ibverbs)
@@ -95,7 +102,6 @@ if(HIPOBJECT_V2_API)
   else()
     message(FATAL_ERROR "libibverbs not found - v2-data-client needs it")
   endif()
-  target_compile_features(v2-client-harness PRIVATE cxx_std_17)
   target_include_directories(v2-client-harness PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(v2-client-harness PRIVATE OpenSSL::Crypto)

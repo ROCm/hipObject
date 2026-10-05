@@ -2,16 +2,23 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Compiler warning and standard options for hipObject
+# Compiler flags for hipObject targets
+#
+# The flags are applied per target (PRIVATE) by the hipobj_add_*
+# functions instead of with add_compile_options(), so they don't
+# leak into third-party code pulled in with FetchContent.
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-set(CMAKE_CXX_EXTENSIONS OFF)
+include_guard(GLOBAL)
 
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+include(HIPOBJSanitizers)
 
-add_compile_options(
-  -Wall
-  -Wextra
-  -Wno-unused-parameter
-)
+function(hipobj_set_compiler_flags target)
+  target_compile_options(${target} PRIVATE
+    -Wall
+    -Wextra
+    -Wno-unused-parameter)
+
+  if(HIPOBJ_USE_SANITIZERS)
+    hipobj_add_sanitizers(${target})
+  endif()
+endfunction()
