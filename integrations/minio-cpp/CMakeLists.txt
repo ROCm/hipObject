@@ -53,10 +53,6 @@ endif()
 add_executable(minio-getput-rdma
   examples/getput-rdma.cpp)
 
-set_source_files_properties(
-  examples/getput-rdma.cpp
-  PROPERTIES LANGUAGE HIP)
-
 target_compile_features(minio-getput-rdma PUBLIC cxx_std_17)
 target_link_libraries(minio-getput-rdma PRIVATE
   hipobj_minio

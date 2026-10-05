@@ -42,7 +42,7 @@ else()
     VERSION ${HIPOBJ_LIBRARY_VERSION}
     DESCRIPTION
       "RDMA-accelerated S3 object storage for GPUs"
-    LANGUAGES C CXX HIP)
+    LANGUAGES C CXX)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH
@@ -76,27 +76,6 @@ option(HIPOBJ_BNXT
 option(HIPOBJ_IONIC
   "Build IONIC (Pensando) RDMA provider" ON)
 
-set(OFFLOAD_ARCH "" CACHE STRING
-  "GPU arch (e.g. gfx942)")
-if(NOT OFFLOAD_ARCH)
-  find_program(ROCMINFO rocminfo
-    PATHS ${ROCM_PATH}/bin /opt/rocm/bin
-    ENV PATH)
-  if(ROCMINFO)
-    execute_process(
-      COMMAND ${ROCMINFO}
-      OUTPUT_VARIABLE ROCMINFO_OUTPUT
-      RESULT_VARIABLE ROCMINFO_RESULT)
-    if(ROCMINFO_RESULT EQUAL 0)
-      string(REGEX MATCH "gfx[0-9a-f]+"
-        DETECTED_ARCH "${ROCMINFO_OUTPUT}")
-      if(DETECTED_ARCH)
-        set(OFFLOAD_ARCH ${DETECTED_ARCH})
-      endif()
-    endif()
-  endif()
-endif()
-
 set(HIPOBJ_SOURCES
   src/hipobj.cpp
   src/state.cpp
@@ -127,10 +106,6 @@ if(HIPOBJ_IONIC)
   list(APPEND HIPOBJ_SOURCES
     src/rdma/ionic/ionic-backend.cpp)
 endif()
-
-set_source_files_properties(
-  ${HIPOBJ_SOURCES}
-  PROPERTIES LANGUAGE HIP)
 
 add_library(hipobj STATIC ${HIPOBJ_SOURCES})
 

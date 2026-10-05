@@ -65,10 +65,6 @@ if(HIPOBJECT_V2_API)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJECT_V2_API)
 endif()
 
-set_source_files_properties(
-  ${HIPOBJ_TEST_SOURCES}
-  PROPERTIES LANGUAGE HIP)
-
 hipobj_add_test(test-rdma-token
   test-rdma-token.cpp)
 
