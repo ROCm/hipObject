@@ -19,8 +19,12 @@ function(hipobj_add_example name)
     ${PROJECT_SOURCE_DIR}/src/common
     ${PROJECT_SOURCE_DIR}/src/rdma
     ${PROJECT_SOURCE_DIR}/src/s3)
-  target_link_libraries(${name} PRIVATE
-    hipobj hip::host dl)
+  if(HIPOBJ_CPU_RDMA)
+    target_compile_definitions(${name} PRIVATE HIPOBJ_CPU_RDMA)
+    target_link_libraries(${name} PRIVATE hipobj dl)
+  else()
+    target_link_libraries(${name} PRIVATE hipobj hip::host dl)
+  endif()
 endfunction()
 
 # The programs are built here but not installed. HIPOBJInstall.cmake

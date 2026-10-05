@@ -7,8 +7,9 @@ add_subdirectory(exports)
 add_subdirectory(header)
 add_subdirectory(subproject)
 
-# The install and package tests need the install rules
-if(NOT CMAKE_SKIP_INSTALL_RULES)
+# The install and package tests need the install rules, which a CPU-only
+# build doesn't set up
+if(NOT CMAKE_SKIP_INSTALL_RULES AND NOT HIPOBJ_CPU_RDMA)
   add_subdirectory(install)
 endif()
 

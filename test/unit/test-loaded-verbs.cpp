@@ -133,6 +133,17 @@ makeFuncs()
         g_call = {.name = "post_send", .object = qp, .value = 0};
         return kResult;
     };
+    funcs.get_async_event = [](ibv_context *context, ibv_async_event *event) {
+        g_call = {.name = "get_async_event", .object = context, .value = hipObj::pointerToAddress(event)};
+        return kResult;
+    };
+    funcs.ack_async_event = [](ibv_async_event *event) {
+        g_call = {.name = "ack_async_event", .object = event, .value = 0};
+    };
+    funcs.event_type_str = [](ibv_event_type event) {
+        g_call = {.name = "event_type_str", .object = nullptr, .value = static_cast<uint64_t>(event)};
+        return "fake event";
+    };
     return funcs;
 }
 
@@ -187,6 +198,15 @@ TEST_F(LoadedVerbsTest, ForwardsEachCall)
     EXPECT_EQ(verbs.create_cq(context, 16, nullptr, nullptr, 0), fakeObject<ibv_cq>(0x60));
     expectCall("create_cq", context);
     EXPECT_EQ(g_call.value, 16U);
+    ibv_async_event asyncEvent{};
+    EXPECT_EQ(verbs.get_async_event(context, &asyncEvent), kResult);
+    expectCall("get_async_event", context);
+    EXPECT_EQ(g_call.value, hipObj::pointerToAddress(&asyncEvent));
+    verbs.ack_async_event(&asyncEvent);
+    expectCall("ack_async_event", &asyncEvent);
+    EXPECT_EQ(std::string_view(verbs.event_type_str(IBV_EVENT_QP_FATAL)), "fake event");
+    expectCall("event_type_str", nullptr);
+    EXPECT_EQ(g_call.value, static_cast<uint64_t>(IBV_EVENT_QP_FATAL));
     EXPECT_EQ(verbs.close_device(context), kResult);
     expectCall("close_device", context);
 
