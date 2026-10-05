@@ -129,9 +129,16 @@ private:
     }
   }
 
+  // Runs the single-connection exchange against one absolute deadline:
+  // accept a connection, read until the request headers are terminated
+  // (or 8 KiB has been read), then write the canned response. Any poll
+  // timeout, I/O error, or the deadline expiring ends the exchange early
+  // via fail()/early return, leaving result_ to report what happened.
   void serve() {
     const auto deadline = std::chrono::steady_clock::now() + kServeDeadline;
 
+    // --- Accept phase: wait for a connection, retrying on EINTR and the
+    // transient accept4() errors a nonblocking listen socket can produce.
     int fd = -1;
     for (;;) {
       if (remainingMs(deadline) == 0) {
@@ -167,6 +174,11 @@ private:
     }
     result_.accepted = true;
 
+    // --- Read phase: accumulate bytes until the header terminator shows
+    // up or at least 8 KiB has been read. The size is checked before each
+    // recv(), so the request can overshoot that threshold by up to one
+    // buffer. A clean disconnect just ends the loop; requestComplete
+    // below reports whether the terminator was actually seen.
     char buf[4096];
     while (request_.find("\r\n\r\n") == std::string::npos &&
            request_.size() < 8192) {
@@ -205,6 +217,8 @@ private:
     }
     result_.requestComplete = request_.find("\r\n\r\n") != std::string::npos;
 
+    // --- Write phase: send the canned response, looping on partial
+    // writes the same way the read phase loops on partial reads.
     size_t sent = 0;
     while (sent < response_.size()) {
       if (remainingMs(deadline) == 0) {
