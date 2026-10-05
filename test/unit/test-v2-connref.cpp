@@ -38,9 +38,6 @@ struct FaultCtl {
 
 FaultCtl g_fault;
 
-struct FakeQp {
-  int magic = 0x5150;
-};
 struct FakeCq {
   int magic = 0x4351;
 };
@@ -70,7 +67,7 @@ int fakeDestroyQp(struct ibv_qp* qp) {
     errno = EBUSY;
     return 1;
   }
-  delete reinterpret_cast<FakeQp*>(qp);
+  delete qp;
   return 0;
 }
 
@@ -81,7 +78,10 @@ int fakeDestroyCq(struct ibv_cq* cq) {
 
 struct ibv_qp* fakeCreateQp(struct ibv_pd*, struct ibv_qp_init_attr*) {
   ++g_fault.createQpCalls;
-  return reinterpret_cast<struct ibv_qp*>(new FakeQp());
+  /* A real (zeroed) ibv_qp: the transport reads qp->qp_num. */
+  auto* qp = new struct ibv_qp();
+  qp->qp_num = 0x77;
+  return qp;
 }
 
 struct ibv_cq* fakeCreateCq(struct ibv_context*, int, void*,
@@ -96,8 +96,10 @@ struct ibv_context* fakeOpenDevice(struct ibv_device*) {
 
 struct ibv_device** fakeGetDeviceList(int* n) {
   *n = 1;
-  return reinterpret_cast<struct ibv_device**>(new struct ibv_device*(
-    reinterpret_cast<struct ibv_device*>(new FakeDev())));
+  /* NULL-terminated, like the real ibv_get_device_list(); allocated
+   * as an array to match the delete[] in fakeFreeDeviceList(). */
+  auto* dev = reinterpret_cast<struct ibv_device*>(new FakeDev());
+  return new struct ibv_device*[2]{dev, nullptr};
 }
 
 void fakeFreeDeviceList(struct ibv_device** list) {
