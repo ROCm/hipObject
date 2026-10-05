@@ -126,14 +126,14 @@ if(HIPOBJECT_V2_API)
       add_test(NAME v2-data-e2e
         COMMAND ${BASH_BIN} -c
           "$<TARGET_FILE:hipobj-rdma-test-server> --v2 --port 19601 --v2-access-key hipobj-test-key --v2-secret-key hipobj-test-secret 2>/dev/null &
-           srv=$!;
-           sleep 1;
-           $<TARGET_FILE:v2-data-client> 127.0.0.1 19601 PUT /bucket/seed64k 64 &&
-           $<TARGET_FILE:v2-data-client> 127.0.0.1 19601 GET /bucket/seed64k 64;
-           rc=$?;
-           kill $srv 2>/dev/null;
-           wait $srv 2>/dev/null;
-           exit $rc")
+          srv=$!;
+          sleep 1;
+          $<TARGET_FILE:v2-data-client> 127.0.0.1 19601 PUT /bucket/seed64k 64 &&
+          $<TARGET_FILE:v2-data-client> 127.0.0.1 19601 GET /bucket/seed64k 64;
+          rc=$?;
+          kill $srv 2>/dev/null;
+          wait $srv 2>/dev/null;
+          exit $rc")
       set_tests_properties(v2-data-e2e PROPERTIES TIMEOUT 120
         ENVIRONMENT "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}")
     endif()
