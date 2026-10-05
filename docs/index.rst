@@ -76,6 +76,7 @@ that make their S3 requests with libcurl.
    building
    architecture
    interop
+   rc-rdma-flow
 
 .. toctree::
    :maxdepth: 2

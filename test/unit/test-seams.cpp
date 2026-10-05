@@ -25,8 +25,12 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
 #include <hsa/hsa_ext_amd.h>
+#endif
 
 #include "fake-device.h"
 #include "hip-seam.h"
@@ -40,6 +44,8 @@
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "rdma-topology.h"
+#include "rdmacm-core.h"
+#include "rdmacm-wrapper.h"
 #include "require-libibverbs.h"
 #include "state.h"
 #include "transport.h"
@@ -54,8 +60,10 @@ namespace {
 /* The GPU's bus ID in the NIC topology tests */
 constexpr std::string_view kGpuBusId = "0000:42:00.0";
 
+#ifndef HIPOBJ_CPU_RDMA
 /* SystemHip passes each call straight to HIP or HSA, so it gets the same
- * answer as calling them directly, whether or not there's a GPU */
+ * answer as calling them directly, whether or not there's a GPU. The
+ * CPU-only build has neither: hip-shim.h stands in for HIP. */
 TEST(HipSeamTest, SystemHipForwardsEachCall)
 {
     const hipObj::SystemHip system;
@@ -127,6 +135,31 @@ TEST(HipSeamTest, SystemHipForwardsEachCall)
                   hsa_amd_portable_export_dmabuf(source.data(), source.size(), &fdDirect, &offsetDirect)));
     EXPECT_EQ(system.closeDmabuf(fdViaSystem), static_cast<int>(hsa_amd_portable_close_dmabuf(fdDirect)));
 }
+#endif /* HIPOBJ_CPU_RDMA */
+
+#ifdef HIPOBJ_RDMA_WIRE_V3
+/* SystemRdmaCm calls librdmacm, in a v3 build. Its event names need no
+ * device; without an RDMA device, there's no event channel to create, and
+ * with one, the channel it creates is real. */
+TEST(RdmaCmSeamTest, SystemRdmaCmCallsLibrdmacm)
+{
+    const hipObj::SystemRdmaCm system;
+    EXPECT_EQ(std::string_view(system.event_str(RDMA_CM_EVENT_ESTABLISHED)), "RDMA_CM_EVENT_ESTABLISHED");
+    EXPECT_EQ(std::string_view(system.event_str(RDMA_CM_EVENT_CONNECT_REQUEST)),
+              "RDMA_CM_EVENT_CONNECT_REQUEST");
+
+    rdma_event_channel *channel = system.create_event_channel();
+    if (channel == nullptr) {
+        GTEST_SKIP() << "librdmacm has no RDMA device to create an event channel on";
+    }
+    EXPECT_GE(channel->fd, 0);
+    rdma_cm_id *id = nullptr;
+    ASSERT_EQ(system.create_id(channel, &id, nullptr, RDMA_PS_TCP), 0);
+    EXPECT_EQ(id->channel, channel);
+    EXPECT_EQ(system.destroy_id(id), 0);
+    system.destroy_event_channel(channel);
+}
+#endif /* HIPOBJ_RDMA_WIRE_V3 */
 
 // ---- NIC topology seam -------------------------------------------
 
@@ -546,11 +579,13 @@ TEST(PlatformTest, RefersToItsInterfaces)
     const hipObjTest::FakeHip          hip(device);
     const hipObjTest::FakeVerbs        verbs(device);
     const hipObjTest::EmptyNicTopology topology;
+    const hipObjTest::FakeRdmaCm       rdmaCm(device, verbs);
 
-    const hipObj::Platform platform(hip, verbs, topology);
+    const hipObj::Platform platform(hip, verbs, topology, &rdmaCm);
     EXPECT_EQ(&platform.hip(), &hip);
     EXPECT_EQ(&platform.verbs(), &verbs);
     EXPECT_EQ(&platform.topology(), &topology);
+    EXPECT_EQ(platform.rdmaCm(), &rdmaCm);
 }
 
 /* A FakePlatform's platform refers to its fakes, and keeps them alive */
@@ -564,6 +599,7 @@ TEST(PlatformTest, FakePlatformOutlivesItsLastPlatform)
     EXPECT_EQ(&platform->hip(), &fakes->hip());
     EXPECT_EQ(&platform->verbs(), &fakes->verbs());
     EXPECT_EQ(&platform->topology(), &fakes->topology());
+    EXPECT_EQ(platform->rdmaCm(), &fakes->rdmaCm());
 
     fakes.reset();
     EXPECT_FALSE(watch.expired());
@@ -571,8 +607,8 @@ TEST(PlatformTest, FakePlatformOutlivesItsLastPlatform)
     EXPECT_TRUE(watch.expired());
 }
 
-/* The system platform is built once, from the real HIP runtime and
- * libibverbs, and the topology sysfs reports */
+/* The system platform is built once, from the real HIP runtime,
+ * libibverbs, the topology sysfs reports, and, in a v3 build, librdmacm */
 TEST(PlatformTest, SystemPlatformIsTheSystem)
 {
     const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
@@ -584,6 +620,11 @@ TEST(PlatformTest, SystemPlatformIsTheSystem)
     EXPECT_NE(dynamic_cast<const hipObj::SystemHip *>(&platform->hip()), nullptr);
     EXPECT_NE(dynamic_cast<const hipObj::LoadedVerbs *>(&platform->verbs()), nullptr);
     EXPECT_NE(dynamic_cast<const hipObj::SysfsTopology *>(&platform->topology()), nullptr);
+#ifdef HIPOBJ_RDMA_WIRE_V3
+    EXPECT_NE(dynamic_cast<const hipObj::SystemRdmaCm *>(platform->rdmaCm()), nullptr);
+#else
+    EXPECT_EQ(platform->rdmaCm(), nullptr);
+#endif
 }
 
 /* hipObjInit() initializes with the system platform. No system has this
@@ -663,21 +704,36 @@ namespace {
 
     ApiTransferLog g_apiTransferLog;
 
-    int fakeSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
+    int fakeSendRequest(void * /*ctx*/, const char *token, size_t tokenLen)
     {
         ++g_apiTransferLog.sendRequestCalls;
+        hipObjTest::noteSentToken(token, tokenLen);
         return 0;
     }
 
     int fakeRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
     {
-        static constexpr auto kReply = std::to_array("200");
         ++g_apiTransferLog.recvReplyCalls;
-        if (replyLen == nullptr || *replyLen < kReply.size()) {
+        // Mirrors state.h's useV1Wire(): HIPOBJ_RDMA_WIRE_V3 is a compile-time
+        // choice (hipobj is built for v1 XOR v3), so this fake's reply format
+        // must track whichever one hipobj_test_objects was built with here.
+#ifndef HIPOBJ_RDMA_WIRE_V3
+        // v1 wire format (see token.cpp's parseRdmaReplyHttpCode()): "ok" is
+        // its own special-cased success reply, with no peer QP/GID/LID.
+        static const std::string kReply = "ok";
+#else
+        // v3 wire format (see v3-wire.h): the fake device's success reply,
+        // which reports the length the token named, as the real server does
+        const std::string kReply = hipObjTest::successReply();
+#endif
+        if (replyLen == nullptr || *replyLen < kReply.size() + 1) {
             return -1;
         }
-        std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).begin());
-        *replyLen = kReply.size();
+        /* The reply and its NUL, but its length is the reply's alone */
+        const std::span<char> out = hipObj::spanFromPointer(reply, *replyLen);
+        std::ranges::copy(kReply, out.begin());
+        out[kReply.size()] = '\0';
+        *replyLen          = kReply.size();
         return 0;
     }
 

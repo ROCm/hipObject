@@ -151,7 +151,8 @@ CheckOptions:
 #   - Third-party code that FetchContent pulls into the build directory
 #   - The public header, which is C (C++ checks don't apply to it)
 #   - ibv-core.h, which is derived from rocSHMEM and mirrors libibverbs'
-#     C ABI, so it can't use enum class, constexpr, and the like
+#     C ABI, so it can't use enum class, constexpr, and the like, and
+#     rdmacm-core.h, which mirrors librdmacm's the same way
 HeaderFilterRegex: '.*'
-ExcludeHeaderFilterRegex: '.*/(_deps/.*|include/hipobj\.h|src/common/ibv-core\.h)$'
+ExcludeHeaderFilterRegex: '.*/(_deps/.*|include/hipobj\.h|src/common/(ibv|rdmacm)-core\.h)$'
 SystemHeaders: false
