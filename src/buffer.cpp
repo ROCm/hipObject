@@ -14,15 +14,13 @@
 #include <system_error>
 #include <utility>
 
-#include <hip/hip_runtime_api.h>
-
 #include "hip-seam.h"
 #include "hipobj-address.h"
 #include "hipobj-print.h"
 #include "hipobj-private.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
-#include "thread-safety.h"
+#include "pd-lock.h"
 
 namespace hipObj {
 
@@ -151,48 +149,16 @@ BufferMap::refusal(uintptr_t key) const
     if (entries_.contains(key)) {
         return RegisterResult::AlreadyRegistered;
     }
-    if (entries_.size() >= kMaxEntries) {
-        return RegisterResult::Failed;
+    int access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    /* Serialized against the RC-CM listener's own QP/CQ create/destroy on
+     * this same PD (see PdLockGuard's doc comment in pd-lock.h):
+     * libibverbs/mlx5 don't guarantee thread safety for concurrent object
+     * lifecycle calls sharing one PD across threads. */
+    IbvMrPtr mr;
+    {
+        PdLockGuard pdLock;
+        mr = registerDeviceMemory(ibv(), hip(), pd, devPtr, size, access, dmabuf_);
     }
-    return std::nullopt;
-}
-
-std::optional<BufferMap::RegisterResult>
-BufferMap::precheck(uintptr_t key) const
-{
-    const SharedLock lock(mutex_);
-    return refusal(key);
-}
-
-/* entry is a parameter, so it's destroyed after the lock, a local, is
- * released */
-BufferMap::RegisterResult
-BufferMap::insert(uintptr_t key, std::shared_ptr<const BufEntry> entry)
-{
-    const ScopedLock<SharedMutex> lock(mutex_);
-    if (const auto refused = refusal(key)) {
-        return *refused;
-    }
-    /* Assigned rather than passed to try_emplace(), since clang-tidy
-     * doesn't see that try_emplace() moves from it */
-    entries_[key] = std::move(entry);
-    return RegisterResult::Registered;
-}
-
-BufferMap::RegisterResult
-BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
-{
-    if (size > MAX_MR_SIZE) {
-        return RegisterResult::Failed;
-    }
-    const auto key = pointerToAddress(devPtr);
-    if (const auto refused = precheck(key)) {
-        return *refused;
-    }
-    const Verbs      &verbs   = *verbs_;
-    const HipRuntime &runtime = *runtime_;
-    const int         access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr          mr      = registerDeviceMemory(verbs, runtime, pd, devPtr, size, access, dmabuf_);
     if (mr) {
         /* The NIC reaches the caller's memory, so there's no staging
          * buffer */
@@ -222,12 +188,13 @@ BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
     if (err != hipSuccess || rawHostBuf == nullptr) {
         return RegisterResult::Failed;
     }
-    auto hostBuf = own<HostBufPtr>(runtime, rawHostBuf);
-    /* Declared after hostBuf, so if building the entry throws, the MR is
-     * deregistered before the staging buffer it covers is freed */
-    auto stagingMr = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
-    if (!stagingMr) {
-        return RegisterResult::Failed;
+    HostBufPtr hostBuf(rawHostBuf);
+    {
+        PdLockGuard pdLock;
+        mr.reset(ibv().reg_mr(pd, hostBuf.get(), size, access));
+    }
+    if (!mr) {
+        return -1;
     }
     /* Read the address before hostBuf is moved into the entry */
     const uint64_t remoteAddr = pointerToAddress(hostBuf.get());
@@ -245,9 +212,12 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
     if (const auto refused = precheck(key)) {
         return *refused;
     }
-    const Verbs &verbs  = *verbs_;
-    const int    access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    auto         mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
+    int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    IbvMrPtr mr;
+    {
+        PdLockGuard pdLock;
+        mr.reset(ibv().reg_mr(pd, hostPtr, size, access));
+    }
     if (!mr) {
         return RegisterResult::Failed;
     }
@@ -279,6 +249,15 @@ BufferMap::deregisterBuffer(void *devPtr)
         entry = std::move(it->second);
         entries_.erase(it);
     }
+    /* Deregisters the MR, then frees any staging buffer. Serialized against
+     * the RC-CM listener's own QP/CQ create/destroy on this same PD; see the
+     * PdLockGuard doc comment in pd-lock.h. */
+    {
+        PdLockGuard pdLock;
+        entries_.erase(it);
+    }
+    return 0;
+}
 
     /* Deregisters the MR, then frees any staging buffer, without holding
      * the lock */

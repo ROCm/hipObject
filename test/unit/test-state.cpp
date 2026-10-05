@@ -20,7 +20,11 @@
 #include <variant>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 
 #include "buffer.h"
 #include "connection-pool.h"
@@ -35,7 +39,9 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 namespace {
 
 using hipObjTest::fake;
+#ifdef HIPOBJ_RDMA_WIRE_V1
 using hipObjTest::makeOps;
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 using std::chrono::milliseconds;
 
 /* An environment, by variable name */
@@ -230,6 +236,8 @@ TEST_F(InitWithTest, ShutdownLeavesTheInstanceToItsLastHolder)
     EXPECT_EQ(fake().log.closeDevice, 1);
 }
 
+#ifdef HIPOBJ_RDMA_WIRE_V1
+/* Only v1's initWith() creates a QP, which is what fails here */
 TEST_F(InitWithTest, FailureLeavesNoInstance)
 {
     fake().fail.createQp = true;
@@ -241,6 +249,7 @@ TEST_F(InitWithTest, FailureLeavesNoInstance)
     EXPECT_EQ(fake().log.openDevice, 1);
     EXPECT_EQ(fake().log.closeDevice, 1);
 }
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 TEST_F(InitWithTest, AlreadyInitialized)
 {
@@ -251,6 +260,9 @@ TEST_F(InitWithTest, AlreadyInitialized)
     EXPECT_EQ(fake().log.openDevice, 1);
 }
 
+#ifdef HIPOBJ_RDMA_WIRE_V1
+/* Only a v1 transfer waits for a completion: under v3 the peer does the
+ * RDMA READ or WRITE, and the reply is the only signal */
 TEST_F(InitWithTest, PollTimeoutLimitsTheWaitForACompletion)
 {
     hipObj::Options options;
@@ -267,6 +279,7 @@ TEST_F(InitWithTest, PollTimeoutLimitsTheWaitForACompletion)
     EXPECT_EQ(result.opError, hipObjRdmaError);
     EXPECT_LT(std::chrono::steady_clock::now() - start, hipObj::Options{}.pollTimeout);
 }
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 TEST_F(InitWithTest, StageTimeoutLimitsTheWaitForACopy)
 {

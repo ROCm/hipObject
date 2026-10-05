@@ -22,9 +22,6 @@
 #include <utility>
 #include <variant>
 
-#include <hip/hip_runtime_api.h>
-
-#include "abandoned-copies.h"
 #include "buffer.h"
 #include "connection-pool.h"
 #include "control.h"
@@ -36,9 +33,13 @@
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
+#include "ibv-wrapper.h"
+#include "log.h"
+#include "rc-listener.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
+#include "v3-wire.h"
 
 namespace hipObj {
 
@@ -138,80 +139,47 @@ namespace {
         return makeError(hipObjSuccess);
     }
 
-    std::optional<RdmaToken> buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf,
-                                            size_t size, off_t offset)
-    {
-        if (!buf.mr) {
-            return std::nullopt;
-        }
-        if (!rangeInRegistration(offset, size, buf.size)) {
-            return std::nullopt;
-        }
-        return RdmaToken{
-            .qpNum      = conn.qp()->qp_num,
-            .gid        = toGid(conn.device().localGid()),
-            .rkey       = buf.mr->rkey,
-            .remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset),
-            .length     = size,
-            .transport  = TransportType::RC,
-            .portNum    = conn.device().portNum(),
-            .lid        = 0,
-        };
+// hipobj-rc-v3 (see v3-wire.h): unlike v1's buildRdmaToken(), this
+// carries no QP number, GID or LID -- the peer learns those by
+// dialing the RC-CM listener (rc-listener.h) at the advertised
+// ip/port, and RDMA CM negotiates the QP-level connection itself.
+static std::optional<v3::RdmaTokenV3>
+buildRdmaTokenV3(const Instance &instance, const BufferMap::BufEntry &buf, size_t size, off_t offset)
+{
+    if (!buf.mr) {
+        return std::nullopt;
     }
-
-    [[nodiscard]] bool finishTransferAfterReply(const HipRuntime &runtime, ConnectionPool::Lease &lease,
-                                                std::string_view reply, bool requiresDeviceSync,
-                                                std::chrono::milliseconds pollTimeout)
-    {
-        if (const auto peerToken = parsePeerTokenFromReply(reply)) {
-            if (!lease.connect(*peerToken)) {
-                return false;
-            }
-        }
-        // A poll timeout or error completion is a failure: the transfer outcome
-        // is unknown. With the current one-sided protocol the responder side
-        // may not observe a completion at all (see issue #22), so this check
-        // reports "no evidence of failure" rather than "transfer verified".
-        if (!pollCompletion(lease.connection(), std::nullopt, pollTimeout)) {
-            return false;
-        }
-        if (!requiresDeviceSync) {
-            return true;
-        }
-        return runtime.deviceSynchronize() == hipSuccess;
+    if (!rangeInRegistration(offset, size, buf.size)) {
+        return std::nullopt;
     }
+    v3::RdmaTokenV3 token;
+    token.listenIp   = localNicIp(instance.conn.localGid);
+    token.listenPort = instance.listener ? instance.listener->port() : 0;
+    token.rkey       = buf.mr->rkey;
+    token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
+    token.length     = static_cast<uint64_t>(size);
+    LOG_DEBUG("built RDMA token listenIp=%s listenPort=%u rkey=0x%x "
+              "remoteAddr=0x%llx length=%llu (rcListenerConnectionCount=%d)",
+              token.listenIp.empty() ? "(empty!)" : token.listenIp.c_str(), token.listenPort, token.rkey,
+              static_cast<unsigned long long>(token.remoteAddr),
+              static_cast<unsigned long long>(token.length),
+              instance.listener ? instance.listener->connectionCount() : 0);
+    return token;
+}
 
-    /* hipMemcpy with a deadline (see Options::stageTimeout), between the
-     * caller's memory and the staging buffer of buf. Async copy plus a
-     * recorded event polled to a wall-clock bound. On timeout, the caller
-     * gets an error instead of a hang, which is the whole point. The copy
-     * may still land, and there's no safe way to stop it, so the event and
-     * the registration are handed to the instance's abandoned copies,
-     * which keep the staging buffer until the copy is over. Room for that
-     * is set aside before the copy starts, so handing them over can't
-     * fail and leave a running copy untracked. */
-    hipObjError_t stageCopyWithDeadline(Instance                                         &instance,
-                                        const std::shared_ptr<const BufferMap::BufEntry> &buf, void *dst,
-                                        const void *src, size_t size, hipMemcpyKind kind)
-    {
-        AbandonedCopies::Slot slot    = instance.abandoned.reserve();
-        const HipRuntime     &runtime = instance.platform->hip();
-        hipEvent_t            rawDone = nullptr;
-        if (runtime.eventCreate(&rawDone) != hipSuccess) {
-            return makeError(hipObjInternalError);
-        }
-        auto done = own<HipEventPtr>(runtime, rawDone);
-
-        /* The calling thread's default stream, not the null stream, which
-         * waits for every other blocking stream on the device, so copies from
-         * different threads would wait for each other */
-        hipError_t err = runtime.memcpyAsync(dst, src, size, kind, hipStreamPerThread);
-        if (err == hipSuccess) {
-            err = runtime.eventRecord(done.get(), hipStreamPerThread);
-        }
-        if (err != hipSuccess) {
-            return makeError(hipObjInternalError);
-        }
+/* hipMemcpy with a deadline (see Options::stageTimeout). Async copy plus a
+ * recorded event polled to a wall-clock bound: on timeout the event and the
+ * copy are abandoned deliberately -- the copy owns the staging buffer and
+ * the stream, and there is no safe way to reclaim either while the DMA may
+ * still land. The caller gets an error instead of a hang, which is the
+ * whole point. */
+static hipObjError_t
+stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice, std::chrono::milliseconds timeout)
+{
+    const HipRuntime   &runtime = hip();
+    const hipMemcpyKind kind    = toDevice ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
+    void               *dst     = toDevice ? dev : host;
+    const void         *src     = toDevice ? host : dev;
 
         const std::chrono::milliseconds timeout  = instance.options.stageTimeout;
         const auto                      deadline = std::chrono::steady_clock::now() + timeout;
@@ -325,7 +293,127 @@ namespace {
         return makeError(hipObjSuccess);
     }
 
-} // namespace
+static hipObjError_t
+stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t offset, bool toDevice,
+            std::chrono::milliseconds timeout)
+{
+    if (!buf.hostBuf) {
+        /* the NIC reads and writes the caller's memory */
+        return {hipObjSuccess, 0};
+    }
+    if (!rangeInRegistration(offset, size, buf.size)) {
+        return {hipObjInvalidValue, 0};
+    }
+    /* The device memory is only viewed for its bounds, never read here */
+    const std::span<std::byte> host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
+    const std::span<std::byte> dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
+    const auto                 start = static_cast<size_t>(offset);
+    return stageCopyWithDeadline(dev.subspan(start, size).data(), host.subspan(start, size).data(), size,
+                                 toDevice, timeout);
+}
+
+static hipObjError_t
+runRdmaTransferV3(Instance &instance, const BufferMap::BufEntry &buf, size_t size, off_t offset,
+                  hipObjOps_t *ops, void *ctx)
+{
+    const auto token = buildRdmaTokenV3(instance, buf, size, offset);
+    if (!token) {
+        LOG_ERROR("buildRdmaTokenV3 failed (no MR registered for this pointer, "
+                  "or offset+size out of range)");
+        return {hipObjRdmaError, 0};
+    }
+    const v3::RdmaTokenV3Hex encodedToken = v3::encodeRdmaTokenV3Hex(*token);
+    LOG_DEBUG("encoded token = \"%s\" (%zu bytes)", encodedToken.data(), v3::kRdmaTokenV3HexLen);
+    if (injectRdmaToken(ops, ctx, asStringView(std::span(encodedToken).first<v3::kRdmaTokenV3HexLen>())) !=
+        0) {
+        LOG_ERROR("injectRdmaToken (sendRequest) failed -- HTTP control request "
+                  "itself did not complete");
+        return {hipObjS3Error, 0};
+    }
+    v3::RdmaReplyV3 reply;
+    if (receiveRdmaReplyV3(ops, ctx, reply) != 0) {
+        LOG_ERROR("receiveRdmaReplyV3 failed -- reply header missing or "
+                  "unparsable");
+        return {hipObjS3Error, 0};
+    }
+    LOG_DEBUG("reply httpStatus=%d bytesTransferred=%llu "
+              "(rcListenerConnectionCount=%d)",
+              reply.httpStatus, static_cast<unsigned long long>(reply.bytesTransferred),
+              instance.listener ? instance.listener->connectionCount() : 0);
+    // The peer establishes the RC connection out-of-band via the RC-CM
+    // listener (or already has), and performs the one-sided RDMA
+    // READ/WRITE itself; there is no local completion to poll for and
+    // no peer QP info to feed into a manual RTR/RTS transition the way
+    // v1's finishTransferAfterReply() needed. The HTTP reply status is
+    // the only signal hipObject gets.
+    if (reply.httpStatus != 200 && reply.httpStatus != 204 && reply.httpStatus != 206) {
+        return {hipObjS3Error, 0};
+    }
+    // v1's finishTransferAfterReply() ran this same check after its local
+    // completion poll; v3 has no local poll (see the comment above), but
+    // the underlying reason a dmabuf-registered buffer needs a device
+    // sync after the peer's one-sided RDMA op is unrelated to how
+    // completion was observed -- it still applies here.
+    if (buf.isDmabuf) {
+        hipError_t err = hip().deviceSynchronize();
+        if (err != hipSuccess) {
+            return {hipObjRdmaError, 0};
+        }
+    }
+    return {hipObjSuccess, 0};
+}
+
+static hipObjError_t
+runRdmaTransferV1(Instance &instance, const BufferMap::BufEntry &buf, size_t size, off_t offset,
+                  hipObjOps_t *ops, void *ctx)
+{
+    const auto token = buildRdmaToken(instance.conn, buf, size, offset);
+    if (!token) {
+        LOG_ERROR("buildRdmaToken failed (no MR registered for this pointer, no "
+                  "QP, or offset+size out of range)");
+        return {hipObjRdmaError, 0};
+    }
+    const RdmaTokenHex encoded = encodeRdmaTokenHex(*token);
+    if (injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>())) != 0) {
+        LOG_ERROR("injectRdmaToken (sendRequest) failed -- HTTP control request "
+                  "itself did not complete");
+        return {hipObjS3Error, 0};
+    }
+    std::array<char, 512> replyBuf;
+    const auto            reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
+    if (!reply || reply->status != RdmaReplyStatus::Success) {
+        LOG_ERROR("receiveRdmaReplyRaw failed -- reply header missing, "
+                  "unparsable, or rdmaStatus=%d",
+                  reply ? static_cast<int>(reply->status) : -1);
+        return {hipObjS3Error, 0};
+    }
+    if (finishTransferAfterReply(instance.conn, reply->text, buf.isDmabuf, instance.options.pollTimeout) !=
+        0) {
+        return {hipObjRdmaError, 0};
+    }
+    return {hipObjSuccess, 0};
+}
+
+static hipObjError_t
+runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size, off_t offset,
+                hipObjOps_t *ops, void *ctx)
+{
+    return useV1Wire() ? runRdmaTransferV1(instance, buf, size, offset, ops, ctx)
+                       : runRdmaTransferV3(instance, buf, size, offset, ops, ctx);
+}
+
+/* The PD to register buffers against. In HIPOBJ_RC_LISTEN_IP self-managed
+ * mode (see initWith()) instance.conn.pd is never populated -- it would have
+ * to alias the RC-CM listener's own PD, and RcConnection::pd is an owning
+ * IbvPdPtr, so aliasing it here would double-free once RcListener::Stop()
+ * releases the same PD (see ~Instance()). Read it from the listener
+ * directly in that mode instead. */
+static struct ibv_pd *
+registrationPd(const Instance &instance)
+{
+    return instance.listenerSelfManaged ? reinterpret_cast<struct ibv_pd *>(instance.listener->pd())
+                                        : instance.conn.pd.get();
+}
 
 } // namespace hipObj
 
@@ -423,7 +511,14 @@ try {
     if (!hipObj::isValidDeviceRange(instance->platform->hip(), devPtr, size)) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    return hipObj::registrationError(instance->buffers.registerBuffer(devPtr, size, instance->device->pd()));
+    if (instance->buffers.isRegistered(devPtr)) {
+        return {hipObjBufAlreadyRegistered, 0};
+    }
+    int ret = instance->buffers.registerBuffer(devPtr, size, hipObj::registrationPd(*instance));
+    if (ret != 0) {
+        return {hipObjRdmaError, 0};
+    }
+    return {hipObjSuccess, 0};
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -440,8 +535,14 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::registrationError(
-        instance->buffers.registerHostBuffer(hostPtr, size, instance->device->pd()));
+    if (instance->buffers.isRegistered(hostPtr)) {
+        return {hipObjBufAlreadyRegistered, 0};
+    }
+    int ret = instance->buffers.registerHostBuffer(hostPtr, size, hipObj::registrationPd(*instance));
+    if (ret != 0) {
+        return {hipObjRdmaError, 0};
+    }
+    return {hipObjSuccess, 0};
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -586,19 +687,32 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::checkNoAbandonedCopy(*instance, *buf);
-    if (err.opError != hipObjSuccess) {
-        return err;
+    hipObj::RdmaTokenHex       v1Hex{};
+    hipObj::v3::RdmaTokenV3Hex v3Hex{};
+    std::string_view           encoded;
+    if (hipObj::useV1Wire()) {
+        const auto token = hipObj::buildRdmaToken(instance->conn, *buf, size, 0);
+        if (!token) {
+            return {hipObjRdmaError, 0};
+        }
+        v1Hex   = hipObj::encodeRdmaTokenHex(*token);
+        encoded = hipObj::asStringView(std::span(v1Hex));
     }
-    const auto token = hipObj::buildRdmaToken(instance->tokenConn, *buf, size, 0);
-    if (!token) {
-        return hipObj::makeError(hipObjRdmaError);
+    else {
+        const auto token = hipObj::buildRdmaTokenV3(*instance, *buf, size, 0);
+        if (!token) {
+            return {hipObjRdmaError, 0};
+        }
+        v3Hex   = hipObj::v3::encodeRdmaTokenV3Hex(*token);
+        encoded = hipObj::asStringView(std::span(v3Hex));
     }
-    const hipObj::RdmaTokenHex encoded = hipObj::encodeRdmaTokenHex(*token);
-    hipObj::TokenPtr           copy    = hipObj::allocateToken(encoded.size());
-    std::ranges::copy(encoded, hipObj::spanFromPointer(copy.get(), encoded.size()).begin());
-    *outToken = copy.release();
-    return hipObj::makeError(hipObjSuccess);
+    char *copy = static_cast<char *>(std::malloc(encoded.size()));
+    if (!copy) {
+        return {hipObjInternalError, 0};
+    }
+    std::ranges::copy(encoded, hipObj::spanFromPointer(copy, encoded.size()).begin());
+    *outToken = copy;
+    return {hipObjSuccess, 0};
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -634,6 +748,24 @@ try {
 }
 catch (...) {
     return hipObj::kExceptionError;
+}
+
+hipObjError_t
+hipObjParseRdmaReplyV3(const char *reply, size_t replyLen, int *httpCode, uint64_t *bytesTransferred)
+try {
+    if (!reply || !httpCode || !bytesTransferred) {
+        return {hipObjInvalidValue, 0};
+    }
+    hipObj::v3::RdmaReplyV3 parsed;
+    if (!hipObj::v3::decodeRdmaReplyV3(reply, replyLen, parsed)) {
+        return {hipObjInvalidValue, 0};
+    }
+    *httpCode         = parsed.httpStatus;
+    *bytesTransferred = parsed.bytesTransferred;
+    return {hipObjSuccess, 0};
+}
+catch (...) {
+    return hipObj::handleException();
 }
 
 hipObjError_t

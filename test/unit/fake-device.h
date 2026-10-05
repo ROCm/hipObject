@@ -20,7 +20,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 
 #include "hip-seam.h"
 #include "hipobj-address.h"

@@ -19,6 +19,7 @@
 #include "hipobj-span.h"
 #include "hipobj.h"
 #include "state.h"
+#include "v3-wire.h"
 
 namespace hipObjTest {
 
@@ -552,6 +553,12 @@ void
 FakeDeviceTest::SetUp()
 {
     resetFake();
+#ifndef HIPOBJ_RDMA_WIRE_V1
+    /* FakeDevice's default reply, "200", is a v1 reply. hipObject is built
+     * for one wire format (see useV1Wire() in state.h), so under v3 the
+     * success reply is the encoder's own, which can't drift from the format. */
+    setReply(hipObj::v3::encodeRdmaReplyV3({200, 0}));
+#endif
 }
 
 void

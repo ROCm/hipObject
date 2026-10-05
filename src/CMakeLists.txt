@@ -11,10 +11,13 @@ set(HIPOBJ_SOURCES
   abandoned-copies.cpp
   common/hip-seam.cpp
   common/ibv-wrapper.cpp
+  common/pd-lock.cpp
   common/rdma-topology.cpp
   rdma/connection-pool.cpp
   rdma/transport.cpp
   rdma/token.cpp
+  rdma/everpure/v3-wire.cpp
+  rdma/everpure/rc-listener.cpp
   s3/control.cpp)
 
 if(HIPOBJ_BNXT)
@@ -71,17 +74,24 @@ target_include_directories(hipobj
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/common
     ${CMAKE_CURRENT_SOURCE_DIR}/rdma
+    ${CMAKE_CURRENT_SOURCE_DIR}/rdma/everpure
     ${CMAKE_CURRENT_SOURCE_DIR}/s3)
 
 # hipobj.h includes no HIP or HSA headers, so consumers don't need their
 # include directories or compile definitions. For the static library,
 # CMake still passes PRIVATE dependencies on to the final link.
+if(NOT HIPOBJ_CPU_RDMA)
 target_link_libraries(hipobj
   PRIVATE
     hip::host
     hsa-runtime64::hsa-runtime64
     dl
     Threads::Threads)
+else()
+target_link_libraries(hipobj
+  PRIVATE
+    dl)
+endif()
 
 # A shared library records its own dependency on the C++ runtime. The
 # static library doesn't, so a consumer linking with the C compiler
@@ -90,6 +100,18 @@ if(HIPOBJ_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
   target_link_libraries(hipobj INTERFACE stdc++)
 endif()
 
+# rc-listener.cpp needs librdmacm/libibverbs directly.
+find_library(HIPOBJ_IBVERBS_LIB ibverbs REQUIRED)
+find_library(HIPOBJ_RDMACM_LIB rdmacm REQUIRED)
+target_link_libraries(hipobj
+  PUBLIC
+    ${HIPOBJ_IBVERBS_LIB}
+    ${HIPOBJ_RDMACM_LIB})
+
+if(HIPOBJ_CPU_RDMA)
+  target_compile_definitions(hipobj
+    PRIVATE HIPOBJ_CPU_RDMA)
+endif()
 if(HIPOBJ_BNXT)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_BNXT)
@@ -97,6 +119,10 @@ endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_IONIC)
+endif()
+if(HIPOBJ_RDMA_WIRE_V1)
+  target_compile_definitions(hipobj
+    PRIVATE HIPOBJ_RDMA_WIRE_V1)
 endif()
 
 # The unit tests compile these same sources into a separate object

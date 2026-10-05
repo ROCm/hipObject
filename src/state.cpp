@@ -7,21 +7,22 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 
-#include <hip/hip_runtime_api.h>
-
-#include "connection-pool.h"
 #include "hip-seam.h"
 #include "hipobj-private.h"
 #include "hipobj-parse.h"
 #include "ibv-wrapper.h"
+#include "log.h"
 #include "nic-seam.h"
 #include "no-destructor.h"
+#include "rc-listener.h"
 #include "rdma-topology.h"
 #include "thread-safety.h"
 
@@ -171,6 +172,11 @@ Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Optio
 {
 }
 
+Instance::~Instance()
+{
+    RcListener::Stop(listener);
+}
+
 std::shared_ptr<Instance>
 currentInstance()
 {
@@ -200,6 +206,39 @@ shutdownInstance()
         instance->pool.close();
     }
     instance.reset();
+}
+
+std::string
+localNicIp(const ibv_gid &localGid)
+{
+    const char *envIp = std::getenv("HIPOBJ_RC_LISTEN_IP");
+    if (envIp && envIp[0] != '\0') {
+        LOG_DEBUG("using HIPOBJ_RC_LISTEN_IP override: %s", envIp);
+        return std::string(envIp);
+    }
+    const uint8_t *gid = localGid.raw;
+    if (gid[10] != 0xff || gid[11] != 0xff) {
+        return std::string();
+    }
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u", gid[12], gid[13], gid[14], gid[15]);
+    return std::string(buf);
+}
+
+// Invoked from the RC-CM listener's background thread (rc-listener.h).
+// hipObject is a passive target for the peer's RDMA READ/WRITE, so
+// there is nothing to do beyond what the listener itself already
+// tracks (rcListenerConnectionCount()); kept as named hooks rather
+// than null callbacks so a future need (metrics, logging) has an
+// obvious place to land.
+static void
+onRcListenerConnected(void * /*userCtx*/, void * /*qp*/)
+{
+}
+
+static void
+onRcListenerDisconnected(void * /*userCtx*/, void * /*qp*/)
+{
 }
 
 hipObjError_t
@@ -242,54 +281,103 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
             return makeError(hipObjInvalidValue);
         }
     }
-    std::optional<RdmaNic> nic;
-    if (gpuDevice >= 0) {
-        nic = GetClosestNicToGpu(runtime, platform->topology(), gpuDevice, nicHint);
+    /* The instance is built in a local, which releases what it holds if
+     * anything fails or throws. It's only published once nothing else
+     * can. */
+    auto instance = std::make_shared<Instance>(std::move(platform), options);
+
+    bool listenerSelfManaged = false;
+    // HIPOBJ_RC_LISTEN_IP (see localNicIp() in state.h) is the address
+    // the RC-CM listener will advertise and bind to. A struct ibv_context
+    // this process opens on its own via ibv_open_device() (as
+    // openRdmaDevice()/openRdmaDeviceByName() do) is never the same
+    // context RDMA CM hands an accepted connection as id->verbs, even for
+    // the identical physical device -- libibverbs gives every open() its
+    // own context, and a PD from one can't back a QP on another. So when
+    // the override is set, start the RC-CM listener FIRST in
+    // self-managed mode (see RcListener::Start()): it binds to this IP,
+    // lets RDMA CM pick the device, and allocates its own PD from that
+    // exact context. instance->conn.ctx/pd are NOT pointed at the
+    // listener's device/PD here: RcConnection now owns them through
+    // IbvContextPtr/IbvPdPtr, and aliasing an owning smart pointer at a PD
+    // the listener itself owns would double-free once RcListener::Stop()
+    // releases it (see ~Instance()). registrationPd()/registrationCtx() in
+    // hipobj.cpp consult listenerSelfManaged to read the real device/PD
+    // from instance->listener instead, so buffer registration still
+    // matches what accepted connections get.
+    // HIPOBJ_RC_LISTEN_IP and the RC-CM listener are v3-only concepts (v1
+    // has no listener, and its peer dials back via QP/GID/LID exchanged
+    // directly in the token) -- v1 mode always takes the plain
+    // NIC/GPU-topology device-open path below instead.
+    const char *rcListenIpOverride = useV1Wire() ? nullptr : std::getenv("HIPOBJ_RC_LISTEN_IP");
+    if (rcListenIpOverride && rcListenIpOverride[0] != '\0') {
+        instance->listener = RcListener::Start(nullptr, nullptr, rcListenIpOverride, 0,
+                                               &onRcListenerConnected, &onRcListenerDisconnected, nullptr);
+        listenerSelfManaged =
+            instance->listener && instance->listener->deviceCtx() && instance->listener->pd();
+        if (!listenerSelfManaged) {
+            LOG_WARN("hipObjInit: failed to self-manage RC-CM listener for "
+                     "HIPOBJ_RC_LISTEN_IP=%s; falling back to NIC/GPU topology",
+                     rcListenIpOverride);
+        }
     }
-    if (!nic) {
-        // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
-        // hint is provided, try opening it directly without GPU topology so the
-        // library works in GPU-less environments (e.g. CI with emulated RDMA).
-        if (haveNicHint) {
-            nic = RdmaNic{.index = 0, .name = std::string(nicHint)};
+    std::optional<RdmaNic> nic;
+    if (!listenerSelfManaged) {
+        if (gpuDevice >= 0) {
+            nic = GetClosestNicToGpu(gpuDevice, config.nicHint);
+        }
+        if (!nic) {
+            // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
+            // hint is provided, try opening it directly without GPU topology so the
+            // library works in GPU-less environments (e.g. CI with emulated RDMA).
+            if (haveNicHint) {
+                nic = RdmaNic{0, config.nicHint};
+            }
+            else {
+                return {hipObjNicNotFound, 0};
+            }
+        }
+        if (openRdmaDeviceByName(nic->name.c_str(), instance->conn) != 0) {
+            return {hipObjRdmaError, 0};
+        }
+        if (useV1Wire()) {
+            // v1: the peer brings its own QP to RTR/RTS against ours (see
+            // buildRdmaToken()/finishTransferAfterReply()), so unlike v3 this
+            // needs an ahead-of-time QP, created and left in INIT state here.
+            if (createRcQp(instance->conn, 256, 128, 128) != 0 || transitionQpToInit(instance->conn) != 0) {
+                return {hipObjRdmaError, 0};
+            }
         }
         else {
-            return makeError(hipObjNicNotFound);
+            // hipobj-rc-v3: the RC-CM listener creates one QP per
+            // accepted connection (see rc-listener.h), against
+            // this same PD so it can service RDMA READ/WRITE against MRs
+            // registered via hipObjBufRegister(). Non-fatal: a bind failure
+            // only disables the server dial-in path, not hipObjBufRegister
+            // or the rest of hipObjInit.
+            std::string rcListenIp = localNicIp(instance->conn.localGid);
+            instance->listener =
+                RcListener::Start(instance->conn.pd.get(), instance->conn.ctx.get(),
+                                  rcListenIp.empty() ? nullptr : rcListenIp.c_str(), 0,
+                                  &onRcListenerConnected, &onRcListenerDisconnected, nullptr);
+            if (!instance->listener) {
+                LOG_WARN("hipObjInit: failed to start RC-CM listener on port %u; "
+                         "continuing without it",
+                         rcListenerPortFromEnv());
+            }
         }
     }
+    instance->gpuDevice           = gpuDevice;
+    instance->endpoint            = config.endpoint ? config.endpoint : "";
+    instance->region              = config.region ? config.region : "";
+    instance->nicHint             = config.nicHint ? config.nicHint : "";
+    instance->nicIndex            = nic ? nic->index : -1;
+    instance->flags               = config.flags;
+    instance->listenerSelfManaged = listenerSelfManaged;
 
-    /* The device, the token connection, and then the instance and its
-     * pool are built in locals, which release what they hold if anything
-     * fails or throws. The instance is only published once nothing else
-     * can. */
-    std::optional<RdmaDevice> opened =
-        openRdmaDeviceByName(platform->verbs(), platform->topology(), nic->name);
-    if (!opened) {
-        return makeError(hipObjRdmaError);
-    }
-    auto                        device    = std::make_shared<const RdmaDevice>(std::move(*opened));
-    std::optional<RcConnection> tokenConn = createRcConnection(
-        *device, ConnectionPool::kCqSize, ConnectionPool::kMaxSendWr, ConnectionPool::kMaxRecvWr);
-    if (!tokenConn) {
-        return makeError(hipObjRdmaError);
-    }
-    ResolvedConfig resolved{
-        .gpuDevice = gpuDevice,
-        .nicHint   = std::string(nicHint),
-        .nicIndex  = nic->index,
-    };
-    auto instance = std::make_shared<Instance>(std::move(platform), options, std::move(resolved),
-                                               std::move(device), std::move(*tokenConn));
-    /* The pool stops at the first connection it can't create */
-    if (instance->pool.size() != options.maxTransfers) {
-        return makeError(hipObjRdmaError);
-    }
-
-    /* If taking the lock throws, the instance is released, and nothing
-     * has changed. Moving the instance in can't throw. */
-    const ScopedLock<SharedMutex> lock(state.mutex);
-    state.instance = std::move(instance);
-    return makeError(hipObjSuccess);
+    /* Can't throw */
+    current() = std::move(instance);
+    return {hipObjSuccess, 0};
 }
 
 } // namespace hipObj

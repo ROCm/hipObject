@@ -23,20 +23,38 @@ target_include_directories(hipobj_test_objects
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/src/common
     ${PROJECT_SOURCE_DIR}/src/rdma
+    ${PROJECT_SOURCE_DIR}/src/rdma/everpure
     ${PROJECT_SOURCE_DIR}/src/s3)
 
+find_library(HIPOBJ_TEST_IBVERBS_LIB ibverbs REQUIRED)
+find_library(HIPOBJ_TEST_RDMACM_LIB rdmacm REQUIRED)
+
+if(HIPOBJ_CPU_RDMA)
+target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_CPU_RDMA)
+target_link_libraries(hipobj_test_objects
+  PUBLIC
+    stdc++
+    ${HIPOBJ_TEST_IBVERBS_LIB}
+    ${HIPOBJ_TEST_RDMACM_LIB})
+else()
 target_link_libraries(hipobj_test_objects
   PUBLIC
     hip::host
     hsa-runtime64::hsa-runtime64
     stdc++
-    Threads::Threads)
+    Threads::Threads
+    ${HIPOBJ_TEST_IBVERBS_LIB}
+    ${HIPOBJ_TEST_RDMACM_LIB})
+endif()
 
 if(HIPOBJ_BNXT)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_BNXT)
 endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_IONIC)
+endif()
+if(HIPOBJ_RDMA_WIRE_V1)
+  target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_RDMA_WIRE_V1)
 endif()
 
 # A test that runs against the fake RDMA device and HIP runtime in
@@ -147,8 +165,12 @@ hipobj_add_test(test-ibv-lazy-load
 hipobj_add_test(test-loaded-verbs
   test-loaded-verbs.cpp)
 
-hipobj_add_fake_device_test(test-ibv-dmabuf
-  test-ibv-dmabuf.cpp)
+# The CPU-only build compiles reg_mr()'s dma-buf path out and has no HSA
+# headers, so there's nothing here for it to test
+if(NOT HIPOBJ_CPU_RDMA)
+  hipobj_add_fake_device_test(test-ibv-dmabuf
+    test-ibv-dmabuf.cpp)
+endif()
 
 hipobj_add_fake_device_test(test-api-args
   test-api-args.cpp)
@@ -177,3 +199,9 @@ hipobj_add_fake_device_test(test-thread-safety
   test-thread-safety.cpp)
 # A deadlock fails the test instead of hanging the run
 set_tests_properties(test-thread-safety PROPERTIES TIMEOUT 120)
+
+hipobj_add_test(test-rc-listener
+  test-rc-listener.cpp)
+
+hipobj_add_test(test-v3-wire
+  test-v3-wire.cpp)

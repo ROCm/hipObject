@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "hipobj.h"
+#include "v3-wire.h"
 
 namespace hipObj {
 
@@ -30,5 +31,9 @@ struct RdmaReply {
  * status. Returns std::nullopt when there's no callback, the callback fails
  * or reports more than replyBuf holds, or the reply is malformed. */
 std::optional<RdmaReply> receiveRdmaReplyRaw(const hipObjOps_t &ops, void *ctx, std::span<char> replyBuf);
+
+/*! hipobj-rc-v3 counterpart of receiveRdmaReplyRaw(): reads the raw
+ * reply via ops->recvReply() and decodes it as a v3::RdmaReplyV3. */
+int receiveRdmaReplyV3(hipObjOps_t* ops, void* ctx, v3::RdmaReplyV3& reply);
 
 } // namespace hipObj
