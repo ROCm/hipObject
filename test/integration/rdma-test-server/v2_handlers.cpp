@@ -774,13 +774,13 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
      * state; only the session fields are lock-protected. */
     std::string target;
     void* staging = nullptr;
-    uint32_t clientQpn = 0;
+    uint32_t sessionClientQpn = 0;
     table_.withSession(req.session, [&](V2Session& s) {
       target = s.target;
       staging = s.staging;
-      clientQpn = s.clientQpn;
+      sessionClientQpn = s.clientQpn;
     });
-    if (clientQpn != 0 && staging != nullptr) {
+    if (sessionClientQpn != 0 && staging != nullptr) {
       backend_->write(target, staging, static_cast<size_t>(stats.bytes));
     }
   }
