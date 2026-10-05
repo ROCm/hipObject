@@ -304,9 +304,9 @@ void expectSendResult(const std::string& response, int expectedRc) {
   hipObjS3CurlCtx ctx;
   memset(&ctx, 0, sizeof(ctx));
   fillCtx(&ctx, server.endpoint());
-  int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
+  int actualRc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
   ASSERT_TRUE(server.waitDone().ok());
-  EXPECT_EQ(expectedRc, rc);
+  EXPECT_EQ(expectedRc, actualRc);
 }
 
 class CurlGlobalEnv : public ::testing::Environment {
