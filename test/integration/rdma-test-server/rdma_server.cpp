@@ -153,9 +153,7 @@ struct RdmaTestServer::Impl {
     if (stagingMr) {
       hipObj::ibv.dereg_mr(stagingMr);
     }
-    if (stagingBuf) {
-      std::free(stagingBuf);
-    }
+    std::free(stagingBuf);
     hipObj::closeRdmaDevice(conn);
   }
 };
