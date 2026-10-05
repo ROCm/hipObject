@@ -7,6 +7,7 @@
  */
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <chrono>
@@ -289,11 +290,16 @@ const char kR200OkCaps[] = "HTTP/1.0 200 OK\r\n"
                            "X-AMZ-RDMA-REPLY: ok\r\n"
                            "\r\n";
 
+// ctx keeps endpoint.c_str(), so the string must outlive ctx.
 void fillCtx(hipObjS3CurlCtx* ctx, const std::string& endpoint) {
   ctx->endpoint = endpoint.c_str();
   ctx->objectSize = 4096;
   ctx->devPtr = reinterpret_cast<const void*>(0x1000);
 }
+
+// Rejects temporaries (including ones converted from a char array),
+// which would leave ctx->endpoint dangling.
+void fillCtx(hipObjS3CurlCtx* ctx, std::string&& endpoint) = delete;
 
 // Runs one request against a fresh stub server and checks both that the
 // stub exchange itself completed and that SendRequest returned the
@@ -425,9 +431,8 @@ TEST(S3CurlOps, ConnectionRefusedFails) {
   socklen_t slen = sizeof(addr);
   ASSERT_EQ(0,
             getsockname(fd, reinterpret_cast<struct sockaddr*>(&addr), &slen));
-  char url[64];
-  snprintf(url, sizeof(url), "http://127.0.0.1:%u",
-           static_cast<unsigned>(ntohs(addr.sin_port)));
+  const std::string url = "http://127.0.0.1:" +
+                          std::to_string(ntohs(addr.sin_port));
 
   hipObjS3CurlCtx ctx;
   memset(&ctx, 0, sizeof(ctx));
