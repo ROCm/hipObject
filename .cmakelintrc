@@ -1,0 +1,10 @@
+# cmakelint configuration for hipObject
+# https://github.com/cmake-lint/cmake-lint
+#
+# Line length is impractical for CMake generator expressions and
+# version strings.
+#
+# wonkycase is disabled because CMake's own FetchContent module
+# commands (FetchContent_Declare, FetchContent_MakeAvailable, etc.)
+# are mixed-case, and that naming is mandated upstream, not ours.
+filter=-linelength,-readability/wonkycase
