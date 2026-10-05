@@ -21,3 +21,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 USER ubuntu
+
+# Not a long-running service; this only reports whether the build toolchain
+# is present in a running container. It does not affect image builds.
+HEALTHCHECK --interval=5m --timeout=10s --retries=1 \
+    CMD command -v cmake && command -v git && test -x /opt/rocm/llvm/bin/clang || exit 1
