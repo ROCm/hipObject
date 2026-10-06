@@ -10,6 +10,7 @@ list(APPEND CMAKE_PREFIX_PATH
   ${CMAKE_SOURCE_DIR}/cmake/minio-deps)
 
 include(${CMAKE_SOURCE_DIR}/cmake/HIPOBJMinioCppDeps.cmake)
+include(HIPOBJSystemIncludes)
 
 set(MINIO_CPP_ENABLE_RDMA OFF CACHE BOOL "" FORCE)
 set(MINIO_CPP_TEST OFF CACHE BOOL "" FORCE)
@@ -22,6 +23,7 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(miniocpp_upstream)
+hipobj_mark_dir_targets_system(${miniocpp_upstream_SOURCE_DIR})
 
 hipobj_add_library(
   NAME hipobj_minio
