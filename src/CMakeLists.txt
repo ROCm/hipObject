@@ -37,7 +37,6 @@ endif()
 
 hipobj_add_library(
   NAME hipobj
-  TYPE STATIC
   SRCS ${HIPOBJ_SOURCES})
 
 target_include_directories(hipobj

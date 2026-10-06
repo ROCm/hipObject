@@ -42,7 +42,7 @@ sudo make install
 | ------------------ | --------- | -------------------------- |
 | `HIPOBJ_BNXT`      | ON        | Build Thor-2 RDMA backend  |
 | `HIPOBJ_IONIC`     | OFF       | Build ionic RDMA backend   |
-| `BUILD_SHARED_LIBS`| OFF       | Build shared library       |
+| `BUILD_SHARED_LIBS`| ON        | Build shared library       |
 | `BUILD_TESTING`    | ON        | Build and register tests   |
 | `HIPOBJ_BUILD_DOCS`| OFF       | Build documentation        |
 | `HIPOBJ_DOCS_ONLY` | OFF       | Configure docs targets only|
