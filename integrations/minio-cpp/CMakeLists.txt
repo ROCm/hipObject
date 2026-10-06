@@ -22,7 +22,19 @@ FetchContent_Declare(
   GIT_TAG v0.4.0
   GIT_SHALLOW TRUE
 )
+# minio-cpp is only a build dependency of hipobj_minio, so don't
+# generate its install rules. Its install(EXPORT) can't be generated
+# here anyway: the curlpp and inih targets it links to are built in
+# this tree (see HIPOBJMinioCppDeps.cmake) and aren't in any export
+# set. CMake checks CMAKE_SKIP_INSTALL_RULES per directory, and
+# EXCLUDE_FROM_ALL keeps our install script from including the
+# upstream install script, which is never generated.
+set(_minio_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
+set(CMAKE_SKIP_INSTALL_RULES ON)
 FetchContent_MakeAvailable(miniocpp_upstream)
+set(CMAKE_SKIP_INSTALL_RULES "${_minio_skip_install_rules}")
+set_property(DIRECTORY ${miniocpp_upstream_SOURCE_DIR}
+  PROPERTY EXCLUDE_FROM_ALL TRUE)
 hipobj_mark_dir_targets_system(${miniocpp_upstream_SOURCE_DIR})
 
 hipobj_add_library(
@@ -38,8 +50,7 @@ endif()
 
 target_include_directories(hipobj_minio
   PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/hipobj_minio>
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
     ${CMAKE_SOURCE_DIR}/include)
 
@@ -63,9 +74,10 @@ target_link_libraries(minio-getput-rdma PRIVATE
   hip::host
   miniocpp::miniocpp)
 
-install(TARGETS hipobj_minio minio-getput-rdma
-  ARCHIVE DESTINATION lib
+# hipobj_minio is build-only. Its headers include minio-cpp's headers
+# and it links minio-cpp publicly, but minio-cpp and the curlpp and
+# inih libraries we build for it aren't installed, so an installed
+# archive and headers would be unusable. The example links everything
+# statically, so it can be installed on its own.
+install(TARGETS minio-getput-rdma
   RUNTIME DESTINATION bin/hipobj-examples)
-
-install(DIRECTORY include/hipobj_minio
-  DESTINATION include)
