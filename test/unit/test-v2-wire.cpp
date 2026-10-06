@@ -220,9 +220,9 @@ TEST(V2Wire, BuildTarget) {
 
 TEST(V2Wire, EnumAbiCompat) {
   /* The v2 enum extension appends after hipObjInternalError(11). */
-  EXPECT_EQ((int)hipObjInternalError, 11);
-  EXPECT_EQ((int)hipObjNotSupported, 12);
-  EXPECT_EQ((int)hipObjBusy, 13);
+  EXPECT_EQ(static_cast<int>(hipObjInternalError), 11);
+  EXPECT_EQ(static_cast<int>(hipObjNotSupported), 12);
+  EXPECT_EQ(static_cast<int>(hipObjBusy), 13);
 }
 
 } // namespace

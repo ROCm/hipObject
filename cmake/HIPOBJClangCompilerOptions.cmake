@@ -145,7 +145,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wnon-virtual-dtor
     -Wnonportable-system-include-path
     -Wnullable-to-nonnull-conversion
-    #-Wold-style-cast # TODO: Fix diagnostics and re-enable
+    -Wold-style-cast
     -Wopenmp
     -Wover-aligned
     -Woverriding-method-mismatch
