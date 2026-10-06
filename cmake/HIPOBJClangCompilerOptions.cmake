@@ -20,7 +20,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wno-unused-parameter # TODO: Fix diagnostics and re-enable
 
     # Avoid non-standard C/C++ behavior
-    #-pedantic # TODO: Fix diagnostics and re-enable
+    -pedantic
 
     # Suggestions from the Effective C++ book
     -Weffc++

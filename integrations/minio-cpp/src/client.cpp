@@ -78,7 +78,7 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
     std::string key = base_url.host + ":" + base_url.region;
     if (initialized_ && key == active_key_) {
-      return HIPOBJ_SUCCESS;
+      return {hipObjSuccess, 0};
     }
     if (initialized_) {
       hipObjShutdown();
