@@ -378,6 +378,10 @@ typedef struct hipObjOpsV2 {
     int (*sendCancel)(void *ctx, const hipObjTransferReqV2_t *req);
 } hipObjOpsV2_t;
 
+/* hipObjInitV2() isn't implemented, so its declaration is disabled.
+ * Callers get a compile error instead of an undefined symbol at link time.
+ */
+#if 0
 /*!
  * @brief Initialize the library for hipobj-rc-v2 transfers
  * @ingroup core
@@ -386,6 +390,7 @@ typedef struct hipObjOpsV2 {
  * the other returns hipObjAlreadyInitialized until hipObjShutdown.
  */
 HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
+#endif
 
 /*!
  * @brief V2 GET: download an object into a registered buffer
