@@ -30,36 +30,36 @@
 namespace hipObj {
 namespace v2 {
 
-enum class Phase : uint8_t {
-  Idle = 0,
-  Negotiating,
-  Connecting,
-  Ready,
-  Transferring,
-  Draining,
-};
+    enum class Phase : uint8_t {
+        Idle = 0,
+        Negotiating,
+        Connecting,
+        Ready,
+        Transferring,
+        Draining,
+    };
 
-const char* phaseName(Phase p);
+    const char *phaseName(Phase p);
 
-/* Pure transition checks. Each returns true when the transition is legal
- * from the current phase and applies it when apply is non-null. */
-bool beginNegotiate(Phase& p, bool apply = true);
-bool prepareOk(Phase& p, bool apply = true);
-bool connectOk(Phase& p, bool apply = true);
-bool sendReady(Phase& p, bool apply = true);
-bool transferDone(Phase& p, bool apply = true);
+    /* Pure transition checks. Each returns true when the transition is legal
+     * from the current phase and applies it when apply is non-null. */
+    bool beginNegotiate(Phase &p, bool apply = true);
+    bool prepareOk(Phase &p, bool apply = true);
+    bool connectOk(Phase &p, bool apply = true);
+    bool sendReady(Phase &p, bool apply = true);
+    bool transferDone(Phase &p, bool apply = true);
 
-/* Failure transition: before the first callback (preExpose) the machine
- * returns to Idle; otherwise it must go through Draining. Returns true
- * and applies when legal. */
-bool fail(Phase& p, bool preExpose, bool apply = true);
+    /* Failure transition: before the first callback (preExpose) the machine
+     * returns to Idle; otherwise it must go through Draining. Returns true
+     * and applies when legal. */
+    bool fail(Phase &p, bool preExpose, bool apply = true);
 
-/* Draining completes back to Idle. */
-bool drained(Phase& p, bool apply = true);
+    /* Draining completes back to Idle. */
+    bool drained(Phase &p, bool apply = true);
 
-/* True when the phase has exposed the request externally (callback
- * started). Used to pick the failure target. */
-bool exposed(Phase p);
+    /* True when the phase has exposed the request externally (callback
+     * started). Used to pick the failure target. */
+    bool exposed(Phase p);
 
 } // namespace v2
 } // namespace hipObj

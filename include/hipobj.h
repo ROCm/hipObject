@@ -62,21 +62,21 @@ extern "C" {
  * @ingroup error
  */
 typedef enum {
-  hipObjSuccess = 0,
-  hipObjInvalidValue,
-  hipObjNotInitialized,
-  hipObjAlreadyInitialized,
-  hipObjRdmaError,
-  hipObjS3Error,
-  hipObjBufNotRegistered,
-  hipObjBufAlreadyRegistered,
-  hipObjNicNotFound,
-  hipObjDmabufNotSupported,
-  hipObjSizeTooLarge,
-  hipObjInternalError,
+    hipObjSuccess = 0,
+    hipObjInvalidValue,
+    hipObjNotInitialized,
+    hipObjAlreadyInitialized,
+    hipObjRdmaError,
+    hipObjS3Error,
+    hipObjBufNotRegistered,
+    hipObjBufAlreadyRegistered,
+    hipObjNicNotFound,
+    hipObjDmabufNotSupported,
+    hipObjSizeTooLarge,
+    hipObjInternalError,
 #ifdef HIPOBJECT_V2_API
-  hipObjNotSupported, /*!< Server explicitly does not support hipobj-rc-v2 */
-  hipObjBusy,         /*!< Server backpressure (503) and retries exhausted */
+    hipObjNotSupported, /*!< Server explicitly does not support hipobj-rc-v2 */
+    hipObjBusy,         /*!< Server backpressure (503) and retries exhausted */
 #endif
 } hipObjOpError_t;
 
@@ -86,8 +86,8 @@ typedef enum {
  * @ingroup error
  */
 typedef struct {
-  hipObjOpError_t opError;
-  int hipError;
+    hipObjOpError_t opError;
+    int             hipError;
 } hipObjError_t;
 
 #define HIPOBJ_SUCCESS ((hipObjError_t){hipObjSuccess, 0})
@@ -97,7 +97,7 @@ typedef struct {
  *        operation error code
  * @ingroup error
  */
-HIPOBJ_API const char* hipObjGetErrorString(hipObjOpError_t err);
+HIPOBJ_API const char *hipObjGetErrorString(hipObjOpError_t err);
 
 /* -------------------------------------------------------
  *  TYPES
@@ -107,7 +107,7 @@ HIPOBJ_API const char* hipObjGetErrorString(hipObjOpError_t err);
  * @brief Opaque handle to an S3 object for RDMA I/O
  * @ingroup core
  */
-typedef void* hipObjHandle_t;
+typedef void *hipObjHandle_t;
 
 /*!
  * @brief Callback struct for S3 SDK integration.
@@ -120,29 +120,29 @@ typedef void* hipObjHandle_t;
  * @ingroup core
  */
 typedef struct {
-  /*!
-   * Called by hipObject to send the RDMA token.
-   * The application should embed the token in the
-   * x-amz-rdma-token S3 request header.
-   *
-   * @param ctx       User-supplied context pointer
-   * @param token     Hex-encoded RDMA token
-   * @param tokenLen  Length of token in bytes
-   * @return 0 on success, negative on failure
-   */
-  int (*sendRequest)(void* ctx, const char* token, size_t tokenLen);
+    /*!
+     * Called by hipObject to send the RDMA token.
+     * The application should embed the token in the
+     * x-amz-rdma-token S3 request header.
+     *
+     * @param ctx       User-supplied context pointer
+     * @param token     Hex-encoded RDMA token
+     * @param tokenLen  Length of token in bytes
+     * @return 0 on success, negative on failure
+     */
+    int (*sendRequest)(void *ctx, const char *token, size_t tokenLen);
 
-  /*!
-   * Called by hipObject to receive the RDMA reply.
-   * The application should extract x-amz-rdma-reply
-   * from the S3 response headers.
-   *
-   * @param ctx       User-supplied context pointer
-   * @param reply     Buffer to receive the reply tag
-   * @param replyLen  In: buffer size; out: actual length
-   * @return 0 on success, negative on failure
-   */
-  int (*recvReply)(void* ctx, char* reply, size_t* replyLen);
+    /*!
+     * Called by hipObject to receive the RDMA reply.
+     * The application should extract x-amz-rdma-reply
+     * from the S3 response headers.
+     *
+     * @param ctx       User-supplied context pointer
+     * @param reply     Buffer to receive the reply tag
+     * @param replyLen  In: buffer size; out: actual length
+     * @return 0 on success, negative on failure
+     */
+    int (*recvReply)(void *ctx, char *reply, size_t *replyLen);
 } hipObjOps_t;
 
 /*!
@@ -150,13 +150,13 @@ typedef struct {
  * @ingroup core
  */
 typedef struct {
-  const char* endpoint;  /*!< S3 endpoint URL           */
-  const char* region;    /*!< AWS region                */
-  const char* accessKey; /*!< S3 access key (optional)  */
-  const char* secretKey; /*!< S3 secret key (optional)  */
-  uint32_t flags;        /*!< Reserved, set to 0        */
-  int gpuDevice;         /*!< HIP device index, or -1   */
-  const char* nicHint;   /*!< NIC name hint, or NULL    */
+    const char *endpoint;  /*!< S3 endpoint URL           */
+    const char *region;    /*!< AWS region                */
+    const char *accessKey; /*!< S3 access key (optional)  */
+    const char *secretKey; /*!< S3 secret key (optional)  */
+    uint32_t    flags;     /*!< Reserved, set to 0        */
+    int         gpuDevice; /*!< HIP device index, or -1   */
+    const char *nicHint;   /*!< NIC name hint, or NULL    */
 } hipObjConfig_t;
 
 /*! @brief RDMA token operation: server RDMA READ (client PUT) @ingroup io */
@@ -182,7 +182,7 @@ typedef struct {
  * @return hipObjError_t
  * @ingroup core
  */
-HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t* config);
+HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t *config);
 
 /*!
  * @brief Shut down the hipObject library
@@ -210,7 +210,7 @@ HIPOBJ_API hipObjError_t hipObjShutdown(void);
  * @return hipObjError_t
  * @ingroup buffer
  */
-HIPOBJ_API hipObjError_t hipObjBufRegister(void* devPtr, size_t size);
+HIPOBJ_API hipObjError_t hipObjBufRegister(void *devPtr, size_t size);
 
 /*!
  * @brief Register a host buffer for RDMA transfers
@@ -225,7 +225,7 @@ HIPOBJ_API hipObjError_t hipObjBufRegister(void* devPtr, size_t size);
  * @return hipObjError_t
  * @ingroup buffer
  */
-HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void* hostPtr, size_t size);
+HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void *hostPtr, size_t size);
 
 /*!
  * @brief Deregister a previously registered buffer
@@ -235,7 +235,7 @@ HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void* hostPtr, size_t size);
  * @return hipObjError_t
  * @ingroup buffer
  */
-HIPOBJ_API hipObjError_t hipObjBufDeregister(void* devPtr);
+HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
 
 /* -------------------------------------------------------
  *  DATA TRANSFER
@@ -257,9 +257,8 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void* devPtr);
  * @return hipObjError_t
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr,
-                                   size_t size, off_t offset, hipObjOps_t* ops,
-                                   void* ctx);
+HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t size, off_t offset,
+                                   hipObjOps_t *ops, void *ctx);
 
 /*!
  * @brief PUT: store a registered buffer to an S3 object
@@ -277,9 +276,8 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void* devPtr,
  * @return hipObjError_t
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
-                                   size_t size, off_t offset, hipObjOps_t* ops,
-                                   void* ctx);
+HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset,
+                                   hipObjOps_t *ops, void *ctx);
 
 /* -------------------------------------------------------
  *  hipobj-rc-v2 (TWO-ROUND-TRIP CONTROL PROTOCOL)
@@ -295,8 +293,8 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void* devPtr,
  * control endpoint; there is no default port, the caller must supply one.
  */
 typedef struct {
-  const char* controlEndpoint; /*!< Required "http(s)://host:port" URI;
-                                    the library copies the string */
+    const char *controlEndpoint; /*!< Required "http(s)://host:port" URI;
+                                      the library copies the string */
 } hipObjControlEndpointV2_t;
 
 /*!
@@ -304,8 +302,8 @@ typedef struct {
  * @ingroup core
  */
 typedef struct {
-  hipObjConfig_t v1;                 /*!< All v1 fields */
-  hipObjControlEndpointV2_t control; /*!< v2 control endpoint (required) */
+    hipObjConfig_t            v1;      /*!< All v1 fields */
+    hipObjControlEndpointV2_t control; /*!< v2 control endpoint (required) */
 } hipObjConfigV2_t;
 
 /* Forward declaration of the phase-aware callback set (see below). */
@@ -321,41 +319,41 @@ typedef struct hipObjOpsV2 hipObjOpsV2_t;
  * anything they need to keep.
  */
 typedef struct {
-  const char* method;  /*!< "GET" or "PUT" */
-  const char* bucket;  /*!< Object bucket */
-  const char* key;     /*!< Object key */
-  const char* query;   /*!< Canonical query string or NULL */
-  const char* token;   /*!< 88-hex RDMA token */
-  const char* session; /*!< READY/cancel: session id (library sets) */
-  const char* target;  /*!< Canonical rdma-target value (library sets) */
-  uint64_t size;       /*!< Transfer size in bytes */
-  uint64_t offset;     /*!< Byte offset into the object */
-  uint32_t cookie;     /*!< Client cookie (library generates) */
-  uint32_t clientPsn;  /*!< Client PSN, 1..0xffffff (library generates) */
-  const hipObjControlEndpointV2_t* endpoint; /*!< Control endpoint (library sets
-                                                from init) */
+    const char                      *method;    /*!< "GET" or "PUT" */
+    const char                      *bucket;    /*!< Object bucket */
+    const char                      *key;       /*!< Object key */
+    const char                      *query;     /*!< Canonical query string or NULL */
+    const char                      *token;     /*!< 88-hex RDMA token */
+    const char                      *session;   /*!< READY/cancel: session id (library sets) */
+    const char                      *target;    /*!< Canonical rdma-target value (library sets) */
+    uint64_t                         size;      /*!< Transfer size in bytes */
+    uint64_t                         offset;    /*!< Byte offset into the object */
+    uint32_t                         cookie;    /*!< Client cookie (library generates) */
+    uint32_t                         clientPsn; /*!< Client PSN, 1..0xffffff (library generates) */
+    const hipObjControlEndpointV2_t *endpoint;  /*!< Control endpoint (library sets
+                                                   from init) */
 } hipObjTransferReqV2_t;
 
 /*! @brief Response to PREPARE @ingroup io */
 typedef struct {
-  int httpStatus;        /*!< Status code (200/501/403/413/503/500) */
-  int protocolEcho;      /*!< 1 when X-Amz-Rdma-Protocol: hipobj-rc-v2 seen */
-  int unsupportedMarker; /*!< 1 when the explicit unsupported marker seen */
-  char serverToken[97];  /*!< 88-hex peer token + NUL */
-  char session[65];      /*!< 32-hex session id + NUL */
-  uint32_t serverPsn;    /*!< Server PSN, 1..0xffffff (0 = invalid) */
+    int      httpStatus;        /*!< Status code (200/501/403/413/503/500) */
+    int      protocolEcho;      /*!< 1 when X-Amz-Rdma-Protocol: hipobj-rc-v2 seen */
+    int      unsupportedMarker; /*!< 1 when the explicit unsupported marker seen */
+    char     serverToken[97];   /*!< 88-hex peer token + NUL */
+    char     session[65];       /*!< 32-hex session id + NUL */
+    uint32_t serverPsn;         /*!< Server PSN, 1..0xffffff (0 = invalid) */
 } hipObjPrepareReplyV2_t;
 
 /*! @brief FINAL response (the reply to READY) @ingroup io */
 typedef struct {
-  int httpStatus;       /*!< 200 (GET) / 204 (PUT) / 5xx / 409 / 408 */
-  int protocolEcho;     /*!< 1 when the protocol echo header was present */
-  uint64_t bytes;       /*!< Bytes transferred per the server */
-  uint32_t cookieEcho;  /*!< Must match the request cookie */
-  char etag[128];       /*!< S3 ETag when present, else empty */
-  char versionId[128];  /*!< S3 version id when present, else empty */
-  char checksumB64[13]; /*!< 12-char canonical CRC64NVME base64 or empty */
-  int cookiePresent;    /*!< 1 when the cookie echo header was present */
+    int      httpStatus;      /*!< 200 (GET) / 204 (PUT) / 5xx / 409 / 408 */
+    int      protocolEcho;    /*!< 1 when the protocol echo header was present */
+    uint64_t bytes;           /*!< Bytes transferred per the server */
+    uint32_t cookieEcho;      /*!< Must match the request cookie */
+    char     etag[128];       /*!< S3 ETag when present, else empty */
+    char     versionId[128];  /*!< S3 version id when present, else empty */
+    char     checksumB64[13]; /*!< 12-char canonical CRC64NVME base64 or empty */
+    int      cookiePresent;   /*!< 1 when the cookie echo header was present */
 } hipObjFinalReplyV2_t;
 
 /*!
@@ -368,18 +366,16 @@ typedef struct {
  * points and is kept for structural forward compatibility.
  */
 typedef struct hipObjOpsV2 {
-  hipObjOps_t v1;
+    hipObjOps_t v1;
 
-  /*! Issue PREPARE; out is filled from the response headers. */
-  int (*sendPrepare)(void* ctx, const hipObjTransferReqV2_t* req,
-                     hipObjPrepareReplyV2_t* out);
+    /*! Issue PREPARE; out is filled from the response headers. */
+    int (*sendPrepare)(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out);
 
-  /*! Issue READY; the response is FINAL. out reflects it. */
-  int (*sendReady)(void* ctx, const hipObjTransferReqV2_t* req,
-                   hipObjFinalReplyV2_t* out);
+    /*! Issue READY; the response is FINAL. out reflects it. */
+    int (*sendReady)(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out);
 
-  /*! Issue CANCEL (idempotent). Only the HTTP status matters. */
-  int (*sendCancel)(void* ctx, const hipObjTransferReqV2_t* req);
+    /*! Issue CANCEL (idempotent). Only the HTTP status matters. */
+    int (*sendCancel)(void *ctx, const hipObjTransferReqV2_t *req);
 } hipObjOpsV2_t;
 
 /*!
@@ -389,7 +385,7 @@ typedef struct hipObjOpsV2 {
  * Mutually exclusive with hipObjInit: whichever is called first wins and
  * the other returns hipObjAlreadyInitialized until hipObjShutdown.
  */
-HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t* config);
+HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
 
 /*!
  * @brief V2 GET: download an object into a registered buffer
@@ -405,16 +401,12 @@ HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t* config);
  * scope: on return the session is terminated and the connection
  * quiesced.
  */
-HIPOBJ_API hipObjError_t hipObjGetV2(const char* bucket, const char* key,
-                                     void* devPtr, uint64_t size,
-                                     uint64_t offset, const char* query,
-                                     hipObjOpsV2_t* ops, void* ctx);
+HIPOBJ_API hipObjError_t hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size,
+                                     uint64_t offset, const char *query, hipObjOpsV2_t *ops, void *ctx);
 
 /*! @brief V2 PUT, same contract as hipObjGetV2 @ingroup io */
-HIPOBJ_API hipObjError_t hipObjPutV2(const char* bucket, const char* key,
-                                     const void* devPtr, uint64_t size,
-                                     uint64_t offset, const char* query,
-                                     hipObjOpsV2_t* ops, void* ctx);
+HIPOBJ_API hipObjError_t hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size,
+                                     uint64_t offset, const char *query, hipObjOpsV2_t *ops, void *ctx);
 
 #endif /* HIPOBJECT_V2_API */
 
@@ -438,8 +430,7 @@ HIPOBJ_API hipObjError_t hipObjPutV2(const char* bucket, const char* key,
  *
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjBufSync(void* devPtr, size_t size, off_t offset,
-                                       int direction);
+HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction);
 
 /*!
  * @brief Mint a hex-encoded RC RDMA token for a registered buffer
@@ -449,14 +440,13 @@ HIPOBJ_API hipObjError_t hipObjBufSync(void* devPtr, size_t size, off_t offset,
  *
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjGetRdmaToken(const void* devPtr, size_t size,
-                                            int op, char** outToken);
+HIPOBJ_API hipObjError_t hipObjGetRdmaToken(const void *devPtr, size_t size, int op, char **outToken);
 
 /*!
  * @brief Release a token allocated by hipObjGetRdmaToken()
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char* token);
+HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char *token);
 
 /*!
  * @brief Parse an x-amz-rdma-reply header value
@@ -466,8 +456,7 @@ HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char* token);
  *
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char* reply,
-                                              size_t replyLen, int* httpCode);
+HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char *reply, size_t replyLen, int *httpCode);
 
 /*!
  * @brief Extract client NIC IPv4 from a minted RDMA token
@@ -478,14 +467,13 @@ HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char* reply,
  *
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
-                                              size_t nicIpLen);
+HIPOBJ_API hipObjError_t hipObjTokenClientNic(const char *token, char *nicIp, size_t nicIpLen);
 
 /*!
  * @brief Return the library version as a string
  * @ingroup core
  */
-HIPOBJ_API const char* hipObjGetVersionString(void);
+HIPOBJ_API const char *hipObjGetVersionString(void);
 
 #ifdef __cplusplus
 }

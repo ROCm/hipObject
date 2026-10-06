@@ -8,13 +8,13 @@
 #include <cstdint>
 #include <cstdio>
 
-#define HIPOBJ_CHECK_NULL(ptr, msg)                                            \
-  do {                                                                         \
-    if (!(ptr)) {                                                              \
-      fprintf(stderr, "hipobj: %s is null\n", msg);                            \
-      return {hipObjInvalidValue, 0};                                          \
-    }                                                                          \
-  } while (0)
+#define HIPOBJ_CHECK_NULL(ptr, msg)                                                                          \
+    do {                                                                                                     \
+        if (!(ptr)) {                                                                                        \
+            fprintf(stderr, "hipobj: %s is null\n", msg);                                                    \
+            return {hipObjInvalidValue, 0};                                                                  \
+        }                                                                                                    \
+    } while (0)
 
 namespace hipObj {
 

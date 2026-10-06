@@ -15,20 +15,20 @@
 namespace hipObj {
 namespace v2 {
 
-class ClockSource {
-public:
-  virtual ~ClockSource() = default;
-  virtual uint64_t nowMs() = 0;
-};
+    class ClockSource {
+    public:
+        virtual ~ClockSource()   = default;
+        virtual uint64_t nowMs() = 0;
+    };
 
-/* Returns the active clock. Production default unless a test
- * override is installed. */
-ClockSource& clockSource();
+    /* Returns the active clock. Production default unless a test
+     * override is installed. */
+    ClockSource &clockSource();
 
-/* Installs a test clock and returns the previously active source
- * (nullptr when the production default was active). Passing nullptr
- * restores the default. Unit tests only. */
-ClockSource* setClockSourceForTest(ClockSource* source);
+    /* Installs a test clock and returns the previously active source
+     * (nullptr when the production default was active). Passing nullptr
+     * restores the default. Unit tests only. */
+    ClockSource *setClockSourceForTest(ClockSource *source);
 
 } // namespace v2
 } // namespace hipObj

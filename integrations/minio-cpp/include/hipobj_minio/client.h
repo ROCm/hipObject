@@ -29,12 +29,12 @@ namespace hipobj::minio {
  * Process-wide and monotonic. Snapshot with TransferStatsSnapshot() before
  * the transfers you care about and subtract. */
 struct TransferStats {
-  uint64_t rdmaPuts = 0;
-  uint64_t rdmaGets = 0;
-  uint64_t httpPuts = 0;
-  uint64_t httpGets = 0;
-  uint64_t rdmaBytes = 0;
-  uint64_t httpBytes = 0;
+    uint64_t rdmaPuts  = 0;
+    uint64_t rdmaGets  = 0;
+    uint64_t httpPuts  = 0;
+    uint64_t httpGets  = 0;
+    uint64_t rdmaBytes = 0;
+    uint64_t httpBytes = 0;
 };
 
 /* A snapshot of the process-wide counters. */
@@ -51,21 +51,21 @@ void TransferStatsReset();
  * A lane that requires RDMA asserts http_put=0 and http_get=0; a lane that
  * cannot have it (no verbs device, e.g. a plain container) asserts the
  * reverse, so the expectation is written down either way. */
-std::string TransferStatsLine(const TransferStats& stats);
+std::string TransferStatsLine(const TransferStats &stats);
 
 class Client {
 public:
-  Client(::minio::s3::BaseUrl base_url, ::minio::creds::Provider* provider);
+    Client(::minio::s3::BaseUrl base_url, ::minio::creds::Provider *provider);
 
-  ::minio::s3::PutObjectResponse PutObject(::minio::s3::PutObjectArgs args);
-  ::minio::s3::GetObjectResponse GetObject(::minio::s3::GetObjectArgs args);
+    ::minio::s3::PutObjectResponse PutObject(::minio::s3::PutObjectArgs args);
+    ::minio::s3::GetObjectResponse GetObject(::minio::s3::GetObjectArgs args);
 
-  bool RdmaAvailable() const;
+    bool RdmaAvailable() const;
 
 private:
-  ::minio::s3::BaseUrl base_url_;
-  ::minio::creds::Provider* provider_ = nullptr;
-  ::minio::s3::Client s3_client_;
+    ::minio::s3::BaseUrl      base_url_;
+    ::minio::creds::Provider *provider_ = nullptr;
+    ::minio::s3::Client       s3_client_;
 };
 
 } // namespace hipobj::minio

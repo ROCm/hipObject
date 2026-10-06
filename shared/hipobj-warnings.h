@@ -30,8 +30,8 @@
 #pragma once
 
 #define HIPOBJ_WARN_JOINSTR(x, y) x y
-#define HIPOBJ_WARN_DO_PRAGMA(x) _Pragma(#x)
-#define HIPOBJ_WARN_PRAGMA(x) HIPOBJ_WARN_DO_PRAGMA(GCC diagnostic x)
+#define HIPOBJ_WARN_DO_PRAGMA(x)  _Pragma(#x)
+#define HIPOBJ_WARN_PRAGMA(x)     HIPOBJ_WARN_DO_PRAGMA(GCC diagnostic x)
 
 /* clang-format off */
 #if (defined(__GNUC__) || defined(__clang__))
@@ -42,7 +42,7 @@
 
 #if defined(__clang__) || defined(__GNUC__)
 #define HIPOBJ_WARN_FORMAT_NONLITERAL_OFF HIPOBJ_WARN_OFF("format-nonliteral")
-#define HIPOBJ_WARN_FORMAT_NONLITERAL_ON HIPOBJ_WARN_ON("format-nonliteral")
+#define HIPOBJ_WARN_FORMAT_NONLITERAL_ON  HIPOBJ_WARN_ON("format-nonliteral")
 #else
 #define HIPOBJ_WARN_FORMAT_NONLITERAL_OFF
 #define HIPOBJ_WARN_FORMAT_NONLITERAL_ON
@@ -50,7 +50,7 @@
 
 #if defined(__clang__)
 #define HIPOBJ_WARN_NO_EXIT_DTOR_OFF HIPOBJ_WARN_OFF("exit-time-destructors")
-#define HIPOBJ_WARN_NO_EXIT_DTOR_ON HIPOBJ_WARN_ON("exit-time-destructors")
+#define HIPOBJ_WARN_NO_EXIT_DTOR_ON  HIPOBJ_WARN_ON("exit-time-destructors")
 #else
 #define HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 #define HIPOBJ_WARN_NO_EXIT_DTOR_ON
@@ -58,7 +58,7 @@
 
 #if defined(__clang__)
 #define HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF HIPOBJ_WARN_OFF("global-constructors")
-#define HIPOBJ_WARN_NO_GLOBAL_CTOR_ON HIPOBJ_WARN_ON("global-constructors")
+#define HIPOBJ_WARN_NO_GLOBAL_CTOR_ON  HIPOBJ_WARN_ON("global-constructors")
 #else
 #define HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 #define HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

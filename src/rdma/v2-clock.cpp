@@ -11,31 +11,34 @@
 namespace hipObj {
 namespace v2 {
 
-namespace {
+    namespace {
 
-class SteadyClock : public ClockSource {
-public:
-  uint64_t nowMs() override {
-    auto now = std::chrono::steady_clock::now().time_since_epoch();
-    return static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
-  }
-};
+        class SteadyClock : public ClockSource {
+        public:
+            uint64_t nowMs() override
+            {
+                auto now = std::chrono::steady_clock::now().time_since_epoch();
+                return static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+            }
+        };
 
-SteadyClock g_defaultClock;
-ClockSource* g_override = nullptr;
+        SteadyClock  g_defaultClock;
+        ClockSource *g_override = nullptr;
 
-} // namespace
+    } // namespace
 
-ClockSource& clockSource() {
-  return g_override ? *g_override : static_cast<ClockSource&>(g_defaultClock);
-}
+    ClockSource &clockSource()
+    {
+        return g_override ? *g_override : static_cast<ClockSource &>(g_defaultClock);
+    }
 
-ClockSource* setClockSourceForTest(ClockSource* source) {
-  ClockSource* previous = g_override;
-  g_override = source;
-  return previous;
-}
+    ClockSource *setClockSourceForTest(ClockSource *source)
+    {
+        ClockSource *previous = g_override;
+        g_override            = source;
+        return previous;
+    }
 
 } // namespace v2
 } // namespace hipObj
