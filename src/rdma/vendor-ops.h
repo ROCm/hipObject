@@ -29,6 +29,7 @@ inline const char* provider_name(Provider p) {
       return "bnxt";
     case Provider::IONIC:
       return "ionic";
+    case Provider::UNKNOWN:
     default:
       return "unknown";
   }

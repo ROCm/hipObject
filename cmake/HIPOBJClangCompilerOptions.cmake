@@ -172,8 +172,8 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wsuggest-destructor-override
     -Wsuggest-override
     -Wsuper-class-method-mismatch
-    #-Wswitch-default # TODO: Fix diagnostics and re-enable
-    #-Wswitch-enum # TODO: Fix diagnostics and re-enable
+    -Wswitch-default
+    -Wswitch-enum
     -Wtautological-constant-in-range-compare
     -Wtype-limits
     -Wunaligned-access

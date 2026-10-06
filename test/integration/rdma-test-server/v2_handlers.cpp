@@ -640,6 +640,8 @@ HandlerResult ControlHandlers::onReady(const ReadyRequest& req,
     case SessState::Transferring:
     case SessState::Completing:
       return error(409); /* duplicate or in-flight FINAL */
+    /* Still Publishing means the wait above hit the deadline */
+    case SessState::Publishing:
     case SessState::Reaping:
     default:
       /* Stale/expired: terminal 409 (session is already doomed). */
