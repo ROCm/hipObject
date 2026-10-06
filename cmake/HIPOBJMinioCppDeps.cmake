@@ -6,6 +6,7 @@
 # imported target names (unofficial::curlpp::curlpp, etc.)
 
 include(FetchContent)
+include(HIPOBJSystemIncludes)
 
 find_package(OpenSSL REQUIRED)
 if(NOT OpenSSL_FOUND)
@@ -24,6 +25,7 @@ if(NOT nlohmann_json_FOUND)
     GIT_TAG v3.11.3
   )
   FetchContent_MakeAvailable(nlohmann_json)
+  hipobj_mark_dir_targets_system(${nlohmann_json_SOURCE_DIR})
 endif()
 
 find_package(pugixml CONFIG QUIET)
@@ -35,6 +37,7 @@ if(NOT pugixml_FOUND)
   )
   set(PUGIXML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(pugixml)
+  hipobj_mark_dir_targets_system(${pugixml_SOURCE_DIR})
   if(NOT TARGET pugixml::pugixml AND TARGET pugixml)
     add_library(pugixml::pugixml ALIAS pugixml)
   endif()
@@ -50,9 +53,9 @@ if(NOT TARGET unofficial::inih::inireader)
   if(NOT inih_POPULATED)
     FetchContent_Populate(inih)
     add_library(inih_c STATIC ${inih_SOURCE_DIR}/ini.c)
-    target_include_directories(inih_c PUBLIC ${inih_SOURCE_DIR})
+    target_include_directories(inih_c SYSTEM PUBLIC ${inih_SOURCE_DIR})
     add_library(inih_cpp STATIC ${inih_SOURCE_DIR}/cpp/INIReader.cpp)
-    target_include_directories(inih_cpp PUBLIC
+    target_include_directories(inih_cpp SYSTEM PUBLIC
       ${inih_SOURCE_DIR}
       ${inih_SOURCE_DIR}/cpp)
     target_link_libraries(inih_cpp PUBLIC inih_c)
@@ -82,7 +85,7 @@ if(NOT TARGET unofficial::curlpp::curlpp)
       FetchContent_Populate(curlpp)
       file(GLOB_RECURSE CURLPP_SOURCES ${curlpp_SOURCE_DIR}/src/*.cpp)
       add_library(curlpp_built STATIC ${CURLPP_SOURCES})
-      target_include_directories(curlpp_built PUBLIC
+      target_include_directories(curlpp_built SYSTEM PUBLIC
         ${curlpp_SOURCE_DIR}/include)
       target_compile_options(curlpp_built PRIVATE -Wno-deprecated-declarations)
       target_link_libraries(curlpp_built PUBLIC CURL::libcurl)
