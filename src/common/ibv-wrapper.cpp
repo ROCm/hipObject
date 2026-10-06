@@ -106,10 +106,12 @@ bool IBVWrapper::is_dmabuf_supported() {
 
 int IBVWrapper::init_function_table() {
 #define LOAD_SYM(field, prefix, name)                                          \
-  if (dlsym_load(funcs_.field, ibv_handle_, prefix, name) != 0)                \
-    return -1;
+  do {                                                                         \
+    if (dlsym_load(funcs_.field, ibv_handle_, prefix, name) != 0)              \
+      return -1;                                                               \
+  } while (0)
 #define LOAD_SYM_OPT(field, prefix, name)                                      \
-  dlsym_load_optional(funcs_.field, ibv_handle_, prefix, name);
+  dlsym_load_optional(funcs_.field, ibv_handle_, prefix, name)
 
   LOAD_SYM(get_device_list, "ibv_", "get_device_list");
   LOAD_SYM(free_device_list, "ibv_", "free_device_list");

@@ -271,7 +271,7 @@ ssize_t rdmaPutV2(S3RdmaContext* sctx, void* buf, size_t size) {
   std::string query;
   if (!sctx->uploadId.empty()) {
     if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
-      RDMA_TRACE("v2 put: part number %d out of range", sctx->partNumber);
+      RDMA_TRACE("v2 put: part number %u out of range", sctx->partNumber);
       hipObjPutRdmaToken(token);
       return -1;
     }

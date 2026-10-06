@@ -110,7 +110,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wexpansion-to-defined
     -Wexplicit-ownership-type
     -Wextra-semi
-    #-Wextra-semi-stmt # TODO: Fix diagnostics and re-enable
+    -Wextra-semi-stmt
     -Wfloat-equal
     -Wformat=2
     -Wformat-non-iso
@@ -136,7 +136,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wmethod-signatures
     -Wmissing-include-dirs
     -Wmissing-noreturn
-    #-Wmissing-prototypes # TODO: Fix diagnostics and re-enable
+    -Wmissing-prototypes
     -Wmissing-variable-declarations
     -Wnarrowing
     -Wnewline-eof
@@ -158,7 +158,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wquoted-include-in-framework-header
     -Wreceiver-forward-class
     -Wredundant-parens
-    #-Wreserved-identifier # TODO: Fix diagnostics and re-enable
+    -Wreserved-identifier
     -Wsequence-point
     -Wshadow-all
     -Wshift-sign-overflow
@@ -214,7 +214,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
       -Wnvcc-compat
 
       # Misc warnings
-      #-Wformat-signedness # TODO: Fix diagnostics and re-enable
+      -Wformat-signedness
       ${flags}
     )
   endif()

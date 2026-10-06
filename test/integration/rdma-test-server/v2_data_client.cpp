@@ -121,8 +121,6 @@ std::string headerValue(const std::string& resp, const std::string& name) {
   return "";
 }
 
-} // namespace
-
 /* One full transfer. Returns 0 on success. `op` is GET or PUT;
  * `size` bytes against the seeded object named by `target`. The
  * control exchange runs over TCP; the data phase uses verbs with
@@ -191,7 +189,7 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
 
   /* ---- PREPARE (control, over TCP) ---- */
   char psnHex[8];
-  std::snprintf(psnHex, sizeof(psnHex), "%06x", 1);
+  std::snprintf(psnHex, sizeof(psnHex), "%06x", 1U);
   char cookieHex[12];
   std::snprintf(cookieHex, sizeof(cookieHex), "%08x", cookie);
   char mrAddrHex[32];
@@ -490,6 +488,8 @@ int runTransfer(const char* host, int port, const char* op, const char* target,
   ibv_free_device_list(devs);
   return rc;
 }
+
+} // namespace
 
 int main(int argc, char* argv[]) {
   if (argc < 6) {

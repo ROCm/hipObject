@@ -128,6 +128,8 @@ bool postWriteWithImm(struct ibv_qp* qp, struct ibv_mr* src,
   return ibv.post_send(qp, &wr, &bad) == 0;
 }
 
+namespace {
+
 /* Polls the CQ for one completion matching `expectWr`, bounded by
  * an absolute deadline on the monotonic clock. */
 enum class PollOutcome { Ok, Timeout, Error, Mismatch };
@@ -151,6 +153,8 @@ PollOutcome pollCqUntil(struct ibv_cq* cq, uint64_t deadlineMs,
     nanosleep(&ts, nullptr);
   }
 }
+
+} // namespace
 
 DataPhaseResult runDataPhase(V2Session& s, uint64_t deadlineMs,
                              DataPhaseStats& stats) {

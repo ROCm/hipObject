@@ -58,8 +58,6 @@ hipObj::DeviceHandle* serverDevice() {
   return dh;
 }
 
-} // namespace
-
 HandlerResult error(int status) {
   HandlerResult r;
   r.status = status;
@@ -144,6 +142,8 @@ bool rdmaHeadersSigned(const std::string& signedList,
   }
   return true;
 }
+
+} // namespace
 
 ControlHandlers::ControlHandlers(SigV4Verifier* verifier,
                                  MemoryBackend* backend, ServerConfig cfg)

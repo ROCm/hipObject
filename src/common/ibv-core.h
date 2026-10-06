@@ -612,16 +612,19 @@ struct ibv_recv_wr {
 #define IBV_SYSFS_PATH_MAX 256
 
 /* -------------------------------------------------------------------------
- * 25. _ibv_device_ops, ibv_device struct
+ * 25. ibv_device_ops, ibv_device struct
  * ------------------------------------------------------------------------- */
 
-struct _ibv_device_ops {
+/* rdma-core spells this tag _ibv_device_ops, which is reserved at
+ * global scope (leading underscore). The tag name is not part of
+ * the ABI, so the layout still matches. */
+struct ibv_device_ops {
   struct ibv_context* (*_dummy1)(struct ibv_device* device, int cmd_fd);
   void (*_dummy2)(struct ibv_context* context);
 };
 
 struct ibv_device {
-  struct _ibv_device_ops _ops;
+  struct ibv_device_ops _ops;
   enum ibv_node_type node_type;
   enum ibv_transport_type transport_type;
   char name[IBV_SYSFS_NAME_MAX];
