@@ -612,6 +612,7 @@ catch (...) {
     return "0.0.0";
 }
 
+#ifdef HIPOBJECT_V2_API
 // Not yet implemented — callers fall back to the v1 RDMA path.
 hipObjError_t
 hipObjPutV2(const char *, const char *, const void *, uint64_t, uint64_t, const char *, hipObjOpsV2_t *,
@@ -625,5 +626,6 @@ hipObjGetV2(const char *, const char *, void *, uint64_t, uint64_t, const char *
 {
     return {hipObjNotSupported, 0};
 }
+#endif /* HIPOBJECT_V2_API */
 
 } // extern "C"
