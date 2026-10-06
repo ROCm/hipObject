@@ -69,10 +69,10 @@ include(HIPOBJAddLibraries)
 include(HIPOBJAddExecutable)
 include(HIPOBJFetchCuObject)
 
-set(HIPOBJ_CXX_STANDARD "17" CACHE STRING
+set(HIPOBJ_CXX_STANDARD "20" CACHE STRING
   "C++ standard to build with")
 set_property(CACHE HIPOBJ_CXX_STANDARD
-  PROPERTY STRINGS "17" "20" "23")
+  PROPERTY STRINGS "20" "23")
 
 option(BUILD_SHARED_LIBS
   "Build using shared libraries" OFF)

@@ -9,7 +9,7 @@ Required
 
 - CMake 3.21 or later
 - ROCm 6.x or later (provides HIP, HSA runtime)
-- C++17 capable compiler (e.g., g++ or amdclang++ from ROCm)
+- C++20 capable compiler (e.g., g++ or amdclang++ from ROCm)
 
 Optional
 ^^^^^^^^
