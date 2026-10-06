@@ -12,15 +12,17 @@ include(HIPOBJCompilerOptions)
 # Parameters:
 #   NAME <name>                     The name of the executable program to create
 #   SRCS [src1 [src2 ...]]          The source files
+#   SYSINCLS [path1 [path2 ...]]    Third-party include dirs (added as
+#                                   SYSTEM so their warnings are suppressed)
 #
-# NOTE: Include directories, link libraries, and compile definitions
-#       are still set by the caller.
+# NOTE: Other include directories, link libraries, and compile
+#       definitions are still set by the caller.
 function(hipobj_add_executable)
 
   # Parse arguments
   set(options) # None at this time
   set(oneValueArgs NAME)
-  set(multiValueArgs SRCS)
+  set(multiValueArgs SRCS SYSINCLS)
   cmake_parse_arguments(PARSE_ARGV 0 arg
     "${options}" "${oneValueArgs}" "${multiValueArgs}")
 
@@ -41,7 +43,12 @@ function(hipobj_add_executable)
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON)
 
+  if(arg_SYSINCLS)
+    target_include_directories(${arg_NAME} SYSTEM PRIVATE ${arg_SYSINCLS})
+  endif()
+
   hipobj_set_compiler_flags(${arg_NAME})
+  hipobj_set_linker_flags(${arg_NAME})
   hipobj_set_clang_tidy(${arg_NAME})
 endfunction()
 
@@ -49,8 +56,12 @@ endfunction()
 #
 # Parameters: Same as hipobj_add_executable()
 #
-# NOTE: Currently a pass-through to hipobj_add_executable(). Settings
-#       that only apply to test programs go here.
+# NOTE: Adds -UNDEBUG so test programs always have assert() available,
+#       even in release builds.
 function(hipobj_add_test_executable)
   hipobj_add_executable(${ARGN})
+
+  # Only NAME is needed here; hipobj_add_executable() validated the rest
+  cmake_parse_arguments(PARSE_ARGV 0 arg "" "NAME" "")
+  target_compile_options(${arg_NAME} PRIVATE -UNDEBUG)
 endfunction()

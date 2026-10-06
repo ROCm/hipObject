@@ -14,15 +14,17 @@ include(HIPOBJCompilerOptions)
 #   TYPE STATIC|SHARED|OBJECT       The library type (optional, defaults
 #                                   to whatever BUILD_SHARED_LIBS selects)
 #   SRCS [src1 [src2 ...]]          The source files
+#   SYSINCLS [path1 [path2 ...]]    Third-party include dirs (added as
+#                                   SYSTEM so their warnings are suppressed)
 #
-# NOTE: Include directories, link libraries, and compile definitions
-#       are still set by the caller.
+# NOTE: Other include directories, link libraries, and compile
+#       definitions are still set by the caller.
 function(hipobj_add_library)
 
   # Parse arguments
   set(options) # None at this time
   set(oneValueArgs NAME TYPE)
-  set(multiValueArgs SRCS)
+  set(multiValueArgs SRCS SYSINCLS)
   cmake_parse_arguments(PARSE_ARGV 0 arg
     "${options}" "${oneValueArgs}" "${multiValueArgs}")
 
@@ -43,6 +45,19 @@ function(hipobj_add_library)
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON)
 
+  # Add version numbers (only meaningful for shared libraries)
+  get_target_property(type ${arg_NAME} TYPE)
+  if(type STREQUAL "SHARED_LIBRARY")
+    set_target_properties(${arg_NAME} PROPERTIES
+      VERSION ${HIPOBJ_LIBRARY_VERSION}
+      SOVERSION ${HIPOBJ_LIBRARY_SOVERSION})
+  endif()
+
+  if(arg_SYSINCLS)
+    target_include_directories(${arg_NAME} SYSTEM PRIVATE ${arg_SYSINCLS})
+  endif()
+
   hipobj_set_compiler_flags(${arg_NAME})
+  hipobj_set_linker_flags(${arg_NAME})
   hipobj_set_clang_tidy(${arg_NAME})
 endfunction()
