@@ -207,7 +207,7 @@ TEST_F(V2RegistryTest, RegistryCrudAndLimits) {
   EXPECT_EQ(reg.size(), reg.kMaxConnections);
   /* 65th connection: capacity check rejects before creation. */
   EXPECT_FALSE(reg.reserveSlot());
-  EXPECT_EQ(g_fake.createCqCalls, (int)reg.kMaxConnections);
+  EXPECT_EQ(g_fake.createCqCalls, static_cast<int>(reg.kMaxConnections));
   /* Release all. */
   for (auto id : ids) {
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);

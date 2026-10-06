@@ -60,14 +60,14 @@ bool canonicalBase64_8Bytes(const std::string& text) {
     if (v[i] < 0)
       return false;
   }
-  bytes[0] = (uint8_t)((v[0] << 2) | (v[1] >> 4));
-  bytes[1] = (uint8_t)((v[1] << 4) | (v[2] >> 2));
-  bytes[2] = (uint8_t)((v[2] << 6) | v[3]);
-  bytes[3] = (uint8_t)((v[4] << 2) | (v[5] >> 4));
-  bytes[4] = (uint8_t)((v[5] << 4) | (v[6] >> 2));
-  bytes[5] = (uint8_t)((v[6] << 6) | v[7]);
-  bytes[6] = (uint8_t)((v[8] << 2) | (v[9] >> 4));
-  bytes[7] = (uint8_t)((v[9] << 4) | (v[10] >> 2));
+  bytes[0] = static_cast<uint8_t>((v[0] << 2) | (v[1] >> 4));
+  bytes[1] = static_cast<uint8_t>((v[1] << 4) | (v[2] >> 2));
+  bytes[2] = static_cast<uint8_t>((v[2] << 6) | v[3]);
+  bytes[3] = static_cast<uint8_t>((v[4] << 2) | (v[5] >> 4));
+  bytes[4] = static_cast<uint8_t>((v[5] << 4) | (v[6] >> 2));
+  bytes[5] = static_cast<uint8_t>((v[6] << 6) | v[7]);
+  bytes[6] = static_cast<uint8_t>((v[8] << 2) | (v[9] >> 4));
+  bytes[7] = static_cast<uint8_t>((v[9] << 4) | (v[10] >> 2));
   /* Pad bits of the last char must be zero for canonical form. */
   if (v[10] & 0x3)
     return false;
@@ -135,7 +135,7 @@ bool parsePrepareReply(int httpStatus, const std::string& headers,
     if (!splitHeaderLine(line, name, value))
       return false;
     for (auto& c : name) {
-      c = (char)std::tolower((unsigned char)c);
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     if (name == "x-amz-rdma-protocol" && value == kProtocolValue) {
       out.protocolEcho = true;
@@ -191,7 +191,7 @@ bool parseFinalReply(int httpStatus, const std::string& headers,
     if (!splitHeaderLine(line, name, value))
       return false;
     for (auto& c : name) {
-      c = (char)std::tolower((unsigned char)c);
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     if (name == "x-amz-rdma-protocol" && value == kProtocolValue) {
       out.protocolEcho = true;
@@ -204,9 +204,10 @@ bool parseFinalReply(int httpStatus, const std::string& headers,
         (void)d;
         if (!isHexDigit(c))
           return false;
-        int hv = (c <= '9') ? (c - '0')
-                            : (std::tolower((unsigned char)c) - 'a' + 10);
-        v = (v << 4) | (uint32_t)hv;
+        int hv = (c <= '9')
+                   ? (c - '0')
+                   : (std::tolower(static_cast<unsigned char>(c)) - 'a' + 10);
+        v = (v << 4) | static_cast<uint32_t>(hv);
       }
       out.cookieEcho = v;
       sawCookie = true;
@@ -217,7 +218,7 @@ bool parseFinalReply(int httpStatus, const std::string& headers,
       for (char c : value) {
         if (c < '0' || c > '9')
           return false;
-        b = b * 10 + (uint64_t)(c - '0');
+        b = b * 10 + static_cast<uint64_t>(c - '0');
       }
       out.bytes = b;
     } else if (name == "x-amz-rdma-etag") {
@@ -268,9 +269,10 @@ bool parsePsn(const std::string& s, uint32_t& psn) {
   for (char c : s) {
     if (!isHexDigit(c))
       return false;
-    int hv = (c <= '9') ? (c - '0')
-                        : (std::tolower((unsigned char)c) - 'a' + 10);
-    v = (v << 4) | (uint32_t)hv;
+    int hv = (c <= '9')
+               ? (c - '0')
+               : (std::tolower(static_cast<unsigned char>(c)) - 'a' + 10);
+    v = (v << 4) | static_cast<uint32_t>(hv);
   }
   if (v == 0 || v > 0xffffff)
     return false;
@@ -299,7 +301,7 @@ std::string buildTarget(const std::string& bucket, const std::string& key,
       if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
           (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' ||
           c == '~' || (keepSlash && c == '/')) {
-        out += (char)c;
+        out += static_cast<char>(c);
       } else {
         out += '%';
         out += hex[c >> 4];

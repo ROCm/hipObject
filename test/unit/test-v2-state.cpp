@@ -82,7 +82,7 @@ TEST(V2State, PreExposureLocalFailureFromIdleIsNoop) {
 
 TEST(V2State, EveryPhaseFailsToDrainingWhenExposed) {
   for (int i = 1; i <= 5; ++i) {
-    Phase p = (Phase)i;
+    Phase p = static_cast<Phase>(i);
     Phase q = p;
     EXPECT_TRUE(hipObj::v2::fail(q, /*preExpose=*/false));
     EXPECT_EQ(q, Phase::Draining) << "phase " << i;

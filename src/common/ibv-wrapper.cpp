@@ -204,11 +204,11 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length,
                 status);
       }
     } else {
-      struct ibv_mr* mr = funcs_.reg_dmabuf_mr(pd, offset, length,
-                                               (uint64_t)(uintptr_t)addr, fd,
-                                               access);
+      struct ibv_mr* mr = funcs_.reg_dmabuf_mr(
+        pd, offset, length,
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(addr)), fd, access);
       if (mr) {
-        dmabuf_fd_map_[(uintptr_t)mr] = fd;
+        dmabuf_fd_map_[reinterpret_cast<uintptr_t>(mr)] = fd;
         return mr;
       }
       fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n",
@@ -221,26 +221,28 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length,
   }
 
   int is_access_const = __builtin_constant_p(
-    ((int)(access)&IBV_ACCESS_OPTIONAL_RANGE) == 0);
+    (access & IBV_ACCESS_OPTIONAL_RANGE) == 0);
   if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
-    return funcs_.reg_mr(pd, addr, length, (int)access);
+    return funcs_.reg_mr(pd, addr, length, access);
   else
-    return funcs_.reg_mr_iova2(pd, addr, length, (uintptr_t)addr, access);
+    return funcs_.reg_mr_iova2(pd, addr, length,
+                               reinterpret_cast<uintptr_t>(addr), access);
 }
 
 struct ibv_mr* IBVWrapper::reg_mr_host(struct ibv_pd* pd, void* addr,
                                        size_t length, int access) {
   int is_access_const = __builtin_constant_p(
-    ((int)(access)&IBV_ACCESS_OPTIONAL_RANGE) == 0);
+    (access & IBV_ACCESS_OPTIONAL_RANGE) == 0);
   if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
-    return funcs_.reg_mr(pd, addr, length, (int)access);
+    return funcs_.reg_mr(pd, addr, length, access);
   else
-    return funcs_.reg_mr_iova2(pd, addr, length, (uintptr_t)addr, access);
+    return funcs_.reg_mr_iova2(pd, addr, length,
+                               reinterpret_cast<uintptr_t>(addr), access);
 }
 
 int IBVWrapper::dereg_mr(struct ibv_mr* mr) {
   if (is_dmabuf_supported()) {
-    auto it = dmabuf_fd_map_.find((uintptr_t)mr);
+    auto it = dmabuf_fd_map_.find(reinterpret_cast<uintptr_t>(mr));
     if (it != dmabuf_fd_map_.end()) {
       close(it->second);
       dmabuf_fd_map_.erase(it);
