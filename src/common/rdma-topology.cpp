@@ -67,43 +67,38 @@ int GetRoceVersionNumber(const char* dev_name, int port_num, int gid_idx) {
   return 0;
 }
 
+GidPriority ClassifyGid(const uint8_t gid[16], int roce_ver) {
+  if (roce_ver == 2) {
+    if (IsIPv4MappedIPv6(gid))
+      return ROCEV2_IPV4;
+    if (LinkLocalGid(gid))
+      return ROCEV2_LINK_LOCAL;
+    return ROCEV2_GLOBAL;
+  }
+  if (roce_ver == 1)
+    return LinkLocalGid(gid) ? ROCEV1_LINK_LOCAL : ROCEV1_GLOBAL;
+  return GID_UNKNOWN;
+}
+
 int AutoSelectGidIndex(ibv_context* ctx, uint8_t port_num) {
   ibv_port_attr port_attr;
   if (ibv.query_port(ctx, port_num, &port_attr) != 0)
     return -1;
 
-  int best_idx = -1;
-  GidPriority best_prio = GID_UNKNOWN;
-
+  std::vector<GidCandidate> candidates;
   for (int i = 0; i < port_attr.gid_tbl_len; ++i) {
     ibv_gid gid;
     if (ibv.query_gid(ctx, port_num, i, &gid) != 0)
       continue;
     if (!IsConfiguredGid(gid.raw))
       continue;
-
-    int roce_ver = GetRoceVersionNumber(ctx->device->name, port_num, i);
-    GidPriority prio = GID_UNKNOWN;
-    if (roce_ver == 2) {
-      if (IsIPv4MappedIPv6(gid.raw))
-        prio = ROCEV2_IPV4;
-      else if (LinkLocalGid(gid.raw))
-        prio = ROCEV2_LINK_LOCAL;
-      else
-        prio = ROCEV2_GLOBAL;
-    } else if (roce_ver == 1) {
-      if (LinkLocalGid(gid.raw))
-        prio = ROCEV1_LINK_LOCAL;
-      else
-        prio = ROCEV1_GLOBAL;
-    }
-
-    if (prio != GID_UNKNOWN && (best_idx < 0 || prio < best_prio)) {
-      best_idx = i;
-      best_prio = prio;
-    }
+    GidCandidate c;
+    c.index = i;
+    std::memcpy(c.raw, gid.raw, sizeof(c.raw));
+    c.roceVersion = GetRoceVersionNumber(ctx->device->name, port_num, i);
+    candidates.push_back(c);
   }
-  return best_idx;
+  return PickBestGid(candidates.data(), candidates.size());
 }
 
 std::string ExtractBusNumber(const std::string& pcie_bus_id) {
@@ -258,6 +253,22 @@ int GetClosestNicToGpu(int gpuIndex, const char* hca_list,
     static std::string s_dev_name;
     s_dev_name = devices[static_cast<size_t>(best_idx)].dev_name;
     *dev_name = s_dev_name.c_str();
+  }
+  return best_idx;
+}
+
+int PickBestGid(const GidCandidate* candidates, size_t count) {
+  int best_idx = -1;
+  GidPriority best_prio = GID_UNKNOWN;
+  for (size_t i = 0; i < count; ++i) {
+    const GidCandidate& c = candidates[i];
+    if (!IsConfiguredGid(c.raw))
+      continue;
+    GidPriority prio = ClassifyGid(c.raw, c.roceVersion);
+    if (prio != GID_UNKNOWN && (best_idx < 0 || prio > best_prio)) {
+      best_idx = c.index;
+      best_prio = prio;
+    }
   }
   return best_idx;
 }
