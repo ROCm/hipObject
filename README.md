@@ -8,7 +8,7 @@
 [![Ansible Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](INSTALL.md)
 [![ROCm](https://img.shields.io/badge/ROCm-supported-green.svg)](https://rocm.docs.amd.com)
-[![Language](https://img.shields.io/badge/language-HIP%20%7C%20C-orange.svg)](https://rocm.docs.amd.com/projects/HIP/en/latest/)
+![Language](https://img.shields.io/badge/language-C%20%7C%20C%2B%2B-orange.svg)
 
 > [!CAUTION]
 > This release is an *early-access* software technology
