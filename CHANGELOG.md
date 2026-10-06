@@ -11,6 +11,9 @@
   pass) is no longer enabled. The HIP runtime is still used via the
   `hip::host` CMake target. `CMAKE_HIP_COMPILER` no longer needs to be set
   when configuring.
+- hipObject is now built as C++20 (without compiler extensions) instead of
+  C++17, so a C++20-capable compiler is required. The
+  `HIPOBJ_CXX_STANDARD` CMake cache variable now defaults to `20`.
 
 ### Removed
 
