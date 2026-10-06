@@ -14,24 +14,23 @@ namespace hipobj::test {
 
 class RdmaTestServer {
 public:
-  RdmaTestServer();
-  ~RdmaTestServer();
+    RdmaTestServer();
+    ~RdmaTestServer();
 
-  RdmaTestServer(const RdmaTestServer&) = delete;
-  RdmaTestServer& operator=(const RdmaTestServer&) = delete;
+    RdmaTestServer(const RdmaTestServer &)            = delete;
+    RdmaTestServer &operator=(const RdmaTestServer &) = delete;
 
-  bool isReady() const;
+    bool isReady() const;
 
-  int rdmaWriteToClient(const std::string& tokenHeader,
-                        const std::vector<uint8_t>& data,
-                        std::string& replyHeader);
+    int rdmaWriteToClient(const std::string &tokenHeader, const std::vector<uint8_t> &data,
+                          std::string &replyHeader);
 
-  int rdmaReadFromClient(const std::string& tokenHeader, size_t size,
-                         std::vector<uint8_t>& data, std::string& replyHeader);
+    int rdmaReadFromClient(const std::string &tokenHeader, size_t size, std::vector<uint8_t> &data,
+                           std::string &replyHeader);
 
 private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace hipobj::test

@@ -11,10 +11,10 @@
 
 #include <cuobjserver.h>
 
-int main() {
-  fprintf(stdout,
-          "hipobj-cuobject-probe: libcuobjserver linked successfully\n");
-  fprintf(stdout,
-          "Use MinIO AIStor + RC adapter for end-to-end cuObject interop.\n");
-  return 0;
+int
+main()
+{
+    fprintf(stdout, "hipobj-cuobject-probe: libcuobjserver linked successfully\n");
+    fprintf(stdout, "Use MinIO AIStor + RC adapter for end-to-end cuObject interop.\n");
+    return 0;
 }

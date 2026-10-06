@@ -15,32 +15,32 @@
 namespace hipObj {
 namespace v2 {
 
-class RandomSource {
-public:
-  virtual ~RandomSource() = default;
+    class RandomSource {
+    public:
+        virtual ~RandomSource() = default;
 
-  /* Draws 32 random bits. Returns false only when the underlying
-   * entropy source failed; callers treat that as an internal error
-   * rather than falling back to a constant. */
-  virtual bool next32(uint32_t& out) = 0;
-};
+        /* Draws 32 random bits. Returns false only when the underlying
+         * entropy source failed; callers treat that as an internal error
+         * rather than falling back to a constant. */
+        virtual bool next32(uint32_t &out) = 0;
+    };
 
-/* Returns the active source (production default unless a test
- * override is installed). */
-RandomSource& randomSource();
+    /* Returns the active source (production default unless a test
+     * override is installed). */
+    RandomSource &randomSource();
 
-/* Installs a test source and returns the previously active one
- * (nullptr when the production default was active). Passing
- * nullptr restores the default. Unit tests only. */
-RandomSource* setRandomSourceForTest(RandomSource* source);
+    /* Installs a test source and returns the previously active one
+     * (nullptr when the production default was active). Passing
+     * nullptr restores the default. Unit tests only. */
+    RandomSource *setRandomSourceForTest(RandomSource *source);
 
-/* Draws a 24-bit non-zero PSN. Retries up to twice when the draw
- * masks to zero; returns false when the source failed or every
- * draw was zero. */
-bool nextClientPsn(uint32_t& psn);
+    /* Draws a 24-bit non-zero PSN. Retries up to twice when the draw
+     * masks to zero; returns false when the source failed or every
+     * draw was zero. */
+    bool nextClientPsn(uint32_t &psn);
 
-/* Draws a full 32-bit completion cookie (0 is a valid cookie). */
-bool nextCookie(uint32_t& cookie);
+    /* Draws a full 32-bit completion cookie (0 is a valid cookie). */
+    bool nextCookie(uint32_t &cookie);
 
 } // namespace v2
 } // namespace hipObj

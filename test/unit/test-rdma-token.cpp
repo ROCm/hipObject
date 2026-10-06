@@ -7,139 +7,151 @@
 
 #include "token.h"
 
-TEST(RdmaToken, EncodeProducesHexString) {
-  hipObj::RdmaToken token;
-  token.transport = hipObj::TRANSPORT_RC;
-  token.qpNum = 42;
-  token.rkey = 0xDEADBEEF;
-  token.remoteAddr = 0x7F0000001000ULL;
-  token.length = 4096;
-  token.portNum = 1;
-  token.lid = 0;
+TEST(RdmaToken, EncodeProducesHexString)
+{
+    hipObj::RdmaToken token;
+    token.transport  = hipObj::TRANSPORT_RC;
+    token.qpNum      = 42;
+    token.rkey       = 0xDEADBEEF;
+    token.remoteAddr = 0x7F0000001000ULL;
+    token.length     = 4096;
+    token.portNum    = 1;
+    token.lid        = 0;
 
-  std::string encoded = hipObj::encodeRdmaToken(token);
+    std::string encoded = hipObj::encodeRdmaToken(token);
 
-  EXPECT_FALSE(encoded.empty());
-  EXPECT_EQ(encoded.size(), 88u);
-  EXPECT_EQ(encoded.size() % 2, 0u);
-  EXPECT_EQ(encoded[0], '0');
-  EXPECT_EQ(encoded[1], '1');
+    EXPECT_FALSE(encoded.empty());
+    EXPECT_EQ(encoded.size(), 88u);
+    EXPECT_EQ(encoded.size() % 2, 0u);
+    EXPECT_EQ(encoded[0], '0');
+    EXPECT_EQ(encoded[1], '1');
 }
 
-TEST(RdmaToken, EncodeRcTransportByte) {
-  hipObj::RdmaToken token;
-  token.transport = hipObj::TRANSPORT_RC;
+TEST(RdmaToken, EncodeRcTransportByte)
+{
+    hipObj::RdmaToken token;
+    token.transport = hipObj::TRANSPORT_RC;
 
-  std::string enc = hipObj::encodeRdmaToken(token);
-  EXPECT_GE(enc.size(), 2u);
-  EXPECT_EQ(enc.substr(0, 2), "01");
+    std::string enc = hipObj::encodeRdmaToken(token);
+    EXPECT_GE(enc.size(), 2u);
+    EXPECT_EQ(enc.substr(0, 2), "01");
 }
 
-TEST(RdmaToken, EncodeDcTransportByte) {
-  hipObj::RdmaToken token;
-  token.transport = hipObj::TRANSPORT_DC;
+TEST(RdmaToken, EncodeDcTransportByte)
+{
+    hipObj::RdmaToken token;
+    token.transport = hipObj::TRANSPORT_DC;
 
-  std::string enc = hipObj::encodeRdmaToken(token);
-  EXPECT_GE(enc.size(), 2u);
-  EXPECT_EQ(enc.substr(0, 2), "00");
+    std::string enc = hipObj::encodeRdmaToken(token);
+    EXPECT_GE(enc.size(), 2u);
+    EXPECT_EQ(enc.substr(0, 2), "00");
 }
 
-TEST(RdmaReply, DecodeOk) {
-  int status = -1;
-  EXPECT_TRUE(hipObj::decodeRdmaReply("ok", 2, status));
-  EXPECT_EQ(status, 0);
+TEST(RdmaReply, DecodeOk)
+{
+    int status = -1;
+    EXPECT_TRUE(hipObj::decodeRdmaReply("ok", 2, status));
+    EXPECT_EQ(status, 0);
 }
 
-TEST(RdmaReply, DecodeErr) {
-  int status = 0;
-  EXPECT_TRUE(hipObj::decodeRdmaReply("err", 3, status));
-  EXPECT_EQ(status, -1);
+TEST(RdmaReply, DecodeErr)
+{
+    int status = 0;
+    EXPECT_TRUE(hipObj::decodeRdmaReply("err", 3, status));
+    EXPECT_EQ(status, -1);
 }
 
-TEST(RdmaReply, DecodeNullReturnsFalse) {
-  int status = 0;
-  EXPECT_FALSE(hipObj::decodeRdmaReply(nullptr, 0, status));
+TEST(RdmaReply, DecodeNullReturnsFalse)
+{
+    int status = 0;
+    EXPECT_FALSE(hipObj::decodeRdmaReply(nullptr, 0, status));
 }
 
-TEST(RdmaReply, DecodeHttp200) {
-  int status = -1;
-  EXPECT_TRUE(hipObj::decodeRdmaReply("200", 3, status));
-  EXPECT_EQ(status, 0);
+TEST(RdmaReply, DecodeHttp200)
+{
+    int status = -1;
+    EXPECT_TRUE(hipObj::decodeRdmaReply("200", 3, status));
+    EXPECT_EQ(status, 0);
 }
 
-TEST(RdmaReply, DecodeHttp501NotSupported) {
-  int status = 0;
-  EXPECT_TRUE(hipObj::decodeRdmaReply("501", 3, status));
-  EXPECT_EQ(status, -2);
+TEST(RdmaReply, DecodeHttp501NotSupported)
+{
+    int status = 0;
+    EXPECT_TRUE(hipObj::decodeRdmaReply("501", 3, status));
+    EXPECT_EQ(status, -2);
 }
 
-TEST(RdmaReply, ParseHttp206) {
-  int code = 0;
-  EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode("206", 3, code));
-  EXPECT_EQ(code, 206);
+TEST(RdmaReply, ParseHttp206)
+{
+    int code = 0;
+    EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode("206", 3, code));
+    EXPECT_EQ(code, 206);
 }
 
-TEST(RdmaReply, ParseHttp200WithPeerToken) {
-  hipObj::RdmaToken peer;
-  peer.qpNum = 7;
-  std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
-  int code = 0;
-  EXPECT_TRUE(
-    hipObj::parseRdmaReplyHttpCode(reply.c_str(), reply.size(), code));
-  EXPECT_EQ(code, 200);
+TEST(RdmaReply, ParseHttp200WithPeerToken)
+{
+    hipObj::RdmaToken peer;
+    peer.qpNum        = 7;
+    std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
+    int         code  = 0;
+    EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode(reply.c_str(), reply.size(), code));
+    EXPECT_EQ(code, 200);
 }
 
-TEST(RdmaToken, FormatHeaderValue) {
-  const char* token = "0011";
-  void* buf = reinterpret_cast<void*>(0x7f0000001000ULL);
-  std::string header = hipObj::formatRdmaHeaderValue(token, buf, 4096);
-  EXPECT_EQ(header, token);
+TEST(RdmaToken, FormatHeaderValue)
+{
+    const char *token  = "0011";
+    void       *buf    = reinterpret_cast<void *>(0x7f0000001000ULL);
+    std::string header = hipObj::formatRdmaHeaderValue(token, buf, 4096);
+    EXPECT_EQ(header, token);
 }
 
-TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue) {
-  hipObj::RdmaToken token{};
-  std::string encoded = hipObj::encodeRdmaToken(token);
+TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue)
+{
+    hipObj::RdmaToken token{};
+    std::string       encoded = hipObj::encodeRdmaToken(token);
 
-  hipObj::RdmaToken parsed{};
-  EXPECT_FALSE(hipObj::decodeRdmaTokenHex((encoded + ":1:2").c_str(), parsed));
-  EXPECT_FALSE(hipObj::decodeRdmaTokenHex(
-    (encoded + ":00007f0000001000:0000000000001000").c_str(), parsed));
-  EXPECT_TRUE(hipObj::decodeRdmaTokenHex(encoded.c_str(), parsed));
+    hipObj::RdmaToken parsed{};
+    EXPECT_FALSE(hipObj::decodeRdmaTokenHex((encoded + ":1:2").c_str(), parsed));
+    EXPECT_FALSE(
+        hipObj::decodeRdmaTokenHex((encoded + ":00007f0000001000:0000000000001000").c_str(), parsed));
+    EXPECT_TRUE(hipObj::decodeRdmaTokenHex(encoded.c_str(), parsed));
 }
 
-TEST(RdmaReply, ParsePeerTokenFromReply) {
-  hipObj::RdmaToken peer;
-  peer.transport = hipObj::TRANSPORT_RC;
-  peer.qpNum = 99;
-  std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
-  hipObj::RdmaToken parsed;
-  int code = 0;
-  EXPECT_TRUE(
-    hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
-  EXPECT_EQ(code, 200);
-  EXPECT_EQ(parsed.qpNum, 99u);
-  EXPECT_EQ(parsed.transport, hipObj::TRANSPORT_RC);
+TEST(RdmaReply, ParsePeerTokenFromReply)
+{
+    hipObj::RdmaToken peer;
+    peer.transport          = hipObj::TRANSPORT_RC;
+    peer.qpNum              = 99;
+    std::string       reply = hipObj::encodeReplyWithPeerToken(200, peer);
+    hipObj::RdmaToken parsed;
+    int               code = 0;
+    EXPECT_TRUE(hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
+    EXPECT_EQ(code, 200);
+    EXPECT_EQ(parsed.qpNum, 99u);
+    EXPECT_EQ(parsed.transport, hipObj::TRANSPORT_RC);
 }
 
-TEST(RdmaReply, LegacyOkHasNoPeerToken) {
-  hipObj::RdmaToken parsed;
-  int code = 0;
-  EXPECT_FALSE(hipObj::parsePeerTokenFromReply("ok", 2, parsed, code));
+TEST(RdmaReply, LegacyOkHasNoPeerToken)
+{
+    hipObj::RdmaToken parsed;
+    int               code = 0;
+    EXPECT_FALSE(hipObj::parsePeerTokenFromReply("ok", 2, parsed, code));
 }
 
-TEST(RdmaToken, ParseClientNicFromGid) {
-  hipObj::RdmaToken token;
-  token.transport = hipObj::TRANSPORT_RC;
-  token.gid[10] = 0xff;
-  token.gid[11] = 0xff;
-  token.gid[12] = 192;
-  token.gid[13] = 168;
-  token.gid[14] = 1;
-  token.gid[15] = 42;
+TEST(RdmaToken, ParseClientNicFromGid)
+{
+    hipObj::RdmaToken token;
+    token.transport = hipObj::TRANSPORT_RC;
+    token.gid[10]   = 0xff;
+    token.gid[11]   = 0xff;
+    token.gid[12]   = 192;
+    token.gid[13]   = 168;
+    token.gid[14]   = 1;
+    token.gid[15]   = 42;
 
-  std::string encoded = hipObj::encodeRdmaToken(token);
-  char nicIp[32];
-  EXPECT_TRUE(
-    hipObj::parseClientNicFromTokenHex(encoded.c_str(), nicIp, sizeof(nicIp)));
-  EXPECT_STREQ(nicIp, "192.168.1.42");
+    std::string encoded = hipObj::encodeRdmaToken(token);
+    char        nicIp[32];
+    EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded.c_str(), nicIp, sizeof(nicIp)));
+    EXPECT_STREQ(nicIp, "192.168.1.42");
 }

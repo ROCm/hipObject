@@ -32,274 +32,265 @@
 
 namespace {
 
-std::string objectKey(const std::string& path) {
-  if (!path.empty() && path[0] == '/') {
-    return path.substr(1);
-  }
-  return path;
+std::string
+objectKey(const std::string &path)
+{
+    if (!path.empty() && path[0] == '/') {
+        return path.substr(1);
+    }
+    return path;
 }
 
 } // namespace
 
-int main(int argc, char* argv[]) {
-  int port = 9000;
-  bool v2Mode = false;
+int
+main(int argc, char *argv[])
+{
+    int  port   = 9000;
+    bool v2Mode = false;
 #ifdef HIPOBJECT_V2_API
-  bool hangAfterPrepare = false;
+    bool hangAfterPrepare = false;
 #endif
-  std::string accessKey = "hipobj-test-key";
-  std::string secretKey = "hipobj-test-secret";
-  for (int i = 1; i < argc; ++i) {
-    const std::string arg = argv[i];
-    if (arg == "--v2") {
-      v2Mode = true;
-    } else if (arg == "--v2-access-key" && i + 1 < argc) {
-      accessKey = argv[++i];
-    } else if (arg == "--v2-secret-key" && i + 1 < argc) {
-      secretKey = argv[++i];
-    } else if (arg == "--hang-after-prepare") {
+    std::string accessKey = "hipobj-test-key";
+    std::string secretKey = "hipobj-test-secret";
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--v2") {
+            v2Mode = true;
+        }
+        else if (arg == "--v2-access-key" && i + 1 < argc) {
+            accessKey = argv[++i];
+        }
+        else if (arg == "--v2-secret-key" && i + 1 < argc) {
+            secretKey = argv[++i];
+        }
+        else if (arg == "--hang-after-prepare") {
 #ifdef HIPOBJECT_V2_API
-      hangAfterPrepare = true;
+            hangAfterPrepare = true;
 #endif
-    } else {
-      port = std::atoi(arg.c_str());
+        }
+        else {
+            port = std::atoi(arg.c_str());
+        }
     }
-  }
 
 #ifdef HIPOBJECT_V2_API
-  if (v2Mode) {
-    /* v2 reference mode: control protocol on the threaded server.
-     * RDMA objects are attached per session by the transport layer;
-     * this mode only needs the control plane. */
-    hipObj::v2::BuiltinVerifier verifier(accessKey, secretKey, "us-east-1");
-    hipObj::v2::MemoryBackend backend;
-    /* Deterministic seed objects for the harness cases. */
-    backend.seed("/bucket/seed64k", 65536);
-    backend.seed("/bucket/seed4m", 4 * 1024 * 1024);
-    backend.seed("/b/k1", 65536);
-    hipObj::v2::ServerConfig cfg;
-    hipObj::v2::ControlHandlers handlers(&verifier, &backend, cfg);
+    if (v2Mode) {
+        /* v2 reference mode: control protocol on the threaded server.
+         * RDMA objects are attached per session by the transport layer;
+         * this mode only needs the control plane. */
+        hipObj::v2::BuiltinVerifier verifier(accessKey, secretKey, "us-east-1");
+        hipObj::v2::MemoryBackend   backend;
+        /* Deterministic seed objects for the harness cases. */
+        backend.seed("/bucket/seed64k", 65536);
+        backend.seed("/bucket/seed4m", 4 * 1024 * 1024);
+        backend.seed("/b/k1", 65536);
+        hipObj::v2::ServerConfig    cfg;
+        hipObj::v2::ControlHandlers handlers(&verifier, &backend, cfg);
 
-    hipobj::test::HttpServer server(port);
-    server.setHandler(
-      [&](const hipobj::test::HttpRequest& req) -> hipobj::test::HttpResponse {
-        hipobj::test::HttpResponse resp;
-        if (req.path == "/.hipobj-rc/prepare") {
-          auto parsed = hipObj::v2::parsePrepareRequest(req.headers,
-                                                        req.rawHeaders);
-          if (!parsed.has_value()) {
-            resp.status = 400;
-            return resp;
-          }
-          auto r = handlers.onPrepare(*parsed, req.rawHeaders);
-          resp.status = r.status;
-          resp.headers = r.headers;
-          if (r.status == 200 && hangAfterPrepare) {
-            /* Deliberate stall for the external supervisor
-             * reclaim check; no watchdog inside the process. */
-            for (;;) {
-              sleep(1);
+        hipobj::test::HttpServer server(port);
+        server.setHandler([&](const hipobj::test::HttpRequest &req) -> hipobj::test::HttpResponse {
+            hipobj::test::HttpResponse resp;
+            if (req.path == "/.hipobj-rc/prepare") {
+                auto parsed = hipObj::v2::parsePrepareRequest(req.headers, req.rawHeaders);
+                if (!parsed.has_value()) {
+                    resp.status = 400;
+                    return resp;
+                }
+                auto r       = handlers.onPrepare(*parsed, req.rawHeaders);
+                resp.status  = r.status;
+                resp.headers = r.headers;
+                if (r.status == 200 && hangAfterPrepare) {
+                    /* Deliberate stall for the external supervisor
+                     * reclaim check; no watchdog inside the process. */
+                    for (;;) {
+                        sleep(1);
+                    }
+                }
+                if (r.status == 200) {
+                    std::string sid = r.headers.count("X-Amz-Rdma-Session") ? r.headers["X-Amz-Rdma-Session"]
+                                                                            : std::string();
+                    resp.afterSend  = [&handlers, sid](bool ok) { handlers.finishPrepareSend(sid, ok); };
+                }
+                return resp;
             }
-          }
-          if (r.status == 200) {
-            std::string sid = r.headers.count("X-Amz-Rdma-Session")
-                                ? r.headers["X-Amz-Rdma-Session"]
-                                : std::string();
-            resp.afterSend = [&handlers, sid](bool ok) {
-              handlers.finishPrepareSend(sid, ok);
-            };
-          }
-          return resp;
-        }
-        if (req.path == "/.hipobj-rc/ready") {
-          auto parsed = hipObj::v2::parseReadyRequest(req.headers,
-                                                      req.rawHeaders);
-          if (!parsed.has_value()) {
-            resp.status = 400;
+            if (req.path == "/.hipobj-rc/ready") {
+                auto parsed = hipObj::v2::parseReadyRequest(req.headers, req.rawHeaders);
+                if (!parsed.has_value()) {
+                    resp.status = 400;
+                    return resp;
+                }
+                auto r       = handlers.onReady(*parsed, req.rawHeaders);
+                resp.status  = r.status;
+                resp.headers = r.headers;
+                if (r.status == 200 || r.status == 204) {
+                    std::string sid = parsed->session;
+                    resp.afterSend  = [&handlers, sid](bool) { handlers.finishFinalSend(sid); };
+                }
+                return resp;
+            }
+            if (req.path == "/.hipobj-rc/cancel") {
+                auto parsed = hipObj::v2::parseCancelRequest(req.headers, req.rawHeaders);
+                if (!parsed.has_value()) {
+                    resp.status = 400;
+                    return resp;
+                }
+                auto r      = handlers.onCancel(*parsed, req.rawHeaders);
+                resp.status = r.status;
+                return resp;
+            }
+            /* Object paths with an rdma token: v1 sequences fail
+             * structurally in v2 mode - explicit unsupported marker. */
+            resp.status                                = 501;
+            resp.headers["X-Amz-Rdma-Protocol-Status"] = "unsupported";
             return resp;
-          }
-          auto r = handlers.onReady(*parsed, req.rawHeaders);
-          resp.status = r.status;
-          resp.headers = r.headers;
-          if (r.status == 200 || r.status == 204) {
-            std::string sid = parsed->session;
-            resp.afterSend = [&handlers, sid](bool) {
-              handlers.finishFinalSend(sid);
-            };
-          }
-          return resp;
+        });
+        if (!server.startThreaded()) {
+            fprintf(stderr, "hipobj-rdma-test-server: v2 not listening on port %d\n", port);
+            return 1;
         }
-        if (req.path == "/.hipobj-rc/cancel") {
-          auto parsed = hipObj::v2::parseCancelRequest(req.headers,
-                                                       req.rawHeaders);
-          if (!parsed.has_value()) {
-            resp.status = 400;
-            return resp;
-          }
-          auto r = handlers.onCancel(*parsed, req.rawHeaders);
-          resp.status = r.status;
-          return resp;
+        fprintf(stdout, "hipobj-rdma-test-server v2 listening on port %d\n", port);
+        /* Block until external termination. Signals terminate the
+         * process without unwinding (no destructor runs); a graceful
+         * return would drain via the HttpServer destructor. */
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(3600));
         }
-        /* Object paths with an rdma token: v1 sequences fail
-         * structurally in v2 mode - explicit unsupported marker. */
-        resp.status = 501;
-        resp.headers["X-Amz-Rdma-Protocol-Status"] = "unsupported";
-        return resp;
-      });
-    if (!server.startThreaded()) {
-      fprintf(stderr, "hipobj-rdma-test-server: v2 not listening on port %d\n",
-              port);
-      return 1;
+        return 0;
     }
-    fprintf(stdout, "hipobj-rdma-test-server v2 listening on port %d\n", port);
-    /* Block until external termination. Signals terminate the
-     * process without unwinding (no destructor runs); a graceful
-     * return would drain via the HttpServer destructor. */
-    for (;;) {
-      std::this_thread::sleep_for(std::chrono::seconds(3600));
-    }
-    return 0;
-  }
 #else
-  if (v2Mode) {
-    fprintf(stderr,
-            "hipobj-rdma-test-server: --v2 requested but this build was "
-            "configured with HIPOBJECT_V2_API=OFF\n");
-    return 1;
-  }
+    if (v2Mode) {
+        fprintf(stderr, "hipobj-rdma-test-server: --v2 requested but this build was "
+                        "configured with HIPOBJECT_V2_API=OFF\n");
+        return 1;
+    }
 #endif /* HIPOBJECT_V2_API */
 
-  hipobj::test::RdmaTestServer rdma;
-  if (!rdma.isReady()) {
-    fprintf(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
-                    "HTTP-only mode\n");
-  }
+    hipobj::test::RdmaTestServer rdma;
+    if (!rdma.isReady()) {
+        fprintf(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
+                        "HTTP-only mode\n");
+    }
 
-  std::map<std::string, std::vector<uint8_t>> objects;
-  std::mutex objects_mu;
+    std::map<std::string, std::vector<uint8_t>> objects;
+    std::mutex                                  objects_mu;
 
-  hipobj::test::HttpServer server(port);
-  server.setHandler(
-    [&](const hipobj::test::HttpRequest& req) -> hipobj::test::HttpResponse {
-      hipobj::test::HttpResponse resp;
-      if (req.method == "GET" && req.path == "/health") {
-        resp.status = 200;
-        resp.body = "ok";
-        return resp;
-      }
+    hipobj::test::HttpServer server(port);
+    server.setHandler([&](const hipobj::test::HttpRequest &req) -> hipobj::test::HttpResponse {
+        hipobj::test::HttpResponse resp;
+        if (req.method == "GET" && req.path == "/health") {
+            resp.status = 200;
+            resp.body   = "ok";
+            return resp;
+        }
 
-      // S3 GetBucketLocation — minio-cpp issues this before every transfer
-      // to resolve the effective region.  Return a minimal XML body so the
-      // bridge can proceed to the RDMA path without a real S3 stack.
-      if (req.method == "GET" &&
-          req.path.find("?location") != std::string::npos) {
-        resp.status = 200;
-        resp.headers["Content-Type"] = "application/xml";
-        resp.body = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                    "<LocationConstraint "
-                    "xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
-                    "us-east-1</LocationConstraint>";
-        return resp;
-      }
+        // S3 GetBucketLocation — minio-cpp issues this before every transfer
+        // to resolve the effective region.  Return a minimal XML body so the
+        // bridge can proceed to the RDMA path without a real S3 stack.
+        if (req.method == "GET" && req.path.find("?location") != std::string::npos) {
+            resp.status                  = 200;
+            resp.headers["Content-Type"] = "application/xml";
+            resp.body                    = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                                           "<LocationConstraint "
+                                           "xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+                                           "us-east-1</LocationConstraint>";
+            return resp;
+        }
 
-      const std::string key = objectKey(req.path);
-      auto tokenIt = req.headers.find("x-amz-rdma-token");
+        const std::string key     = objectKey(req.path);
+        auto              tokenIt = req.headers.find("x-amz-rdma-token");
 
-      // HTTP-only mode: RDMA token absent or RDMA not available.
-      if (tokenIt == req.headers.end() || !rdma.isReady()) {
+        // HTTP-only mode: RDMA token absent or RDMA not available.
+        if (tokenIt == req.headers.end() || !rdma.isReady()) {
+            if (req.method == "PUT") {
+                std::lock_guard<std::mutex> lk(objects_mu);
+                objects[key]         = std::vector<uint8_t>(req.body.begin(), req.body.end());
+                resp.status          = 200;
+                resp.headers["etag"] = "\"test\"";
+                return resp;
+            }
+            if (req.method == "GET") {
+                std::lock_guard<std::mutex> lk(objects_mu);
+                auto                        it = objects.find(key);
+                if (it == objects.end()) {
+                    resp.status = 404;
+                    resp.body   = "not found";
+                    return resp;
+                }
+                resp.status = 200;
+                resp.body   = std::string(it->second.begin(), it->second.end());
+                return resp;
+            }
+            resp.status = 405;
+            resp.body   = "method not allowed";
+            return resp;
+        }
+
+        // Reaching here: token present and RDMA ready — use RDMA path.
         if (req.method == "PUT") {
-          std::lock_guard<std::mutex> lk(objects_mu);
-          objects[key] = std::vector<uint8_t>(req.body.begin(), req.body.end());
-          resp.status = 200;
-          resp.headers["etag"] = "\"test\"";
-          return resp;
+            std::vector<uint8_t> payload;
+            std::string          replyHeader;
+            size_t               contentLen = 0;
+            auto                 clIt       = req.headers.find("content-length");
+            if (clIt != req.headers.end()) {
+                contentLen = static_cast<size_t>(std::strtoull(clIt->second.c_str(), nullptr, 10));
+            }
+            if (rdma.rdmaReadFromClient(tokenIt->second, contentLen, payload, replyHeader) != 0) {
+                resp.status = 500;
+                resp.body   = "RDMA PUT failed";
+                return resp;
+            }
+            {
+                std::lock_guard<std::mutex> lk(objects_mu);
+                objects[key] = std::move(payload);
+            }
+            resp.status                      = 200;
+            resp.headers["x-amz-rdma-reply"] = replyHeader;
+            resp.headers["etag"]             = "\"test\"";
+            return resp;
         }
+
         if (req.method == "GET") {
-          std::lock_guard<std::mutex> lk(objects_mu);
-          auto it = objects.find(key);
-          if (it == objects.end()) {
-            resp.status = 404;
-            resp.body = "not found";
+            std::vector<uint8_t> data;
+            {
+                std::lock_guard<std::mutex> lk(objects_mu);
+                auto                        it = objects.find(key);
+                if (it == objects.end()) {
+                    resp.status = 404;
+                    resp.body   = "not found";
+                    return resp;
+                }
+                data = it->second;
+            }
+            std::string replyHeader;
+            if (rdma.rdmaWriteToClient(tokenIt->second, data, replyHeader) != 0) {
+                resp.status = 500;
+                resp.body   = "RDMA GET failed";
+                return resp;
+            }
+            resp.status                                  = 200;
+            resp.headers["x-amz-rdma-reply"]             = replyHeader;
+            resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(data.size());
             return resp;
-          }
-          resp.status = 200;
-          resp.body = std::string(it->second.begin(), it->second.end());
-          return resp;
         }
+
         resp.status = 405;
-        resp.body = "method not allowed";
+        resp.body   = "method not allowed";
         return resp;
-      }
-
-      // Reaching here: token present and RDMA ready — use RDMA path.
-      if (req.method == "PUT") {
-        std::vector<uint8_t> payload;
-        std::string replyHeader;
-        size_t contentLen = 0;
-        auto clIt = req.headers.find("content-length");
-        if (clIt != req.headers.end()) {
-          contentLen = static_cast<size_t>(
-            std::strtoull(clIt->second.c_str(), nullptr, 10));
-        }
-        if (rdma.rdmaReadFromClient(tokenIt->second, contentLen, payload,
-                                    replyHeader) != 0) {
-          resp.status = 500;
-          resp.body = "RDMA PUT failed";
-          return resp;
-        }
-        {
-          std::lock_guard<std::mutex> lk(objects_mu);
-          objects[key] = std::move(payload);
-        }
-        resp.status = 200;
-        resp.headers["x-amz-rdma-reply"] = replyHeader;
-        resp.headers["etag"] = "\"test\"";
-        return resp;
-      }
-
-      if (req.method == "GET") {
-        std::vector<uint8_t> data;
-        {
-          std::lock_guard<std::mutex> lk(objects_mu);
-          auto it = objects.find(key);
-          if (it == objects.end()) {
-            resp.status = 404;
-            resp.body = "not found";
-            return resp;
-          }
-          data = it->second;
-        }
-        std::string replyHeader;
-        if (rdma.rdmaWriteToClient(tokenIt->second, data, replyHeader) != 0) {
-          resp.status = 500;
-          resp.body = "RDMA GET failed";
-          return resp;
-        }
-        resp.status = 200;
-        resp.headers["x-amz-rdma-reply"] = replyHeader;
-        resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(
-          data.size());
-        return resp;
-      }
-
-      resp.status = 405;
-      resp.body = "method not allowed";
-      return resp;
     });
 
-  // Use the threaded server so large HTTP request bodies (e.g. HTTP-only
-  // PUT payloads) are received in full rather than truncated at the
-  // 65 KB single-recv limit of runOnce().
-  /* "listening on port N" is what every caller waits for before it starts
-   * sending. Printing it without checking made a dead server look ready. */
-  if (!server.startThreaded()) {
-    fprintf(stderr, "hipobj-rdma-test-server: not listening on port %d\n",
-            port);
-    return 1;
-  }
-  fprintf(stdout, "hipobj-rdma-test-server listening on port %d\n", port);
-  for (;;) {
-    std::this_thread::sleep_for(std::chrono::seconds(3600));
-  }
-  return 0;
+    // Use the threaded server so large HTTP request bodies (e.g. HTTP-only
+    // PUT payloads) are received in full rather than truncated at the
+    // 65 KB single-recv limit of runOnce().
+    /* "listening on port N" is what every caller waits for before it starts
+     * sending. Printing it without checking made a dead server look ready. */
+    if (!server.startThreaded()) {
+        fprintf(stderr, "hipobj-rdma-test-server: not listening on port %d\n", port);
+        return 1;
+    }
+    fprintf(stdout, "hipobj-rdma-test-server listening on port %d\n", port);
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::seconds(3600));
+    }
+    return 0;
 }

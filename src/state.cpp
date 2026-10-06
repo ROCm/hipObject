@@ -9,17 +9,21 @@ namespace hipObj {
 
 // State override installed by tests; null means the real singleton is
 // active. The library itself never swaps the pointer.
-static DriverState* g_state_override = nullptr;
+static DriverState *g_state_override = nullptr;
 
-DriverState& getState() {
-  static DriverState state;
-  return g_state_override ? *g_state_override : state;
+DriverState &
+getState()
+{
+    static DriverState state;
+    return g_state_override ? *g_state_override : state;
 }
 
-DriverState* setStateForTest(DriverState* state) {
-  DriverState* previous = g_state_override;
-  g_state_override = state;
-  return previous;
+DriverState *
+setStateForTest(DriverState *state)
+{
+    DriverState *previous = g_state_override;
+    g_state_override      = state;
+    return previous;
 }
 
 } // namespace hipObj

@@ -11,14 +11,14 @@ namespace hipObj {
 
 class NUMAWrapper {
 public:
-  NUMAWrapper();
-  ~NUMAWrapper();
+    NUMAWrapper();
+    ~NUMAWrapper();
 
-  int num_configured_nodes() const;
+    int num_configured_nodes() const;
 
 private:
-  void* handle_ = nullptr;
-  int (*numa_num_configured_nodes_)() = nullptr;
+    void *handle_                       = nullptr;
+    int (*numa_num_configured_nodes_)() = nullptr;
 };
 
 extern NUMAWrapper numa;
