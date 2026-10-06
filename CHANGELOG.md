@@ -18,6 +18,8 @@
   The `BUILD_SHARED_LIBS` CMake option, which was previously ignored, now
   selects between a shared and a static library and defaults to `ON`. Set
   it to `OFF` to build the static library (`libhipobj.a`) as before.
+  The shared library exports only the public C API declared in
+  `hipobj.h`.
 
 ### Removed
 

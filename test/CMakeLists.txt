@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 add_subdirectory(unit)
+add_subdirectory(exports)
 
 if(BUILD_TESTING)
   add_subdirectory(integration)

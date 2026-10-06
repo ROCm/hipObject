@@ -39,6 +39,27 @@ hipobj_add_library(
   NAME hipobj
   SRCS ${HIPOBJ_SOURCES})
 
+# Only the functions marked HIPOBJ_API in include/hipobj.h are exported
+# from the shared library. VISIBILITY_INLINES_HIDDEN also hides inline
+# member functions. Neither hides C++ standard library template
+# instantiations, since libstdc++ declares them with default
+# visibility, so the version script makes everything that isn't
+# hipObj* local. Visibility has no effect on the static library, and
+# static libraries aren't linked. test/exports checks the result.
+set_target_properties(hipobj PROPERTIES
+  C_VISIBILITY_PRESET hidden
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON)
+
+get_target_property(HIPOBJ_LIBRARY_TYPE hipobj TYPE)
+if(HIPOBJ_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")
+  target_link_options(hipobj PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/hipobj.map")
+  # Relink when the version script changes
+  set_property(TARGET hipobj APPEND PROPERTY
+    LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hipobj.map)
+endif()
+
 target_include_directories(hipobj
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>

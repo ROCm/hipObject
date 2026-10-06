@@ -1,0 +1,19 @@
+/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/* Linker version script for the shared library
+ *
+ * Exports only the public C API. Hidden visibility already keeps
+ * everything not marked HIPOBJ_API out of the export table, apart from
+ * C++ standard library template instantiations, which libstdc++
+ * declares with default visibility. Making everything else local
+ * removes those too.
+ */
+{
+  global:
+    hipObj*;
+  local:
+    *;
+};
