@@ -20,6 +20,10 @@
   it to `OFF` to build the static library (`libhipobj.a`) as before.
   The shared library exports only the public C API declared in
   `hipobj.h`.
+- The `hipobj::hipobj` CMake target no longer passes `hip::host` and
+  `hsa-runtime64::hsa-runtime64` on to consumers, since `hipobj.h`
+  doesn't include HIP or HSA headers. Consumers that use HIP themselves
+  must link `hip::host` directly.
 
 ### Removed
 

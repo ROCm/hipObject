@@ -72,13 +72,21 @@ target_include_directories(hipobj
     ${CMAKE_CURRENT_SOURCE_DIR}/rdma
     ${CMAKE_CURRENT_SOURCE_DIR}/s3)
 
+# hipobj.h includes no HIP or HSA headers, so consumers don't need their
+# include directories or compile definitions. For the static library,
+# CMake still passes PRIVATE dependencies on to the final link.
 target_link_libraries(hipobj
-  PUBLIC
+  PRIVATE
     hip::host
     hsa-runtime64::hsa-runtime64
-    stdc++
-  PRIVATE
     dl)
+
+# A shared library records its own dependency on the C++ runtime. The
+# static library doesn't, so a consumer linking with the C compiler
+# would otherwise miss it.
+if(HIPOBJ_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
+  target_link_libraries(hipobj INTERFACE stdc++)
+endif()
 
 if(HIPOBJ_BNXT)
   target_compile_definitions(hipobj
