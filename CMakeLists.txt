@@ -4,12 +4,6 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-if(NOT CMAKE_BUILD_TYPE
-    AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE Debug CACHE STRING
-    "Build type")
-endif()
-
 set(HIPOBJ_VERSION_MAJOR 0)
 set(HIPOBJ_VERSION_MINOR 1)
 set(HIPOBJ_VERSION_PATCH 0)
@@ -45,6 +39,24 @@ else()
     LANGUAGES C CXX)
 endif()
 
+# Default to a Debug build. This has to come after project(), since
+# that's where CMake decides whether the generator is multi-config.
+# Multi-config generators (Ninja Multi-Config, Xcode, etc.) pick the
+# configuration at build time and don't use CMAKE_BUILD_TYPE. For
+# single-config generators, project() creates an empty cache entry,
+# so FORCE is needed to replace it.
+get_property(HIPOBJ_IS_MULTI_CONFIG GLOBAL
+  PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT HIPOBJ_IS_MULTI_CONFIG)
+  if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING
+      "Build type" FORCE)
+  endif()
+  set_property(CACHE CMAKE_BUILD_TYPE
+    PROPERTY STRINGS
+    "Debug" "Release" "RelWithDebInfo" "None")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_SOURCE_DIR}/cmake)
 
@@ -64,9 +76,6 @@ set_property(CACHE HIPOBJ_CXX_STANDARD
 
 option(BUILD_SHARED_LIBS
   "Build using shared libraries" OFF)
-set_property(CACHE CMAKE_BUILD_TYPE
-  PROPERTY STRINGS
-  "Debug" "Release" "RelWithDebInfo" "None")
 
 include(CTest)
 
