@@ -131,7 +131,7 @@ static hipObjError_t stageCopyWithDeadline(void* dev, void* host, size_t size,
       return {hipObjInternalError, 0};
     }
     hipError_t err = ops.hipMemcpy(dst, src, size, kind);
-    return (err == hipSuccess) ? HIPOBJ_SUCCESS
+    return (err == hipSuccess) ? hipObjError_t{hipObjSuccess, 0}
                                : hipObjError_t{hipObjInternalError, 0};
   };
 
@@ -161,7 +161,7 @@ static hipObjError_t stageCopyWithDeadline(void* dev, void* host, size_t size,
     hipError_t q = ops.hipEventQuery(done);
     if (q == hipSuccess) {
       (void)ops.hipEventDestroy(done);
-      return HIPOBJ_SUCCESS;
+      return {hipObjSuccess, 0};
     }
     if (q != hipErrorNotReady) {
       (void)ops.hipEventDestroy(done);
@@ -182,7 +182,8 @@ static hipObjError_t stageBuffer(void* devPtr, size_t size, off_t offset,
                                  bool toDevice) {
   void* hostBuf = g_bufferMap.lookupHostBuf(devPtr);
   if (!hostBuf) {
-    return HIPOBJ_SUCCESS; /* the NIC reads and writes the caller's memory */
+    /* the NIC reads and writes the caller's memory */
+    return {hipObjSuccess, 0};
   }
   size_t regSize = g_bufferMap.lookupSize(devPtr);
   if (offset < 0 || static_cast<size_t>(offset) + size > regSize) {
@@ -216,7 +217,7 @@ static hipObjError_t runRdmaTransfer(const void* devPtr, size_t size,
   if (finishTransferAfterReply(replyBuf, replyLen, requiresDeviceSync) != 0) {
     return {hipObjRdmaError, 0};
   }
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 }
 
 } // namespace hipObj
@@ -330,7 +331,7 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
   state.nicHint = config->nicHint ? config->nicHint : "";
   state.nicIndex = nicIndex;
   state.flags = config->flags;
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -338,7 +339,7 @@ hipObjError_t hipObjInit(hipObjConfig_t* config) try {
 hipObjError_t hipObjShutdown(void) try {
   hipObj::DriverState& state = hipObj::getState();
   if (!state.initialized) {
-    return HIPOBJ_SUCCESS;
+    return {hipObjSuccess, 0};
   }
 #ifdef HIPOBJECT_V2_API
   std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
@@ -370,7 +371,7 @@ hipObjError_t hipObjShutdown(void) try {
   state.nicHint.clear();
   state.nicIndex = -1;
   state.flags = 0;
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -390,7 +391,7 @@ hipObjError_t hipObjBufRegister(void* devPtr, size_t size) try {
   if (ret != 0) {
     return {hipObjRdmaError, 0};
   }
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -414,7 +415,7 @@ hipObjError_t hipObjBufRegisterHost(void* hostPtr, size_t size) try {
   if (ret != 0) {
     return {hipObjRdmaError, 0};
   }
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -431,7 +432,7 @@ hipObjError_t hipObjBufDeregister(void* devPtr) try {
   if (ret != 0) {
     return {hipObjRdmaError, 0};
   }
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -526,7 +527,7 @@ hipObjError_t hipObjGetRdmaToken(const void* devPtr, size_t size, int op,
   }
   std::memcpy(copy, encoded.c_str(), encoded.size() + 1);
   *outToken = copy;
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -536,7 +537,7 @@ hipObjError_t hipObjPutRdmaToken(char* token) try {
     return {hipObjInvalidValue, 0};
   }
   std::free(token);
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -551,7 +552,7 @@ hipObjError_t hipObjParseRdmaReply(const char* reply, size_t replyLen,
     return {hipObjInvalidValue, 0};
   }
   *httpCode = code;
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
@@ -564,7 +565,7 @@ hipObjError_t hipObjTokenClientNic(const char* token, char* nicIp,
   if (!hipObj::parseClientNicFromTokenHex(token, nicIp, nicIpLen)) {
     return {hipObjInvalidValue, 0};
   }
-  return HIPOBJ_SUCCESS;
+  return {hipObjSuccess, 0};
 } catch (...) {
   return hipObj::handleException();
 }
