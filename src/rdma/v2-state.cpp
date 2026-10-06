@@ -23,8 +23,9 @@ const char* phaseName(Phase p) {
       return "Transferring";
     case Phase::Draining:
       return "Draining";
+    default:
+      return "?";
   }
-  return "?";
 }
 
 bool beginNegotiate(Phase& p, bool apply) {
