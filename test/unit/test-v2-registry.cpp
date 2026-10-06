@@ -31,7 +31,7 @@ struct FakeIbv {
     int                                destroyQpFails = 0;
     int                                destroyCqFails = 0;
     int                                createCqCalls  = 0;
-    int                                createQpCalls  = 0;
+    uint32_t                           createQpCalls  = 0; /* feeds qp_num */
     int                                destroyQpCalls = 0;
     int                                destroyCqCalls = 0;
     int                                deallocPdCalls = 0;
@@ -469,6 +469,29 @@ TEST_F(V2RegistryTest, TopologyFieldsReachQpAttrs)
     EXPECT_EQ(g_fake.qpAttrRqPsn.back()[0], 0xAABBCCu);
     ASSERT_FALSE(g_fake.qpAttrSqPsn.empty());
     EXPECT_EQ(g_fake.qpAttrSqPsn.back()[0], 0x112233u);
+    bool qpOk = true, cqOk = true;
+    hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
+    EXPECT_TRUE(qpOk);
+    EXPECT_TRUE(cqOk);
+}
+
+/* The address handle's GID index is a uint8_t: an unselected (-1) or
+ * too-large index is rejected before the QP is modified instead of
+ * being truncated into some other index. */
+TEST_F(V2RegistryTest, OutOfRangeGidIndexRejected)
+{
+    hipObj::RcConnV2 conn;
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    union ibv_gid gid;
+    std::memset(&gid, 0, sizeof(gid));
+    for (int gidIndex : {-1, 256}) {
+        dh_.gidIndex = gidIndex;
+        EXPECT_NE(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, 0, gid, 0xAABBCC), 0) << gidIndex;
+    }
+    EXPECT_TRUE(g_fake.qpAttrRqPsn.empty());
+    dh_.gidIndex = 255;
+    EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, 0, gid, 0xAABBCC), 0);
+    EXPECT_EQ(g_fake.qpAttrRqPsn.size(), 1u);
     bool qpOk = true, cqOk = true;
     hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
     EXPECT_TRUE(qpOk);

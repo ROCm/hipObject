@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <utility>
 
 #include <arpa/inet.h>
 
@@ -85,6 +86,14 @@ namespace v2 {
         int modifyQpToRtr(struct ibv_context *ctx, struct ibv_qp *qp, uint32_t destQpNum, uint16_t destLid,
                           union ibv_gid destGid, int gidIndex, uint32_t rqPsn, uint8_t portNum)
         {
+            /* The address handle stores the GID index in a uint8_t, so an
+             * index outside [0, 255] (including the -1 "not selected"
+             * default) can't be used and must not be truncated into a
+             * different, valid-looking one. */
+            if (!std::in_range<uint8_t>(gidIndex)) {
+                return -1;
+            }
+
             struct ibv_qp_attr attr;
             std::memset(&attr, 0, sizeof(attr));
             attr.qp_state = IBV_QPS_RTR;
@@ -112,7 +121,7 @@ namespace v2 {
             attr.ah_attr.dlid              = 0;
             attr.ah_attr.grh.dgid          = destGid;
             attr.ah_attr.grh.hop_limit     = 64;
-            attr.ah_attr.grh.sgid_index    = gidIndex;
+            attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(gidIndex);
             attr.ah_attr.grh.traffic_class = 0;
             attr.ah_attr.sl                = 0;
             attr.ah_attr.src_path_bits     = 0;

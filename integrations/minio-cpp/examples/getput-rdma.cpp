@@ -5,6 +5,7 @@
 
 /* AMD port of minio-cpp GetPutRDMA: PUT + GET over hipObject RDMA */
 
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -81,7 +83,17 @@ main(int argc, char *argv[])
     bool              gpu_enabled = true;
 
     if (argc >= 5) {
-        bufsize = static_cast<size_t>(std::atol(argv[4]));
+        /* from_chars rejects signs, trailing junk, and values that don't
+         * fit in size_t, all of which atol() would quietly accept. */
+        const char *first = argv[4];
+        const char *last  = first + std::strlen(first);
+        size_t      parsed{};
+        auto [ptr, ec] = std::from_chars(first, last, parsed);
+        if (ec != std::errc() || ptr != last) {
+            std::cerr << "invalid size_bytes: " << first << "\n";
+            return 1;
+        }
+        bufsize = parsed;
     }
     if (argc >= 6) {
         gpu_enabled = std::string(argv[5]) == "gpu";
@@ -119,7 +131,12 @@ main(int argc, char *argv[])
         std::cout << "GPU buffer " << bufsize << " bytes\n";
     }
     else {
-        int res = posix_memalign(reinterpret_cast<void **>(&bufptr), getpagesize(), bufsize);
+        const long pagesize = sysconf(_SC_PAGESIZE);
+        if (pagesize <= 0) {
+            std::cerr << "sysconf(_SC_PAGESIZE) failed\n";
+            return 1;
+        }
+        int res = posix_memalign(reinterpret_cast<void **>(&bufptr), static_cast<size_t>(pagesize), bufsize);
         if (res != 0 || bufptr == nullptr) {
             std::cerr << "posix_memalign failed\n";
             return 1;

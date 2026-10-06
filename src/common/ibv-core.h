@@ -71,7 +71,7 @@ enum ib_uverbs_access_flags {
 
 #define IBV_ACCESS_OPTIONAL_FIRST (1 << 20)
 #define IBV_ACCESS_OPTIONAL_LAST  (1 << 29)
-#define IBV_ACCESS_OPTIONAL_RANGE (((1ULL << 30) - 1) & ~((1ULL << 20) - 1))
+#define IBV_ACCESS_OPTIONAL_RANGE (((IBV_ACCESS_OPTIONAL_LAST << 1) - 1) & ~(IBV_ACCESS_OPTIONAL_FIRST - 1))
 
 /* -------------------------------------------------------------------------
  * 2. union ibv_gid

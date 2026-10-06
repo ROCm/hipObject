@@ -10,7 +10,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <algorithm>
 #include <chrono>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -41,12 +43,14 @@ struct ServeResult {
     }
 };
 
-long
+// Returns the milliseconds left before deadline, clamped to [0, INT_MAX]
+// so it can be passed straight to poll()'s int timeout
+int
 remainingMs(const std::chrono::steady_clock::time_point &deadline)
 {
     auto left = deadline - std::chrono::steady_clock::now();
-    auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(left);
-    return ms.count() < 0 ? 0 : static_cast<long>(ms.count());
+    auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(left).count();
+    return static_cast<int>(std::clamp<decltype(ms)>(ms, 0, std::numeric_limits<int>::max()));
 }
 
 // Single-connection loopback HTTP stub. It accepts one connection,
