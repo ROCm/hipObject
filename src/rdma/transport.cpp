@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <thread>
+#include <utility>
 
 #include "ibv-wrapper.h"
 #include "rdma-topology.h"
@@ -119,7 +120,7 @@ closeRdmaDevice(RcConnection &conn)
 }
 
 int
-createRcQp(RcConnection &conn, int cqSize, int maxSendWr, int maxRecvWr)
+createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
 {
     conn.cq = ibv.create_cq(conn.ctx, cqSize, nullptr, nullptr, 0);
     if (!conn.cq) {
@@ -182,6 +183,13 @@ applyVendorQpAttrs(RcConnection &conn, struct ibv_qp_attr *attr)
 int
 transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid)
 {
+    // The address handle stores the GID index in a uint8_t, so an index
+    // outside [0, 255] (including the -1 "not selected" default) can't be
+    // used and must not be truncated into a different, valid-looking one.
+    if (!std::in_range<uint8_t>(conn.gidIndex)) {
+        return -1;
+    }
+
     struct ibv_qp_attr attr;
     std::memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
@@ -199,7 +207,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.grh.dgid          = destGid;
     attr.ah_attr.grh.flow_label    = 0;
     attr.ah_attr.grh.hop_limit     = 64;
-    attr.ah_attr.grh.sgid_index    = conn.gidIndex;
+    attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(conn.gidIndex);
     attr.ah_attr.grh.traffic_class = 0;
     int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;

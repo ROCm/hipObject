@@ -309,7 +309,10 @@ namespace v2 {
         static const char *hex = "0123456789ABCDEF";
         std::string        out = "/";
         auto               enc = [&](const std::string &s, bool keepSlash) {
-            for (unsigned char c : s) {
+            for (char ch : s) {
+                /* Percent-encoding works on raw bytes, so view each char as
+                 * its 0-255 byte value (well-defined for negative chars). */
+                const auto c = static_cast<unsigned char>(ch);
                 if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
                     c == '.' || c == '_' || c == '~' || (keepSlash && c == '/')) {
                     out += static_cast<char>(c);

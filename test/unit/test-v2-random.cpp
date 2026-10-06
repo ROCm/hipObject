@@ -134,7 +134,8 @@ std::vector<uint32_t> V2PsnDeliveryTest::g_sqPsn;
 TEST_F(V2PsnDeliveryTest, PsnsReachQpAttrs)
 {
     hipObj::DeviceHandle dh;
-    hipObj::RcConnV2     conn;
+    dh.gidIndex = 0;
+    hipObj::RcConnV2 conn;
     conn.qp = reinterpret_cast<struct ibv_qp *>(0x1);
     union ibv_gid gid;
     std::memset(&gid, 0, sizeof(gid));

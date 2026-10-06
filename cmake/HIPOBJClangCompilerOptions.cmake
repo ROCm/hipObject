@@ -93,7 +93,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wcomma
     -Wconditional-uninitialized
     -Wconsumed
-    #-Wconversion # TODO: Fix diagnostics and re-enable (also see -Wnon-gcc)
+    -Wconversion
     #-Wcovered-switch-default (flags default labels where we handle all enum values)
     -Wcstring-format-directive
     -Wctad-maybe-unsupported
@@ -141,7 +141,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wnarrowing
     -Wnewline-eof
     -Wnoexcept-type
-    #-Wnon-gcc # TODO: Fix diagnostics and re-enable (includes -Wconversion)
+    -Wnon-gcc
     -Wnon-virtual-dtor
     -Wnonportable-system-include-path
     -Wnullable-to-nonnull-conversion
