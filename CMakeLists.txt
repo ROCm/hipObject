@@ -82,77 +82,7 @@ option(HIPOBJ_BNXT
 option(HIPOBJ_IONIC
   "Build IONIC (Pensando) RDMA provider" ON)
 
-set(HIPOBJ_SOURCES
-  src/hipobj.cpp
-  src/state.cpp
-  src/buffer.cpp
-  src/common/hip-seam.cpp
-  src/common/ibv-wrapper.cpp
-  src/common/rdma-topology.cpp
-  src/common/rdma-numa-wrapper.cpp
-  src/rdma/transport.cpp
-  src/rdma/token.cpp
-  src/s3/control.cpp)
-
-if(HIPOBJECT_V2_API)
-  list(APPEND HIPOBJ_SOURCES
-    src/rdma/v2-wire.cpp
-    src/rdma/v2-state.cpp
-    src/rdma/v2-clock.cpp
-    src/rdma/v2-random.cpp
-    src/rdma/v2-registry.cpp
-    src/rdma/v2-transport.cpp)
-endif()
-
-if(HIPOBJ_BNXT)
-  list(APPEND HIPOBJ_SOURCES
-    src/rdma/bnxt/bnxt-backend.cpp)
-endif()
-if(HIPOBJ_IONIC)
-  list(APPEND HIPOBJ_SOURCES
-    src/rdma/ionic/ionic-backend.cpp)
-endif()
-
-hipobj_add_library(
-  NAME hipobj
-  TYPE STATIC
-  SRCS ${HIPOBJ_SOURCES})
-
-target_include_directories(hipobj
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/hipobj>
-  PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/shared
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/common
-    ${CMAKE_SOURCE_DIR}/src/rdma
-    ${CMAKE_SOURCE_DIR}/src/s3)
-
-target_link_libraries(hipobj
-  PUBLIC
-    hip::host
-    hsa-runtime64::hsa-runtime64
-    stdc++
-  PRIVATE
-    dl)
-
-if(HIPOBJ_BNXT)
-  target_compile_definitions(hipobj
-    PRIVATE HIPOBJ_BNXT)
-endif()
-if(HIPOBJ_IONIC)
-  target_compile_definitions(hipobj
-    PRIVATE HIPOBJ_IONIC)
-endif()
-if(HIPOBJECT_V2_API)
-  # PUBLIC: include/hipobj.h only declares the V2 API surface when this
-  # macro is defined, so consumers linking hipobj::hipobj (in-tree or via
-  # the exported CMake package) need it on their own translation units too.
-  target_compile_definitions(hipobj
-    PUBLIC HIPOBJECT_V2_API)
-endif()
+add_subdirectory(src)
 
 if(BUILD_TESTING)
   include(HIPOBJUseGTest)

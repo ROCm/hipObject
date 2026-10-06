@@ -8,17 +8,11 @@
 # distinct targets avoids ODR issues, and the shipped hipobj library
 # is compiled without the macro so the accessors are absent there.
 
-# HIPOBJ_SOURCES uses root-relative paths; rebase them for this
-# directory scope.
-set(HIPOBJ_TEST_SOURCES)
-foreach(SRC IN LISTS HIPOBJ_SOURCES)
-  list(APPEND HIPOBJ_TEST_SOURCES ${CMAKE_SOURCE_DIR}/${SRC})
-endforeach()
-
+# HIPOBJ_SOURCES is exported by src/CMakeLists.txt as absolute paths.
 hipobj_add_library(
   NAME hipobj_test_objects
   TYPE OBJECT
-  SRCS ${HIPOBJ_TEST_SOURCES})
+  SRCS ${HIPOBJ_SOURCES})
 
 target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 
