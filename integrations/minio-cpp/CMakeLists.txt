@@ -9,12 +9,20 @@ include(FetchContent)
 list(APPEND CMAKE_PREFIX_PATH
   ${CMAKE_SOURCE_DIR}/cmake/minio-deps)
 
+# minio-cpp and the dependencies we fetch for it aren't installed, so
+# build them static. This is a normal variable, so it only applies to
+# this directory and the projects added from it, and doesn't change the
+# user's BUILD_SHARED_LIBS cache entry (which hipobj uses). minio-cpp
+# requires CMake 3.10, which predates CMP0077, so without the policy
+# default its option(BUILD_SHARED_LIBS) can discard the normal variable.
+set(BUILD_SHARED_LIBS OFF)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
 include(${CMAKE_SOURCE_DIR}/cmake/HIPOBJMinioCppDeps.cmake)
 include(HIPOBJSystemIncludes)
 
 set(MINIO_CPP_ENABLE_RDMA OFF CACHE BOOL "" FORCE)
 set(MINIO_CPP_TEST OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
   miniocpp_upstream
