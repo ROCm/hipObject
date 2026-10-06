@@ -1,0 +1,139 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+# Warning flags for GNU g++
+#
+# https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
+
+include_guard(GLOBAL)
+
+include(HIPOBJFortifySource)
+
+function(hipobj_get_gnu_warning_flags outvar compiler_version)
+
+  # Warning flags for g++ 9 and earlier
+  set(flags
+    # Basic "high" warning levels
+    -Wall
+    -Wextra
+    -Wno-unused-parameter # TODO: Fix diagnostics and re-enable
+
+    # Avoid non-standard C/C++ behavior
+    # Can't use -pedantic with nvcc at this time, as nvcc
+    # generates code with non-standard #line styles, leading
+    # to a LOT of warnings
+    #-pedantic
+
+    # Check for ABI warnings
+    # Most of this is noise, but probably useful to turn
+    # on from time to time
+    #-Wabi
+
+    # Turn on stack protection options
+    -fstack-clash-protection
+    -fstack-protector-strong
+
+    # Misc warnings
+    #-Waggregate-return # We return structs, but might be useful
+                        # to turn on to see where this can be
+                        # minimized
+    -Walloca
+    -Walloc-zero
+    -Warray-bounds=2 # TODO: Consider making =3 in newer g++
+    -Wcast-align
+    -Wcast-qual
+    #-Wconversion # TODO: Fix diagnostics and re-enable
+    -Wdate-time
+    -Wdouble-promotion
+    -Wduplicated-branches
+    -Wduplicated-cond
+    -Wfloat-equal
+    -Wformat=2
+    -Wformat-nonliteral
+    -Wformat-overflow=2
+    -Wformat-security
+    #-Wformat-signedness # TODO: Fix diagnostics and re-enable
+    #-Wformat-truncation=2 # TODO: Fix diagnostics and re-enable
+    -Wformat-y2k
+    -Winvalid-pch
+    # This is a warning for when using <C++11
+    #-Wlong-long
+    -Wlogical-op
+    #-Wmissing-declarations # TODO: Fix diagnostics and re-enable
+    -Wnormalized
+    -Wnull-dereference
+    -Wpacked
+    #-Wpadded # Probably should be a developer warning
+    -Wpointer-arith
+    -Wredundant-decls
+    -Wshadow
+    -Wshadow-local
+    -Wshift-overflow=2
+    -Wno-strict-overflow
+    #-Wswitch-default # TODO: Fix diagnostics and re-enable
+    #-Wswitch-enum # TODO: Fix diagnostics and re-enable
+    -Wtrampolines
+    -Wundef
+    -Wuninitialized
+    -Wunknown-pragmas
+    -Wunsafe-loop-optimizations
+    -Wunused
+    -Wunused-macros
+    #-Wuseless-cast # TODO: Fix diagnostics and re-enable
+    -Wvla
+    -Wzero-as-null-pointer-constant
+
+    # TODO: Add size warnings when we pick a limit
+  )
+
+  if(compiler_version VERSION_GREATER_EQUAL 12)
+    set(flags
+      # Misc warnings
+      -Wbidi-chars=any
+      -Winterference-size
+      -Wtrivial-auto-var-init
+      ${flags}
+    )
+
+    # Only use _FORTIFY_SOURCE if the optimization level is -O2, -O3, or -Os
+    hipobj_get_fortify_flags(fortify_flags)
+    set(flags
+      ${fortify_flags}
+      ${flags}
+    )
+  endif()
+
+  if(compiler_version VERSION_GREATER_EQUAL 13)
+    set(flags
+      # Turn on strict flex arrays (helps ASAN, _FORTIFY_SOURCE, etc.)
+      -fstrict-flex-arrays=3
+      # Misc warnings
+      -Winvalid-utf8
+      ${flags}
+    )
+  endif()
+
+  if(compiler_version VERSION_GREATER_EQUAL 14)
+    set(flags
+      # Misc warnings
+      -Walloc-size
+      -Wcalloc-transposed-args
+      -Wflex-array-member-not-at-end
+      -Wnrvo
+      ${flags}
+    )
+  endif()
+
+  if(compiler_version VERSION_GREATER_EQUAL 15)
+    set(flags
+      # Misc warnings
+      -Wtrailing-whitespace
+      -Wleading-whitespace=tabs
+      ${flags}
+    )
+  endif()
+
+  set(${outvar} ${flags} PARENT_SCOPE)
+
+endfunction()
