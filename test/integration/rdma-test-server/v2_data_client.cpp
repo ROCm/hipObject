@@ -200,13 +200,13 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     char psnHex[8];
     std::snprintf(psnHex, sizeof(psnHex), "%06x", 1U);
     char cookieHex[12];
-    std::snprintf(cookieHex, sizeof(cookieHex), "%08x", cookie);
+    std::snprintf(cookieHex, sizeof(cookieHex), "%08" PRIx32, cookie);
     char mrAddrHex[32];
     std::snprintf(mrAddrHex, sizeof(mrAddrHex), "%" PRIxPTR, reinterpret_cast<uintptr_t>(buf));
     char mrRkeyHex[12];
-    std::snprintf(mrRkeyHex, sizeof(mrRkeyHex), "%x", mr->rkey);
+    std::snprintf(mrRkeyHex, sizeof(mrRkeyHex), "%" PRIx32, mr->rkey);
     char sizeDec[24];
-    std::snprintf(sizeDec, sizeof(sizeDec), "%llu", static_cast<unsigned long long>(size));
+    std::snprintf(sizeDec, sizeof(sizeDec), "%" PRIu64, size);
 
     hipObj::v2::BuiltinVerifier signer("hipobj-test-key", "hipobj-test-secret", "us-east-1");
     char                        amzDate[24];
@@ -217,7 +217,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         std::strftime(amzDate, sizeof(amzDate), "%Y%m%dT%H%M%SZ", &tmv);
     }
     char qpnHex[12];
-    std::snprintf(qpnHex, sizeof(qpnHex), "%x", qp->qp_num);
+    std::snprintf(qpnHex, sizeof(qpnHex), "%" PRIx32, qp->qp_num);
 
     /* Real peer token: this client's QPN and GID so the server
      * pairs back through the token-carried endpoint. */
@@ -427,11 +427,11 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
                     usleep(1000);
                 }
                 if (wc.status != IBV_WC_SUCCESS) {
-                    std::fprintf(stderr, "dp: PUT completion status=%d\n", wc.status);
+                    std::fprintf(stderr, "dp: PUT completion status=%d\n", static_cast<int>(wc.status));
                     rc = 1;
                 }
                 else {
-                    std::printf("dp: PUT ok cookie=%08x posted\n", cookie);
+                    std::printf("dp: PUT ok cookie=%08" PRIx32 " posted\n", cookie);
                 }
             }
         }
@@ -472,8 +472,8 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         else {
             std::fprintf(stderr,
                          "dp: GET completion bad (status=%d op=%d "
-                         "imm=%08x)\n",
-                         wc.status, wc.opcode, ntohl(wc.imm_data));
+                         "imm=%08" PRIx32 ")\n",
+                         static_cast<int>(wc.status), static_cast<int>(wc.opcode), ntohl(wc.imm_data));
             rc = 1;
         }
     }

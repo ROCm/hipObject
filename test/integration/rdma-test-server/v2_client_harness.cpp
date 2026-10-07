@@ -17,6 +17,7 @@
 
 #include <cerrno>
 #include <charconv>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -147,7 +148,7 @@ std::string
 hex32(uint32_t v)
 {
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "%08x", v);
+    std::snprintf(buf, sizeof(buf), "%08" PRIx32, v);
     return buf;
 }
 

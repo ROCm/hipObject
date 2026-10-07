@@ -9,6 +9,7 @@
 #include "v2-wire.h"
 
 #include <cctype>
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 
@@ -292,7 +293,7 @@ namespace v2 {
     std::string formatCookie(uint32_t cookie)
     {
         char buf[kCookieHexLen + 1];
-        std::snprintf(buf, sizeof(buf), "%08x", cookie);
+        std::snprintf(buf, sizeof(buf), "%08" PRIx32, cookie);
         return std::string(buf);
     }
 
@@ -300,7 +301,7 @@ namespace v2 {
     {
         char buf[kPsnHexLen + 1];
         /* PSNs are 24 bits; masking also bounds the output to 6 hex digits */
-        std::snprintf(buf, sizeof(buf), "%06x", psn & 0xffffffU);
+        std::snprintf(buf, sizeof(buf), "%06" PRIx32, psn & 0xffffffU);
         return std::string(buf);
     }
 
