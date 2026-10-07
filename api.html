@@ -1,0 +1,1445 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>API Reference &#8212; hipObject 0.1.0</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=4418a689" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+
+    <script src="_static/documentation_options.js?v=a1637f0b"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api';</script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="hipObject cuObject Interoperability" href="interop.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="0.1.0" />
+  
+    
+    <script src="_static/searchtools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <script src="searchindex.js"></script>
+  
+  </head>
+  <body data-default-mode="">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">hipObject 0.1.0</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="building.html">Building hipObject</a></li>
+<li class="toctree-l1"><a class="reference internal" href="interop.html">hipObject cuObject Interoperability</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">API Reference</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/ROCm/hipObject" target="_blank"
+   class="btn btn-sm btn-source-repository-button"
+   title="Source repository"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+
+</a>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/api.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>API Reference</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#core-functionality">Core Functionality</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjHandle_t"><code class="docutils literal notranslate"><span class="pre">hipObjHandle_t</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv422hipObjGetVersionStringv"><code class="docutils literal notranslate"><span class="pre">hipObjGetVersionString()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv410hipObjInitP14hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjShutdownv"><code class="docutils literal notranslate"><span class="pre">hipObjShutdown()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MAJOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MAJOR</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MINOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MINOR</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_PATCH"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_PATCH</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9accessKeyE"><code class="docutils literal notranslate"><span class="pre">accessKey</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t5flagsE"><code class="docutils literal notranslate"><span class="pre">flags</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9gpuDeviceE"><code class="docutils literal notranslate"><span class="pre">gpuDevice</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t7nicHintE"><code class="docutils literal notranslate"><span class="pre">nicHint</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t6regionE"><code class="docutils literal notranslate"><span class="pre">region</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9secretKeyE"><code class="docutils literal notranslate"><span class="pre">secretKey</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv416hipObjConfigV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfigV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N16hipObjConfigV2_t7controlE"><code class="docutils literal notranslate"><span class="pre">control</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N16hipObjConfigV2_t2v1E"><code class="docutils literal notranslate"><span class="pre">v1</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv425hipObjControlEndpointV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjControlEndpointV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N25hipObjControlEndpointV2_t15controlEndpointE"><code class="docutils literal notranslate"><span class="pre">controlEndpoint</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOps_t"><code class="docutils literal notranslate"><span class="pre">hipObjOps_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t9recvReplyE"><code class="docutils literal notranslate"><span class="pre">recvReply</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t11sendRequestE"><code class="docutils literal notranslate"><span class="pre">sendRequest</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#errors-and-error-handling">Errors and Error Handling</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv415hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpError_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjSuccessE"><code class="docutils literal notranslate"><span class="pre">hipObjSuccess</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t18hipObjInvalidValueE"><code class="docutils literal notranslate"><span class="pre">hipObjInvalidValue</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t20hipObjNotInitializedE"><code class="docutils literal notranslate"><span class="pre">hipObjNotInitialized</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t24hipObjAlreadyInitializedE"><code class="docutils literal notranslate"><span class="pre">hipObjAlreadyInitialized</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t15hipObjRdmaErrorE"><code class="docutils literal notranslate"><span class="pre">hipObjRdmaError</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjS3ErrorE"><code class="docutils literal notranslate"><span class="pre">hipObjS3Error</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t22hipObjBufNotRegisteredE"><code class="docutils literal notranslate"><span class="pre">hipObjBufNotRegistered</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t26hipObjBufAlreadyRegisteredE"><code class="docutils literal notranslate"><span class="pre">hipObjBufAlreadyRegistered</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t17hipObjNicNotFoundE"><code class="docutils literal notranslate"><span class="pre">hipObjNicNotFound</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t24hipObjDmabufNotSupportedE"><code class="docutils literal notranslate"><span class="pre">hipObjDmabufNotSupported</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t18hipObjSizeTooLargeE"><code class="docutils literal notranslate"><span class="pre">hipObjSizeTooLarge</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t19hipObjInternalErrorE"><code class="docutils literal notranslate"><span class="pre">hipObjInternalError</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t18hipObjNotSupportedE"><code class="docutils literal notranslate"><span class="pre">hipObjNotSupported</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t10hipObjBusyE"><code class="docutils literal notranslate"><span class="pre">hipObjBusy</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjGetErrorString15hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjGetErrorString()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_BASE_ERR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BASE_ERR</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv413hipObjError_t"><code class="docutils literal notranslate"><span class="pre">hipObjError_t</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#buffer-registration">Buffer Registration</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv419hipObjBufDeregisterPv"><code class="docutils literal notranslate"><span class="pre">hipObjBufDeregister()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv417hipObjBufRegisterPv6size_t"><code class="docutils literal notranslate"><span class="pre">hipObjBufRegister()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv421hipObjBufRegisterHostPv6size_t"><code class="docutils literal notranslate"><span class="pre">hipObjBufRegisterHost()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-transfer-get-put">Data Transfer (GET / PUT)</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv413hipObjOpsV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpsV2_t</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv413hipObjBufSyncPv6size_t5off_ti"><code class="docutils literal notranslate"><span class="pre">hipObjBufSync()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv49hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjGet()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv418hipObjGetRdmaTokenPKv6size_tiPPc"><code class="docutils literal notranslate"><span class="pre">hipObjGetRdmaToken()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjGetV2PKcPKcPv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjGetV2()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjParseRdmaReplyPKc6size_tPi"><code class="docutils literal notranslate"><span class="pre">hipObjParseRdmaReply()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv49hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjPut()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv418hipObjPutRdmaTokenPc"><code class="docutils literal notranslate"><span class="pre">hipObjPutRdmaToken()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjPutV2PKcPKcPKv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjPutV2()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjTokenClientNicPKcPc6size_t"><code class="docutils literal notranslate"><span class="pre">hipObjTokenClientNic()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_RDMA_OP_GET"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_RDMA_OP_GET</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_RDMA_OP_PUT"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_RDMA_OP_PUT</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_SYNC_TO_DEVICE"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_SYNC_TO_DEVICE</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_SYNC_TO_HOST"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_SYNC_TO_HOST</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjFinalReplyV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjFinalReplyV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t5bytesE"><code class="docutils literal notranslate"><span class="pre">bytes</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t11checksumB64E"><code class="docutils literal notranslate"><span class="pre">checksumB64</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t10cookieEchoE"><code class="docutils literal notranslate"><span class="pre">cookieEcho</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t13cookiePresentE"><code class="docutils literal notranslate"><span class="pre">cookiePresent</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t4etagE"><code class="docutils literal notranslate"><span class="pre">etag</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t10httpStatusE"><code class="docutils literal notranslate"><span class="pre">httpStatus</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t12protocolEchoE"><code class="docutils literal notranslate"><span class="pre">protocolEcho</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t9versionIdE"><code class="docutils literal notranslate"><span class="pre">versionId</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOpsV2"><code class="docutils literal notranslate"><span class="pre">hipObjOpsV2</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOpsV210sendCancelE"><code class="docutils literal notranslate"><span class="pre">sendCancel</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOpsV211sendPrepareE"><code class="docutils literal notranslate"><span class="pre">sendPrepare</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOpsV29sendReadyE"><code class="docutils literal notranslate"><span class="pre">sendReady</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv422hipObjPrepareReplyV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjPrepareReplyV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t10httpStatusE"><code class="docutils literal notranslate"><span class="pre">httpStatus</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t12protocolEchoE"><code class="docutils literal notranslate"><span class="pre">protocolEcho</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t9serverPsnE"><code class="docutils literal notranslate"><span class="pre">serverPsn</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t11serverTokenE"><code class="docutils literal notranslate"><span class="pre">serverToken</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t7sessionE"><code class="docutils literal notranslate"><span class="pre">session</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t17unsupportedMarkerE"><code class="docutils literal notranslate"><span class="pre">unsupportedMarker</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv421hipObjTransferReqV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjTransferReqV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6bucketE"><code class="docutils literal notranslate"><span class="pre">bucket</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t9clientPsnE"><code class="docutils literal notranslate"><span class="pre">clientPsn</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6cookieE"><code class="docutils literal notranslate"><span class="pre">cookie</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t3keyE"><code class="docutils literal notranslate"><span class="pre">key</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6methodE"><code class="docutils literal notranslate"><span class="pre">method</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6offsetE"><code class="docutils literal notranslate"><span class="pre">offset</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t5queryE"><code class="docutils literal notranslate"><span class="pre">query</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t7sessionE"><code class="docutils literal notranslate"><span class="pre">session</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t4sizeE"><code class="docutils literal notranslate"><span class="pre">size</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6targetE"><code class="docutils literal notranslate"><span class="pre">target</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t5tokenE"><code class="docutils literal notranslate"><span class="pre">token</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="api-reference">
+<h1>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading">#</a></h1>
+<p>This page documents the hipObject public C API,
+extracted from annotated source headers by Doxygen and
+rendered via Breathe.</p>
+<section id="core-functionality">
+<h2>Core Functionality<a class="headerlink" href="#core-functionality" title="Link to this heading">#</a></h2>
+<dl class="cpp type">
+<dt class="sig sig-object cpp" id="_CPPv414hipObjHandle_t">
+<span id="_CPPv314hipObjHandle_t"></span><span id="_CPPv214hipObjHandle_t"></span><span id="hipObjHandle_t"></span><span class="target" id="group__core_1ga3fcfb2197290022841b1fb784d072f98"></span><span class="k"><span class="pre">typedef</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">hipObjHandle_t</span></span></span><a class="headerlink" href="#_CPPv414hipObjHandle_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Opaque handle to an S3 object for RDMA I/O. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv422hipObjGetVersionStringv">
+<span id="_CPPv322hipObjGetVersionStringv"></span><span id="_CPPv222hipObjGetVersionStringv"></span><span id="hipObjGetVersionString__void"></span><span class="target" id="group__core_1ga9e1534d88db59149240b934840c70391"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetVersionString</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv422hipObjGetVersionStringv" title="Link to this definition">#</a><br /></dt>
+<dd><p>Return the library version as a string. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv410hipObjInitP14hipObjConfig_t">
+<span id="_CPPv310hipObjInitP14hipObjConfig_t"></span><span id="_CPPv210hipObjInitP14hipObjConfig_t"></span><span id="hipObjInit__hipObjConfig_tP"></span><span class="target" id="group__core_1ga2b4e5bd6f1170f792720293c41864619"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjInit</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjConfig_t" title="hipObjConfig_t"><span class="n"><span class="pre">hipObjConfig_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">config</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv410hipObjInitP14hipObjConfig_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Initialize the hipObject library. </p>
+<p>Opens the RDMA device, selects the closest NIC to the GPU, and prepares internal state. Must be called before any other hipObj* function.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>config</strong> – Pointer to configuration struct </p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv414hipObjShutdownv">
+<span id="_CPPv314hipObjShutdownv"></span><span id="_CPPv214hipObjShutdownv"></span><span id="hipObjShutdown__void"></span><span class="target" id="group__core_1ga395aabc844f28115e01f5b5e41e644f7"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjShutdown</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv414hipObjShutdownv" title="Link to this definition">#</a><br /></dt>
+<dd><p>Shut down the hipObject library. </p>
+<p>Releases all RDMA resources. All registered buffers are implicitly deregistered.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_VERSION_MAJOR">
+<span class="target" id="group__core_1ga7bbe5cc85f0e7e9942f7bcba2a84d1f1"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_VERSION_MAJOR</span></span></span><a class="headerlink" href="#c.HIPOBJ_VERSION_MAJOR" title="Link to this definition">#</a><br /></dt>
+<dd><p>hipObject major version number </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_VERSION_MINOR">
+<span class="target" id="group__core_1ga5d7f2b8ea8b5653ec2a609fbf109fb64"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_VERSION_MINOR</span></span></span><a class="headerlink" href="#c.HIPOBJ_VERSION_MINOR" title="Link to this definition">#</a><br /></dt>
+<dd><p>hipObject minor version number </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_VERSION_PATCH">
+<span class="target" id="group__core_1ga5d4277342cce917b98acc9d08e368434"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_VERSION_PATCH</span></span></span><a class="headerlink" href="#c.HIPOBJ_VERSION_PATCH" title="Link to this definition">#</a><br /></dt>
+<dd><p>hipObject patch version number </p>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv414hipObjConfig_t">
+<span id="_CPPv314hipObjConfig_t"></span><span id="_CPPv214hipObjConfig_t"></span><span id="hipObjConfig_t"></span><span class="target" id="structhipObjConfig__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjConfig_t</span></span></span><a class="headerlink" href="#_CPPv414hipObjConfig_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>Configuration for hipObject initialization. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9accessKeyE">
+<span id="_CPPv3N14hipObjConfig_t9accessKeyE"></span><span id="_CPPv2N14hipObjConfig_t9accessKeyE"></span><span id="hipObjConfig_t::accessKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a0b5dcc5a7b3ca31fcb0848a362f0654e"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">accessKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9accessKeyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>S3 access key (optional) 
+
+ </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t8endpointE">
+<span id="_CPPv3N14hipObjConfig_t8endpointE"></span><span id="_CPPv2N14hipObjConfig_t8endpointE"></span><span id="hipObjConfig_t::endpoint__cCP"></span><span class="target" id="structhipObjConfig__t_1a3a54a13819c14885fa8f9678bed8028b"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">endpoint</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t8endpointE" title="Link to this definition">#</a><br /></dt>
+<dd><p>S3 endpoint URL 
+
+ </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t5flagsE">
+<span id="_CPPv3N14hipObjConfig_t5flagsE"></span><span id="_CPPv2N14hipObjConfig_t5flagsE"></span><span id="hipObjConfig_t::flags__uint32_t"></span><span class="target" id="structhipObjConfig__t_1a4e56b12abc8cc80fa5f4ae2a6eef5527"></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">flags</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t5flagsE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Reserved, set to 0 
+
+ </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9gpuDeviceE">
+<span id="_CPPv3N14hipObjConfig_t9gpuDeviceE"></span><span id="_CPPv2N14hipObjConfig_t9gpuDeviceE"></span><span id="hipObjConfig_t::gpuDevice__i"></span><span class="target" id="structhipObjConfig__t_1ad808599b82f5a4c7e267b661799b1fb6"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">gpuDevice</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9gpuDeviceE" title="Link to this definition">#</a><br /></dt>
+<dd><p>HIP device index, or -1 
+
+ </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t7nicHintE">
+<span id="_CPPv3N14hipObjConfig_t7nicHintE"></span><span id="_CPPv2N14hipObjConfig_t7nicHintE"></span><span id="hipObjConfig_t::nicHint__cCP"></span><span class="target" id="structhipObjConfig__t_1ac5fcea279bee344f92fe5bac7efcaae3"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">nicHint</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t7nicHintE" title="Link to this definition">#</a><br /></dt>
+<dd><p>NIC name hint, or NULL 
+
+ </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t6regionE">
+<span id="_CPPv3N14hipObjConfig_t6regionE"></span><span id="_CPPv2N14hipObjConfig_t6regionE"></span><span id="hipObjConfig_t::region__cCP"></span><span class="target" id="structhipObjConfig__t_1aa53af17a63bc86a33f9834259f2739c8"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">region</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t6regionE" title="Link to this definition">#</a><br /></dt>
+<dd><p>AWS region 
+
+ </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9secretKeyE">
+<span id="_CPPv3N14hipObjConfig_t9secretKeyE"></span><span id="_CPPv2N14hipObjConfig_t9secretKeyE"></span><span id="hipObjConfig_t::secretKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a234137e07eb2ff71d7b4cacc6e499a65"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">secretKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9secretKeyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>S3 secret key (optional) 
+
+ </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv416hipObjConfigV2_t">
+<span id="_CPPv316hipObjConfigV2_t"></span><span id="_CPPv216hipObjConfigV2_t"></span><span id="hipObjConfigV2_t"></span><span class="target" id="structhipObjConfigV2__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjConfigV2_t</span></span></span><a class="headerlink" href="#_CPPv416hipObjConfigV2_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>V2 initialization configuration. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N16hipObjConfigV2_t7controlE">
+<span id="_CPPv3N16hipObjConfigV2_t7controlE"></span><span id="_CPPv2N16hipObjConfigV2_t7controlE"></span><span id="hipObjConfigV2_t::control__hipObjControlEndpointV2_t"></span><span class="target" id="structhipObjConfigV2__t_1a96e791cdcc0f16e50c47bb1c5ddf13d6"></span><a class="reference internal" href="#_CPPv425hipObjControlEndpointV2_t" title="hipObjControlEndpointV2_t"><span class="n"><span class="pre">hipObjControlEndpointV2_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">control</span></span></span><a class="headerlink" href="#_CPPv4N16hipObjConfigV2_t7controlE" title="Link to this definition">#</a><br /></dt>
+<dd><p>v2 control endpoint (required) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N16hipObjConfigV2_t2v1E">
+<span id="_CPPv3N16hipObjConfigV2_t2v1E"></span><span id="_CPPv2N16hipObjConfigV2_t2v1E"></span><span id="hipObjConfigV2_t::v1__hipObjConfig_t"></span><span class="target" id="structhipObjConfigV2__t_1a219a618c0527447ba8621591fccbcd56"></span><a class="reference internal" href="#_CPPv414hipObjConfig_t" title="hipObjConfig_t"><span class="n"><span class="pre">hipObjConfig_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">v1</span></span></span><a class="headerlink" href="#_CPPv4N16hipObjConfigV2_t2v1E" title="Link to this definition">#</a><br /></dt>
+<dd><p>All v1 fields </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv425hipObjControlEndpointV2_t">
+<span id="_CPPv325hipObjControlEndpointV2_t"></span><span id="_CPPv225hipObjControlEndpointV2_t"></span><span id="hipObjControlEndpointV2_t"></span><span class="target" id="structhipObjControlEndpointV2__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjControlEndpointV2_t</span></span></span><a class="headerlink" href="#_CPPv425hipObjControlEndpointV2_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>V2 control endpoint settings. </p>
+<p>The v2 protocol runs its prepare/ready/cancel exchange on a dedicated control endpoint; there is no default port, the caller must supply one. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N25hipObjControlEndpointV2_t15controlEndpointE">
+<span id="_CPPv3N25hipObjControlEndpointV2_t15controlEndpointE"></span><span id="_CPPv2N25hipObjControlEndpointV2_t15controlEndpointE"></span><span id="hipObjControlEndpointV2_t::controlEndpoint__cCP"></span><span class="target" id="structhipObjControlEndpointV2__t_1a995cd240b89fe02bd70ff227cca0511c"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">controlEndpoint</span></span></span><a class="headerlink" href="#_CPPv4N25hipObjControlEndpointV2_t15controlEndpointE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Required “http(s)://host:port” URI; the library copies the string </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv411hipObjOps_t">
+<span id="_CPPv311hipObjOps_t"></span><span id="_CPPv211hipObjOps_t"></span><span id="hipObjOps_t"></span><span class="target" id="structhipObjOps__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjOps_t</span></span></span><a class="headerlink" href="#_CPPv411hipObjOps_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>Callback struct for S3 SDK integration. </p>
+<p>The application provides these callbacks so that hipObject can inject RDMA tokens into S3 requests and receive RDMA reply tags from the server. This mirrors cuObject’s CUObjOps_t pattern. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N11hipObjOps_t9recvReplyE">
+<span id="_CPPv3N11hipObjOps_t9recvReplyE"></span><span id="_CPPv2N11hipObjOps_t9recvReplyE"></span><span class="target" id="structhipObjOps__t_1a097ecb74add3e52c856986a7acbcf544"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">recvReply</span></span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">(</span></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">ctx</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">reply</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">replyLen</span></span><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N11hipObjOps_t9recvReplyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Called by hipObject to receive the RDMA reply. The application should extract x-amz-rdma-reply from the S3 response headers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Param ctx<span class="colon">:</span></dt>
+<dd class="field-odd"><p>User-supplied context pointer </p>
+</dd>
+<dt class="field-even">Param reply<span class="colon">:</span></dt>
+<dd class="field-even"><p>Buffer to receive the reply tag </p>
+</dd>
+<dt class="field-odd">Param replyLen<span class="colon">:</span></dt>
+<dd class="field-odd"><p>In: buffer size; out: actual length </p>
+</dd>
+<dt class="field-even">Return<span class="colon">:</span></dt>
+<dd class="field-even"><p>0 on success, negative on failure </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N11hipObjOps_t11sendRequestE">
+<span id="_CPPv3N11hipObjOps_t11sendRequestE"></span><span id="_CPPv2N11hipObjOps_t11sendRequestE"></span><span class="target" id="structhipObjOps__t_1a37dccff6aa24a920f5012bab4803ce6e"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">sendRequest</span></span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">(</span></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">ctx</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">token</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n"><span class="pre">tokenLen</span></span><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N11hipObjOps_t11sendRequestE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Called by hipObject to send the RDMA token. The application should embed the token in the x-amz-rdma-token S3 request header.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Param ctx<span class="colon">:</span></dt>
+<dd class="field-odd"><p>User-supplied context pointer </p>
+</dd>
+<dt class="field-even">Param token<span class="colon">:</span></dt>
+<dd class="field-even"><p>Hex-encoded RDMA token </p>
+</dd>
+<dt class="field-odd">Param tokenLen<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Length of token in bytes </p>
+</dd>
+<dt class="field-even">Return<span class="colon">:</span></dt>
+<dd class="field-even"><p>0 on success, negative on failure </p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+</section>
+<section id="errors-and-error-handling">
+<h2>Errors and Error Handling<a class="headerlink" href="#errors-and-error-handling" title="Link to this heading">#</a></h2>
+<dl class="cpp enum">
+<dt class="sig sig-object cpp" id="_CPPv415hipObjOpError_t">
+<span id="_CPPv315hipObjOpError_t"></span><span id="_CPPv215hipObjOpError_t"></span><span class="target" id="group__error_1ga1ee9764dda2b20100b8e5463e7246e61"></span><span class="k"><span class="pre">enum</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjOpError_t</span></span></span><a class="headerlink" href="#_CPPv415hipObjOpError_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Operation-level error codes. </p>
+<p><em>Values:</em></p>
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t13hipObjSuccessE">
+<span id="_CPPv3N15hipObjOpError_t13hipObjSuccessE"></span><span id="_CPPv2N15hipObjOpError_t13hipObjSuccessE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61aec8698694da20b85642681a7256d9f12"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjSuccess</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t13hipObjSuccessE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t18hipObjInvalidValueE">
+<span id="_CPPv3N15hipObjOpError_t18hipObjInvalidValueE"></span><span id="_CPPv2N15hipObjOpError_t18hipObjInvalidValueE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61aceed9524deb29a47ff85ff30852f07d7"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjInvalidValue</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t18hipObjInvalidValueE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t20hipObjNotInitializedE">
+<span id="_CPPv3N15hipObjOpError_t20hipObjNotInitializedE"></span><span id="_CPPv2N15hipObjOpError_t20hipObjNotInitializedE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a929a936d688b10b17a2ea4bc39ed4552"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjNotInitialized</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t20hipObjNotInitializedE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t24hipObjAlreadyInitializedE">
+<span id="_CPPv3N15hipObjOpError_t24hipObjAlreadyInitializedE"></span><span id="_CPPv2N15hipObjOpError_t24hipObjAlreadyInitializedE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61af14df65958e925cacefc2c366196b048"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjAlreadyInitialized</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t24hipObjAlreadyInitializedE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t15hipObjRdmaErrorE">
+<span id="_CPPv3N15hipObjOpError_t15hipObjRdmaErrorE"></span><span id="_CPPv2N15hipObjOpError_t15hipObjRdmaErrorE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a5f8a46e392f191206d20f019d37b795d"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjRdmaError</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t15hipObjRdmaErrorE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t13hipObjS3ErrorE">
+<span id="_CPPv3N15hipObjOpError_t13hipObjS3ErrorE"></span><span id="_CPPv2N15hipObjOpError_t13hipObjS3ErrorE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a45c574e4934f3c57bea7db4fc98ba53b"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjS3Error</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t13hipObjS3ErrorE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t22hipObjBufNotRegisteredE">
+<span id="_CPPv3N15hipObjOpError_t22hipObjBufNotRegisteredE"></span><span id="_CPPv2N15hipObjOpError_t22hipObjBufNotRegisteredE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a8a52a58123bd87c3fecf95e2604ee9fb"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufNotRegistered</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t22hipObjBufNotRegisteredE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t26hipObjBufAlreadyRegisteredE">
+<span id="_CPPv3N15hipObjOpError_t26hipObjBufAlreadyRegisteredE"></span><span id="_CPPv2N15hipObjOpError_t26hipObjBufAlreadyRegisteredE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a4c73e77bbad0d89d6f82ab9fb297eb99"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufAlreadyRegistered</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t26hipObjBufAlreadyRegisteredE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t17hipObjNicNotFoundE">
+<span id="_CPPv3N15hipObjOpError_t17hipObjNicNotFoundE"></span><span id="_CPPv2N15hipObjOpError_t17hipObjNicNotFoundE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a46dda3b0773256bbbdbe77c063aa4eed"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjNicNotFound</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t17hipObjNicNotFoundE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t24hipObjDmabufNotSupportedE">
+<span id="_CPPv3N15hipObjOpError_t24hipObjDmabufNotSupportedE"></span><span id="_CPPv2N15hipObjOpError_t24hipObjDmabufNotSupportedE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a372b5749400ad4eaf38c5aca9aa1634a"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjDmabufNotSupported</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t24hipObjDmabufNotSupportedE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t18hipObjSizeTooLargeE">
+<span id="_CPPv3N15hipObjOpError_t18hipObjSizeTooLargeE"></span><span id="_CPPv2N15hipObjOpError_t18hipObjSizeTooLargeE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61af94e5aaa655fb112cfc7d00b2440cc62"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjSizeTooLarge</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t18hipObjSizeTooLargeE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t19hipObjInternalErrorE">
+<span id="_CPPv3N15hipObjOpError_t19hipObjInternalErrorE"></span><span id="_CPPv2N15hipObjOpError_t19hipObjInternalErrorE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61acecfcd38c8192ab440acfa374d8e4527"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjInternalError</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t19hipObjInternalErrorE" title="Link to this definition">#</a><br /></dt>
+<dd></dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t18hipObjNotSupportedE">
+<span id="_CPPv3N15hipObjOpError_t18hipObjNotSupportedE"></span><span id="_CPPv2N15hipObjOpError_t18hipObjNotSupportedE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61ae8f4aefd6121e87af7e40dbd143d4a0c"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjNotSupported</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t18hipObjNotSupportedE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Server explicitly does not support hipobj-rc-v2 </p>
+</dd></dl>
+
+<dl class="cpp enumerator">
+<dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t10hipObjBusyE">
+<span id="_CPPv3N15hipObjOpError_t10hipObjBusyE"></span><span id="_CPPv2N15hipObjOpError_t10hipObjBusyE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a7d9af3b412560965465404414bdc7f8e"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBusy</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t10hipObjBusyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Server backpressure (503) and retries exhausted </p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv420hipObjGetErrorString15hipObjOpError_t">
+<span id="_CPPv320hipObjGetErrorString15hipObjOpError_t"></span><span id="_CPPv220hipObjGetErrorString15hipObjOpError_t"></span><span id="hipObjGetErrorString__hipObjOpError_t"></span><span class="target" id="group__error_1ga3d847cc075755e1e3cc4ca1a21e24f52"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetErrorString</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv415hipObjOpError_t" title="hipObjOpError_t"><span class="n"><span class="pre">hipObjOpError_t</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">err</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv420hipObjGetErrorString15hipObjOpError_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Return a human-readable string for an operation error code. </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_BASE_ERR">
+<span class="target" id="group__error_1ga6b8328f869fea10cccf60da20b8c5942"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_BASE_ERR</span></span></span><a class="headerlink" href="#c.HIPOBJ_BASE_ERR" title="Link to this definition">#</a><br /></dt>
+<dd><p>Base value for hipObject error codes. </p>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv413hipObjError_t">
+<span id="_CPPv313hipObjError_t"></span><span id="_CPPv213hipObjError_t"></span><span id="hipObjError_t"></span><span class="target" id="structhipObjError__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjError_t</span></span></span><a class="headerlink" href="#_CPPv413hipObjError_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>Compound error type carrying both an operation error and an optional HIP error. </p>
+</dd></dl>
+
+</section>
+<section id="buffer-registration">
+<h2>Buffer Registration<a class="headerlink" href="#buffer-registration" title="Link to this heading">#</a></h2>
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv419hipObjBufDeregisterPv">
+<span id="_CPPv319hipObjBufDeregisterPv"></span><span id="_CPPv219hipObjBufDeregisterPv"></span><span id="hipObjBufDeregister__voidP"></span><span class="target" id="group__buffer_1ga2dc6e401b67d9f0dcef8725556dcea83"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufDeregister</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv419hipObjBufDeregisterPv" title="Link to this definition">#</a><br /></dt>
+<dd><p>Deregister a previously registered buffer. </p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>devPtr</strong> – Pointer previously passed to hipObjBufRegister or hipObjBufRegisterHost </p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv417hipObjBufRegisterPv6size_t">
+<span id="_CPPv317hipObjBufRegisterPv6size_t"></span><span id="_CPPv217hipObjBufRegisterPv6size_t"></span><span id="hipObjBufRegister__voidP.s"></span><span class="target" id="group__buffer_1ga6e5f4ed7bb337f3095fb232cfa9ff4cb"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufRegister</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv417hipObjBufRegisterPv6size_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Register a GPU buffer for RDMA transfers. </p>
+<p>Exports the GPU buffer via dmabuf and registers it with the RDMA NIC. Maximum 4 GiB per registration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>devPtr</strong> – Pointer returned by hipMalloc </p></li>
+<li><p><strong>size</strong> – Size of the buffer in bytes </p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv421hipObjBufRegisterHostPv6size_t">
+<span id="_CPPv321hipObjBufRegisterHostPv6size_t"></span><span id="_CPPv221hipObjBufRegisterHostPv6size_t"></span><span id="hipObjBufRegisterHost__voidP.s"></span><span class="target" id="group__buffer_1ga883521992a80d57ff932c466becfe172"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufRegisterHost</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">hostPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv421hipObjBufRegisterHostPv6size_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Register a host buffer for RDMA transfers. </p>
+<p>Registers user-owned CPU RAM, such as a buffer allocated with malloc() or hipHostMalloc(), with the RDMA NIC. hipObject does not allocate or free the host buffer. Maximum 4 GiB per registration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>hostPtr</strong> – Pointer to CPU-accessible memory </p></li>
+<li><p><strong>size</strong> – Size of the buffer in bytes </p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="data-transfer-get-put">
+<h2>Data Transfer (GET / PUT)<a class="headerlink" href="#data-transfer-get-put" title="Link to this heading">#</a></h2>
+<dl class="cpp type">
+<dt class="sig sig-object cpp" id="_CPPv413hipObjOpsV2_t">
+<span id="_CPPv313hipObjOpsV2_t"></span><span id="_CPPv213hipObjOpsV2_t"></span><span id="hipObjOpsV2_t"></span><span class="target" id="group__io_1ga421382c4d5a4125b8f2ae1525c746395"></span><span class="k"><span class="pre">typedef</span></span><span class="w"> </span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv411hipObjOpsV2" title="hipObjOpsV2"><span class="n"><span class="pre">hipObjOpsV2</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjOpsV2_t</span></span></span><a class="headerlink" href="#_CPPv413hipObjOpsV2_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Phase-aware callbacks for the v2 control protocol. </p>
+<p>Each send* callback performs one complete HTTP round trip on the control endpoint and fills <code class="docutils literal notranslate"><span class="pre">out</span></code> from the response. All callbacks are required for v2 transfers. The v1 member is unused by the v2 entry points and is kept for structural forward compatibility. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv413hipObjBufSyncPv6size_t5off_ti">
+<span id="_CPPv313hipObjBufSyncPv6size_t5off_ti"></span><span id="_CPPv213hipObjBufSyncPv6size_t5off_ti"></span><span id="hipObjBufSync__voidP.s.off_t.i"></span><span class="target" id="group__io_1ga9881be94f12504fb3e0ff980ac73653c"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufSync</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="n"><span class="pre">off_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">offset</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">direction</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv413hipObjBufSyncPv6size_t5off_ti" title="Link to this definition">#</a><br /></dt>
+<dd><p>Stage a registered buffer between device and host memory. </p>
+<p>When a device pointer cannot be registered with the NIC directly (no dmabuf support, or a fabric with no peer-to-peer path to the GPU), <a class="reference internal" href="#group__buffer_1ga6e5f4ed7bb337f3095fb232cfa9ff4cb"><span class="std std-ref">hipObjBufRegister()</span></a> registers a host staging buffer instead and the peer’s RDMA reads and writes land there. Callers driving a transfer through <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a> must therefore call this with HIPOBJ_SYNC_TO_HOST before a PUT and HIPOBJ_SYNC_TO_DEVICE after a GET. It is a no-op, reporting success, for a directly registered buffer; <a class="reference internal" href="#group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"><span class="std std-ref">hipObjGet()</span></a>/hipObjPut() and the V2 entry points do it themselves. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv49hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv">
+<span id="_CPPv39hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv"></span><span id="_CPPv29hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv"></span><span id="hipObjGet__hipObjHandle_t.voidP.s.off_t.hipObjOps_tP.voidP"></span><span class="target" id="group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGet</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjHandle_t" title="hipObjHandle_t"><span class="n"><span class="pre">hipObjHandle_t</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">handle</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="n"><span class="pre">off_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">offset</span></span>, <a class="reference internal" href="#_CPPv411hipObjOps_t" title="hipObjOps_t"><span class="n"><span class="pre">hipObjOps_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ops</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ctx</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv49hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv" title="Link to this definition">#</a><br /></dt>
+<dd><p>GET: fetch an S3 object into a registered buffer via RDMA. </p>
+<p>The server performs an RDMA WRITE to push data into the registered buffer.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>handle</strong> – S3 object handle (from application) </p></li>
+<li><p><strong>devPtr</strong> – Registered GPU or host buffer </p></li>
+<li><p><strong>size</strong> – Number of bytes to transfer </p></li>
+<li><p><strong>offset</strong> – Byte offset into the S3 object </p></li>
+<li><p><strong>ops</strong> – S3 SDK callbacks </p></li>
+<li><p><strong>ctx</strong> – User context passed to callbacks </p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv418hipObjGetRdmaTokenPKv6size_tiPPc">
+<span id="_CPPv318hipObjGetRdmaTokenPKv6size_tiPPc"></span><span id="_CPPv218hipObjGetRdmaTokenPKv6size_tiPPc"></span><span id="hipObjGetRdmaToken__voidCP.s.i.cPP"></span><span class="target" id="group__io_1ga4b1095efab54d620753fc18d475531f4"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetRdmaToken</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">op</span></span>, <span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">outToken</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv418hipObjGetRdmaTokenPKv6size_tiPPc" title="Link to this definition">#</a><br /></dt>
+<dd><p>Mint a hex-encoded RC RDMA token for a registered buffer. </p>
+<p>The caller must release <code class="docutils literal notranslate"><span class="pre">*outToken</span></code> with <a class="reference internal" href="#group__io_1gaae230e1f71aa7243d882deff8ff4efcf"><span class="std std-ref">hipObjPutRdmaToken()</span></a>. <code class="docutils literal notranslate"><span class="pre">op</span></code> is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved). </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv411hipObjGetV2PKcPKcPv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv">
+<span id="_CPPv311hipObjGetV2PKcPKcPv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"></span><span id="_CPPv211hipObjGetV2PKcPKcPv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"></span><span id="hipObjGetV2__cCP.cCP.voidP.uint64_t.uint64_t.cCP.hipObjOpsV2_tP.voidP"></span><span class="target" id="group__io_1ga0c88e552606027800f61632f6d67b56f"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetV2</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">bucket</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">key</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">offset</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">query</span></span>, <a class="reference internal" href="#_CPPv413hipObjOpsV2_t" title="hipObjOpsV2_t"><span class="n"><span class="pre">hipObjOpsV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ops</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ctx</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv411hipObjGetV2PKcPKcPv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv" title="Link to this definition">#</a><br /></dt>
+<dd><p>V2 GET: download an object into a registered buffer. </p>
+<p>Runs the two-round-trip protocol (PREPARE, then READY whose response is FINAL) against the configured control endpoint. The transfer size is capped at 2^31-1 bytes; larger requests fail with hipObjSizeTooLarge. When the server answers PREPARE with 501 plus the protocol-unsupported marker the function returns hipObjNotSupported and the caller may fall back to plain HTTP; failures after READY are never retried or fallen back. The session lifetime is the function scope: on return the session is terminated and the connection quiesced. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv420hipObjParseRdmaReplyPKc6size_tPi">
+<span id="_CPPv320hipObjParseRdmaReplyPKc6size_tPi"></span><span id="_CPPv220hipObjParseRdmaReplyPKc6size_tPi"></span><span id="hipObjParseRdmaReply__cCP.s.iP"></span><span class="target" id="group__io_1ga3878729f7564208a6160f667aea8a500"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjParseRdmaReply</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">reply</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">replyLen</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">httpCode</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv420hipObjParseRdmaReplyPKc6size_tPi" title="Link to this definition">#</a><br /></dt>
+<dd><p>Parse an x-amz-rdma-reply header value. </p>
+<p>On success writes the HTTP-style reply code (200, 204, 206, 501) to <code class="docutils literal notranslate"><span class="pre">httpCode</span></code>. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv49hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv">
+<span id="_CPPv39hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv"></span><span id="_CPPv29hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv"></span><span id="hipObjPut__hipObjHandle_t.voidCP.s.off_t.hipObjOps_tP.voidP"></span><span class="target" id="group__io_1gaf3a2695bab90023d0d40967e48489ff5"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjPut</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjHandle_t" title="hipObjHandle_t"><span class="n"><span class="pre">hipObjHandle_t</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">handle</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="n"><span class="pre">off_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">offset</span></span>, <a class="reference internal" href="#_CPPv411hipObjOps_t" title="hipObjOps_t"><span class="n"><span class="pre">hipObjOps_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ops</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ctx</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv49hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv" title="Link to this definition">#</a><br /></dt>
+<dd><p>PUT: store a registered buffer to an S3 object via RDMA. </p>
+<p>The server performs an RDMA READ to pull data from the registered buffer.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>handle</strong> – S3 object handle (from application) </p></li>
+<li><p><strong>devPtr</strong> – Registered GPU or host buffer </p></li>
+<li><p><strong>size</strong> – Number of bytes to transfer </p></li>
+<li><p><strong>offset</strong> – Byte offset into the S3 object </p></li>
+<li><p><strong>ops</strong> – S3 SDK callbacks </p></li>
+<li><p><strong>ctx</strong> – User context passed to callbacks </p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv418hipObjPutRdmaTokenPc">
+<span id="_CPPv318hipObjPutRdmaTokenPc"></span><span id="_CPPv218hipObjPutRdmaTokenPc"></span><span id="hipObjPutRdmaToken__cP"></span><span class="target" id="group__io_1gaae230e1f71aa7243d882deff8ff4efcf"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjPutRdmaToken</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">token</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv418hipObjPutRdmaTokenPc" title="Link to this definition">#</a><br /></dt>
+<dd><p>Release a token allocated by <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a></p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv411hipObjPutV2PKcPKcPKv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv">
+<span id="_CPPv311hipObjPutV2PKcPKcPKv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"></span><span id="_CPPv211hipObjPutV2PKcPKcPKv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"></span><span id="hipObjPutV2__cCP.cCP.voidCP.uint64_t.uint64_t.cCP.hipObjOpsV2_tP.voidP"></span><span class="target" id="group__io_1ga8ed3acae5ea9bd1383509f6750ab64ae"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjPutV2</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">bucket</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">key</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">offset</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">query</span></span>, <a class="reference internal" href="#_CPPv413hipObjOpsV2_t" title="hipObjOpsV2_t"><span class="n"><span class="pre">hipObjOpsV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ops</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ctx</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv411hipObjPutV2PKcPKcPKv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv" title="Link to this definition">#</a><br /></dt>
+<dd><p>V2 PUT, same contract as hipObjGetV2. </p>
+</dd></dl>
+
+<dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv420hipObjTokenClientNicPKcPc6size_t">
+<span id="_CPPv320hipObjTokenClientNicPKcPc6size_t"></span><span id="_CPPv220hipObjTokenClientNicPKcPc6size_t"></span><span id="hipObjTokenClientNic__cCP.cP.s"></span><span class="target" id="group__io_1ga85ce7d367ff2f1fe671d1e41c37fb8f0"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjTokenClientNic</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">token</span></span>, <span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">nicIp</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">nicIpLen</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv420hipObjTokenClientNicPKcPc6size_t" title="Link to this definition">#</a><br /></dt>
+<dd><p>Extract client NIC IPv4 from a minted RDMA token. </p>
+<p>Writes a dotted-quad address into <code class="docutils literal notranslate"><span class="pre">nicIp</span></code> when the token GID carries an IPv4-mapped RoCEv2 suffix. Returns hipObjSuccess with an empty string when no address is encoded. </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_RDMA_OP_GET">
+<span class="target" id="group__io_1gae75c3983bec094549f79b5e5351e9b96"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_RDMA_OP_GET</span></span></span><a class="headerlink" href="#c.HIPOBJ_RDMA_OP_GET" title="Link to this definition">#</a><br /></dt>
+<dd><p>RDMA token operation: server RDMA WRITE (client GET) </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_RDMA_OP_PUT">
+<span class="target" id="group__io_1ga858db79a63fc3bb38be18fa686891d5b"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_RDMA_OP_PUT</span></span></span><a class="headerlink" href="#c.HIPOBJ_RDMA_OP_PUT" title="Link to this definition">#</a><br /></dt>
+<dd><p>RDMA token operation: server RDMA READ (client PUT) </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED">
+<span class="target" id="group__io_1ga2bdf23416134d66e9accd304d1bb632b"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED</span></span></span><a class="headerlink" href="#c.HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED" title="Link to this definition">#</a><br /></dt>
+<dd><p>x-amz-rdma-reply: server declined RDMA (HTTP fallback) </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_SYNC_TO_DEVICE">
+<span class="target" id="group__io_1ga70a027bd6a0c0fa5944f26743ed192f9"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_SYNC_TO_DEVICE</span></span></span><a class="headerlink" href="#c.HIPOBJ_SYNC_TO_DEVICE" title="Link to this definition">#</a><br /></dt>
+<dd><p>hipObjBufSync direction: staging buffer -&gt; device </p>
+</dd></dl>
+
+<dl class="cpp macro">
+<dt class="sig sig-object cpp" id="c.HIPOBJ_SYNC_TO_HOST">
+<span class="target" id="group__io_1ga5389a93e1a6cf22b11af69bb82491e0a"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_SYNC_TO_HOST</span></span></span><a class="headerlink" href="#c.HIPOBJ_SYNC_TO_HOST" title="Link to this definition">#</a><br /></dt>
+<dd><p>hipObjBufSync direction: device -&gt; staging buffer </p>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv420hipObjFinalReplyV2_t">
+<span id="_CPPv320hipObjFinalReplyV2_t"></span><span id="_CPPv220hipObjFinalReplyV2_t"></span><span id="hipObjFinalReplyV2_t"></span><span class="target" id="structhipObjFinalReplyV2__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjFinalReplyV2_t</span></span></span><a class="headerlink" href="#_CPPv420hipObjFinalReplyV2_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>FINAL response (the reply to READY) </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t5bytesE">
+<span id="_CPPv3N20hipObjFinalReplyV2_t5bytesE"></span><span id="_CPPv2N20hipObjFinalReplyV2_t5bytesE"></span><span id="hipObjFinalReplyV2_t::bytes__uint64_t"></span><span class="target" id="structhipObjFinalReplyV2__t_1ab2af0b8d7f3c2db5b0333e365d75307c"></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">bytes</span></span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t5bytesE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Bytes transferred per the server </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t11checksumB64E">
+<span id="_CPPv3N20hipObjFinalReplyV2_t11checksumB64E"></span><span id="_CPPv2N20hipObjFinalReplyV2_t11checksumB64E"></span><span id="hipObjFinalReplyV2_t::checksumB64__cA"></span><span class="target" id="structhipObjFinalReplyV2__t_1ac6628b0598ec8c1ecaeff2b36d3dd8f3"></span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">checksumB64</span></span></span><span class="p"><span class="pre">[</span></span><span class="m"><span class="pre">13</span></span><span class="p"><span class="pre">]</span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t11checksumB64E" title="Link to this definition">#</a><br /></dt>
+<dd><p>12-char canonical CRC64NVME base64 or empty </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t10cookieEchoE">
+<span id="_CPPv3N20hipObjFinalReplyV2_t10cookieEchoE"></span><span id="_CPPv2N20hipObjFinalReplyV2_t10cookieEchoE"></span><span id="hipObjFinalReplyV2_t::cookieEcho__uint32_t"></span><span class="target" id="structhipObjFinalReplyV2__t_1a932545283d5879dc963f34eeb03917c2"></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">cookieEcho</span></span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t10cookieEchoE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Must match the request cookie </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t13cookiePresentE">
+<span id="_CPPv3N20hipObjFinalReplyV2_t13cookiePresentE"></span><span id="_CPPv2N20hipObjFinalReplyV2_t13cookiePresentE"></span><span id="hipObjFinalReplyV2_t::cookiePresent__i"></span><span class="target" id="structhipObjFinalReplyV2__t_1ae1b8eedd04be6d6d4c856fa675766810"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">cookiePresent</span></span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t13cookiePresentE" title="Link to this definition">#</a><br /></dt>
+<dd><p>1 when the cookie echo header was present </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t4etagE">
+<span id="_CPPv3N20hipObjFinalReplyV2_t4etagE"></span><span id="_CPPv2N20hipObjFinalReplyV2_t4etagE"></span><span id="hipObjFinalReplyV2_t::etag__cA"></span><span class="target" id="structhipObjFinalReplyV2__t_1a711624044cda558fca085b36081429dc"></span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">etag</span></span></span><span class="p"><span class="pre">[</span></span><span class="m"><span class="pre">128</span></span><span class="p"><span class="pre">]</span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t4etagE" title="Link to this definition">#</a><br /></dt>
+<dd><p>S3 ETag when present, else empty </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t10httpStatusE">
+<span id="_CPPv3N20hipObjFinalReplyV2_t10httpStatusE"></span><span id="_CPPv2N20hipObjFinalReplyV2_t10httpStatusE"></span><span id="hipObjFinalReplyV2_t::httpStatus__i"></span><span class="target" id="structhipObjFinalReplyV2__t_1a6d6958cf294d5f920ce2c5085e301990"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">httpStatus</span></span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t10httpStatusE" title="Link to this definition">#</a><br /></dt>
+<dd><p>200 (GET) / 204 (PUT) / 5xx / 409 / 408 </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t12protocolEchoE">
+<span id="_CPPv3N20hipObjFinalReplyV2_t12protocolEchoE"></span><span id="_CPPv2N20hipObjFinalReplyV2_t12protocolEchoE"></span><span id="hipObjFinalReplyV2_t::protocolEcho__i"></span><span class="target" id="structhipObjFinalReplyV2__t_1a9099e1793e05d4fc77cde44a707f211a"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">protocolEcho</span></span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t12protocolEchoE" title="Link to this definition">#</a><br /></dt>
+<dd><p>1 when the protocol echo header was present </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N20hipObjFinalReplyV2_t9versionIdE">
+<span id="_CPPv3N20hipObjFinalReplyV2_t9versionIdE"></span><span id="_CPPv2N20hipObjFinalReplyV2_t9versionIdE"></span><span id="hipObjFinalReplyV2_t::versionId__cA"></span><span class="target" id="structhipObjFinalReplyV2__t_1a27d7eaeccd54f29f1d2ff44dfbc18ce3"></span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">versionId</span></span></span><span class="p"><span class="pre">[</span></span><span class="m"><span class="pre">128</span></span><span class="p"><span class="pre">]</span></span><a class="headerlink" href="#_CPPv4N20hipObjFinalReplyV2_t9versionIdE" title="Link to this definition">#</a><br /></dt>
+<dd><p>S3 version id when present, else empty </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv411hipObjOpsV2">
+<span id="_CPPv311hipObjOpsV2"></span><span id="_CPPv211hipObjOpsV2"></span><span id="hipObjOpsV2"></span><span class="target" id="structhipObjOpsV2"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjOpsV2</span></span></span><a class="headerlink" href="#_CPPv411hipObjOpsV2" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>Phase-aware callbacks for the v2 control protocol. </p>
+<p>Each send* callback performs one complete HTTP round trip on the control endpoint and fills <code class="docutils literal notranslate"><span class="pre">out</span></code> from the response. All callbacks are required for v2 transfers. The v1 member is unused by the v2 entry points and is kept for structural forward compatibility. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N11hipObjOpsV210sendCancelE">
+<span id="_CPPv3N11hipObjOpsV210sendCancelE"></span><span id="_CPPv2N11hipObjOpsV210sendCancelE"></span><span class="target" id="structhipObjOpsV2_1a6482cabf8d7930bd1b187c4b49b4d345"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">sendCancel</span></span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">(</span></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">ctx</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv421hipObjTransferReqV2_t" title="hipObjTransferReqV2_t"><span class="n"><span class="pre">hipObjTransferReqV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">req</span></span><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N11hipObjOpsV210sendCancelE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Issue CANCEL (idempotent). Only the HTTP status matters. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N11hipObjOpsV211sendPrepareE">
+<span id="_CPPv3N11hipObjOpsV211sendPrepareE"></span><span id="_CPPv2N11hipObjOpsV211sendPrepareE"></span><span class="target" id="structhipObjOpsV2_1ab401d64ad52f844dcd1e64c201d879d9"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">sendPrepare</span></span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">(</span></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">ctx</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv421hipObjTransferReqV2_t" title="hipObjTransferReqV2_t"><span class="n"><span class="pre">hipObjTransferReqV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">req</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv422hipObjPrepareReplyV2_t" title="hipObjPrepareReplyV2_t"><span class="n"><span class="pre">hipObjPrepareReplyV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out</span></span><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N11hipObjOpsV211sendPrepareE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Issue PREPARE; out is filled from the response headers. </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N11hipObjOpsV29sendReadyE">
+<span id="_CPPv3N11hipObjOpsV29sendReadyE"></span><span id="_CPPv2N11hipObjOpsV29sendReadyE"></span><span class="target" id="structhipObjOpsV2_1a2c78eee84cbcf6f7447fc719b4a87122"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">(</span></span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">sendReady</span></span></span><span class="p"><span class="pre">)</span></span><span class="p"><span class="pre">(</span></span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">ctx</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="k"><span class="pre">const</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv421hipObjTransferReqV2_t" title="hipObjTransferReqV2_t"><span class="n"><span class="pre">hipObjTransferReqV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">req</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv420hipObjFinalReplyV2_t" title="hipObjFinalReplyV2_t"><span class="n"><span class="pre">hipObjFinalReplyV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">out</span></span><span class="p"><span class="pre">)</span></span><a class="headerlink" href="#_CPPv4N11hipObjOpsV29sendReadyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Issue READY; the response is FINAL. out reflects it. </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv422hipObjPrepareReplyV2_t">
+<span id="_CPPv322hipObjPrepareReplyV2_t"></span><span id="_CPPv222hipObjPrepareReplyV2_t"></span><span id="hipObjPrepareReplyV2_t"></span><span class="target" id="structhipObjPrepareReplyV2__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjPrepareReplyV2_t</span></span></span><a class="headerlink" href="#_CPPv422hipObjPrepareReplyV2_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>Response to PREPARE. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N22hipObjPrepareReplyV2_t10httpStatusE">
+<span id="_CPPv3N22hipObjPrepareReplyV2_t10httpStatusE"></span><span id="_CPPv2N22hipObjPrepareReplyV2_t10httpStatusE"></span><span id="hipObjPrepareReplyV2_t::httpStatus__i"></span><span class="target" id="structhipObjPrepareReplyV2__t_1ad623586671372a80030359428657133a"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">httpStatus</span></span></span><a class="headerlink" href="#_CPPv4N22hipObjPrepareReplyV2_t10httpStatusE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Status code (200/501/403/413/503/500) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N22hipObjPrepareReplyV2_t12protocolEchoE">
+<span id="_CPPv3N22hipObjPrepareReplyV2_t12protocolEchoE"></span><span id="_CPPv2N22hipObjPrepareReplyV2_t12protocolEchoE"></span><span id="hipObjPrepareReplyV2_t::protocolEcho__i"></span><span class="target" id="structhipObjPrepareReplyV2__t_1a16f25f352567b018ee6f8eb9567dc034"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">protocolEcho</span></span></span><a class="headerlink" href="#_CPPv4N22hipObjPrepareReplyV2_t12protocolEchoE" title="Link to this definition">#</a><br /></dt>
+<dd><p>1 when X-Amz-Rdma-Protocol: hipobj-rc-v2 seen </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N22hipObjPrepareReplyV2_t9serverPsnE">
+<span id="_CPPv3N22hipObjPrepareReplyV2_t9serverPsnE"></span><span id="_CPPv2N22hipObjPrepareReplyV2_t9serverPsnE"></span><span id="hipObjPrepareReplyV2_t::serverPsn__uint32_t"></span><span class="target" id="structhipObjPrepareReplyV2__t_1a1ff3d28e4bc29d7a99b0f988bb6a7c08"></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">serverPsn</span></span></span><a class="headerlink" href="#_CPPv4N22hipObjPrepareReplyV2_t9serverPsnE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Server PSN, 1..0xffffff (0 = invalid) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N22hipObjPrepareReplyV2_t11serverTokenE">
+<span id="_CPPv3N22hipObjPrepareReplyV2_t11serverTokenE"></span><span id="_CPPv2N22hipObjPrepareReplyV2_t11serverTokenE"></span><span id="hipObjPrepareReplyV2_t::serverToken__cA"></span><span class="target" id="structhipObjPrepareReplyV2__t_1a17233b5f0f7ea3756f6b71d2f4a95325"></span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">serverToken</span></span></span><span class="p"><span class="pre">[</span></span><span class="m"><span class="pre">97</span></span><span class="p"><span class="pre">]</span></span><a class="headerlink" href="#_CPPv4N22hipObjPrepareReplyV2_t11serverTokenE" title="Link to this definition">#</a><br /></dt>
+<dd><p>88-hex peer token + NUL </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N22hipObjPrepareReplyV2_t7sessionE">
+<span id="_CPPv3N22hipObjPrepareReplyV2_t7sessionE"></span><span id="_CPPv2N22hipObjPrepareReplyV2_t7sessionE"></span><span id="hipObjPrepareReplyV2_t::session__cA"></span><span class="target" id="structhipObjPrepareReplyV2__t_1a7ab62d0adb9d31dbc7d2cb41423675a9"></span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">session</span></span></span><span class="p"><span class="pre">[</span></span><span class="m"><span class="pre">65</span></span><span class="p"><span class="pre">]</span></span><a class="headerlink" href="#_CPPv4N22hipObjPrepareReplyV2_t7sessionE" title="Link to this definition">#</a><br /></dt>
+<dd><p>32-hex session id + NUL </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N22hipObjPrepareReplyV2_t17unsupportedMarkerE">
+<span id="_CPPv3N22hipObjPrepareReplyV2_t17unsupportedMarkerE"></span><span id="_CPPv2N22hipObjPrepareReplyV2_t17unsupportedMarkerE"></span><span id="hipObjPrepareReplyV2_t::unsupportedMarker__i"></span><span class="target" id="structhipObjPrepareReplyV2__t_1afecf8a9c60e044245af1dd843b1ef884"></span><span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">unsupportedMarker</span></span></span><a class="headerlink" href="#_CPPv4N22hipObjPrepareReplyV2_t17unsupportedMarkerE" title="Link to this definition">#</a><br /></dt>
+<dd><p>1 when the explicit unsupported marker seen </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+<dl class="cpp struct">
+<dt class="sig sig-object cpp" id="_CPPv421hipObjTransferReqV2_t">
+<span id="_CPPv321hipObjTransferReqV2_t"></span><span id="_CPPv221hipObjTransferReqV2_t"></span><span id="hipObjTransferReqV2_t"></span><span class="target" id="structhipObjTransferReqV2__t"></span><span class="k"><span class="pre">struct</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjTransferReqV2_t</span></span></span><a class="headerlink" href="#_CPPv421hipObjTransferReqV2_t" title="Link to this definition">#</a><br /></dt>
+<dd><div class="docutils container">
+<em>#include &lt;hipobj.h&gt;</em></div>
+<p>Per-transfer request description for the v2 phases. </p>
+<p>Borrow contract: string fields are owned by the library and remain valid for the duration of a single callback invocation. Callbacks are synchronous (they return before the library continues) and must copy anything they need to keep. </p>
+<div class="breathe-sectiondef docutils container">
+<p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t6bucketE">
+<span id="_CPPv3N21hipObjTransferReqV2_t6bucketE"></span><span id="_CPPv2N21hipObjTransferReqV2_t6bucketE"></span><span id="hipObjTransferReqV2_t::bucket__cCP"></span><span class="target" id="structhipObjTransferReqV2__t_1a35c5e3c81dfb4358c60736ffece14d24"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">bucket</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t6bucketE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Object bucket </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t9clientPsnE">
+<span id="_CPPv3N21hipObjTransferReqV2_t9clientPsnE"></span><span id="_CPPv2N21hipObjTransferReqV2_t9clientPsnE"></span><span id="hipObjTransferReqV2_t::clientPsn__uint32_t"></span><span class="target" id="structhipObjTransferReqV2__t_1a0b272244cd4f2d5ae28fcaf59ae5294e"></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">clientPsn</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t9clientPsnE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Client PSN, 1..0xffffff (library generates) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t6cookieE">
+<span id="_CPPv3N21hipObjTransferReqV2_t6cookieE"></span><span id="_CPPv2N21hipObjTransferReqV2_t6cookieE"></span><span id="hipObjTransferReqV2_t::cookie__uint32_t"></span><span class="target" id="structhipObjTransferReqV2__t_1a8a0f09c623ba54b6f417d22d1c039f5c"></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">cookie</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t6cookieE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Client cookie (library generates) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t8endpointE">
+<span id="_CPPv3N21hipObjTransferReqV2_t8endpointE"></span><span id="_CPPv2N21hipObjTransferReqV2_t8endpointE"></span><span id="hipObjTransferReqV2_t::endpoint__hipObjControlEndpointV2_tCP"></span><span class="target" id="structhipObjTransferReqV2__t_1a99b59966e7b1576d2fff36bba805b23d"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><a class="reference internal" href="#_CPPv425hipObjControlEndpointV2_t" title="hipObjControlEndpointV2_t"><span class="n"><span class="pre">hipObjControlEndpointV2_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">endpoint</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t8endpointE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Control endpoint (library sets from init) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t3keyE">
+<span id="_CPPv3N21hipObjTransferReqV2_t3keyE"></span><span id="_CPPv2N21hipObjTransferReqV2_t3keyE"></span><span id="hipObjTransferReqV2_t::key__cCP"></span><span class="target" id="structhipObjTransferReqV2__t_1af86600373a71586dec37f4122c2749e5"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">key</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t3keyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Object key </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t6methodE">
+<span id="_CPPv3N21hipObjTransferReqV2_t6methodE"></span><span id="_CPPv2N21hipObjTransferReqV2_t6methodE"></span><span id="hipObjTransferReqV2_t::method__cCP"></span><span class="target" id="structhipObjTransferReqV2__t_1ae7b0738888bdb5be9fcded081f9d5d4f"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">method</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t6methodE" title="Link to this definition">#</a><br /></dt>
+<dd><p>“GET” or “PUT” </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t6offsetE">
+<span id="_CPPv3N21hipObjTransferReqV2_t6offsetE"></span><span id="_CPPv2N21hipObjTransferReqV2_t6offsetE"></span><span id="hipObjTransferReqV2_t::offset__uint64_t"></span><span class="target" id="structhipObjTransferReqV2__t_1a5d482b7281f8352325d283ae9a971da0"></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">offset</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t6offsetE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Byte offset into the object </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t5queryE">
+<span id="_CPPv3N21hipObjTransferReqV2_t5queryE"></span><span id="_CPPv2N21hipObjTransferReqV2_t5queryE"></span><span id="hipObjTransferReqV2_t::query__cCP"></span><span class="target" id="structhipObjTransferReqV2__t_1acf0de066e62642d262e1ababbe8c051b"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">query</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t5queryE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Canonical query string or NULL </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t7sessionE">
+<span id="_CPPv3N21hipObjTransferReqV2_t7sessionE"></span><span id="_CPPv2N21hipObjTransferReqV2_t7sessionE"></span><span id="hipObjTransferReqV2_t::session__cCP"></span><span class="target" id="structhipObjTransferReqV2__t_1af623ca7d37df29509c6f004891a038f5"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">session</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t7sessionE" title="Link to this definition">#</a><br /></dt>
+<dd><p>READY/cancel: session id (library sets) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t4sizeE">
+<span id="_CPPv3N21hipObjTransferReqV2_t4sizeE"></span><span id="_CPPv2N21hipObjTransferReqV2_t4sizeE"></span><span id="hipObjTransferReqV2_t::size__uint64_t"></span><span class="target" id="structhipObjTransferReqV2__t_1a4eb9b7dc50d5b564800ad4e0e1291b72"></span><span class="n"><span class="pre">uint64_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">size</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t4sizeE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Transfer size in bytes </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t6targetE">
+<span id="_CPPv3N21hipObjTransferReqV2_t6targetE"></span><span id="_CPPv2N21hipObjTransferReqV2_t6targetE"></span><span id="hipObjTransferReqV2_t::target__cCP"></span><span class="target" id="structhipObjTransferReqV2__t_1a67011d5c656d1d8175d4144c00a1dd0f"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">target</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t6targetE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Canonical rdma-target value (library sets) </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N21hipObjTransferReqV2_t5tokenE">
+<span id="_CPPv3N21hipObjTransferReqV2_t5tokenE"></span><span id="_CPPv2N21hipObjTransferReqV2_t5tokenE"></span><span id="hipObjTransferReqV2_t::token__cCP"></span><span class="target" id="structhipObjTransferReqV2__t_1a680628b6592335681e39f4d326f01208"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">token</span></span></span><a class="headerlink" href="#_CPPv4N21hipObjTransferReqV2_t5tokenE" title="Link to this definition">#</a><br /></dt>
+<dd><p>88-hex RDMA token </p>
+</dd></dl>
+
+</div>
+</dd></dl>
+
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="interop.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">hipObject cuObject Interoperability</p>
+      </div>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#core-functionality">Core Functionality</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjHandle_t"><code class="docutils literal notranslate"><span class="pre">hipObjHandle_t</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv422hipObjGetVersionStringv"><code class="docutils literal notranslate"><span class="pre">hipObjGetVersionString()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv410hipObjInitP14hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjShutdownv"><code class="docutils literal notranslate"><span class="pre">hipObjShutdown()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MAJOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MAJOR</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MINOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MINOR</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_PATCH"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_PATCH</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9accessKeyE"><code class="docutils literal notranslate"><span class="pre">accessKey</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t5flagsE"><code class="docutils literal notranslate"><span class="pre">flags</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9gpuDeviceE"><code class="docutils literal notranslate"><span class="pre">gpuDevice</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t7nicHintE"><code class="docutils literal notranslate"><span class="pre">nicHint</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t6regionE"><code class="docutils literal notranslate"><span class="pre">region</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9secretKeyE"><code class="docutils literal notranslate"><span class="pre">secretKey</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv416hipObjConfigV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfigV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N16hipObjConfigV2_t7controlE"><code class="docutils literal notranslate"><span class="pre">control</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N16hipObjConfigV2_t2v1E"><code class="docutils literal notranslate"><span class="pre">v1</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv425hipObjControlEndpointV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjControlEndpointV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N25hipObjControlEndpointV2_t15controlEndpointE"><code class="docutils literal notranslate"><span class="pre">controlEndpoint</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOps_t"><code class="docutils literal notranslate"><span class="pre">hipObjOps_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t9recvReplyE"><code class="docutils literal notranslate"><span class="pre">recvReply</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t11sendRequestE"><code class="docutils literal notranslate"><span class="pre">sendRequest</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#errors-and-error-handling">Errors and Error Handling</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv415hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpError_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjSuccessE"><code class="docutils literal notranslate"><span class="pre">hipObjSuccess</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t18hipObjInvalidValueE"><code class="docutils literal notranslate"><span class="pre">hipObjInvalidValue</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t20hipObjNotInitializedE"><code class="docutils literal notranslate"><span class="pre">hipObjNotInitialized</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t24hipObjAlreadyInitializedE"><code class="docutils literal notranslate"><span class="pre">hipObjAlreadyInitialized</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t15hipObjRdmaErrorE"><code class="docutils literal notranslate"><span class="pre">hipObjRdmaError</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjS3ErrorE"><code class="docutils literal notranslate"><span class="pre">hipObjS3Error</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t22hipObjBufNotRegisteredE"><code class="docutils literal notranslate"><span class="pre">hipObjBufNotRegistered</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t26hipObjBufAlreadyRegisteredE"><code class="docutils literal notranslate"><span class="pre">hipObjBufAlreadyRegistered</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t17hipObjNicNotFoundE"><code class="docutils literal notranslate"><span class="pre">hipObjNicNotFound</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t24hipObjDmabufNotSupportedE"><code class="docutils literal notranslate"><span class="pre">hipObjDmabufNotSupported</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t18hipObjSizeTooLargeE"><code class="docutils literal notranslate"><span class="pre">hipObjSizeTooLarge</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t19hipObjInternalErrorE"><code class="docutils literal notranslate"><span class="pre">hipObjInternalError</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t18hipObjNotSupportedE"><code class="docutils literal notranslate"><span class="pre">hipObjNotSupported</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t10hipObjBusyE"><code class="docutils literal notranslate"><span class="pre">hipObjBusy</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjGetErrorString15hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjGetErrorString()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_BASE_ERR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BASE_ERR</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv413hipObjError_t"><code class="docutils literal notranslate"><span class="pre">hipObjError_t</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#buffer-registration">Buffer Registration</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv419hipObjBufDeregisterPv"><code class="docutils literal notranslate"><span class="pre">hipObjBufDeregister()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv417hipObjBufRegisterPv6size_t"><code class="docutils literal notranslate"><span class="pre">hipObjBufRegister()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv421hipObjBufRegisterHostPv6size_t"><code class="docutils literal notranslate"><span class="pre">hipObjBufRegisterHost()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-transfer-get-put">Data Transfer (GET / PUT)</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv413hipObjOpsV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpsV2_t</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv413hipObjBufSyncPv6size_t5off_ti"><code class="docutils literal notranslate"><span class="pre">hipObjBufSync()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv49hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjGet()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv418hipObjGetRdmaTokenPKv6size_tiPPc"><code class="docutils literal notranslate"><span class="pre">hipObjGetRdmaToken()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjGetV2PKcPKcPv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjGetV2()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjParseRdmaReplyPKc6size_tPi"><code class="docutils literal notranslate"><span class="pre">hipObjParseRdmaReply()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv49hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjPut()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv418hipObjPutRdmaTokenPc"><code class="docutils literal notranslate"><span class="pre">hipObjPutRdmaToken()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjPutV2PKcPKcPKv8uint64_t8uint64_tPKcP13hipObjOpsV2_tPv"><code class="docutils literal notranslate"><span class="pre">hipObjPutV2()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjTokenClientNicPKcPc6size_t"><code class="docutils literal notranslate"><span class="pre">hipObjTokenClientNic()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_RDMA_OP_GET"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_RDMA_OP_GET</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_RDMA_OP_PUT"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_RDMA_OP_PUT</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_RDMA_REPLY_NOT_IMPLEMENTED</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_SYNC_TO_DEVICE"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_SYNC_TO_DEVICE</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_SYNC_TO_HOST"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_SYNC_TO_HOST</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv420hipObjFinalReplyV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjFinalReplyV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t5bytesE"><code class="docutils literal notranslate"><span class="pre">bytes</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t11checksumB64E"><code class="docutils literal notranslate"><span class="pre">checksumB64</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t10cookieEchoE"><code class="docutils literal notranslate"><span class="pre">cookieEcho</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t13cookiePresentE"><code class="docutils literal notranslate"><span class="pre">cookiePresent</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t4etagE"><code class="docutils literal notranslate"><span class="pre">etag</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t10httpStatusE"><code class="docutils literal notranslate"><span class="pre">httpStatus</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t12protocolEchoE"><code class="docutils literal notranslate"><span class="pre">protocolEcho</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N20hipObjFinalReplyV2_t9versionIdE"><code class="docutils literal notranslate"><span class="pre">versionId</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOpsV2"><code class="docutils literal notranslate"><span class="pre">hipObjOpsV2</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOpsV210sendCancelE"><code class="docutils literal notranslate"><span class="pre">sendCancel</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOpsV211sendPrepareE"><code class="docutils literal notranslate"><span class="pre">sendPrepare</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOpsV29sendReadyE"><code class="docutils literal notranslate"><span class="pre">sendReady</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv422hipObjPrepareReplyV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjPrepareReplyV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t10httpStatusE"><code class="docutils literal notranslate"><span class="pre">httpStatus</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t12protocolEchoE"><code class="docutils literal notranslate"><span class="pre">protocolEcho</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t9serverPsnE"><code class="docutils literal notranslate"><span class="pre">serverPsn</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t11serverTokenE"><code class="docutils literal notranslate"><span class="pre">serverToken</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t7sessionE"><code class="docutils literal notranslate"><span class="pre">session</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N22hipObjPrepareReplyV2_t17unsupportedMarkerE"><code class="docutils literal notranslate"><span class="pre">unsupportedMarker</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv421hipObjTransferReqV2_t"><code class="docutils literal notranslate"><span class="pre">hipObjTransferReqV2_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6bucketE"><code class="docutils literal notranslate"><span class="pre">bucket</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t9clientPsnE"><code class="docutils literal notranslate"><span class="pre">clientPsn</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6cookieE"><code class="docutils literal notranslate"><span class="pre">cookie</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t3keyE"><code class="docutils literal notranslate"><span class="pre">key</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6methodE"><code class="docutils literal notranslate"><span class="pre">method</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6offsetE"><code class="docutils literal notranslate"><span class="pre">offset</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t5queryE"><code class="docutils literal notranslate"><span class="pre">query</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t7sessionE"><code class="docutils literal notranslate"><span class="pre">session</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t4sizeE"><code class="docutils literal notranslate"><span class="pre">size</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t6targetE"><code class="docutils literal notranslate"><span class="pre">target</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N21hipObjTransferReqV2_t5tokenE"><code class="docutils literal notranslate"><span class="pre">token</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Advanced Micro Devices, Inc.
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2025-2026 Advanced Micro Devices, Inc. All rights reserved..
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
