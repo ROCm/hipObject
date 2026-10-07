@@ -9,6 +9,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 namespace hipObj {
 namespace v2 {

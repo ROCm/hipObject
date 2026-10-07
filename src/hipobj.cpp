@@ -9,7 +9,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include "control.h"
 #include "hip-seam.h"
 #include "hipobj-private.h"
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "rdma-topology.h"
 #include "state.h"

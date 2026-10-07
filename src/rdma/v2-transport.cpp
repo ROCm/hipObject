@@ -7,14 +7,12 @@
 #include "v2-transport.h"
 
 #include <atomic>
-#include <cerrno>
 #include <cstring>
 #include <utility>
 
 #include <arpa/inet.h>
 
 #include "ibv-wrapper.h"
-#include "transport.h"
 #include "vendor-ops.h"
 
 namespace hipObj {

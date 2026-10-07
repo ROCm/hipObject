@@ -7,8 +7,8 @@
 #include "v2_request.h"
 
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
+#include <utility>
 
 namespace hipObj {
 namespace v2 {

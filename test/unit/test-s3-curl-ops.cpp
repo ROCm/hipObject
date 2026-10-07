@@ -6,16 +6,17 @@
  * Unit tests for the example S3 curl helper (s3_curl_ops).
  */
 
-#include <errno.h>
-#include <stdio.h>
-#include <string.h>
-
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <arpa/inet.h>
 #include <curl/curl.h>

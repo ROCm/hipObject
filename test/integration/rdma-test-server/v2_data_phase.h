@@ -19,14 +19,15 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
-#include <string>
 
 #include "../../../src/common/ibv-core.h"
-#include "v2_session.h"
 
 namespace hipObj {
 namespace v2 {
+
+    struct V2Session;
 
     /* Outcome of one data-phase execution. */
     enum class DataPhaseResult {

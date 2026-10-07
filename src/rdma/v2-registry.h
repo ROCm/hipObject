@@ -36,10 +36,10 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "ibv-core.h"
-#include "v2-clock.h"
 
 namespace hipObj {
 
@@ -60,9 +60,6 @@ namespace v2 {
     constexpr int kReleaseLeftover = 2;
 
     using ConnId = uint64_t;
-
-    /* Protocol phase tracked per entry (v2-state machine). */
-    enum class Phase : uint8_t;
 
     struct ConnectionEntryV2 {
         RcConnV2      conn;

@@ -15,15 +15,14 @@
 #include <ctime>
 #include <map>
 #include <string>
+#include <utility>
 
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
 #include <netdb.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define HIPOBJ_REAL_VERBS 1
 #include "../../../src/rdma/token.h"
 #include "v2_sigv4.h"
 

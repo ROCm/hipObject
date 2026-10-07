@@ -11,7 +11,6 @@
 #include <cctype>
 #include <cinttypes>
 #include <cstdio>
-#include <cstring>
 
 namespace hipObj {
 namespace v2 {

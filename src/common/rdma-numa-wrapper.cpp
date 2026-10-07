@@ -7,8 +7,6 @@
 
 #include "rdma-numa-wrapper.h"
 
-#include <cstddef>
-
 #include <dlfcn.h>
 
 namespace hipObj {

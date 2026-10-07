@@ -15,6 +15,7 @@
  * harness validates the control semantics: session creation, cookie
  * echo, error statuses, cancel idempotency. */
 
+#include <cctype>
 #include <cerrno>
 #include <charconv>
 #include <cinttypes>
@@ -27,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>

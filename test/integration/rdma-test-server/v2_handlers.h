@@ -16,18 +16,21 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <map>
-#include <memory>
 #include <string>
 #include <thread>
 
-#include "v2_backend.h"
-#include "v2_request.h"
 #include "v2_session.h"
-#include "v2_sigv4.h"
 
 namespace hipObj {
 namespace v2 {
+
+    class MemoryBackend;
+    class SigV4Verifier;
+    struct CancelRequest;
+    struct PrepareRequest;
+    struct ReadyRequest;
 
     struct ServerConfig {
         uint64_t tPrepMs = 10000;

@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <cstring>
+#include <cstdint>
 
 #include "ibv-core.h"
-#include "ibv-wrapper.h"
 #include "vendor-ops.h"
 
 namespace hipObj {

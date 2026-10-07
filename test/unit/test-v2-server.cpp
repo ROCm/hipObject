@@ -6,8 +6,12 @@
  * Unit tests for the server-side v2 request parsers and session
  * table state machine (no RDMA hardware; transitions only). */
 
+#include <cstdint>
+#include <initializer_list>
 #include <map>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include <gtest/gtest.h>
 

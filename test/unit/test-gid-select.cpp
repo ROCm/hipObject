@@ -6,7 +6,6 @@
  * GID table entries are built in memory.
  */
 
-#include <cstring>
 #include <vector>
 
 #include <gtest/gtest.h>

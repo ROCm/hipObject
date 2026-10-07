@@ -8,8 +8,6 @@
 #include <cstdint>
 #include <string>
 
-#include "hipobj.h"
-
 namespace hipObj {
 
 struct DriverState {

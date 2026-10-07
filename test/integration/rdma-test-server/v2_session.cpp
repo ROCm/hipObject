@@ -8,6 +8,8 @@
 
 #include <utility>
 
+#include "v2-clock.h"
+
 namespace hipObj {
 namespace v2 {
 

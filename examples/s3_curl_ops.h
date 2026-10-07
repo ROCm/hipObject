@@ -7,8 +7,6 @@
 
 #include <stddef.h>
 
-#include "hipobj.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
