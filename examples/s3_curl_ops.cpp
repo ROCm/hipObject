@@ -14,6 +14,10 @@
 
 #include <curl/curl.h>
 
+// curl.h defines curl_easy_setopt() and curl_easy_getinfo() as macros that
+// expand to themselves, which trips -Wdisabled-macro-expansion. Calls below
+// parenthesize the function name to bypass the macro and call the function.
+
 namespace {
 
 struct HeaderState {
@@ -70,7 +74,7 @@ long
 responseCode(CURL *curl)
 {
     long code = 0;
-    if (curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code) != CURLE_OK) {
+    if ((curl_easy_getinfo)(curl, CURLINFO_RESPONSE_CODE, &code) != CURLE_OK) {
         return -1;
     }
     return code;
@@ -102,11 +106,11 @@ hipObjS3CurlSendRequest(void *ctx, const char *token, size_t tokenLen)
     HeaderState state{cfg};
     cfg->lastReply[0] = '\0';
 
-    curl_easy_setopt(curl, CURLOPT_URL, buildUrl(cfg).c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, cfg->isPut ? "PUT" : "GET");
-    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
-    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &state);
+    (curl_easy_setopt)(curl, CURLOPT_URL, buildUrl(cfg).c_str());
+    (curl_easy_setopt)(curl, CURLOPT_HTTPHEADER, headers);
+    (curl_easy_setopt)(curl, CURLOPT_CUSTOMREQUEST, cfg->isPut ? "PUT" : "GET");
+    (curl_easy_setopt)(curl, CURLOPT_HEADERFUNCTION, headerCallback);
+    (curl_easy_setopt)(curl, CURLOPT_HEADERDATA, &state);
 
     CURLcode   rc       = curl_easy_perform(curl);
     const long httpCode = rc == CURLE_OK ? responseCode(curl) : -1;

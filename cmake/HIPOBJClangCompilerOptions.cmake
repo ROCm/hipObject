@@ -99,7 +99,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wctad-maybe-unsupported
     -Wdate-time
     -Wdirect-ivar-access
-    #-Wdisabled-macro-expansion # TODO: Fix diagnostics and re-enable
+    -Wdisabled-macro-expansion
     -Wdouble-promotion
     -Wdtor-name
     -Wduplicate-enum
