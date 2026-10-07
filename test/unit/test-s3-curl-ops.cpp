@@ -338,7 +338,6 @@ public:
         if (rc != CURLE_OK) {
             initialized_ = false;
             FAIL() << "curl_global_init failed: " << static_cast<int>(rc);
-            return;
         }
         initialized_ = true;
     }

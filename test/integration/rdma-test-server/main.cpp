@@ -156,7 +156,6 @@ main(int argc, char *argv[])
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(3600));
         }
-        return 0;
     }
 #else
     if (v2Mode) {
@@ -292,5 +291,4 @@ main(int argc, char *argv[])
     for (;;) {
         std::this_thread::sleep_for(std::chrono::seconds(3600));
     }
-    return 0;
 }
