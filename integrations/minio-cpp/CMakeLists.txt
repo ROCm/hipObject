@@ -85,7 +85,8 @@ target_link_libraries(minio-getput-rdma PRIVATE
 # hipobj_minio is build-only. Its headers include minio-cpp's headers
 # and it links minio-cpp publicly, but minio-cpp and the curlpp and
 # inih libraries we build for it aren't installed, so an installed
-# archive and headers would be unusable. The example links everything
-# statically, so it can be installed on its own.
+# archive and headers would be unusable. The example links those
+# statically, so it only needs libhipobj at run time when hipobj is a
+# shared library.
 install(TARGETS minio-getput-rdma
   RUNTIME DESTINATION bin/hipobj-examples)
