@@ -131,7 +131,7 @@ if(HIPOBJECT_V2_API)
     if(HAVE_IBVERBS_HEADER AND HAVE_IBVERBS_DEVICE EQUAL 0)
       add_test(NAME v2-data-e2e
         COMMAND ${BASH_BIN} -c
-          "$<TARGET_FILE:hipobj-rdma-test-server> --v2 --port 19601 --v2-access-key hipobj-test-key --v2-secret-key hipobj-test-secret 2>/dev/null &
+          "$<TARGET_FILE:hipobj-rdma-test-server> --v2 19601 --v2-access-key hipobj-test-key --v2-secret-key hipobj-test-secret 2>/dev/null &
           srv=$!;
           sleep 1;
           $<TARGET_FILE:v2-data-client> 127.0.0.1 19601 PUT /bucket/seed64k 64 &&
