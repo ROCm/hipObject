@@ -1,8 +1,24 @@
 name: hipObject - MinIO Integration Check
 
 on:
+  # What this lane adds is the examples' S3 control plane against a real
+  # MinIO, so it gates on what builds the library and the examples. The
+  # unit tests it also runs are the Build lane's job, so test-only changes
+  # are left to that. Negations must come last: the last pattern a file
+  # matches decides whether it counts.
   pull_request:
     branches: [develop]
+    paths:
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "examples/**"
+      - "include/**"
+      - "shared/**"
+      - "src/**"
+      - ".github/workflows/hipobject-minio-integration-check.yml"
+      - "!cmake/HIPOBJClangTidy.cmake"
+      - "!cmake/HIPOBJDocumentation.cmake"
+      - "!**/*.md"
   workflow_dispatch:
 
 concurrency:

@@ -36,15 +36,42 @@ on:
   # PR-gated and manual only. Nothing reaches develop without passing
   # this on the PR, so a second post-merge run would buy nothing but
   # queue time.
+  #
+  # The paths are what this lane builds and runs, so a change it cannot
+  # observe doesn't spend VM time. Unit, header and install tests,
+  # examples, the BNXT provider (built OFF here), docs, Clang options
+  # (this lane builds with GCC), and the CMake modules for packaging or
+  # opt-in tooling never reach this lane's binaries; other lanes cover
+  # them. Negations must come last: the last pattern a file matches
+  # decides whether it counts.
   pull_request:
     branches: [develop]
     paths:
-      - "src/**"
+      - "CMakeLists.txt"
+      - "cmake/HIPOBJAddExecutable.cmake"
+      - "cmake/HIPOBJAddLibraries.cmake"
+      - "cmake/HIPOBJCompilerOptions.cmake"
+      - "cmake/HIPOBJFortifySource.cmake"
+      - "cmake/HIPOBJGNUCompilerOptions.cmake"
+      - "cmake/HIPOBJMinioCppDeps.cmake"
+      - "cmake/HIPOBJSystemIncludes.cmake"
+      - "cmake/HIPOBJUseROCmCMake.cmake"
+      - "cmake/minio-deps/**"
       - "include/**"
-      - "test/**"
-      - "integrations/**"
-      - "ci/ernic/**"
+      - "integrations/minio-cpp/**"
+      - "shared/**"
+      - "src/**"
+      - "test/CMakeLists.txt"
+      - "test/integration/CMakeLists.txt"
+      - "test/integration/rdma-test-server/**"
+      - "ci/ernic/assert-transfer.sh"
+      - "ci/ernic/client-entrypoint.sh"
+      - "ci/ernic/server-entrypoint.sh"
+      - ".github/actions/fetch-guest-vm/**"
       - ".github/workflows/hipobject-hardware-test-two-vm-gpu-direct.yml"
+      - "!src/rdma/bnxt/**"
+      - "!test/integration/rdma-test-server/run-v2-e2e.sh"
+      - "!**/*.md"
   workflow_dispatch:
 
 concurrency:
