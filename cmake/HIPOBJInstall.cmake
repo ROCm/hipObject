@@ -7,25 +7,24 @@
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+# Let the installed library find libamdhip64 and libhsa-runtime64 even
+# when they aren't in the loader's search path:
+#   - $ORIGIN/../lib finds them when hipObject is installed into the
+#     ROCm prefix
+#   - INSTALL_RPATH_USE_LINK_PATH adds the directory they were linked
+#     from (the ROCm lib directory)
+# Installed executables get no run path and rely on the loader's search
+# path.
+set_target_properties(hipobj PROPERTIES
+  INSTALL_RPATH "\$ORIGIN/../lib"
+  INSTALL_RPATH_USE_LINK_PATH ON)
+
 # Components:
 #   hipobj      What programs need at run time: the versioned shared
 #               library (libhipobj.so.<major> and libhipobj.so.<version>)
 #   hipobj-dev  What's needed to build against hipObject: the
 #               libhipobj.so symlink used at link time, the static
 #               library, the header, and the CMake package files
-# Give the installed library the same run path that hipFile's gets when
-# built from rocm-systems, so it finds libamdhip64 and libhsa-runtime64
-# even when they aren't in the loader's search path:
-#   - $ORIGIN/../lib, which rocm-cmake's rocm_install() adds and hipFile
-#     uses, finds them when hipObject is installed into the ROCm prefix
-#   - INSTALL_RPATH_USE_LINK_PATH adds the directory they were linked
-#     from (the ROCm lib directory). hipFile gets that entry from the
-#     HIP compiler driver, which hipObject doesn't link with.
-# As in hipFile, installed executables get no run path.
-set_target_properties(hipobj PROPERTIES
-  INSTALL_RPATH "\$ORIGIN/../lib"
-  INSTALL_RPATH_USE_LINK_PATH ON)
-
 install(TARGETS hipobj
   EXPORT hipobj-targets
   ARCHIVE
