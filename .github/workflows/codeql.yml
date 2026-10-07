@@ -81,6 +81,7 @@ jobs:
         # security-and-quality is security-extended (the default set plus
         # lower-precision security queries) plus code-quality queries.
         queries: security-and-quality
+        config-file: ./.github/codeql/codeql-config.yml
 
     # If the analyze step fails for one of the languages you are analyzing with
     # "We were unable to automatically build your code", modify the matrix above
