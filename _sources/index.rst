@@ -1,6 +1,11 @@
 hipObject: RDMA-Accelerated S3 Object Storage for GPUs
 ======================================================
 
+.. warning::
+
+   **hipObject is an experimental library. It is not
+   intended for production use.**
+
 Introduction
 ------------
 
