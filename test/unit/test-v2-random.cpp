@@ -7,15 +7,20 @@
  * delivery into QP transitions, and the public cookie-present
  * plumbing. */
 
+#include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "hipobj.h"
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "v2-random.h"
+#include "v2-registry.h"
 #include "v2-transport.h"
 #include "v2-wire.h"
 

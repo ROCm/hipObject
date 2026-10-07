@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <string>
+
 #include <gtest/gtest.h>
 
 #include "token.h"

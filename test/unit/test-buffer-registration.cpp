@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstdint>
 #include <cstdlib>
 
 #include <gtest/gtest.h>
 
 #include "buffer.h"
 #include "hip-seam.h"
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
 
 namespace {

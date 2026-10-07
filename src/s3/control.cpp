@@ -5,8 +5,6 @@
 
 #include "control.h"
 
-#include <cstring>
-
 #include "token.h"
 
 namespace hipObj {

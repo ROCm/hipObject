@@ -10,6 +10,7 @@
 #include <cstddef>
 
 #include <sys/random.h>
+#include <sys/types.h>
 
 namespace hipObj {
 namespace v2 {

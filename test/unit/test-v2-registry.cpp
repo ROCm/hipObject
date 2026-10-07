@@ -8,16 +8,19 @@
  * device/connection ownership split. All tests run without RDMA
  * hardware: ibverbs calls go through the function-table seam. */
 
+#include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
-#include <set>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "buffer.h"
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
-#include "state.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
 

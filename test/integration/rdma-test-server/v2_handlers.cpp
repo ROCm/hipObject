@@ -6,21 +6,28 @@
 
 #include "v2_handlers.h"
 
-#include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "ibv-core.h"
 #include "token.h"
 #include "v2-clock.h"
 #include "v2-random.h"
 #include "v2-registry.h"
+#include "v2_backend.h"
 #include "v2_data_phase.h"
+#include "v2_request.h"
+#include "v2_sigv4.h"
 
 namespace hipObj {
 namespace v2 {

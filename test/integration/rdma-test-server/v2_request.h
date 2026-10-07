@@ -19,8 +19,6 @@
 #include <optional>
 #include <string>
 
-#include "v2-wire.h"
-
 namespace hipObj {
 namespace v2 {
 

@@ -9,16 +9,22 @@
  * keeps the surviving QP with its reference, and reapSession()
  * retries destroy and consumes the reference exactly once. */
 
+#include <atomic>
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
+#include "../../../src/common/ibv-core.h"
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "v2_backend.h"
 #include "v2_handlers.h"
 #include "v2_request.h"
 #include "v2_session.h"

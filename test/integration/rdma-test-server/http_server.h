@@ -13,7 +13,6 @@
 #include <set>
 #include <string>
 #include <thread>
-#include <vector>
 
 namespace hipobj::test {
 

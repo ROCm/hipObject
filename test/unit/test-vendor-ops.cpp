@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstdint>
+
 #include <gtest/gtest.h>
 
 #include "vendor-ops.h"

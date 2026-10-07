@@ -15,13 +15,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <map>
 #include <mutex>
-#include <sstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -29,6 +31,7 @@
 #include "http_server.h"
 #include "rdma_server.h"
 #ifdef HIPOBJECT_V2_API
+#include "v2_backend.h"
 #include "v2_handlers.h"
 #include "v2_request.h"
 #include "v2_sigv4.h"

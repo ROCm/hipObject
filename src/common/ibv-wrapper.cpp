@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>

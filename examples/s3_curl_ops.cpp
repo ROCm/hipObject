@@ -8,7 +8,6 @@
 #include "s3_curl_ops.h"
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <string>
 

@@ -7,6 +7,7 @@
 /* Unit tests for the hipobj-rc-v2 wire helpers (src/rdma/v2-wire.*).
  * These are pure parsing/formatting tests and need no RDMA hardware. */
 
+#include <cstdint>
 #include <string>
 
 #include <gtest/gtest.h>

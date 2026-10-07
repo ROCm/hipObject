@@ -8,6 +8,7 @@
  * fakes through the seam accessors.
  */
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +19,7 @@
 
 #include "hip-seam.h"
 #include "hipobj.h"
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "rdma-topology.h"

@@ -8,11 +8,13 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
+#include <cstdint>
 #include <ctime>
 #include <sstream>
+#include <utility>
 #include <vector>
 
+#include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 

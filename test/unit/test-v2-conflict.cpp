@@ -6,13 +6,17 @@
  * Unit tests for the qp conflict-discard procedure and data-phase
  * completion validation. */
 
+#include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "v2-registry.h"
 #include "v2-transport.h"

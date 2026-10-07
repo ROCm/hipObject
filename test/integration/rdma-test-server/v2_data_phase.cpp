@@ -6,13 +6,16 @@
 
 #include "v2_data_phase.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <string>
 
 #include <arpa/inet.h>
 
 #include "../../../src/common/ibv-wrapper.h"
+#include "v2_session.h"
 
 namespace hipObj {
 namespace v2 {

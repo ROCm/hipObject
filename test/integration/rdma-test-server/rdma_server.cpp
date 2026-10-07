@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "token.h"
 #include "transport.h"

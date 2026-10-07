@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "ibv-core.h"
+struct ibv_context;
 
 namespace hipObj {
 

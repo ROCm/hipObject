@@ -31,20 +31,20 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ibv-core.h"
-#include "v2-clock.h"
 #include "v2-registry.h"
 
 namespace hipObj {
 
 struct DeviceHandle;
-struct RcConnV2;
 
 namespace v2 {
 

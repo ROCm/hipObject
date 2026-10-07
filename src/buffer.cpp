@@ -7,7 +7,7 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
+#include <utility>
 
 #include <hip/hip_runtime.h>
 
