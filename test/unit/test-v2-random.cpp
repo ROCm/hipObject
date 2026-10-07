@@ -120,6 +120,9 @@ protected:
             a->active_mtu = IBV_MTU_4096;
             return 0;
         };
+        /* The test's RcConnV2 owns a fake QP and destroys it when the
+         * test body ends, before TearDown() restores the table. */
+        funcs.destroy_qp = [](struct ibv_qp *) -> int { return 0; };
         g_rqPsn.clear();
         g_sqPsn.clear();
     }
@@ -141,7 +144,7 @@ TEST_F(V2PsnDeliveryTest, PsnsReachQpAttrs)
     hipObj::DeviceHandle dh;
     dh.gidIndex = 0;
     hipObj::RcConnV2 conn;
-    conn.qp = reinterpret_cast<struct ibv_qp *>(0x1);
+    conn.qp.reset(reinterpret_cast<struct ibv_qp *>(0x1));
     union ibv_gid gid;
     std::memset(&gid, 0, sizeof(gid));
     ASSERT_EQ(hipObj::v2::transitionQpToRtrV2(&dh, conn, 77, gid, 0x334455), 0);

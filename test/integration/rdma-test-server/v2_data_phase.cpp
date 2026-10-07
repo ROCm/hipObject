@@ -11,10 +11,13 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <utility>
 
 #include <arpa/inet.h>
 
 #include "../../../src/common/ibv-wrapper.h"
+#include "ibv-ptr.h"
+#include "malloc_ptr.h"
 #include "v2_session.h"
 
 namespace hipObj {
@@ -42,7 +45,7 @@ namespace v2 {
         if (s.staging != nullptr) {
             return s.stagingMr != nullptr || pd == nullptr;
         }
-        void *buf = std::malloc(size ? size : 1);
+        MallocPtr buf(std::malloc(size ? size : 1));
         if (buf == nullptr) {
             return false;
         }
@@ -54,19 +57,18 @@ namespace v2 {
          * ibv_reg_mr otherwise) so peers can reach it via rkey. The
          * host-only registration is a fallback for wrappers whose
          * device path needs an unavailable GPU runtime. */
-        struct ibv_mr *mr = nullptr;
+        IbvMrPtr mr;
         if (pd != nullptr) {
-            mr = ibv.reg_mr(pd, buf, size, kAccess);
+            mr.reset(ibv.reg_mr(pd, buf.get(), size, kAccess));
             if (mr == nullptr) {
-                mr = ibv.reg_mr_host(pd, buf, size, kAccess);
+                mr.reset(ibv.reg_mr_host(pd, buf.get(), size, kAccess));
             }
             if (mr == nullptr) {
-                std::free(buf);
                 return false;
             }
         }
-        s.staging   = buf;
-        s.stagingMr = mr;
+        s.staging   = std::move(buf);
+        s.stagingMr = std::move(mr);
         return true;
     }
 
@@ -77,16 +79,13 @@ namespace v2 {
          * until the QP is gone. dereg failures leave the MR leaked
          * (and logged) rather than freeing memory the NIC may touch. */
         if (s.stagingMr != nullptr) {
-            if (ibv.dereg_mr(s.stagingMr) != 0) {
+            if (ibv.dereg_mr(s.stagingMr.get()) != 0) {
                 fprintf(stderr, "v2: staging dereg failed; leaking buffer\n");
-                s.staging = nullptr; /* MR is dead to us either way */
+                dropOwnership(s.staging); /* intentionally leaked */
             }
-            s.stagingMr = nullptr;
+            dropOwnership(s.stagingMr); /* MR is dead to us either way */
         }
-        if (s.staging != nullptr) {
-            std::free(s.staging);
-            s.staging = nullptr;
-        }
+        s.staging.reset();
     }
 
     bool postRecvForImm(struct ibv_qp *qp, struct ibv_mr *mr, size_t len)
@@ -161,7 +160,7 @@ namespace v2 {
 
     } // namespace
 
-    DataPhaseResult runDataPhase(V2Session &s, uint64_t deadlineMs, DataPhaseStats &stats)
+    DataPhaseResult runDataPhase(const DataPhaseView &s, uint64_t deadlineMs, DataPhaseStats &stats)
     {
         const bool noTransport = s.qp == nullptr && s.cq == nullptr;
         if (noTransport || s.clientQpn == 0) {

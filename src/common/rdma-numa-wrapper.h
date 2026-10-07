@@ -7,17 +7,18 @@
 
 #pragma once
 
+#include "dl-handle.h"
+
 namespace hipObj {
 
 class NUMAWrapper {
 public:
     NUMAWrapper();
-    ~NUMAWrapper();
 
     int num_configured_nodes() const;
 
 private:
-    void *handle_                       = nullptr;
+    DlHandle handle_;
     int (*numa_num_configured_nodes_)() = nullptr;
 };
 

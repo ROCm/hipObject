@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <map>
 
+#include "dl-handle.h"
 #include "ibv-core.h"
 
 namespace hipObj {
@@ -44,7 +45,6 @@ struct IbvFuncs {
 class IBVWrapper {
 public:
     IBVWrapper();
-    ~IBVWrapper();
 
     bool is_initialized = false;
 
@@ -76,7 +76,7 @@ private:
     void init_dmabuf_support_flag();
     int  init_function_table();
 
-    void                    *ibv_handle_          = nullptr;
+    DlHandle                 ibv_handle_;
     IbvFuncs                 funcs_               = {};
     int                      dmabuf_enabled_      = 1;
     int                      dmabuf_is_supported_ = 0;

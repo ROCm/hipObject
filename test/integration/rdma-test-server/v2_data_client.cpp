@@ -14,7 +14,9 @@
 #include <cstring>
 #include <ctime>
 #include <map>
+#include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 
 #include <arpa/inet.h>
@@ -24,9 +26,77 @@
 #include <unistd.h>
 
 #include "../../../src/rdma/token.h"
+#include "malloc_ptr.h"
 #include "v2_sigv4.h"
 
 namespace {
+
+/* Owning pointers for verbs objects. This client calls libibverbs
+ * directly rather than through the library's dlopen wrapper, so it
+ * can't use the deleters in ibv-ptr.h. */
+struct VerbsDeleter {
+    void operator()(struct ibv_device **list) const noexcept
+    {
+        ibv_free_device_list(list);
+    }
+    void operator()(struct ibv_context *ctx) const noexcept
+    {
+        (void)ibv_close_device(ctx);
+    }
+    void operator()(struct ibv_pd *pd) const noexcept
+    {
+        (void)ibv_dealloc_pd(pd);
+    }
+    void operator()(struct ibv_cq *cq) const noexcept
+    {
+        (void)ibv_destroy_cq(cq);
+    }
+    void operator()(struct ibv_qp *qp) const noexcept
+    {
+        (void)ibv_destroy_qp(qp);
+    }
+    void operator()(struct ibv_mr *mr) const noexcept
+    {
+        (void)ibv_dereg_mr(mr);
+    }
+};
+
+template <typename T> using VerbsPtr = std::unique_ptr<T, VerbsDeleter>;
+
+/* The verbs objects and transfer buffer for one transfer, released on
+ * every return path. Work may still be posted when a transfer fails, so
+ * the destructor destroys the QP before deregistering the MR. If either
+ * step fails, the NIC may still reach the buffer, so the MR and buffer
+ * are leaked instead of freed. The remaining members are released by
+ * their deleters, in reverse declaration order. */
+struct ClientVerbs {
+    VerbsPtr<struct ibv_device *[]> devs;
+    VerbsPtr<struct ibv_context>    ctx;
+    VerbsPtr<struct ibv_pd>         pd;
+    VerbsPtr<struct ibv_cq>         cq;
+    hipObj::MallocPtr               buf;
+    VerbsPtr<struct ibv_mr>         mr;
+    VerbsPtr<struct ibv_qp>         qp;
+
+    ClientVerbs() = default;
+    ~ClientVerbs()
+    {
+        struct ibv_qp *rawQp   = qp.release();
+        bool           bufSafe = rawQp == nullptr || ibv_destroy_qp(rawQp) == 0;
+        struct ibv_mr *rawMr   = mr.release();
+        if (bufSafe && rawMr != nullptr) {
+            bufSafe = ibv_dereg_mr(rawMr) == 0;
+        }
+        if (!bufSafe) {
+            std::ignore = buf.release();
+        }
+    }
+
+    ClientVerbs(const ClientVerbs &)            = delete;
+    ClientVerbs &operator=(const ClientVerbs &) = delete;
+    ClientVerbs(ClientVerbs &&)                 = delete;
+    ClientVerbs &operator=(ClientVerbs &&)      = delete;
+};
 
 uint32_t gCookie = 0;
 
@@ -142,25 +212,26 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     gCookie = cookie;
 
     /* ---- verbs setup (client side) ---- */
-    int                 n    = 0;
-    struct ibv_device **devs = ibv_get_device_list(&n);
-    if (devs == nullptr || n == 0) {
+    ClientVerbs verbs;
+    int         n = 0;
+    verbs.devs.reset(ibv_get_device_list(&n));
+    if (verbs.devs == nullptr || n == 0) {
         std::fprintf(stderr, "dp: no verbs device\n");
         return 2;
     }
-    struct ibv_context     *ctx  = ibv_open_device(devs[0]);
-    struct ibv_pd          *pd   = ibv_alloc_pd(ctx);
-    struct ibv_cq          *cq   = ibv_create_cq(ctx, 16, nullptr, nullptr, 0);
+    verbs.ctx.reset(ibv_open_device(verbs.devs[0]));
+    verbs.pd.reset(ibv_alloc_pd(verbs.ctx.get()));
+    verbs.cq.reset(ibv_create_cq(verbs.ctx.get(), 16, nullptr, nullptr, 0));
     struct ibv_qp_init_attr init = {};
     init.qp_type                 = IBV_QPT_RC;
-    init.send_cq                 = cq;
-    init.recv_cq                 = cq;
+    init.send_cq                 = verbs.cq.get();
+    init.recv_cq                 = verbs.cq.get();
     init.cap.max_send_wr         = 8;
     init.cap.max_recv_wr         = 8;
     init.cap.max_send_sge        = 1;
     init.cap.max_recv_sge        = 1;
-    struct ibv_qp *qp            = ibv_create_qp(pd, &init);
-    if (!ctx || !pd || !cq || !qp) {
+    verbs.qp.reset(ibv_create_qp(verbs.pd.get(), &init));
+    if (!verbs.ctx || !verbs.pd || !verbs.cq || !verbs.qp) {
         std::fprintf(stderr, "dp: verbs setup failed\n");
         return 2;
     }
@@ -169,14 +240,15 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
      * page by page and rejects a region whose chunk count does not
      * divide the length, which a stack buffer crossing a page
      * boundary triggers. */
-    char *buf = static_cast<char *>(std::aligned_alloc(4096, 4096));
+    verbs.buf.reset(std::aligned_alloc(4096, 4096));
+    char *buf = static_cast<char *>(verbs.buf.get());
     if (buf == nullptr) {
         std::fprintf(stderr, "dp: alloc failed\n");
         return 2;
     }
-    struct ibv_mr *mr =
-        ibv_reg_mr(pd, buf, 4096, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
-    if (!mr) {
+    verbs.mr.reset(ibv_reg_mr(verbs.pd.get(), buf, 4096,
+                              IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+    if (!verbs.mr) {
         std::fprintf(stderr, "dp: reg_mr failed\n");
         return 2;
     }
@@ -190,10 +262,11 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     attr.pkey_index         = 0;
     attr.port_num           = 1;
     attr.qp_access_flags    = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-    ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
+    ibv_modify_qp(verbs.qp.get(), &attr,
+                  IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
 
     union ibv_gid gid = {};
-    ibv_query_gid(ctx, 1, 0, &gid);
+    ibv_query_gid(verbs.ctx.get(), 1, 0, &gid);
 
     /* ---- PREPARE (control, over TCP) ---- */
     char psnHex[8];
@@ -203,7 +276,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     char mrAddrHex[32];
     std::snprintf(mrAddrHex, sizeof(mrAddrHex), "%" PRIxPTR, reinterpret_cast<uintptr_t>(buf));
     char mrRkeyHex[12];
-    std::snprintf(mrRkeyHex, sizeof(mrRkeyHex), "%" PRIx32, mr->rkey);
+    std::snprintf(mrRkeyHex, sizeof(mrRkeyHex), "%" PRIx32, verbs.mr->rkey);
     char sizeDec[24];
     std::snprintf(sizeDec, sizeof(sizeDec), "%" PRIu64, size);
 
@@ -216,12 +289,12 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         std::strftime(amzDate, sizeof(amzDate), "%Y%m%dT%H%M%SZ", &tmv);
     }
     char qpnHex[12];
-    std::snprintf(qpnHex, sizeof(qpnHex), "%" PRIx32, qp->qp_num);
+    std::snprintf(qpnHex, sizeof(qpnHex), "%" PRIx32, verbs.qp->qp_num);
 
     /* Real peer token: this client's QPN and GID so the server
      * pairs back through the token-carried endpoint. */
     hipObj::RdmaToken clientTok{};
-    clientTok.qpNum = qp->qp_num;
+    clientTok.qpNum = verbs.qp->qp_num;
     std::memcpy(clientTok.gid, &gid, sizeof(clientTok.gid));
     clientTok.transport            = hipObj::TRANSPORT_RC;
     clientTok.portNum              = 1;
@@ -332,7 +405,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         attr.ah_attr.grh.sgid_index = 0;
         attr.ah_attr.grh.hop_limit  = 1;
         attr.ah_attr.port_num       = 1;
-        ibv_modify_qp(qp, &attr,
+        ibv_modify_qp(verbs.qp.get(), &attr,
                       IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                           IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
         attr               = {};
@@ -342,7 +415,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         attr.rnr_retry     = 7;
         attr.sq_psn        = 1;
         attr.max_rd_atomic = 1;
-        ibv_modify_qp(qp, &attr,
+        ibv_modify_qp(verbs.qp.get(), &attr,
                       IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                           IBV_QP_MAX_QP_RD_ATOMIC);
     }
@@ -377,13 +450,13 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
             struct ibv_sge rsge      = {};
             rsge.addr                = reinterpret_cast<uintptr_t>(buf);
             rsge.length              = static_cast<uint32_t>(size < sizeof(buf) ? size : sizeof(buf));
-            rsge.lkey                = mr->lkey;
+            rsge.lkey                = verbs.mr->lkey;
             struct ibv_recv_wr rwr   = {};
             rwr.wr_id                = 0x47455452454356ULL; /* "GETRECV" */
             rwr.sg_list              = &rsge;
             rwr.num_sge              = 1;
             struct ibv_recv_wr *rbad = nullptr;
-            if (ibv_post_recv(qp, &rwr, &rbad) != 0) {
+            if (ibv_post_recv(verbs.qp.get(), &rwr, &rbad) != 0) {
                 std::fprintf(stderr, "dp: GET post_recv failed\n");
             }
         }
@@ -398,7 +471,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         struct ibv_sge sge    = {};
         sge.addr              = reinterpret_cast<uintptr_t>(buf);
         sge.length            = static_cast<uint32_t>(size < 4096 ? size : 4096);
-        sge.lkey              = mr->lkey;
+        sge.lkey              = verbs.mr->lkey;
         struct ibv_send_wr wr = {};
         wr.opcode             = IBV_WR_RDMA_WRITE_WITH_IMM;
         wr.send_flags         = IBV_SEND_SIGNALED;
@@ -413,14 +486,14 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
             wr.sg_list              = &sge;
             wr.num_sge              = 1;
             struct ibv_send_wr *bad = nullptr;
-            if (ibv_post_send(qp, &wr, &bad) != 0) {
+            if (ibv_post_send(verbs.qp.get(), &wr, &bad) != 0) {
                 std::fprintf(stderr, "dp: post WRITE_WITH_IMM failed\n");
                 rc = 1;
             }
             else {
                 struct ibv_wc wc = {};
                 for (int i = 0; i < 2000; ++i) {
-                    if (ibv_poll_cq(cq, 1, &wc) > 0) {
+                    if (ibv_poll_cq(verbs.cq.get(), 1, &wc) > 0) {
                         break;
                     }
                     usleep(1000);
@@ -450,7 +523,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     if (std::strcmp(op, "GET") == 0 && sqpn != 0 && rst == 200) {
         struct ibv_wc wc = {};
         for (int i = 0; i < 2000; ++i) {
-            if (ibv_poll_cq(cq, 1, &wc) > 0) {
+            if (ibv_poll_cq(verbs.cq.get(), 1, &wc) > 0) {
                 break;
             }
             usleep(1000);
@@ -477,13 +550,6 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         }
     }
 
-    ibv_dereg_mr(mr);
-    std::free(buf);
-    ibv_destroy_qp(qp);
-    ibv_destroy_cq(cq);
-    ibv_dealloc_pd(pd);
-    ibv_close_device(ctx);
-    ibv_free_device_list(devs);
     return rc;
 }
 

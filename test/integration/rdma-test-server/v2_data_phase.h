@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "../../../src/common/ibv-core.h"
 
@@ -43,11 +44,27 @@ namespace v2 {
         uint32_t cookie = 0;
     };
 
+    /* The session fields a transfer needs, copied out so the transfer
+     * can run without the session table lock. The pointers don't own
+     * anything: the caller's io reference keeps the session's objects
+     * alive for the duration. */
+    struct DataPhaseView {
+        std::string    op;
+        uint64_t       size         = 0;
+        uint32_t       cookie       = 0;
+        struct ibv_qp *qp           = nullptr;
+        struct ibv_cq *cq           = nullptr;
+        struct ibv_mr *stagingMr    = nullptr;
+        uint64_t       clientMrAddr = 0;
+        uint32_t       clientMrRkey = 0;
+        uint32_t       clientQpn    = 0;
+    };
+
     /* Runs the data phase for a session that is already in the
      * Transferring state. `deadlineMs` bounds the completion poll on
      * the monotonic clock. Returns the outcome and fills `stats` on
      * success. */
-    DataPhaseResult runDataPhase(V2Session &s, uint64_t deadlineMs, DataPhaseStats &stats);
+    DataPhaseResult runDataPhase(const DataPhaseView &s, uint64_t deadlineMs, DataPhaseStats &stats);
 
     /* Registers the staging buffer for PUT objects of the given size
      * and records the MR on the session. Returns false when the

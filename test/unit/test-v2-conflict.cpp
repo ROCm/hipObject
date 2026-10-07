@@ -149,13 +149,15 @@ protected:
             }
             return 0;
         }
-        entry.conn          = conn;
+        entry.conn          = std::move(conn);
         entry.device        = &dh_;
         entry.reservationId = rid;
         entry.clientPsn     = 0x42;
         return reg.insert(std::move(entry));
     }
 
+    /* install_ is declared first so it's destroyed last: the registry
+     * entries free their fake objects through the fake table. */
     std::unique_ptr<IbvFakeInstall>                 install_;
     std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_;
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;
@@ -175,7 +177,7 @@ TEST_F(V2ConflictTest, DiscardAndRecreate)
     reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) {
         oldQpn    = e.conn.qpNum;
         ridBefore = e.reservationId;
-        cqBefore  = e.conn.cq;
+        cqBefore  = e.conn.cq.get();
     });
     size_t recordedBefore = reg.retired().recordedCount();
 
@@ -184,7 +186,7 @@ TEST_F(V2ConflictTest, DiscardAndRecreate)
     reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) {
         EXPECT_NE(e.conn.qp, nullptr);
         EXPECT_NE(e.conn.qpNum, oldQpn);
-        EXPECT_EQ(e.conn.cq, cqBefore); /* cq survives */
+        EXPECT_EQ(e.conn.cq.get(), cqBefore); /* cq survives */
         EXPECT_NE(e.reservationId, 0U);
         EXPECT_NE(e.reservationId, 0U);
     });
@@ -216,7 +218,7 @@ TEST_F(V2ConflictTest, DiscardRingFullIsBusy)
     }
     EXPECT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::kReleaseBusy);
     void *qp = nullptr;
-    reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp; });
+    reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp.get(); });
     EXPECT_NE(qp, nullptr); /* untouched */
     for (auto r : fills) {
         reg.retired().unreserve(r);
@@ -234,7 +236,7 @@ TEST_F(V2ConflictTest, DiscardDestroyFailureKeepsQp)
     size_t recordedBefore  = reg.retired().recordedCount();
     EXPECT_NE(hipObj::v2::discardAndRecreateQp(id), 0);
     void *qp = nullptr;
-    reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp; });
+    reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp.get(); });
     EXPECT_NE(qp, nullptr);
     EXPECT_EQ(reg.retired().recordedCount(), recordedBefore);
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);

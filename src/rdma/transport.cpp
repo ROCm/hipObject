@@ -12,6 +12,7 @@
 #include <thread>
 #include <utility>
 
+#include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "rdma-topology.h"
 #include "token.h"
@@ -29,46 +30,37 @@ namespace {
 int
 openRdmaDevice(int nicIndex, RcConnection &conn)
 {
-    int                 numDevs = 0;
-    struct ibv_device **devList = ibv.get_device_list(&numDevs);
-    if (!devList || numDevs <= 0 || nicIndex >= numDevs) {
+    int              numDevs = 0;
+    IbvDeviceListPtr devList(ibv.get_device_list(&numDevs));
+    if (!devList || numDevs <= 0 || nicIndex < 0 || nicIndex >= numDevs) {
         return -1;
     }
-    struct ibv_device *dev = devList[nicIndex];
+    struct ibv_device *dev = devList[static_cast<size_t>(nicIndex)];
     if (!dev) {
-        ibv.free_device_list(devList);
         return -1;
     }
-    conn.ctx = ibv.open_device(dev);
-    ibv.free_device_list(devList);
-    if (!conn.ctx) {
+    IbvContextPtr ctx(ibv.open_device(dev));
+    devList.reset();
+    if (!ctx) {
         return -1;
     }
-    conn.pd = ibv.alloc_pd(conn.ctx);
-    if (!conn.pd) {
-        ibv.close_device(conn.ctx);
-        conn.ctx = nullptr;
+    IbvPdPtr pd(ibv.alloc_pd(ctx.get()));
+    if (!pd) {
         return -1;
     }
     struct ibv_port_attr portAttr;
-    if (ibv.query_port(conn.ctx, conn.portNum, &portAttr) != 0) {
-        ibv.dealloc_pd(conn.pd);
-        ibv.close_device(conn.ctx);
-        conn.pd  = nullptr;
-        conn.ctx = nullptr;
+    if (ibv.query_port(ctx.get(), conn.portNum, &portAttr) != 0) {
         return -1;
     }
-    conn.gidIndex = SelectBestGid(conn.ctx, conn.portNum);
+    conn.gidIndex = SelectBestGid(ctx.get(), conn.portNum);
     if (conn.gidIndex < 0) {
         conn.gidIndex = 0;
     }
-    if (ibv.query_gid(conn.ctx, conn.portNum, conn.gidIndex, &conn.localGid) != 0) {
-        ibv.dealloc_pd(conn.pd);
-        ibv.close_device(conn.ctx);
-        conn.pd  = nullptr;
-        conn.ctx = nullptr;
+    if (ibv.query_gid(ctx.get(), conn.portNum, conn.gidIndex, &conn.localGid) != 0) {
         return -1;
     }
+    conn.pd  = std::move(pd);
+    conn.ctx = std::move(ctx);
     return 0;
 }
 
@@ -78,70 +70,56 @@ openRdmaDeviceByName(const char *devName, RcConnection &conn)
     if (!devName) {
         return -1;
     }
-    int                 numDevs = 0;
-    struct ibv_device **devList = ibv.get_device_list(&numDevs);
+    int              numDevs = 0;
+    IbvDeviceListPtr devList(ibv.get_device_list(&numDevs));
     if (!devList || numDevs <= 0) {
         return -1;
     }
     int nicIndex = -1;
     for (int i = 0; i < numDevs; ++i) {
-        if (ibv.get_device_name(devList[i]) && std::strcmp(ibv.get_device_name(devList[i]), devName) == 0) {
+        struct ibv_device *dev = devList[static_cast<size_t>(i)];
+        if (ibv.get_device_name(dev) && std::strcmp(ibv.get_device_name(dev), devName) == 0) {
             nicIndex = i;
             break;
         }
     }
     if (nicIndex < 0) {
-        ibv.free_device_list(devList);
         return -1;
     }
-    int ret = openRdmaDevice(nicIndex, conn);
-    ibv.free_device_list(devList);
-    return ret;
+    return openRdmaDevice(nicIndex, conn);
 }
 
 void
 closeRdmaDevice(RcConnection &conn)
 {
-    if (conn.qp) {
-        ibv.destroy_qp(conn.qp);
-        conn.qp = nullptr;
-    }
-    if (conn.cq) {
-        ibv.destroy_cq(conn.cq);
-        conn.cq = nullptr;
-    }
-    if (conn.pd) {
-        ibv.dealloc_pd(conn.pd);
-        conn.pd = nullptr;
-    }
-    if (conn.ctx) {
-        ibv.close_device(conn.ctx);
-        conn.ctx = nullptr;
-    }
+    conn.qp.reset();
+    conn.cq.reset();
+    conn.pd.reset();
+    conn.ctx.reset();
 }
 
 int
 createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
 {
-    conn.cq = ibv.create_cq(conn.ctx, cqSize, nullptr, nullptr, 0);
-    if (!conn.cq) {
+    IbvCqPtr cq(ibv.create_cq(conn.ctx.get(), cqSize, nullptr, nullptr, 0));
+    if (!cq) {
         return -1;
     }
     struct ibv_qp_init_attr initAttr;
     std::memset(&initAttr, 0, sizeof(initAttr));
-    initAttr.send_cq          = conn.cq;
-    initAttr.recv_cq          = conn.cq;
+    initAttr.send_cq          = cq.get();
+    initAttr.recv_cq          = cq.get();
     initAttr.cap.max_send_wr  = maxSendWr;
     initAttr.cap.max_recv_wr  = maxRecvWr;
     initAttr.cap.max_send_sge = 1;
     initAttr.cap.max_recv_sge = 1;
     initAttr.qp_type          = IBV_QPT_RC;
-    conn.qp                   = ibv.create_qp(conn.pd, &initAttr);
-    if (!conn.qp) {
-        ibv.destroy_cq(conn.cq);
-        conn.cq = nullptr;
+    IbvQpPtr qp(ibv.create_qp(conn.pd.get(), &initAttr));
+    if (!qp) {
         return -1;
     }
+    conn.qp = std::move(qp);
+    conn.cq = std::move(cq);
     return 0;
 }
 
@@ -155,7 +133,7 @@ transitionQpToInit(RcConnection &conn)
     attr.port_num        = conn.portNum;
     attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
     int mask             = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
-    return ibv.modify_qp(conn.qp, &attr, mask);
+    return ibv.modify_qp(conn.qp.get(), &attr, mask);
 }
 
 static void
@@ -166,7 +144,7 @@ applyVendorQpAttrs(RcConnection &conn, struct ibv_qp_attr *attr)
     }
     struct ibv_device_attr devAttr;
     std::memset(&devAttr, 0, sizeof(devAttr));
-    if (ibv.query_device(conn.ctx, &devAttr) != 0) {
+    if (ibv.query_device(conn.ctx.get(), &devAttr) != 0) {
         return;
     }
 #ifdef HIPOBJ_BNXT
@@ -212,7 +190,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.grh.traffic_class = 0;
     int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-    return ibv.modify_qp(conn.qp, &attr, mask);
+    return ibv.modify_qp(conn.qp.get(), &attr, mask);
 }
 
 int
@@ -229,7 +207,7 @@ transitionQpToRts(RcConnection &conn)
     attr.max_rd_atomic = 1;
     int mask           = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                IBV_QP_MAX_QP_RD_ATOMIC;
-    return ibv.modify_qp(conn.qp, &attr, mask);
+    return ibv.modify_qp(conn.qp.get(), &attr, mask);
 }
 
 int
@@ -256,7 +234,7 @@ pollCompletion(RcConnection &conn, int expectedOpcode, int timeoutMs)
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (std::chrono::steady_clock::now() < deadline) {
         struct ibv_wc wc;
-        int           n = ibv.poll_cq(conn.cq, 1, &wc);
+        int           n = ibv.poll_cq(conn.cq.get(), 1, &wc);
         if (n < 0) {
             return -1;
         }

@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include <hip/hip_runtime.h>
 
@@ -23,6 +24,14 @@
 
 #include "s3_curl_ops.h"
 #endif
+
+// Frees device memory allocated with hipMalloc()
+struct HipFreeDeleter {
+    void operator()(void *ptr) const noexcept
+    {
+        (void)hipFree(ptr);
+    }
+};
 
 static int
 stubSendRequest(void *ctx, const char *token, size_t tokenLen)
@@ -95,18 +104,18 @@ main(int argc, char *argv[])
         return 1;
     }
 
-    void      *devPtr  = nullptr;
-    hipError_t hip_err = hipMalloc(&devPtr, objSize);
+    void      *rawDevPtr = nullptr;
+    hipError_t hip_err   = hipMalloc(&rawDevPtr, objSize);
     if (hip_err != hipSuccess) {
         fprintf(stderr, "hipMalloc failed: %d\n", hip_err);
         hipObjShutdown();
         return 1;
     }
+    std::unique_ptr<void, HipFreeDeleter> devPtr(rawDevPtr);
 
-    err = hipObjBufRegister(devPtr, objSize);
+    err = hipObjBufRegister(devPtr.get(), objSize);
     if (err.opError != hipObjSuccess) {
         fprintf(stderr, "hipObjBufRegister failed: %s\n", hipObjGetErrorString(err.opError));
-        (void)hipFree(devPtr);
         hipObjShutdown();
         return 1;
     }
@@ -121,7 +130,7 @@ main(int argc, char *argv[])
         curlCtx.bucket     = bucket;
         curlCtx.object     = object;
         curlCtx.objectSize = objSize;
-        curlCtx.devPtr     = devPtr;
+        curlCtx.devPtr     = devPtr.get();
         curlCtx.isPut      = 0;
         ops.sendRequest    = hipObjS3CurlSendRequest;
         ops.recvReply      = hipObjS3CurlRecvReply;
@@ -136,7 +145,7 @@ main(int argc, char *argv[])
     }
 
     int exitCode = 0;
-    err          = hipObjGet(nullptr, devPtr, objSize, 0, &ops, opsCtx);
+    err          = hipObjGet(nullptr, devPtr.get(), objSize, 0, &ops, opsCtx);
     if (err.opError != hipObjSuccess) {
         fprintf(stderr, "hipObjGet failed: %s\n", hipObjGetErrorString(err.opError));
         exitCode = 1;
@@ -151,8 +160,8 @@ main(int argc, char *argv[])
     }
 #endif
 
-    hipObjBufDeregister(devPtr);
-    (void)hipFree(devPtr);
+    hipObjBufDeregister(devPtr.get());
+    devPtr.reset();
     hipObjShutdown();
     return exitCode;
 }

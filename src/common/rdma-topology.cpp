@@ -21,6 +21,7 @@
 
 #include "hip-seam.h"
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 
@@ -132,11 +133,11 @@ namespace {
         {
             std::vector<NicInfo> result;
             int                  num_devs = 0;
-            ibv_device         **dev_list = ibv.get_device_list(&num_devs);
+            IbvDeviceListPtr     dev_list(ibv.get_device_list(&num_devs));
             if (!dev_list || num_devs <= 0)
                 return result;
 
-            for (int i = 0; i < num_devs && dev_list[i]; ++i) {
+            for (size_t i = 0; i < static_cast<size_t>(num_devs) && dev_list[i]; ++i) {
                 ibv_device *dev      = dev_list[i];
                 const char *dev_name = ibv.get_device_name(dev);
                 if (!dev_name)
@@ -158,19 +159,18 @@ namespace {
                         continue;
                 }
 
-                ibv_context *ctx = ibv.open_device(dev);
+                IbvContextPtr ctx(ibv.open_device(dev));
                 if (!ctx)
                     continue;
 
                 ibv_device_attr attr;
-                if (ibv.query_device(ctx, &attr) != 0) {
-                    ibv.close_device(ctx);
+                if (ibv.query_device(ctx.get(), &attr) != 0) {
                     continue;
                 }
 
                 for (uint8_t p = 1; p <= attr.phys_port_cnt; ++p) {
                     ibv_port_attr port_attr;
-                    if (ibv.query_port(ctx, p, &port_attr) != 0)
+                    if (ibv.query_port(ctx.get(), p, &port_attr) != 0)
                         continue;
                     if (port_attr.state != IBV_PORT_ACTIVE && port_attr.state != IBV_PORT_ACTIVE_DEFER)
                         continue;
@@ -202,9 +202,7 @@ namespace {
                     result.push_back(info);
                     break;
                 }
-                ibv.close_device(ctx);
             }
-            ibv.free_device_list(dev_list);
             return result;
         }
     };

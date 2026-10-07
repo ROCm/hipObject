@@ -13,22 +13,13 @@ namespace hipObj {
 
 NUMAWrapper::NUMAWrapper()
 {
-    handle_ = dlopen("libnuma.so", RTLD_NOW | RTLD_LOCAL);
+    handle_.reset(dlopen("libnuma.so", RTLD_NOW | RTLD_LOCAL));
     if (!handle_) {
-        handle_ = dlopen("libnuma.so.1", RTLD_NOW | RTLD_LOCAL);
+        handle_.reset(dlopen("libnuma.so.1", RTLD_NOW | RTLD_LOCAL));
     }
     if (handle_) {
-        auto *sym                  = dlsym(handle_, "numa_num_configured_nodes");
+        auto *sym                  = dlsym(handle_.get(), "numa_num_configured_nodes");
         numa_num_configured_nodes_ = reinterpret_cast<int (*)()>(sym);
-    }
-}
-
-NUMAWrapper::~NUMAWrapper()
-{
-    if (handle_) {
-        dlclose(handle_);
-        handle_                    = nullptr;
-        numa_num_configured_nodes_ = nullptr;
     }
 }
 

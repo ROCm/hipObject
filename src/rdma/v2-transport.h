@@ -18,13 +18,16 @@
 #include <cstdint>
 
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 #include "v2-registry.h"
 
 namespace hipObj {
 
+/* pd is declared after ctx so it is deallocated before the context
+ * closes. */
 struct DeviceHandle {
-    struct ibv_context   *ctx      = nullptr;
-    struct ibv_pd        *pd       = nullptr;
+    IbvContextPtr         ctx;
+    IbvPdPtr              pd;
     uint8_t               portNum  = 1;
     int                   gidIndex = -1;
     union ibv_gid         localGid = {};
