@@ -66,6 +66,8 @@ jobs:
         with:
           persist-credentials: false
 
+      # rpm provides rpmbuild, so hipObject can build RPM packages here
+      # as well as DEB packages, and the RPM package test runs
       - name: Install dependencies
         run: |
           apt-get update
@@ -75,7 +77,8 @@ jobs:
             libcurl4-openssl-dev \
             libibverbs-dev \
             libnuma-dev \
-            libssl-dev
+            libssl-dev \
+            rpm
 
       - name: Configure
         run: |

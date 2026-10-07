@@ -11,8 +11,8 @@
 # build configuration to install, for multi-config generators.
 #
 # Steps:
-#   1. Install only the hipobj and hipobj-dev components (what the
-#      runtime and development packages contain) into a scratch prefix
+#   1. Install only the runtime and devel components (what the runtime
+#      and development packages contain) into a scratch prefix
 #   2. Configure, build, and run the consumer project in consumer/
 #      against that prefix
 
@@ -45,7 +45,7 @@ endfunction()
 file(REMOVE_RECURSE ${TEST_DIR})
 file(MAKE_DIRECTORY ${TEST_DIR})
 
-foreach(component IN ITEMS hipobj hipobj-dev)
+foreach(component IN ITEMS runtime devel)
   run_step("install the ${component} component"
     ${CMAKE_COMMAND} --install ${BUILD_DIR} --prefix ${prefix}
       --component ${component} ${config_args})

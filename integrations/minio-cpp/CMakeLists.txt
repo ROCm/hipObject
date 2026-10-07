@@ -91,8 +91,37 @@ target_link_libraries(minio-getput-rdma PRIVATE
 # and it links minio-cpp publicly, but minio-cpp and the curlpp and
 # inih libraries we build for it aren't installed, so an installed
 # archive and headers would be unusable. The example links those
-# statically, so it only needs libhipobj at run time when hipobj is a
-# shared library.
+# statically, so at run time it only needs the system libraries that
+# minio-cpp uses (see HIPOBJMinioCppDeps.cmake), plus libhipobj when
+# hipobj is a shared library.
 hipobj_install_executable(
   NAME minio-getput-rdma
   DESTINATION bin/hipobj-examples)
+
+hipobj_add_runtime_library_dependency(
+  SONAMES libcurl.so.4
+  DEB "libcurl4t64 | libcurl4")
+hipobj_add_runtime_library_dependency(
+  SONAMES libz.so.1
+  DEB zlib1g)
+if(OPENSSL_VERSION VERSION_GREATER_EQUAL 3)
+  hipobj_add_runtime_library_dependency(
+    SONAMES libssl.so.3 libcrypto.so.3
+    DEB "libssl3t64 | libssl3")
+else()
+  hipobj_add_runtime_library_dependency(
+    SONAMES libssl.so.1.1 libcrypto.so.1.1
+    DEB libssl1.1)
+endif()
+# pugixml and curlpp are only shared libraries when they're the
+# system's. Otherwise they're built here as static libraries.
+if(pugixml_FOUND)
+  hipobj_add_runtime_library_dependency(
+    SONAMES libpugixml.so.1
+    DEB libpugixml1v5)
+endif()
+if(TARGET unofficial-curlpp AND CURLPP_LIBRARY MATCHES "\\.so")
+  hipobj_add_runtime_library_dependency(
+    SONAMES libcurlpp.so.0
+    DEB "libcurlpp0t64 | libcurlpp0")
+endif()

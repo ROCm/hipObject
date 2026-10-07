@@ -2,8 +2,8 @@
 
 Guidance for AI coding agents and Cursor Cloud agents working in the hipObject
 repository. hipObject is an RDMA-accelerated S3 object client for AMD GPUs; see
-[README.md](README.md) for scope and [INSTALL.md](INSTALL.md) for full CMake
-options.
+[README.md](README.md) for scope and [docs/building.rst](docs/building.rst) for
+full CMake options.
 
 ## Toolchain and paths
 
@@ -29,9 +29,9 @@ cmake --build build -j"$(nproc)"
 
 Notes:
 
-- [INSTALL.md](INSTALL.md) defaults `HIPOBJ_IONIC` to **OFF** for local lab
-  workflows; CI and Cursor Cloud use **ON** to compile both RDMA backends—keep
-  that difference in mind when debugging.
+- The build steps in [docs/building.rst](docs/building.rst) set `HIPOBJ_IONIC`
+  to **OFF** for local lab workflows; CI and Cursor Cloud use **ON** to compile
+  both RDMA backends—keep that difference in mind when debugging.
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON` plus the dependencies
   already installed in [`.cursor/Dockerfile`](.cursor/Dockerfile); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).

@@ -81,6 +81,9 @@ endfunction()
 #   - INSTALL_RPATH_USE_LINK_PATH adds the directory the ROCm libraries
 #     were linked from, as for the installed library (see
 #     HIPOBJInstall.cmake)
+#
+# The program goes in the runtime component, so it's in the runtime
+# package. A static build has no runtime package.
 function(hipobj_install_executable)
 
   # Parse arguments
@@ -117,5 +120,56 @@ function(hipobj_install_executable)
     INSTALL_RPATH_USE_LINK_PATH ON)
 
   install(TARGETS ${arg_NAME}
-    RUNTIME DESTINATION ${arg_DESTINATION})
+    RUNTIME DESTINATION ${arg_DESTINATION}
+    COMPONENT runtime)
+endfunction()
+
+# Make the runtime package depend on shared libraries that an installed
+# program links
+#
+# Parameters:
+#   SONAMES <soname> [<soname> ...]  The libraries' sonames
+#                                    (e.g., libcurl.so.4), which the RPM
+#                                    package requires
+#   DEB <dependency>                 The Debian package that provides
+#                                    them (e.g., "libcurl4t64 | libcurl4")
+#
+# The RPM packages don't generate their requirements automatically (see
+# HIPOBJInstall.cmake), so they require the sonames, which every
+# distribution's library packages provide.
+#
+# HIPOBJInstall.cmake adds the dependencies to the runtime package,
+# which is only created for a shared build.
+function(hipobj_add_runtime_library_dependency)
+
+  # Parse arguments
+  set(options) # None at this time
+  set(oneValueArgs DEB)
+  set(multiValueArgs SONAMES)
+  cmake_parse_arguments(PARSE_ARGV 0 arg
+    "${options}" "${oneValueArgs}" "${multiValueArgs}")
+
+  if(NOT arg_SONAMES OR NOT arg_DEB)
+    message(FATAL_ERROR
+      "hipobj_add_runtime_library_dependency: SONAMES and DEB are required")
+  endif()
+  if(arg_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR
+      "hipobj_add_runtime_library_dependency: unknown arguments: "
+      "${arg_UNPARSED_ARGUMENTS}")
+  endif()
+
+  set_property(GLOBAL APPEND PROPERTY
+    HIPOBJ_RUNTIME_DEB_DEPENDS "${arg_DEB}")
+
+  # RPM marks the sonames of 64-bit libraries with "()(64bit)"
+  foreach(soname IN LISTS arg_SONAMES)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+      set(rpm_depend "${soname}()(64bit)")
+    else()
+      set(rpm_depend "${soname}")
+    endif()
+    set_property(GLOBAL APPEND PROPERTY
+      HIPOBJ_RUNTIME_RPM_DEPENDS "${rpm_depend}")
+  endforeach()
 endfunction()

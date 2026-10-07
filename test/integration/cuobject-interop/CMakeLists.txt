@@ -9,5 +9,7 @@ hipobj_add_test_executable(
 target_link_libraries(hipobj-cuobject-probe PRIVATE
   cuobjserver::cuobjserver)
 
+# The tests component isn't packaged
 install(TARGETS hipobj-cuobject-probe
-  RUNTIME DESTINATION bin/hipobj-test)
+  RUNTIME DESTINATION bin/hipobj-test
+  COMPONENT tests)
