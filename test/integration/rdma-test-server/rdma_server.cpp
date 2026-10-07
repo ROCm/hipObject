@@ -54,7 +54,7 @@ namespace {
             token.remoteAddr = remoteAddr;
         }
         if (size != 0) {
-            token.length = static_cast<uint64_t>(size);
+            token.length = size;
         }
         return true;
     }
@@ -67,7 +67,7 @@ namespace {
         std::memcpy(token.gid, conn.localGid.raw, 16);
         token.rkey       = mr->rkey;
         token.remoteAddr = reinterpret_cast<uint64_t>(mr->addr);
-        token.length     = static_cast<uint64_t>(size);
+        token.length     = size;
         token.portNum    = conn.portNum;
         token.lid        = 0;
         return token;
@@ -258,7 +258,7 @@ RdmaTestServer::rdmaReadFromClient(const std::string &tokenHeader, size_t size, 
         xferSize = size;
     }
     if (xferSize == 0) {
-        xferSize = static_cast<size_t>(clientToken.length);
+        xferSize = clientToken.length;
     }
     if (xferSize > impl_->stagingSize) {
         fprintf(stderr,

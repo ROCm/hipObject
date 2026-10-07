@@ -299,7 +299,8 @@ namespace v2 {
     std::string formatPsn(uint32_t psn)
     {
         char buf[kPsnHexLen + 1];
-        std::snprintf(buf, sizeof(buf), "%06x", psn);
+        /* PSNs are 24 bits; masking also bounds the output to 6 hex digits */
+        std::snprintf(buf, sizeof(buf), "%06x", psn & 0xffffffU);
         return std::string(buf);
     }
 

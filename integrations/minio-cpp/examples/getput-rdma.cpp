@@ -38,7 +38,7 @@ namespace {
 uint8_t
 PatternByte(size_t offset, uint32_t seed)
 {
-    uint64_t x = (static_cast<uint64_t>(offset) + 1) * 6364136223846793005ULL + seed;
+    uint64_t x = (offset + 1ULL) * 6364136223846793005ULL + seed;
     x ^= x >> 33;
     x *= 0xff51afd7ed558ccdULL;
     x ^= x >> 33;

@@ -225,6 +225,8 @@ TEST(V2Wire, FormatHelpers)
     EXPECT_EQ(formatCookie(0xdeadbeefu), "deadbeef");
     EXPECT_EQ(formatPsn(1), "000001");
     EXPECT_EQ(formatPsn(0xffffffu), "ffffff");
+    /* Out-of-range PSNs keep the low 24 bits, not the leading 6 digits */
+    EXPECT_EQ(formatPsn(0x1234567u), "234567");
 }
 
 TEST(V2Wire, BuildTarget)

@@ -8,6 +8,7 @@
  * and performs the actual RDMA transfer (WRITE_WITH_IMM for PUT,
  * READ pull for GET) so the server data phase runs for real. */
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -201,8 +202,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     char cookieHex[12];
     std::snprintf(cookieHex, sizeof(cookieHex), "%08x", cookie);
     char mrAddrHex[32];
-    std::snprintf(mrAddrHex, sizeof(mrAddrHex), "%lx",
-                  static_cast<unsigned long>(reinterpret_cast<uintptr_t>(buf)));
+    std::snprintf(mrAddrHex, sizeof(mrAddrHex), "%" PRIxPTR, reinterpret_cast<uintptr_t>(buf));
     char mrRkeyHex[12];
     std::snprintf(mrRkeyHex, sizeof(mrRkeyHex), "%x", mr->rkey);
     char sizeDec[24];

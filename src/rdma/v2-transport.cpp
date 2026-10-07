@@ -104,7 +104,7 @@ namespace v2 {
                 struct ibv_port_attr pa;
                 std::memset(&pa, 0, sizeof(pa));
                 if (ibv.query_port(ctx, portNum, &pa) == 0 && pa.active_mtu >= IBV_MTU_512) {
-                    attr.path_mtu = static_cast<enum ibv_mtu>(pa.active_mtu);
+                    attr.path_mtu = pa.active_mtu;
                 }
                 else {
                     attr.path_mtu = IBV_MTU_1024;

@@ -235,7 +235,7 @@ namespace v2 {
 
     ConnectionRegistry &registry()
     {
-        return g_registryOverride ? *g_registryOverride : static_cast<ConnectionRegistry &>(g_registry);
+        return g_registryOverride ? *g_registryOverride : g_registry;
     }
 
     ConnectionRegistry *setRegistryForTest(ConnectionRegistry *r)

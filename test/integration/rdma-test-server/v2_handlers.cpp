@@ -8,6 +8,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -600,7 +601,7 @@ namespace v2 {
             });
             if (saddr != 0) {
                 char addrHex[32];
-                std::snprintf(addrHex, sizeof(addrHex), "%lx", static_cast<unsigned long>(saddr));
+                std::snprintf(addrHex, sizeof(addrHex), "%" PRIx64, saddr);
                 char rkeyHex[12];
                 std::snprintf(rkeyHex, sizeof(rkeyHex), "%x", srkey);
                 r.headers["X-Amz-Rdma-Mr-Addr"] = addrHex;
@@ -775,7 +776,7 @@ namespace v2 {
                 sessionClientQpn = s.clientQpn;
             });
             if (sessionClientQpn != 0 && staging != nullptr) {
-                backend_->write(target, staging, static_cast<size_t>(stats.bytes));
+                backend_->write(target, staging, stats.bytes);
             }
         }
 

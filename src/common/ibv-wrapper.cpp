@@ -229,8 +229,8 @@ IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
             }
         }
         else {
-            struct ibv_mr *mr = funcs_.reg_dmabuf_mr(
-                pd, offset, length, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(addr)), fd, access);
+            struct ibv_mr *mr =
+                funcs_.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr), fd, access);
             if (mr) {
                 dmabuf_fd_map_[reinterpret_cast<uintptr_t>(mr)] = fd;
                 return mr;
