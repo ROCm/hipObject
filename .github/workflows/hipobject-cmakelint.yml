@@ -17,6 +17,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
 jobs:
   cmakelint:
     name: Lint CMake files
