@@ -4,6 +4,16 @@
 
 ### Added
 
+- hipObject is installed and packaged with rocm-cmake. `cpack` builds
+  `hipobject` (runtime) and `hipobject-dev` (development) DEB packages
+  or `hipobject` and `hipobject-devel` RPM packages, or a single
+  `hipobject-static-dev` DEB or `hipobject-static-devel` RPM package
+  for a static build. rocm-cmake is downloaded if ROCm doesn't provide
+  it.
+- The `ROCM_VERSION` CMake and environment variable sets the ROCm
+  version, which selects the package dependencies and the default
+  `ROCM_PATH`. It defaults to the version of the ROCm in `ROCM_PATH`.
+
 ### Changed
 
 - hipObject is now built as plain C/C++ instead of HIP. It contains no GPU

@@ -146,5 +146,7 @@ if(HIPOBJECT_V2_API)
   endif()
 endif()
 
+# The tests component isn't packaged
 install(TARGETS hipobj-rdma-test-server
-  RUNTIME DESTINATION bin/hipobj-test)
+  RUNTIME DESTINATION bin/hipobj-test
+  COMPONENT tests)

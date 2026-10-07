@@ -28,6 +28,9 @@ if(CURL_FOUND)
   target_compile_definitions(put-object PRIVATE HIPOBJ_HAVE_CURL)
   target_link_libraries(get-object PRIVATE CURL::libcurl)
   target_link_libraries(put-object PRIVATE CURL::libcurl)
+  hipobj_add_runtime_library_dependency(
+    SONAMES libcurl.so.4
+    DEB "libcurl4t64 | libcurl4")
   message(STATUS "hipObject examples: libcurl enabled (--live mode)")
 else()
   hipobj_add_example(get-object get-object.cpp)
