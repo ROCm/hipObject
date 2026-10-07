@@ -13,8 +13,8 @@ include(CMakePackageConfigHelpers)
 #     ROCm prefix
 #   - INSTALL_RPATH_USE_LINK_PATH adds the directory they were linked
 #     from (the ROCm lib directory)
-# Installed executables get no run path and rely on the loader's search
-# path.
+# The installed examples get their run path from
+# hipobj_install_executable().
 set_target_properties(hipobj PROPERTIES
   INSTALL_RPATH "\$ORIGIN/../lib"
   INSTALL_RPATH_USE_LINK_PATH ON)

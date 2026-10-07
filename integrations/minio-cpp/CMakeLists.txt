@@ -88,5 +88,6 @@ target_link_libraries(minio-getput-rdma PRIVATE
 # archive and headers would be unusable. The example links those
 # statically, so it only needs libhipobj at run time when hipobj is a
 # shared library.
-install(TARGETS minio-getput-rdma
-  RUNTIME DESTINATION bin/hipobj-examples)
+hipobj_install_executable(
+  NAME minio-getput-rdma
+  DESTINATION bin/hipobj-examples)

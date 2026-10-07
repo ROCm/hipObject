@@ -33,7 +33,9 @@
 set -euo pipefail
 
 BUILD_DIR="${BUILD_DIR:-/tmp/hipobject-build}"
-export LD_LIBRARY_PATH="${BUILD_DIR}/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# A shared libhipobj is in src/ when the build tree is used in place, and
+# in rocm-libs/ when the binaries were copied out of it
+export LD_LIBRARY_PATH="${BUILD_DIR}/src:${BUILD_DIR}/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 export HIPOBJ_NIC_HINT="${HIPOBJ_NIC_HINT:-ernic0}"
 echo "Using NIC hint: ${HIPOBJ_NIC_HINT}"

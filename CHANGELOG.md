@@ -30,6 +30,9 @@
 - The `OFFLOAD_ARCH` CMake cache variable and its `rocminfo`-based GPU
   architecture detection. It was never used to set the target architecture
   and is unnecessary now that nothing is compiled for the GPU.
+- The `hipObjInitV2()` declaration in `hipobj.h`. The function was never
+  implemented, so calls to it failed at link time. They now fail to
+  compile.
 
 ### Known issues
 

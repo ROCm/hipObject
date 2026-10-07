@@ -14,8 +14,9 @@ function(hipobj_add_example name)
     ${PROJECT_SOURCE_DIR}/src/s3)
   target_link_libraries(${name} PRIVATE
     hipobj hip::host dl)
-  install(TARGETS ${name}
-    RUNTIME DESTINATION bin/hipobj-examples)
+  hipobj_install_executable(
+    NAME ${name}
+    DESTINATION bin/hipobj-examples)
 endfunction()
 
 find_package(CURL QUIET)

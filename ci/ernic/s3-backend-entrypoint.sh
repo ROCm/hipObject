@@ -21,7 +21,8 @@
 
 set -euo pipefail
 
-export LD_LIBRARY_PATH=/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+# A shared libhipobj is in the mounted build tree's src/ directory
+export LD_LIBRARY_PATH=/hipobject-build/src:/hipobject-build/rocm-libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
 TEST_SIZE="${TEST_SIZE:-65536}"
 S3_IP="${S3_IP:-192.168.200.1}"
