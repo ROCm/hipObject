@@ -44,6 +44,11 @@ set(CMAKE_SKIP_INSTALL_RULES "${_minio_skip_install_rules}")
 set_property(DIRECTORY ${miniocpp_upstream_SOURCE_DIR}
   PROPERTY EXCLUDE_FROM_ALL TRUE)
 hipobj_mark_dir_targets_system(${miniocpp_upstream_SOURCE_DIR})
+# minio-cpp adds its own -Wall -Wextra -Wconversion to miniocpp, which
+# warn under Clang. It isn't our code to fix, so silence all warnings
+# in its sources. This only affects compiling miniocpp itself, not
+# targets that link it.
+target_compile_options(miniocpp PRIVATE -w)
 
 hipobj_add_library(
   NAME hipobj_minio
