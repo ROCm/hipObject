@@ -4,16 +4,31 @@ on:
   # The one lane that also fires post-merge: it is the cheapest thing that
   # compiles the tree, so it is the canary for a develop that no single PR
   # was tested against.
+  #
+  # The ignored paths hold nothing this build compiles or runs: ansible/
+  # and ci/ belong to their own lanes, and the documentation inputs are
+  # only used with HIPOBJ_BUILD_DOCS, which is OFF here. The Documentation
+  # Check lane configures and builds those.
   push:
     branches: [develop]
     paths-ignore:
       - '**/*.md'
       - '**/*.rst'
+      - 'ansible/**'
+      - 'ci/**'
+      - 'cmake/HIPOBJDocumentation.cmake'
+      - 'docs/**'
+      - 'requirements.txt'
   pull_request:
     branches: [develop]
     paths-ignore:
       - '**/*.md'
       - '**/*.rst'
+      - 'ansible/**'
+      - 'ci/**'
+      - 'cmake/HIPOBJDocumentation.cmake'
+      - 'docs/**'
+      - 'requirements.txt'
   workflow_dispatch:
 
 concurrency:

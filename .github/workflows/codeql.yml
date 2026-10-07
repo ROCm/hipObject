@@ -12,10 +12,24 @@
 name: "CodeQL Advanced"
 
 on:
+  # Documentation holds nothing CodeQL analyzes (C/C++ and workflows), so
+  # docs-only changes skip it. The weekly run still scans the whole tree.
   push:
     branches: [ "develop" ]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.rst'
+      - 'cmake/HIPOBJDocumentation.cmake'
+      - 'docs/**'
+      - 'requirements.txt'
   pull_request:
     branches: [ "develop" ]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.rst'
+      - 'cmake/HIPOBJDocumentation.cmake'
+      - 'docs/**'
+      - 'requirements.txt'
   schedule:
     - cron: '39 16 * * 2'
 

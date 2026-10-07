@@ -3,6 +3,14 @@ name: hipObject - Format Check
 on:
   pull_request:
     branches: [develop]
+    # The extensions match the lint action's "extensions" input below.
+    paths:
+      - '**.c'
+      - '**.cpp'
+      - '**.h'
+      - '**.hpp'
+      - '.clang-format'
+      - '.github/workflows/hipobject-format-check.yml'
   workflow_dispatch:
 
 concurrency:
