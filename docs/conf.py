@@ -51,6 +51,12 @@ html_theme_options = {
     "repository_url": "https://github.com/ROCm/hipObject",
     "use_repository_button": True,
     "show_toc_level": 2,
+    # Banner across the top of every page (the theme inserts
+    # it as HTML)
+    "announcement": (
+        "<strong>hipObject is an experimental library. "
+        "It is not intended for production use.</strong>"
+    ),
 }
 html_title = f"hipObject {version}"
 html_static_path = []
