@@ -4,6 +4,7 @@
 
 add_subdirectory(unit)
 add_subdirectory(exports)
+add_subdirectory(header)
 
 # The install test runs cmake --install, which needs the install rules
 if(NOT CMAKE_SKIP_INSTALL_RULES)

@@ -90,8 +90,6 @@ typedef struct {
     int             hipError;
 } hipObjError_t;
 
-#define HIPOBJ_SUCCESS ((hipObjError_t){hipObjSuccess, 0})
-
 /*!
  * @brief Return a human-readable string for an
  *        operation error code
