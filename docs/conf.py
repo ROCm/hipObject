@@ -2,14 +2,16 @@
 #
 # SPDX-License-Identifier: MIT
 
+# Sphinx reads its settings from lowercase module-level names
+# pylint: disable=invalid-name
+
 """Sphinx configuration for hipObject documentation."""
 
 project = "hipObject"
 author = "Advanced Micro Devices, Inc."
-copyright = (
-    "2025-2026 Advanced Micro Devices, Inc. "
-    "All rights reserved."
-)
+# pylint: disable=redefined-builtin
+copyright = "2025-2026 Advanced Micro Devices, Inc. All rights reserved."
+# pylint: enable=redefined-builtin
 
 version = "0.1.0"
 release = version
@@ -18,6 +20,11 @@ release = version
 
 extensions = [
     "breathe",
+    # Emits .nojekyll into the build. GitHub Pages serves this
+    # site from the gh-pages branch, and without that file it
+    # runs Jekyll, which strips _static/ and leaves the site
+    # without its CSS.
+    "sphinx.ext.githubpages",
 ]
 
 # -- Breathe (Doxygen XML import) ----------------------------
@@ -41,9 +48,7 @@ templates_path = []
 
 html_theme = "sphinx_book_theme"
 html_theme_options = {
-    "repository_url": (
-        "https://github.com/ROCm/hipObject"
-    ),
+    "repository_url": "https://github.com/ROCm/hipObject",
     "use_repository_button": True,
     "show_toc_level": 2,
 }

@@ -117,9 +117,13 @@ if(HIPOBJ_BUILD_DOCS)
 
   # ── Sphinx target: RST + Doxygen XML -> HTML ─────────
   # Target name follows ROCm convention (ROCMSphinxDoc)
+  #
+  # -d keeps Sphinx's doctree cache out of the HTML
+  # directory, which is published to GitHub Pages as is.
   add_custom_target(sphinx-html
     COMMAND ${SPHINX_BUILD}
       -b html
+      -d ${HIPOBJ_DOC_PATH}/doctrees
       -c ${CMAKE_BINARY_DIR}/docs-sphinx
       ${CMAKE_SOURCE_DIR}/docs
       ${HIPOBJ_DOC_PATH}/html

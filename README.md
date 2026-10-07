@@ -126,8 +126,10 @@ v1.2.0 compatibility matrix and testing guide.
 
 ## Documentation
 
-Full documentation lives in the [`docs/`](docs/) directory
-and covers building, the API reference, and architecture.
+Full documentation is published at
+<https://rocm.github.io/hipObject/>. Its source lives in the
+[`docs/`](docs/) directory and covers building, the API
+reference, and architecture.
 
 ## License
 

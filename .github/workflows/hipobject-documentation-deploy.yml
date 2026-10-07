@@ -1,0 +1,113 @@
+name: hipObject - Documentation Deploy
+
+# Build the Sphinx documentation and publish it to the gh-pages branch,
+# which GitHub Pages serves at https://rocm.github.io/hipObject/.
+#
+# Prerequisite (one-time, requires repo-admin access, after the first run
+# has created gh-pages):
+#   Settings > Pages > Source = "Deploy from a branch", gh-pages / (root)
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'docs/**'
+      - 'include/**/*.h'
+      - 'requirements.txt'
+      - 'cmake/HIPOBJDocumentation.cmake'
+      - '.github/workflows/hipobject-documentation-deploy.yml'
+  workflow_dispatch:
+
+# Serialize deploys, so this workflow is the only thing pushing to gh-pages
+# while it runs. Unlike the pull request workflows this does NOT cancel in
+# progress: a superseded run queues behind the current one and then
+# publishes the newer docs. The group includes the ref because a newly
+# queued run always replaces a pending one in the same group, and a
+# build-only run from another branch mustn't displace a pending develop
+# deploy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
+jobs:
+  documentation-deploy:
+    name: Documentation Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Check out code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        # "Publish to gh-pages" pushes through origin with this token.
+        persist-credentials: true
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake doxygen
+    - name: Configure docs-only build
+      run: |
+        cmake -S . -B build \
+          -DHIPOBJ_DOCS_ONLY=ON \
+          -DHIPOBJ_BUILD_DOCS=ON
+    - name: Build documentation
+      run: cmake --build build --target sphinx-html
+    # A manual run from any other branch builds the docs as a check but
+    # doesn't replace the published site with that branch's docs.
+    - name: Publish to gh-pages
+      if: github.ref == 'refs/heads/develop'
+      run: |
+        set -euo pipefail
+
+        git config user.name "github-actions[bot]"
+        git config user.email \
+          "41898282+github-actions[bot]@users.noreply.github.com"
+        git config commit.gpgSign false
+
+        # ls-remote --exit-code exits 2 when gh-pages doesn't exist. Any
+        # other failure is an error, not a reason to start a new branch.
+        status=0
+        git ls-remote --quiet --exit-code --heads origin gh-pages \
+          > /dev/null || status=$?
+        case "${status}" in
+          0)
+            git fetch --quiet origin gh-pages
+            git worktree add --quiet --detach ../gh-pages FETCH_HEAD
+            ;;
+          2)
+            echo "::notice::no gh-pages branch yet; starting one"
+            git worktree add --quiet --orphan -b gh-pages ../gh-pages
+            ;;
+          *)
+            echo "::error::could not query origin for gh-pages"
+            exit 1
+            ;;
+        esac
+
+        rsync -a --delete --exclude '.git' build/docs/html/ ../gh-pages/
+
+        # sphinx.ext.githubpages emits this, but a branch source that ever
+        # loses it runs Jekyll and strips _static/, which costs the whole
+        # site its CSS. Cheap to assert.
+        touch ../gh-pages/.nojekyll
+
+        git -C ../gh-pages add -A
+        if git -C ../gh-pages diff --cached --quiet; then
+          echo "site unchanged"
+          exit 0
+        fi
+        git -C ../gh-pages commit --quiet \
+          -m "docs: publish site from ${GITHUB_SHA}" \
+          -m "Built by hipobject-documentation-deploy.yml. [skip ci]"
+        git -C ../gh-pages push --quiet origin HEAD:refs/heads/gh-pages
+        echo "published"
