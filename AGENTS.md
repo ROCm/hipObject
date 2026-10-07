@@ -335,7 +335,7 @@ steps.
   ```
 
   CI: [hipobject-shellcheck.yml](.github/workflows/hipobject-shellcheck.yml),
-  only when a `.sh` file changes.
+  when a `.sh` file or the workflow file changes.
 - **The shell embedded in YAML files must be shellcheck-clean too.** Every
   `run:` block in `.github/workflows/*.yml` is a bash script (the `hipobject-*`
   workflows set `defaults.run.shell` to `bash -e {0}`, and `codeql.yml` sets
@@ -370,7 +370,7 @@ steps.
   ```
 
   CI: [hipobject-cmakelint.yml](.github/workflows/hipobject-cmakelint.yml),
-  only when a CMake file changes.
+  when a CMake file, `.cmakelintrc`, or the workflow file changes.
 
 ### Python
 
@@ -407,15 +407,16 @@ Python code must run on **Python 3.10**. Don't use anything newer, such as
 
   CI:
   [hipobject-documentation-check.yml](.github/workflows/hipobject-documentation-check.yml),
-  only when the documentation, the public header, `README.md`, or the
-  documentation's build files change.
+  when the documentation, the public header, `README.md`, `requirements.txt`,
+  the documentation's build files, or the workflow file change.
 
 ### Ansible
 
 - **ansible-lint** and a playbook syntax check, run from `ansible/` after
   installing the Galaxy collection (see [ansible/README.md](ansible/README.md));
   [hipobject-ansible.yml](.github/workflows/hipobject-ansible.yml) has the exact
-  commands. CI runs them only when something under `ansible/` changes.
+  commands. CI runs them when something under `ansible/` or the workflow file
+  changes.
 
 ## Changelog
 
