@@ -30,6 +30,10 @@ install(EXPORT hipobj-targets
   COMPONENT hipobj
 )
 
+# hipobj-config.cmake only finds hipobj's dependencies for the static
+# library
+get_target_property(HIPOBJ_LIBRARY_TYPE hipobj TYPE)
+
 configure_package_config_file(
   ${CMAKE_SOURCE_DIR}/cmake/hipobj-config.cmake.in
   ${CMAKE_BINARY_DIR}/hipobj-config.cmake
