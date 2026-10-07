@@ -250,7 +250,7 @@ TEST_F(ConnRefFaultTest, InitAndDestroyFailureKeepsOwnership)
     ASSERT_EQ(r.status, 500) << "INIT failure must answer 500";
 
     auto ids = handlers.table().ids();
-    ASSERT_EQ(ids.size(), 1u) << "exactly the failed session remains";
+    ASSERT_EQ(ids.size(), 1U) << "exactly the failed session remains";
     std::string sid = ids[0];
 
     bool                  sawSurvivingQp = false;
@@ -268,17 +268,17 @@ TEST_F(ConnRefFaultTest, InitAndDestroyFailureKeepsOwnership)
     /* Reference ledger against a non-zero base: creation raised the
      * counter; the failed destroys must have left it there. */
     const uint32_t base = dev->connRefs.load();
-    EXPECT_GT(base, 0u) << "creation must have raised the counter";
+    EXPECT_GT(base, 0U) << "creation must have raised the counter";
 
     /* Reaper retry: the QP destroys cleanly this time and the
      * reference is consumed exactly once. */
     handlers.reapSession(sid);
-    EXPECT_EQ(dev->connRefs.load(), base - 1u) << "successful retry consumes exactly one reference";
+    EXPECT_EQ(dev->connRefs.load(), base - 1U) << "successful retry consumes exactly one reference";
 
     /* A further reap finds no session - the counter must not move
      * (no double release through the CQ-only path). */
     handlers.reapSession(sid);
-    EXPECT_EQ(dev->connRefs.load(), base - 1u) << "no additional release after the session is gone";
+    EXPECT_EQ(dev->connRefs.load(), base - 1U) << "no additional release after the session is gone";
 
     EXPECT_EQ(g_fault.destroyQpCalls, 2);
 }

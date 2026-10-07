@@ -223,11 +223,11 @@ protected:
 TEST_F(V2RegistryTest, RegistryCrudAndLimits)
 {
     auto &reg = hipObj::v2::registry();
-    EXPECT_EQ(reg.size(), 0u);
+    EXPECT_EQ(reg.size(), 0U);
     std::vector<hipObj::v2::ConnId> ids;
     for (size_t i = 0; i < reg.kMaxConnections; ++i) {
         auto id = makeConn(&dh_);
-        ASSERT_NE(id, 0u);
+        ASSERT_NE(id, 0U);
         ids.push_back(id);
     }
     EXPECT_EQ(reg.size(), reg.kMaxConnections);
@@ -238,7 +238,7 @@ TEST_F(V2RegistryTest, RegistryCrudAndLimits)
     for (auto id : ids) {
         EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
     }
-    EXPECT_EQ(reg.size(), 0u);
+    EXPECT_EQ(reg.size(), 0U);
 }
 
 /* The MR table limit is enforced by BufferMap. */
@@ -266,36 +266,36 @@ TEST_F(V2RegistryTest, MrRefCountGating)
     int fakePtr = 0;
     EXPECT_FALSE(map.acquireMrRef(&fakePtr));
     EXPECT_FALSE(map.releaseMrRef(&fakePtr));
-    EXPECT_EQ(map.mrRefCount(&fakePtr), 0u);
+    EXPECT_EQ(map.mrRefCount(&fakePtr), 0U);
 }
 
 /* Connection teardown touches only qp/cq. */
 TEST_F(V2RegistryTest, ConnectionOnlyTeardown)
 {
     auto id = makeConn(&dh_);
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     g_fake.deallocPdCalls = 0;
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
     EXPECT_EQ(g_fake.destroyQpCalls, 1);
     EXPECT_EQ(g_fake.destroyCqCalls, 1);
     EXPECT_EQ(g_fake.deallocPdCalls, 0);
-    EXPECT_EQ(hipObj::v2::registry().size(), 0u);
+    EXPECT_EQ(hipObj::v2::registry().size(), 0U);
 }
 
 /* destroy_qp failure poisons the entry. */
 TEST_F(V2RegistryTest, DestroyQpFailurePoisons)
 {
     auto id = makeConn(&dh_);
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     g_fake.destroyQpFails = 1;
     EXPECT_NE(hipObj::v2::releaseConnection(id), 0);
     EXPECT_TRUE(hipObj::v2::registry().isPoisoned(id));
-    EXPECT_EQ(hipObj::v2::registry().size(), 1u);
+    EXPECT_EQ(hipObj::v2::registry().size(), 1U);
     /* The cq was destroyed on the first attempt; the retry only has
      * the failed qp left. */
     EXPECT_EQ(g_fake.destroyCqCalls, 1);
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
-    EXPECT_EQ(hipObj::v2::registry().size(), 0u);
+    EXPECT_EQ(hipObj::v2::registry().size(), 0U);
     EXPECT_EQ(g_fake.destroyQpCalls, 2);
 }
 
@@ -303,7 +303,7 @@ TEST_F(V2RegistryTest, DestroyQpFailurePoisons)
 TEST_F(V2RegistryTest, DestroyCqFailurePoisons)
 {
     auto id = makeConn(&dh_);
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     g_fake.destroyCqFails = 1;
     EXPECT_NE(hipObj::v2::releaseConnection(id), 0);
     EXPECT_TRUE(hipObj::v2::registry().isPoisoned(id));
@@ -312,7 +312,7 @@ TEST_F(V2RegistryTest, DestroyCqFailurePoisons)
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
     EXPECT_EQ(g_fake.destroyQpCalls, qpDestroys);
     EXPECT_EQ(g_fake.destroyCqCalls, 2);
-    EXPECT_EQ(hipObj::v2::registry().size(), 0u);
+    EXPECT_EQ(hipObj::v2::registry().size(), 0U);
 }
 
 /* Releasing an unknown ConnId is a no-op. */
@@ -326,7 +326,7 @@ TEST_F(V2RegistryTest, UnknownConnIdIsNoOp)
 TEST_F(V2RegistryTest, DoubleReleaseClaimsOnce)
 {
     auto id = makeConn(&dh_);
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0); /* idempotent */
     EXPECT_EQ(g_fake.destroyQpCalls, 1);
@@ -338,15 +338,15 @@ TEST_F(V2RegistryTest, EraseReleasesCapacity)
 {
     auto &reg = hipObj::v2::registry();
     auto  id  = makeConn(&dh_);
-    ASSERT_NE(id, 0u);
-    EXPECT_EQ(reg.size(), 1u);
+    ASSERT_NE(id, 0U);
+    EXPECT_EQ(reg.size(), 1U);
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
-    EXPECT_EQ(reg.size(), 0u);
+    EXPECT_EQ(reg.size(), 0U);
     /* Capacity is fully returned: 64 more fit. */
     std::vector<hipObj::v2::ConnId> ids;
     for (size_t i = 0; i < reg.kMaxConnections; ++i) {
         auto nid = makeConn(&dh_);
-        ASSERT_NE(nid, 0u);
+        ASSERT_NE(nid, 0U);
         ids.push_back(nid);
     }
     for (auto nid : ids) {
@@ -361,11 +361,11 @@ TEST_F(V2RegistryTest, RegistryFullSuppressesCreation)
     std::vector<hipObj::v2::ConnId> ids;
     for (size_t i = 0; i < reg.kMaxConnections; ++i) {
         auto id = makeConn(&dh_);
-        ASSERT_NE(id, 0u);
+        ASSERT_NE(id, 0U);
         ids.push_back(id);
     }
     int cqBefore = g_fake.createCqCalls;
-    EXPECT_EQ(makeConn(&dh_), 0u);
+    EXPECT_EQ(makeConn(&dh_), 0U);
     EXPECT_EQ(g_fake.createCqCalls, cqBefore); /* nothing created */
     for (auto id : ids) {
         EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
@@ -379,7 +379,7 @@ TEST_F(V2RegistryTest, PartialRollbackFailureTombstone)
     auto &reg = hipObj::v2::registry();
     ASSERT_TRUE(reg.reserveSlot());
     uint64_t rid = reg.retired().reserve();
-    ASSERT_NE(rid, 0u);
+    ASSERT_NE(rid, 0U);
     g_fake.createQpFails  = 1;
     g_fake.destroyCqFails = 1; /* rollback fails too */
     hipObj::RcConnV2 conn;
@@ -394,12 +394,12 @@ TEST_F(V2RegistryTest, PartialRollbackFailureTombstone)
     reg.retired().unreserve(rid);
     entry.reservationId = 0;
     auto id             = reg.insert(std::move(entry));
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     /* The leftover cq is unreachable until the verb recovers; retry
      * destroys it and finishes. */
     g_fake.destroyCqFails = 0;
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
-    EXPECT_EQ(reg.size(), 0u);
+    EXPECT_EQ(reg.size(), 0U);
 }
 
 /* create_qp failure with successful rollback frees the
@@ -418,7 +418,7 @@ TEST_F(V2RegistryTest, QpCreateFailureCleanRollback)
     EXPECT_EQ(conn.qp, nullptr);
     reg.retired().unreserve(rid);
     reg.unreserveSlot();
-    EXPECT_EQ(reg.retired().used(), 0u);
+    EXPECT_EQ(reg.retired().used(), 0U);
 }
 
 /* Defensive busy path: live qp, no reservation, ring full. */
@@ -435,24 +435,24 @@ TEST_F(V2RegistryTest, DefensiveBusyPath)
     entry.reservationId = 0;
     entry.clientPsn     = 5;
     auto id             = reg.insertRawForTest(std::move(entry));
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     /* Fill the retired ring to capacity. */
     std::vector<uint64_t> rids;
     for (size_t i = 0; i < reg.retired().kCapacity; ++i) {
         uint64_t r = reg.retired().reserve();
-        ASSERT_NE(r, 0u);
+        ASSERT_NE(r, 0U);
         rids.push_back(r);
     }
     EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::kReleaseBusy);
     /* Entry stayed, not destroyed. */
-    EXPECT_EQ(reg.size(), 1u);
+    EXPECT_EQ(reg.size(), 1U);
     EXPECT_TRUE(reg.withEntry(id, [](hipObj::v2::ConnectionEntryV2 &e) { EXPECT_NE(e.conn.qp, nullptr); }));
     /* Free ring space, retry completes. */
     for (auto r : rids) {
         reg.retired().unreserve(r);
     }
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
-    EXPECT_EQ(reg.size(), 0u);
+    EXPECT_EQ(reg.size(), 0U);
 }
 
 /* Topology fields reach the QP attributes. */
@@ -469,9 +469,9 @@ TEST_F(V2RegistryTest, TopologyFieldsReachQpAttrs)
     EXPECT_EQ(hipObj::v2::transitionQpToRtsV2(conn, &dh_, 0x112233), 0);
     /* PSNs captured by the modify spy. */
     ASSERT_FALSE(g_fake.qpAttrRqPsn.empty());
-    EXPECT_EQ(g_fake.qpAttrRqPsn.back()[0], 0xAABBCCu);
+    EXPECT_EQ(g_fake.qpAttrRqPsn.back()[0], 0xAABBCCU);
     ASSERT_FALSE(g_fake.qpAttrSqPsn.empty());
-    EXPECT_EQ(g_fake.qpAttrSqPsn.back()[0], 0x112233u);
+    EXPECT_EQ(g_fake.qpAttrSqPsn.back()[0], 0x112233U);
     bool qpOk = true, cqOk = true;
     hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
     EXPECT_TRUE(qpOk);
@@ -494,7 +494,7 @@ TEST_F(V2RegistryTest, OutOfRangeGidIndexRejected)
     EXPECT_TRUE(g_fake.qpAttrRqPsn.empty());
     dh_.gidIndex = 255;
     EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, gid, 0xAABBCC), 0);
-    EXPECT_EQ(g_fake.qpAttrRqPsn.size(), 1u);
+    EXPECT_EQ(g_fake.qpAttrRqPsn.size(), 1U);
     bool qpOk = true, cqOk = true;
     hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
     EXPECT_TRUE(qpOk);
@@ -506,24 +506,24 @@ TEST_F(V2RegistryTest, OutOfRangeGidIndexRejected)
 TEST_F(V2RegistryTest, RetiredRingLifecycle)
 {
     auto &ring = hipObj::v2::registry().retired();
-    EXPECT_EQ(ring.used(), 0u);
+    EXPECT_EQ(ring.used(), 0U);
     uint64_t rid = ring.reserve();
-    ASSERT_NE(rid, 0u);
-    EXPECT_EQ(ring.reservedCount(), 1u);
+    ASSERT_NE(rid, 0U);
+    EXPECT_EQ(ring.reservedCount(), 1U);
     EXPECT_FALSE(ring.contains(5, 6));
     ring.record(rid, 5, 6);
     EXPECT_TRUE(ring.contains(5, 6));
-    EXPECT_EQ(ring.reservedCount(), 0u);
-    EXPECT_EQ(ring.recordedCount(), 1u);
+    EXPECT_EQ(ring.reservedCount(), 0U);
+    EXPECT_EQ(ring.recordedCount(), 1U);
     /* Record survives within the expiry window (fake clock default
      * is the steady clock; expiry collection only picks recorded
      * slots past 60 s). */
-    EXPECT_EQ(ring.collectExpired(0), 0u);
+    EXPECT_EQ(ring.collectExpired(0), 0U);
     EXPECT_TRUE(ring.contains(5, 6));
     /* Far future: collected. */
-    EXPECT_EQ(ring.collectExpired(UINT64_MAX), 1u);
+    EXPECT_EQ(ring.collectExpired(UINT64_MAX), 1U);
     EXPECT_FALSE(ring.contains(5, 6));
-    EXPECT_EQ(ring.used(), 0u);
+    EXPECT_EQ(ring.used(), 0U);
 }
 
 /* Reservation ownership: recording consumes exactly the owned slot;
@@ -533,7 +533,7 @@ TEST_F(V2RegistryTest, ReservationOwnership)
     auto    &reg  = hipObj::v2::registry();
     auto    &ring = reg.retired();
     uint64_t ridA = ring.reserve();
-    ASSERT_NE(ridA, 0u);
+    ASSERT_NE(ridA, 0U);
     /* Recording with an unrelated tuple through the same id is the
      * owner's action; unreserve by another party is prevented by the
      * single apiLock contract (not directly testable). Verify record
@@ -543,7 +543,7 @@ TEST_F(V2RegistryTest, ReservationOwnership)
     /* The consumed rid cannot be double-recorded or unreserved. */
     ring.unreserve(ridA);
     EXPECT_TRUE(ring.contains(9, 9));
-    EXPECT_EQ(ring.used(), 1u);
+    EXPECT_EQ(ring.used(), 1U);
 }
 
 /* Conflict-discard accounting is exercised in commit 3 with the

@@ -23,8 +23,8 @@ TEST(RdmaToken, EncodeProducesHexString)
     std::string encoded = hipObj::encodeRdmaToken(token);
 
     EXPECT_FALSE(encoded.empty());
-    EXPECT_EQ(encoded.size(), 88u);
-    EXPECT_EQ(encoded.size() % 2, 0u);
+    EXPECT_EQ(encoded.size(), 88U);
+    EXPECT_EQ(encoded.size() % 2, 0U);
     EXPECT_EQ(encoded[0], '0');
     EXPECT_EQ(encoded[1], '1');
 }
@@ -35,7 +35,7 @@ TEST(RdmaToken, EncodeRcTransportByte)
     token.transport = hipObj::TRANSPORT_RC;
 
     std::string enc = hipObj::encodeRdmaToken(token);
-    EXPECT_GE(enc.size(), 2u);
+    EXPECT_GE(enc.size(), 2U);
     EXPECT_EQ(enc.substr(0, 2), "01");
 }
 
@@ -45,7 +45,7 @@ TEST(RdmaToken, EncodeDcTransportByte)
     token.transport = hipObj::TRANSPORT_DC;
 
     std::string enc = hipObj::encodeRdmaToken(token);
-    EXPECT_GE(enc.size(), 2u);
+    EXPECT_GE(enc.size(), 2U);
     EXPECT_EQ(enc.substr(0, 2), "00");
 }
 
@@ -130,7 +130,7 @@ TEST(RdmaReply, ParsePeerTokenFromReply)
     int               code = 0;
     EXPECT_TRUE(hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
     EXPECT_EQ(code, 200);
-    EXPECT_EQ(parsed.qpNum, 99u);
+    EXPECT_EQ(parsed.qpNum, 99U);
     EXPECT_EQ(parsed.transport, hipObj::TRANSPORT_RC);
 }
 
