@@ -79,7 +79,7 @@ namespace {
             return inst;
         }
 
-        hipObjError_t EnsureInit(minio::s3::BaseUrl base_url, minio::creds::Provider *provider)
+        hipObjError_t EnsureInit(minio::s3::BaseUrl base_url)
         {
             std::lock_guard<std::mutex> lock(mutex_);
             std::string                 key = base_url.host + ":" + base_url.region;
@@ -203,7 +203,7 @@ Client::PutObject(minio::s3::PutObjectArgs args)
 
     const size_t size = *args.size;
 
-    hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_, provider_);
+    hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
         // RDMA not available (no NIC or no GPU topology) — fall back to HTTP PUT.
         // Copy the buffer into a std::stringstream so minio-cpp can seek in it.
@@ -292,7 +292,7 @@ Client::GetObject(minio::s3::GetObjectArgs args)
 
     const size_t size = *args.size;
 
-    hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_, provider_);
+    hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
         // RDMA not available — fall back to HTTP GET.
         // Accumulate response into a string, then memcpy to the caller's buffer.

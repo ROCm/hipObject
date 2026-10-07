@@ -690,7 +690,7 @@ namespace v2 {
                 /* Route to the real peer when the token carried its GID;
                  * same-HCA loopback (zero token) keeps the local GID. */
                 union ibv_gid peer = s.hasPeerGid ? s.peerGid : dh.localGid;
-                paired = hipObj::v2::transitionQpToRtrV2(&dh, conn, req.qpn, 0, peer, s.clientPsn) == 0 &&
+                paired = hipObj::v2::transitionQpToRtrV2(&dh, conn, req.qpn, peer, s.clientPsn) == 0 &&
                          hipObj::v2::transitionQpToRtsV2(conn, &dh, s.serverPsn) == 0;
             }
         });

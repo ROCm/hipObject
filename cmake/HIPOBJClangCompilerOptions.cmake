@@ -17,7 +17,6 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     # Basic "high" warning levels
     -Wall
     -Wextra
-    -Wno-unused-parameter # TODO: Fix diagnostics and re-enable
 
     # Avoid non-standard C/C++ behavior
     -pedantic

@@ -83,7 +83,7 @@ namespace v2 {
             return ibv.modify_qp(qp, &attr, mask);
         }
 
-        int modifyQpToRtr(struct ibv_context *ctx, struct ibv_qp *qp, uint32_t destQpNum, uint16_t destLid,
+        int modifyQpToRtr(struct ibv_context *ctx, struct ibv_qp *qp, uint32_t destQpNum,
                           union ibv_gid destGid, int gidIndex, uint32_t rqPsn, uint8_t portNum)
         {
             /* The address handle stores the GID index in a uint8_t, so an
@@ -251,10 +251,10 @@ namespace v2 {
         return modifyQpToInit(dh, conn.qp);
     }
 
-    int transitionQpToRtrV2(DeviceHandle *dh, RcConnV2 &conn, uint32_t destQpNum, uint16_t destLid,
-                            union ibv_gid destGid, uint32_t rqPsn)
+    int transitionQpToRtrV2(DeviceHandle *dh, RcConnV2 &conn, uint32_t destQpNum, union ibv_gid destGid,
+                            uint32_t rqPsn)
     {
-        return modifyQpToRtr(dh->ctx, conn.qp, destQpNum, destLid, destGid, dh->gidIndex, rqPsn, dh->portNum);
+        return modifyQpToRtr(dh->ctx, conn.qp, destQpNum, destGid, dh->gidIndex, rqPsn, dh->portNum);
     }
 
     int transitionQpToRtsV2(RcConnV2 &conn, DeviceHandle *dh, uint32_t sqPsn)

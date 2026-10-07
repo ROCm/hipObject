@@ -47,8 +47,8 @@ namespace v2 {
     /* QP state transitions taking the device topology from dh. The v1
      * signatures (RcConnection&) remain unchanged. */
     int transitionQpToInitV2(DeviceHandle *dh, RcConnV2 &conn);
-    int transitionQpToRtrV2(DeviceHandle *dh, RcConnV2 &conn, uint32_t destQpNum, uint16_t destLid,
-                            union ibv_gid destGid, uint32_t rqPsn);
+    int transitionQpToRtrV2(DeviceHandle *dh, RcConnV2 &conn, uint32_t destQpNum, union ibv_gid destGid,
+                            uint32_t rqPsn);
     int transitionQpToRtsV2(RcConnV2 &conn, DeviceHandle *dh, uint32_t sqPsn);
 
     /* Creates only a qp on an existing cq (conflict-discard retry uses
