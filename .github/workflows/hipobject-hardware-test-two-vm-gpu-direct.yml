@@ -68,6 +68,13 @@ env:
   ROCJITSU_IMAGE_GPU: sbates130272/batesste-ci-images-ubuntu-rocm-rocjitsu:20260924.gad7a357-rocjitsu.c85bb75
   ROCM_IMAGE: rocm/dev-ubuntu-24.04:10.0.0-full
 
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
 jobs:
   two-vm-gpu-direct:
     name: Two-VM RDMA (${{ matrix.buffer_label }})
@@ -220,7 +227,7 @@ jobs:
             "$ROCJITSU_IMAGE_GPU" \
             rocjitsu --config /usr/local/share/rocjitsu/configs/gfx1250_mi455x.json \
                      --vfio-socket /run/vfu/rocjitsu.sock
-          for i in $(seq 1 45); do
+          for _ in $(seq 1 45); do
             [ -S "${GITHUB_WORKSPACE}/vfu/rocjitsu.sock" ] && break
             sleep 2
           done
@@ -231,7 +238,7 @@ jobs:
 
       - name: Select QEMU accelerator and guest size
         run: |
-          if [ -c /dev/kvm ] && ${QEMU_PATH:-}qemu-system-x86_64 -accel help 2>/dev/null | grep -qw kvm; then
+          if [ -c /dev/kvm ] && "${QEMU_PATH:-}qemu-system-x86_64" -accel help 2>/dev/null | grep -qw kvm; then
             echo "QEMU_ACCEL=kvm" >> "$GITHUB_ENV"
             echo "QEMU_CPU=host"  >> "$GITHUB_ENV"
           else
@@ -286,9 +293,11 @@ jobs:
           PYEOF
           )"
           chmod 600 "$SSH_KEY_PRIVATE"
-          echo "vm_user=$VM_USER"         >> "$GITHUB_OUTPUT"
-          echo "vm_disk=$VM_DISK"         >> "$GITHUB_OUTPUT"
-          echo "ssh_key=$SSH_KEY_PRIVATE" >> "$GITHUB_OUTPUT"
+          {
+            echo "vm_user=$VM_USER"
+            echo "vm_disk=$VM_DISK"
+            echo "ssh_key=$SSH_KEY_PRIVATE"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create the per-VM disk overlays
         id: overlays
@@ -344,7 +353,7 @@ jobs:
             --verbose > /tmp/server1.log 2>&1 &
           echo "ERNIC_PID1=$!" >> "$GITHUB_ENV"
 
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             timeout 1 bash -c "echo > /dev/tcp/localhost/${TCP_PORT}" 2>/dev/null && break
             sleep 1
           done
@@ -360,7 +369,7 @@ jobs:
           echo "ERNIC_PID2=$!" >> "$GITHUB_ENV"
 
           for n in 1 2; do
-            for i in $(seq 1 45); do
+            for _ in $(seq 1 45); do
               [ -S "/tmp/vfio-user-server${n}.sock" ] && break
               sleep 1
             done
@@ -371,7 +380,7 @@ jobs:
 
       - name: Verify the TCP mesh formed
         run: |
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             grep -q "TCP: Registered with manager" /tmp/server2.log && \
             grep -q "TCP: Registered node" /tmp/server1.log && break
             sleep 2
@@ -389,34 +398,36 @@ jobs:
         run: |
           start_vm() {
             n=$1; disk=$2; port=$3
-            # Only VM 2 gets the GPU. rombar=0 because rocjitsu serves no
-            # option ROM, and a guest that goes looking for one oopses in the
-            # RAS VBIOS query.
-            gpu=""
-            # if/fi, not `[ ] && x=y`: under `sh -e` the failing test would be
+            # Only VM 2 gets the GPU, passed as the function's positional
+            # parameters so the JSON reaches QEMU as one argument. rombar=0
+            # because rocjitsu serves no option ROM, and a guest that goes
+            # looking for one oopses in the RAS VBIOS query.
+            set --
+            # if/fi, not `[ ] && x=y`: under `bash -e` the failing test would be
             # the whole command's status and kill the step for VM 1.
             if [ "$n" = 2 ]; then
-              gpu='-device {"driver":"vfio-user-pci","rombar":0,"socket":{"type":"unix","path":"'"${GITHUB_WORKSPACE}"'/vfu/rocjitsu.sock"}}'
+              set -- -device '{"driver":"vfio-user-pci","rombar":0,"socket":{"type":"unix","path":"'"${GITHUB_WORKSPACE}"'/vfu/rocjitsu.sock"}}'
             fi
-            # shellcheck disable=SC2086
-            ${QEMU_PATH:-}qemu-system-x86_64 \
-              -machine q35,accel=${QEMU_ACCEL},memory-backend=mem${n} \
-              -cpu ${QEMU_CPU} -smp ${VM_VCPUS} -m ${VM_MEM_MB}M \
-              -object memory-backend-memfd,id=mem${n},share=on,size=${VM_MEM_MB}M \
+            "${QEMU_PATH:-}qemu-system-x86_64" \
+              -machine "q35,accel=${QEMU_ACCEL},memory-backend=mem${n}" \
+              -cpu "${QEMU_CPU}" -smp "${VM_VCPUS}" -m "${VM_MEM_MB}M" \
+              -object "memory-backend-memfd,id=mem${n},share=on,size=${VM_MEM_MB}M" \
               -nographic \
               -drive file="$disk",format=qcow2,if=virtio \
-              -netdev user,id=net0,hostfwd=tcp::${port}-:22 \
+              -netdev "user,id=net0,hostfwd=tcp::${port}-:22" \
               -device virtio-net-pci,netdev=net0 \
               -device '{"driver":"vfio-user-pci","socket":{"type":"unix","path":"/tmp/vfio-user-server'"$n"'.sock"}}' \
-              $gpu \
-              -serial file:/tmp/qemu-vm${n}-console.log -monitor none \
-              -qmp unix:/tmp/qmp-vm${n}.sock,server=on,wait=off > /tmp/qemu-vm${n}.log 2>&1 &
+              "$@" \
+              -serial "file:/tmp/qemu-vm${n}-console.log" -monitor none \
+              -qmp "unix:/tmp/qmp-vm${n}.sock,server=on,wait=off" > "/tmp/qemu-vm${n}.log" 2>&1 &
             echo "QEMU_PID${n}=$!" >> "$GITHUB_ENV"
           }
           start_vm 1 "${VM_DISK_1}" "$VM1_SSH_PORT"
           start_vm 2 "${VM_DISK_2}" "$VM2_SSH_PORT"
           sleep 5
-          for pid in $(awk -F= '/^QEMU_PID/{print $2}' "$GITHUB_ENV"); do
+          # The loop runs in a subshell: its exit fails the pipeline, and
+          # with it the step.
+          awk -F= '/^QEMU_PID/{print $2}' "$GITHUB_ENV" | while read -r pid; do
             kill -0 "$pid" 2>/dev/null || { cat /tmp/qemu-vm1.log /tmp/qemu-vm2.log; exit 1; }
           done
 
@@ -426,7 +437,7 @@ jobs:
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
-            for i in $(seq 1 60); do
+            for _ in $(seq 1 60); do
               ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
                   -o ConnectTimeout=5 -p "$port" "${VM_USER}@localhost" true \
                 2>/dev/null && break
@@ -545,20 +556,22 @@ jobs:
           SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          vm_ssh() {
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
+          }
           for spec in "1:${VM1_SSH_PORT}" "2:${VM2_SSH_PORT}"; do
             n=${spec%%:*}; port=${spec##*:}
             # By PCI vendor ID, never by name: the kernel registers ionic_%d
             # and udev rewrites it twice.
-            DEV=$(ssh $SSH_OPTS -p "$port" "${VM_USER}@localhost" 'sh -s' \
+            DEV=$(vm_ssh -p "$port" "${VM_USER}@localhost" 'sh -s' \
               < "${GITHUB_WORKSPACE}/rocm-ernic/scripts/find-rdma-device.sh" | tr -d '\r') || true
             [ -n "$DEV" ] || {
               echo "VM ${n}: no RDMA device"
-              ssh $SSH_OPTS -p "$port" "${VM_USER}@localhost" \
+              vm_ssh -p "$port" "${VM_USER}@localhost" \
                 'ibv_devices; lsmod | grep ionic; dmesg | grep -i ionic | tail -30' || true
               exit 1
             }
-            ssh $SSH_OPTS -p "$port" "${VM_USER}@localhost" "ibv_devinfo -d $DEV" \
+            vm_ssh -p "$port" "${VM_USER}@localhost" "ibv_devinfo -d $DEV" \
               | grep -q PORT_ACTIVE || { echo "VM ${n}: $DEV not PORT_ACTIVE"; exit 1; }
             echo "VM ${n}: $DEV is PORT_ACTIVE"
             echo "RDMA_DEVICE_${n}=$DEV" >> "$GITHUB_ENV"
@@ -569,14 +582,16 @@ jobs:
           SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          vm_ssh() {
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
+          }
           # Count by sysfs vendor/device, never by parsing lspci. lspci needs
           # /usr/share/misc/pci.ids, and a guest this early is still running
           # the boot's apt work -- one run caught pciutils mid-rewrite, and
           # lspci bailed with "Parse error at line 28286" after one device,
           # which reads exactly like a function that never attached.
           count() {
-            ssh $SSH_OPTS -p "$2" "${VM_USER}@localhost" \
+            vm_ssh -p "$2" "${VM_USER}@localhost" \
               "grep -lix '$1' /sys/bus/pci/devices/*/vendor 2>/dev/null | wc -l" | tr -d '\r'
           }
           # 0x1dd8 is Pensando (the emulated ionic NIC), 0x1002 is AMD (rocjitsu).
@@ -589,19 +604,20 @@ jobs:
             echo "VM 1 has a GPU; this lane is supposed to be asymmetric"; exit 1
           fi
           echo "VM 2 has both functions, VM 1 has only the NIC"
-          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' || true
+          vm_ssh -p "$VM2_SSH_PORT" "${VM_USER}@localhost" 'lspci -nn' || true
 
       - name: Stage ip_discovery.bin into VM 2
         env:
           SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
-          scp $SSH_OPTS -P "$VM2_SSH_PORT" "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
+          scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -P "$VM2_SSH_PORT" "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
             "${VM_USER}@localhost:/tmp/"
           # updates/ takes precedence over the packaged firmware, and is where
           # the guest's baked gap stubs already live.
-          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
             'sudo install -D -m 0644 /tmp/ip_discovery.bin \
                /lib/firmware/updates/amdgpu/ip_discovery.bin && \
              ls -l /lib/firmware/updates/amdgpu/'
@@ -626,18 +642,20 @@ jobs:
           SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
-          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+          vm_ssh() {
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
+          }
+          vm_ssh -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
             'lsmod | grep -q amdgpu' || { echo "amdgpu module not loaded"; exit 1; }
           # /dev/kfd is not a valid assertion: kfd_chardev_init() creates it
           # before amdgpu_init() registers the PCI driver, so it exists even
           # when every probe failed. Node 0 is the CPU and has an empty name;
           # a bound GPU adds a named node.
-          gpus=$(ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+          gpus=$(vm_ssh -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
             'cat /sys/class/kfd/kfd/topology/nodes/*/name 2>/dev/null | grep -c .')
           [ "$gpus" -ge 1 ] || {
             echo "amdgpu loaded but never bound the device"
-            ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+            vm_ssh -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
               'sudo dmesg | grep -i amdgpu | tail -40' || true
             exit 1
           }
@@ -649,19 +667,21 @@ jobs:
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
           BUILD="${GITHUB_WORKSPACE}/ernic-build"
+          vm_scp() {
+            scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
+          }
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
-            SCP="scp -i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no -P $port"
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -p "$port" \
               "${VM_USER}@localhost" \
               'mkdir -p /tmp/hipobject-build/test/integration/rdma-test-server /tmp/hipobject-build/integrations/minio-cpp'
-            $SCP -r "${BUILD}/rocm-libs" "${VM_USER}@localhost:/tmp/hipobject-build/rocm-libs"
-            $SCP "${BUILD}/test/integration/rdma-test-server/hipobj-rdma-test-server" \
-                 "${VM_USER}@localhost:/tmp/hipobject-build/test/integration/rdma-test-server/"
-            $SCP "${BUILD}/integrations/minio-cpp/minio-getput-rdma" \
-                 "${VM_USER}@localhost:/tmp/hipobject-build/integrations/minio-cpp/"
-            $SCP ci/ernic/server-entrypoint.sh ci/ernic/client-entrypoint.sh \
-                 ci/ernic/assert-transfer.sh \
-                 "${VM_USER}@localhost:/tmp/hipobject-build/"
+            vm_scp -P "$port" -r "${BUILD}/rocm-libs" "${VM_USER}@localhost:/tmp/hipobject-build/rocm-libs"
+            vm_scp -P "$port" "${BUILD}/test/integration/rdma-test-server/hipobj-rdma-test-server" \
+                              "${VM_USER}@localhost:/tmp/hipobject-build/test/integration/rdma-test-server/"
+            vm_scp -P "$port" "${BUILD}/integrations/minio-cpp/minio-getput-rdma" \
+                              "${VM_USER}@localhost:/tmp/hipobject-build/integrations/minio-cpp/"
+            vm_scp -P "$port" ci/ernic/server-entrypoint.sh ci/ernic/client-entrypoint.sh \
+                              ci/ernic/assert-transfer.sh \
+                              "${VM_USER}@localhost:/tmp/hipobject-build/"
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -p "$port" \
               "${VM_USER}@localhost" 'chmod +x /tmp/hipobject-build/*.sh \
                  /tmp/hipobject-build/integrations/minio-cpp/* \
@@ -673,12 +693,14 @@ jobs:
           SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
-          SSH_OPTS="-i $SSH_KEY -o BatchMode=yes -o StrictHostKeyChecking=no"
+          vm_ssh() {
+            ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
+          }
           # systemd-run, not `nohup ... &` over ssh: a backgrounded remote
           # command leaves nothing to ask about afterwards. If it dies at
           # startup the only evidence is an empty log file, which is exactly
           # how the first run of this lane failed.
-          ssh $SSH_OPTS -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
+          vm_ssh -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
             "sudo systemd-run --unit=hipobj-server \
                --setenv=HIPOBJ_NIC_HINT='${RDMA_DEVICE_1}' \
                --setenv=SERVER_PORT='${SERVER_PORT}' \
@@ -686,7 +708,7 @@ jobs:
 
           dump_server() {
             echo "=== VM 1: systemctl status hipobj-server ==="
-            ssh $SSH_OPTS -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
+            vm_ssh -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
               'systemctl status hipobj-server --no-pager -l || true
                sudo journalctl -u hipobj-server --no-pager | tail -60
                ss -ltnp 2>/dev/null | head -20
@@ -695,17 +717,17 @@ jobs:
 
           # From VM 2, not from VM 1: the point of the probe is that the
           # listener is reachable across the emulated wire.
-          for i in $(seq 1 45); do
-            ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+          for _ in $(seq 1 45); do
+            vm_ssh -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
               "timeout 2 bash -c 'echo > /dev/tcp/${VM1_ADDR}/${SERVER_PORT}'" \
               2>/dev/null && { echo "server reachable at ${VM1_ADDR}:${SERVER_PORT}"; break; }
             # No point waiting out the loop once the unit has given up.
-            ssh $SSH_OPTS -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
+            vm_ssh -p "$VM1_SSH_PORT" "${VM_USER}@localhost" \
               'systemctl is-active --quiet hipobj-server' || {
               echo "hipobj-server is no longer running"; dump_server; exit 1; }
             sleep 2
           done
-          ssh $SSH_OPTS -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
+          vm_ssh -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \
             "timeout 2 bash -c 'echo > /dev/tcp/${VM1_ADDR}/${SERVER_PORT}'" || {
             echo "VM 2 cannot reach the test server"
             dump_server
@@ -772,11 +794,11 @@ jobs:
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
         run: |
           for n in 1 2; do
-            echo "=== server${n}.log ==="        && tail -100 "/tmp/server${n}.log"        || true
-            echo "=== qemu-vm${n}.log ==="       && cat "/tmp/qemu-vm${n}.log"             || true
-            echo "=== qemu-vm${n}-console ===" && tail -200 "/tmp/qemu-vm${n}-console.log" || true
+            echo "=== server${n}.log ===";         tail -100 "/tmp/server${n}.log"        || true
+            echo "=== qemu-vm${n}.log ===";        cat "/tmp/qemu-vm${n}.log"             || true
+            echo "=== qemu-vm${n}-console ===";  tail -200 "/tmp/qemu-vm${n}-console.log" || true
           done
-          echo "=== rocjitsu ===" && docker logs rocjitsu-2vm 2>&1 || true
+          echo "=== rocjitsu ==="; docker logs rocjitsu-2vm 2>&1 || true
           echo "=== VM 2 amdgpu dmesg ==="
           timeout 60 ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
             -o ConnectTimeout=10 -p "$VM2_SSH_PORT" "${VM_USER}@localhost" \

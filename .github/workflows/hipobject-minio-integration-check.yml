@@ -29,6 +29,13 @@ env:
   TEST_OBJECT: test-object
   TEST_SIZE: "1048576"
 
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
 jobs:
   minio-integration:
     name: MinIO Integration Check
@@ -94,7 +101,7 @@ jobs:
               &>/tmp/minio.log &
           echo $! > /tmp/minio.pid
 
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -sf "$MINIO_ENDPOINT/minio/health/live" && break
             sleep 1
           done
@@ -105,7 +112,7 @@ jobs:
         run: |
           mc alias set ci "$MINIO_ENDPOINT" \
             "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" --insecure
-          mc mb ci/$TEST_BUCKET
+          mc mb "ci/$TEST_BUCKET"
 
       - name: Build hipObject with curl support
         run: |
@@ -114,7 +121,7 @@ jobs:
             -DBUILD_TESTING=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON
-          cmake --build build -j$(nproc)
+          cmake --build build -j"$(nproc)"
 
       - name: Unit tests
         run: cd build && ctest --output-on-failure
@@ -133,7 +140,7 @@ jobs:
       - name: Seed object via mc for GET test
         run: |
           dd if=/dev/urandom bs="$TEST_SIZE" count=1 2>/dev/null \
-            | mc pipe ci/$TEST_BUCKET/$TEST_OBJECT
+            | mc pipe "ci/$TEST_BUCKET/$TEST_OBJECT"
 
       - name: S3 control-plane GET (no RDMA hardware — expect 501 fallback)
         run: |
