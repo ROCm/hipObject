@@ -6,6 +6,7 @@
 
 #include "v2_backend.h"
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 
@@ -35,7 +36,7 @@ namespace v2 {
                 b = b * 29 + bytes[i];
             }
             char out[33];
-            std::snprintf(out, sizeof(out), "%016zx%016zx", static_cast<size_t>(a), static_cast<size_t>(b));
+            std::snprintf(out, sizeof(out), "%016" PRIx64 "%016" PRIx64, a, b);
             return out;
         }
 
@@ -61,8 +62,7 @@ namespace v2 {
     {
         std::lock_guard<std::mutex> guard(mtx_);
         auto                        it = objects_.find(target);
-        if (it == objects_.end() || offset > static_cast<uint64_t>(it->second.size()) ||
-            len > it->second.size() - static_cast<size_t>(offset)) {
+        if (it == objects_.end() || offset > it->second.size() || len > it->second.size() - offset) {
             return false;
         }
         std::memcpy(dst, it->second.data() + offset, len);

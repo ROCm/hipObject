@@ -11,6 +11,8 @@
 #include <cstring>
 #include <sstream>
 
+#include <netinet/in.h>
+
 namespace hipObj {
 
 namespace {
@@ -187,11 +189,15 @@ parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen)
     if (token.gid[10] != 0xff || token.gid[11] != 0xff)
         return true;
 
-    int n = std::snprintf(nicIp, nicIpLen, "%u.%u.%u.%u", static_cast<unsigned>(token.gid[12]),
-                          static_cast<unsigned>(token.gid[13]), static_cast<unsigned>(token.gid[14]),
-                          static_cast<unsigned>(token.gid[15]));
+    /* Format into a fixed-size buffer first so the snprintf output is
+     * bounded; nicIpLen is caller-supplied. */
+    char buf[INET_ADDRSTRLEN];
+    int  n = std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u", static_cast<unsigned>(token.gid[12]),
+                           static_cast<unsigned>(token.gid[13]), static_cast<unsigned>(token.gid[14]),
+                           static_cast<unsigned>(token.gid[15]));
     if (n < 0 || static_cast<size_t>(n) >= nicIpLen)
         return false;
+    std::memcpy(nicIp, buf, static_cast<size_t>(n) + 1);
     return true;
 }
 

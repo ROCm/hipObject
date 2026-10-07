@@ -271,9 +271,8 @@ namespace {
             query = "uploadId=" + sctx->uploadId + "&partNumber=" + std::to_string(sctx->partNumber);
         }
 
-        hipObjError_t err =
-            hipObjPutV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, static_cast<uint64_t>(size), 0,
-                        query.empty() ? nullptr : query.c_str(), &ops, &cbctx);
+        hipObjError_t err = hipObjPutV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0,
+                                        query.empty() ? nullptr : query.c_str(), &ops, &cbctx);
         hipObjPutRdmaToken(token);
 
         if (err.opError == hipObjNotSupported) {
@@ -302,8 +301,8 @@ namespace {
         ops.sendReady   = v2SendReady;
         ops.sendCancel  = v2SendCancel;
 
-        hipObjError_t err = hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(), buf,
-                                        static_cast<uint64_t>(size), 0, nullptr, &ops, &cbctx);
+        hipObjError_t err =
+            hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0, nullptr, &ops, &cbctx);
         hipObjPutRdmaToken(token);
 
         if (err.opError == hipObjNotSupported) {
@@ -515,7 +514,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         // A buffer the NIC cannot reach directly is registered as a host
         // staging buffer, so the bytes have to be there before the server
         // reads it.
-        hipObjError_t serr = hipObjBufSync(const_cast<void *>(buf), size, 0, HIPOBJ_SYNC_TO_HOST);
+        hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
             RDMA_TRACE("v1 put: stage to host: %s", hipObjGetErrorString(serr.opError));
             hipObjPutRdmaToken(token);

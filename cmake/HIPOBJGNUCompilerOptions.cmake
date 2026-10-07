@@ -43,7 +43,7 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     -Warray-bounds=2 # TODO: Consider making =3 in newer g++
     -Wcast-align
     -Wcast-qual
-    #-Wconversion # TODO: Fix diagnostics and re-enable
+    -Wconversion
     -Wdate-time
     -Wdouble-promotion
     -Wduplicated-branches
@@ -53,14 +53,14 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     -Wformat-nonliteral
     -Wformat-overflow=2
     -Wformat-security
-    #-Wformat-signedness # TODO: Fix diagnostics and re-enable
-    #-Wformat-truncation=2 # TODO: Fix diagnostics and re-enable
+    -Wformat-signedness
+    -Wformat-truncation=2
     -Wformat-y2k
     -Winvalid-pch
     # This is a warning for when using <C++11
     #-Wlong-long
     -Wlogical-op
-    #-Wmissing-declarations # TODO: Fix diagnostics and re-enable
+    -Wmissing-declarations
     -Wnormalized
     -Wnull-dereference
     -Wpacked
@@ -71,8 +71,8 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     -Wshadow-local
     -Wshift-overflow=2
     -Wno-strict-overflow
-    #-Wswitch-default # TODO: Fix diagnostics and re-enable
-    #-Wswitch-enum # TODO: Fix diagnostics and re-enable
+    -Wswitch-default
+    -Wswitch-enum
     -Wtrampolines
     -Wundef
     -Wuninitialized
@@ -80,7 +80,7 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     -Wunsafe-loop-optimizations
     -Wunused
     -Wunused-macros
-    #-Wuseless-cast # TODO: Fix diagnostics and re-enable
+    -Wuseless-cast
     -Wvla
     -Wzero-as-null-pointer-constant
 

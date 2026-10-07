@@ -179,7 +179,7 @@ namespace v2 {
         if (s.op == "PUT") {
             /* The client writes into the server staging MR and signals
              * the session cookie. */
-            if (!postRecvForImm(s.qp, s.stagingMr, static_cast<size_t>(s.size))) {
+            if (!postRecvForImm(s.qp, s.stagingMr, s.size)) {
                 return DataPhaseResult::WireFail;
             }
             po = pollCqUntil(s.cq, deadlineMs, kWrRecv, &wc);
@@ -201,8 +201,7 @@ namespace v2 {
         if (s.clientMrAddr == 0 || s.clientMrRkey == 0) {
             return DataPhaseResult::WireFail;
         }
-        if (!postWriteWithImm(s.qp, s.stagingMr, s.clientMrAddr, s.clientMrRkey, static_cast<size_t>(s.size),
-                              s.cookie)) {
+        if (!postWriteWithImm(s.qp, s.stagingMr, s.clientMrAddr, s.clientMrRkey, s.size, s.cookie)) {
             return DataPhaseResult::WireFail;
         }
         po = pollCqUntil(s.cq, deadlineMs, kWrWrite, &wc);

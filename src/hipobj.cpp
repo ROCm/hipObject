@@ -65,7 +65,7 @@ buildRdmaToken(const void *devPtr, size_t size, off_t offset, RdmaToken &token)
     token.rkey = mr->rkey;
     token.remoteAddr =
         g_bufferMap.lookupRemoteAddr(const_cast<void *>(devPtr)) + static_cast<uint64_t>(offset);
-    token.length  = static_cast<uint64_t>(size);
+    token.length  = size;
     token.portNum = g_conn.portNum;
     token.lid     = 0;
     return true;

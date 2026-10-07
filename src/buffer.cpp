@@ -95,7 +95,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     int            access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     struct ibv_mr *mr     = ibv.reg_mr(pd, devPtr, size, access);
     if (mr) {
-        entries_[key] = {mr, size, true, false, static_cast<uint64_t>(key), nullptr};
+        entries_[key] = {mr, size, true, false, key, nullptr};
         return 0;
     }
 

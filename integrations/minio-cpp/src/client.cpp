@@ -358,7 +358,7 @@ Client::GetObject(minio::s3::GetObjectArgs args)
     std::cerr << "hipobj: RDMA GET failed (" << ret << "); falling back to HTTP" << std::endl;
 
     minio::s3::GetObjectArgs http_args = args;
-    char                    *dst       = static_cast<char *>(args.buf);
+    char                    *dst       = args.buf;
     size_t                   offset    = 0;
     http_args.datafunc                 = [&](minio::http::DataFunctionArgs chunk) -> bool {
         size_t len = chunk.datachunk.size();
