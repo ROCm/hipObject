@@ -49,7 +49,7 @@ jobs:
   build:
     name: >-
       Build (V2 API ${{ matrix.v2_api }},
-      ${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }})
+      ${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
     runs-on: ubuntu-latest
     strategy:
       # Every other workflow builds the default configuration (V2 API on,
@@ -62,12 +62,17 @@ jobs:
         v2_api: [ON, OFF]
         shared_libs: [ON, OFF]
         sanitizers: [OFF]
+        # Empty means the CMakeLists.txt default (RelWithDebInfo)
+        build_type: ['']
         include:
           # One AddressSanitizer job (HIPOBJ_SANITIZER_TYPE defaults to
-          # address) with the default configuration
+          # address) with the default configuration. It builds Debug, so
+          # it's also the one place the library's assert()s are checked,
+          # and sanitizer reports aren't muddied by optimization.
           - v2_api: ON
             shared_libs: ON
             sanitizers: ON
+            build_type: Debug
     container:
       image: rocm/dev-ubuntu-24.04:10.0.0-full
       options: --user root
@@ -104,7 +109,8 @@ jobs:
             -DHIPOBJ_IONIC=ON \
             -DHIPOBJECT_V2_API=${{ matrix.v2_api }} \
             -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }} \
-            -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizers }}
+            -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizers }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
