@@ -10,3 +10,11 @@ query-filters:
   # an i + 1 < argc check, so the alert is noise.
   - exclude:
       id: cpp/loop-variable-changed
+  # Style-only check that flags global variables with very short names.
+  - exclude:
+      id: cpp/short-global-name
+  # Unused variables are already diagnosed by the compilers (-Wall and
+  # -Wunused), which see the real build configuration. CodeQL runs with
+  # build-mode: none, so its view of what is used is less reliable.
+  - exclude:
+      id: cpp/unused-static-variable
