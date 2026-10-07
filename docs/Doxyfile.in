@@ -9,8 +9,8 @@ PROJECT_NUMBER         = "@PROJECT_VERSION@"
 PROJECT_BRIEF          = \
   "RDMA-accelerated S3 object storage for GPUs"
 
-OUTPUT_DIRECTORY       = @HIPOBJ_DOC_PATH@
-INPUT                  = @HIPOBJ_DOXYFILE_INPUT@
+OUTPUT_DIRECTORY       = "@HIPOBJ_DOC_PATH@"
+INPUT                  = "@HIPOBJ_DOXYFILE_INPUT@"
 RECURSIVE              = YES
 FILE_PATTERNS          = *.h
 
