@@ -33,6 +33,9 @@
 - The `hipObjInitV2()` declaration in `hipobj.h`. The function was never
   implemented, so calls to it failed at link time. They now fail to
   compile.
+- The `HIPOBJ_SUCCESS` macro from `hipobj.h`. It expanded to a compound
+  literal, which isn't valid C++. Compare a `hipObjError_t`'s `opError`
+  with `hipObjSuccess` instead.
 
 ### Known issues
 
