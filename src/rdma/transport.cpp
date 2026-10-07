@@ -6,6 +6,7 @@
 #include "transport.h"
 
 #include <chrono>
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -270,9 +271,8 @@ pollCompletion(RcConnection &conn, int expectedOpcode, int timeoutMs)
              * remote -- into an indistinguishable -1 several layers up. */
             fprintf(stderr,
                     "hipObj: work completion failed: status=%d opcode=%d "
-                    "vendor_err=0x%x wr_id=%llu\n",
-                    static_cast<int>(wc.status), static_cast<int>(wc.opcode), wc.vendor_err,
-                    static_cast<unsigned long long>(wc.wr_id));
+                    "vendor_err=0x%" PRIx32 " wr_id=%" PRIu64 "\n",
+                    static_cast<int>(wc.status), static_cast<int>(wc.opcode), wc.vendor_err, wc.wr_id);
             return -1;
         }
         if (expectedOpcode < 0 || wc.opcode == expectedOpcode) {

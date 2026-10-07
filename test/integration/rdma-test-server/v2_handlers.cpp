@@ -78,14 +78,14 @@ namespace v2 {
         std::string hex32(uint32_t v)
         {
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%08x", v);
+            std::snprintf(buf, sizeof(buf), "%08" PRIx32, v);
             return buf;
         }
 
         std::string hex24(uint32_t v)
         {
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%06x", v);
+            std::snprintf(buf, sizeof(buf), "%06" PRIx32, v);
             return buf;
         }
 
@@ -355,7 +355,8 @@ namespace v2 {
                 return error(500);
             }
             char buf[33];
-            std::snprintf(buf, sizeof(buf), "%08x%08x%08x%08x", w[0], w[1], w[2], w[3]);
+            std::snprintf(buf, sizeof(buf), "%08" PRIx32 "%08" PRIx32 "%08" PRIx32 "%08" PRIx32, w[0], w[1],
+                          w[2], w[3]);
             id = buf;
             V2Session s;
             s.id        = id;
@@ -587,7 +588,7 @@ namespace v2 {
         table_.withSession(id, [&](V2Session &s) { exposedQpn = s.serverQpn; });
         if (exposedQpn != 0) {
             char qpnHex[12];
-            std::snprintf(qpnHex, sizeof(qpnHex), "%x", exposedQpn);
+            std::snprintf(qpnHex, sizeof(qpnHex), "%" PRIx32, exposedQpn);
             r.headers["X-Amz-Rdma-Qpn"] = qpnHex;
             /* Staging endpoint for the client's WRITE (PUT) or the READ
              * pull confirmation (GET). */
@@ -603,7 +604,7 @@ namespace v2 {
                 char addrHex[32];
                 std::snprintf(addrHex, sizeof(addrHex), "%" PRIx64, saddr);
                 char rkeyHex[12];
-                std::snprintf(rkeyHex, sizeof(rkeyHex), "%x", srkey);
+                std::snprintf(rkeyHex, sizeof(rkeyHex), "%" PRIx32, srkey);
                 r.headers["X-Amz-Rdma-Mr-Addr"] = addrHex;
                 r.headers["X-Amz-Rdma-Mr-Rkey"] = rkeyHex;
             }

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -169,13 +170,11 @@ std::string
 TransferStatsLine(const TransferStats &stats)
 {
     char buf[256];
-    std::snprintf(
-        buf, sizeof(buf),
-        "hipobj-stats: rdma_put=%llu rdma_get=%llu http_put=%llu "
-        "http_get=%llu rdma_bytes=%llu http_bytes=%llu",
-        static_cast<unsigned long long>(stats.rdmaPuts), static_cast<unsigned long long>(stats.rdmaGets),
-        static_cast<unsigned long long>(stats.httpPuts), static_cast<unsigned long long>(stats.httpGets),
-        static_cast<unsigned long long>(stats.rdmaBytes), static_cast<unsigned long long>(stats.httpBytes));
+    std::snprintf(buf, sizeof(buf),
+                  "hipobj-stats: rdma_put=%" PRIu64 " rdma_get=%" PRIu64 " http_put=%" PRIu64
+                  " http_get=%" PRIu64 " rdma_bytes=%" PRIu64 " http_bytes=%" PRIu64,
+                  stats.rdmaPuts, stats.rdmaGets, stats.httpPuts, stats.httpGets, stats.rdmaBytes,
+                  stats.httpBytes);
     return buf;
 }
 
