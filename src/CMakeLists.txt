@@ -58,6 +58,16 @@ if(HIPOBJ_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")
   # Relink when the version script changes
   set_property(TARGET hipobj APPEND PROPERTY
     LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hipobj.map)
+
+  # Fail the link if the library uses a symbol that none of its
+  # dependencies define, instead of leaving it for the program that
+  # loads it. Clang doesn't link the sanitizer runtimes into shared
+  # libraries (the executable provides them), so sanitizer builds with
+  # Clang always have undefined symbols. GCC links them as shared
+  # libraries, so its sanitizer builds are fine.
+  if(NOT (HIPOBJ_USE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+    target_link_options(hipobj PRIVATE "LINKER:--no-undefined")
+  endif()
 endif()
 
 target_include_directories(hipobj
