@@ -168,7 +168,7 @@ TEST_F(V2ConflictTest, DiscardAndRecreate)
 {
     auto &reg = hipObj::v2::registry();
     auto  id  = makeEntry();
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     uint32_t       oldQpn    = 0;
     uint64_t       ridBefore = 0;
     struct ibv_cq *cqBefore  = nullptr;
@@ -185,20 +185,20 @@ TEST_F(V2ConflictTest, DiscardAndRecreate)
         EXPECT_NE(e.conn.qp, nullptr);
         EXPECT_NE(e.conn.qpNum, oldQpn);
         EXPECT_EQ(e.conn.cq, cqBefore); /* cq survives */
-        EXPECT_NE(e.reservationId, 0u);
-        EXPECT_NE(e.reservationId, 0u);
+        EXPECT_NE(e.reservationId, 0U);
+        EXPECT_NE(e.reservationId, 0U);
     });
-    EXPECT_EQ(g_state.destroyedQpns.size(), 1u);
+    EXPECT_EQ(g_state.destroyedQpns.size(), 1U);
     EXPECT_EQ(g_state.destroyedQpns[0], oldQpn);
     /* Old tuple recorded against the peer PSN. */
     EXPECT_TRUE(reg.retired().contains(oldQpn, 0x42));
     EXPECT_EQ(reg.retired().recordedCount(), recordedBefore + 1);
     /* Ring accounting: one recorded slot per discard. */
-    EXPECT_EQ(reg.retired().reservedCount(), 0u);
+    EXPECT_EQ(reg.retired().reservedCount(), 0U);
 
     /* Clean teardown still works afterwards. */
     EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
-    EXPECT_EQ(reg.size(), 0u);
+    EXPECT_EQ(reg.size(), 0U);
 }
 
 /* Ring exhausted: busy, entry untouched. */
@@ -206,12 +206,12 @@ TEST_F(V2ConflictTest, DiscardRingFullIsBusy)
 {
     auto &reg = hipObj::v2::registry();
     auto  id  = makeEntry();
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     /* The entry already holds one reservation; fill the rest. */
     std::vector<uint64_t> fills;
     while (reg.retired().reservedCount() + reg.retired().recordedCount() < reg.retired().kCapacity) {
         uint64_t r = reg.retired().reserve();
-        ASSERT_NE(r, 0u);
+        ASSERT_NE(r, 0U);
         fills.push_back(r);
     }
     EXPECT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::kReleaseBusy);
@@ -229,7 +229,7 @@ TEST_F(V2ConflictTest, DiscardDestroyFailureKeepsQp)
 {
     auto &reg = hipObj::v2::registry();
     auto  id  = makeEntry();
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     g_state.destroyQpFails = 1;
     size_t recordedBefore  = reg.retired().recordedCount();
     EXPECT_NE(hipObj::v2::discardAndRecreateQp(id), 0);
@@ -246,12 +246,12 @@ TEST_F(V2ConflictTest, DiscardRecreateFailureReleases)
 {
     auto &reg = hipObj::v2::registry();
     auto  id  = makeEntry();
-    ASSERT_NE(id, 0u);
+    ASSERT_NE(id, 0U);
     g_state.createQpFails = 1;
     EXPECT_NE(hipObj::v2::discardAndRecreateQp(id), 0);
-    EXPECT_EQ(reg.size(), 0u); /* entry gone */
-    EXPECT_EQ(reg.retired().reservedCount(), 0u);
-    EXPECT_EQ(reg.pendingReserves(), 0u);
+    EXPECT_EQ(reg.size(), 0U); /* entry gone */
+    EXPECT_EQ(reg.retired().reservedCount(), 0U);
+    EXPECT_EQ(reg.pendingReserves(), 0U);
 }
 
 /* ---- completion validation -------------------------------------- */

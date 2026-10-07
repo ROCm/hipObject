@@ -62,7 +62,7 @@ TEST(V2Wire, PrepareOk)
     EXPECT_FALSE(r.unsupportedMarker);
     EXPECT_EQ(r.serverToken, std::string(kGoodToken));
     EXPECT_EQ(r.session, std::string(kGoodSession));
-    EXPECT_EQ(r.serverPsn, 0x01ab01u);
+    EXPECT_EQ(r.serverPsn, 0x01ab01U);
 }
 
 TEST(V2Wire, PrepareOkCaseInsensitiveHeaderNames)
@@ -74,7 +74,7 @@ TEST(V2Wire, PrepareOkCaseInsensitiveHeaderNames)
     hipObj::v2::PrepareReply r;
     EXPECT_TRUE(parsePrepareReply(200, h, r));
     EXPECT_TRUE(r.protocolEcho);
-    EXPECT_EQ(r.serverPsn, 0xffffffu);
+    EXPECT_EQ(r.serverPsn, 0xffffffU);
 }
 
 TEST(V2Wire, PrepareUnsupported)
@@ -135,8 +135,8 @@ TEST(V2Wire, FinalGetOk)
     hipObj::v2::FinalReply r;
     EXPECT_TRUE(parseFinalReply(200, h, r));
     EXPECT_TRUE(r.protocolEcho);
-    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeu);
-    EXPECT_EQ(r.bytes, 65536u);
+    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
+    EXPECT_EQ(r.bytes, 65536U);
     EXPECT_EQ(r.etag, "\"abc123\"");
 }
 
@@ -213,9 +213,9 @@ TEST(V2Wire, Psn)
 {
     uint32_t v = 0;
     EXPECT_TRUE(parsePsn("000001", v));
-    EXPECT_EQ(v, 1u);
+    EXPECT_EQ(v, 1U);
     EXPECT_TRUE(parsePsn("ffffff", v));
-    EXPECT_EQ(v, 0xffffffu);
+    EXPECT_EQ(v, 0xffffffU);
     EXPECT_FALSE(parsePsn("000000", v));
     EXPECT_FALSE(parsePsn("1000000", v));
     EXPECT_FALSE(parsePsn("zzzzzz", v));
@@ -223,11 +223,11 @@ TEST(V2Wire, Psn)
 
 TEST(V2Wire, FormatHelpers)
 {
-    EXPECT_EQ(formatCookie(0xdeadbeefu), "deadbeef");
+    EXPECT_EQ(formatCookie(0xdeadbeefU), "deadbeef");
     EXPECT_EQ(formatPsn(1), "000001");
-    EXPECT_EQ(formatPsn(0xffffffu), "ffffff");
+    EXPECT_EQ(formatPsn(0xffffffU), "ffffff");
     /* Out-of-range PSNs keep the low 24 bits, not the leading 6 digits */
-    EXPECT_EQ(formatPsn(0x1234567u), "234567");
+    EXPECT_EQ(formatPsn(0x1234567U), "234567");
 }
 
 TEST(V2Wire, BuildTarget)

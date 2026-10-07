@@ -70,15 +70,15 @@ protected:
 TEST_F(V2RandomTest, PsnGeneration)
 {
     uint32_t psn = 0;
-    scripted_->setDraws({0x00000000u, 0x00abcdefu});
+    scripted_->setDraws({0x00000000U, 0x00abcdefU});
     ASSERT_TRUE(hipObj::v2::nextClientPsn(psn));
-    EXPECT_EQ(psn, 0x00abcdefu); /* zero draw retried, then accepted */
+    EXPECT_EQ(psn, 0x00abcdefU); /* zero draw retried, then accepted */
 
-    scripted_->setDraws({0xffffffffu});
+    scripted_->setDraws({0xffffffffU});
     ASSERT_TRUE(hipObj::v2::nextClientPsn(psn));
-    EXPECT_EQ(psn, 0x00ffffffu); /* masked to 24 bits */
+    EXPECT_EQ(psn, 0x00ffffffU); /* masked to 24 bits */
 
-    scripted_->setDraws({0u, 0u, 0u});
+    scripted_->setDraws({0U, 0U, 0U});
     EXPECT_FALSE(hipObj::v2::nextClientPsn(psn)); /* all-zero: fail */
 
     scripted_->failAll = true;
@@ -89,12 +89,12 @@ TEST_F(V2RandomTest, PsnGeneration)
 TEST_F(V2RandomTest, CookiePassThrough)
 {
     uint32_t cookie = 99;
-    scripted_->setDraws({0u});
+    scripted_->setDraws({0U});
     ASSERT_TRUE(hipObj::v2::nextCookie(cookie));
-    EXPECT_EQ(cookie, 0u);
-    scripted_->setDraws({0xdeadbeefu});
+    EXPECT_EQ(cookie, 0U);
+    scripted_->setDraws({0xdeadbeefU});
     ASSERT_TRUE(hipObj::v2::nextCookie(cookie));
-    EXPECT_EQ(cookie, 0xdeadbeefu);
+    EXPECT_EQ(cookie, 0xdeadbeefU);
     scripted_->failAll = true;
     EXPECT_FALSE(hipObj::v2::nextCookie(cookie));
 }
@@ -146,10 +146,10 @@ TEST_F(V2PsnDeliveryTest, PsnsReachQpAttrs)
     std::memset(&gid, 0, sizeof(gid));
     ASSERT_EQ(hipObj::v2::transitionQpToRtrV2(&dh, conn, 77, gid, 0x334455), 0);
     ASSERT_EQ(hipObj::v2::transitionQpToRtsV2(conn, &dh, 0x667788), 0);
-    ASSERT_EQ(g_rqPsn.size(), 1u);
-    EXPECT_EQ(g_rqPsn[0], 0x334455u); /* server PSN -> rq_psn */
-    ASSERT_EQ(g_sqPsn.size(), 1u);
-    EXPECT_EQ(g_sqPsn[0], 0x667788u); /* client PSN -> sq_psn */
+    ASSERT_EQ(g_rqPsn.size(), 1U);
+    EXPECT_EQ(g_rqPsn[0], 0x334455U); /* server PSN -> rq_psn */
+    ASSERT_EQ(g_sqPsn.size(), 1U);
+    EXPECT_EQ(g_sqPsn[0], 0x667788U); /* client PSN -> sq_psn */
 }
 
 /* The wire parser surfaces cookie presence; the public reply
@@ -162,7 +162,7 @@ TEST(V2CookiePresenceTest, ParserSetsPresence)
                                      "X-Amz-Rdma-Bytes: 0\r\n";
     ASSERT_TRUE(hipObj::v2::parseFinalReply(200, headers, reply));
     EXPECT_TRUE(reply.cookiePresent);
-    EXPECT_EQ(reply.cookieEcho, 0u); /* zero cookie is valid */
+    EXPECT_EQ(reply.cookieEcho, 0U); /* zero cookie is valid */
 
     /* Missing cookie on a success status fails the parse. */
     const std::string      noCookie = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n"
@@ -177,7 +177,7 @@ TEST(V2CookiePresenceTest, ParserSetsPresence)
     pub.cookiePresent = reply.cookiePresent ? 1 : 0;
     pub.cookieEcho    = reply.cookieEcho;
     EXPECT_EQ(pub.cookiePresent, 1);
-    EXPECT_EQ(pub.cookieEcho, 0u);
+    EXPECT_EQ(pub.cookieEcho, 0U);
 }
 
 } // namespace

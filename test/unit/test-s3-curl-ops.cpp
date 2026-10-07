@@ -397,7 +397,7 @@ TEST(S3CurlOps, ReplyHeaderMixedCase)
     memset(reply, 0, sizeof(reply));
     size_t len = sizeof(reply);
     EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply, &len));
-    EXPECT_EQ(3u, len);
+    EXPECT_EQ(3U, len);
     EXPECT_EQ(0, memcmp(reply, "err", 3));
 }
 
@@ -415,7 +415,7 @@ TEST(S3CurlOps, ReplyHeaderAllCaps)
     memset(reply, 0, sizeof(reply));
     size_t len = sizeof(reply);
     EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply, &len));
-    EXPECT_EQ(2u, len);
+    EXPECT_EQ(2U, len);
     EXPECT_EQ(0, memcmp(reply, "ok", 2));
 }
 
@@ -489,7 +489,7 @@ TEST(S3CurlOps, RecvReplyExactSize)
     char   reply[2];
     size_t len = 2;
     EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply, &len));
-    EXPECT_EQ(2u, len);
+    EXPECT_EQ(2U, len);
     EXPECT_EQ(0, memcmp(reply, "ok", 2));
 }
 

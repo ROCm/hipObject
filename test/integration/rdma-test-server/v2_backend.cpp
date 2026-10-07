@@ -18,9 +18,9 @@ namespace v2 {
 
         uint8_t patternByte(const std::string &target, size_t i)
         {
-            uint32_t h = 2166136261u;
+            uint32_t h = 2166136261U;
             for (char c : target) {
-                h = (h ^ static_cast<uint8_t>(c)) * 16777619u;
+                h = (h ^ static_cast<uint8_t>(c)) * 16777619U;
             }
             return static_cast<uint8_t>((h + static_cast<uint32_t>(i)) & 0xff);
         }
@@ -30,7 +30,7 @@ namespace v2 {
             /* Simple deterministic digest - not a real MD5; format matches
              * the 32-hex S3 ETag shape for response parsing tests. */
             const auto *bytes = static_cast<const uint8_t *>(data);
-            uint64_t    a     = 1469598103934665603ull;
+            uint64_t    a     = 1469598103934665603ULL;
             uint64_t    b     = 7;
             for (size_t i = 0; i < len; ++i) {
                 a = (a * 31 + bytes[i] + i) ^ (b << 3);

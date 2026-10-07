@@ -164,7 +164,7 @@ TEST_F(V2SessionTest, DestroyGateLifecycle)
     /* Poisoned entries are re-claimable exactly once more. */
     EXPECT_TRUE(table_.claimDestroy("ii"));
     table_.commitDestroy("ii", false, true);
-    EXPECT_EQ(table_.size(), 0u);
+    EXPECT_EQ(table_.size(), 0U);
 }
 
 /* claimDestroy requires Reaping state and quiesced I/O. */
@@ -202,7 +202,7 @@ TEST_F(V2SessionTest, AwaitOnErasedId)
     });
     table_.claimDestroy("ll");
     table_.commitDestroy("ll", true, true);
-    EXPECT_EQ(table_.size(), 0u);
+    EXPECT_EQ(table_.size(), 0U);
     EXPECT_EQ(table_.awaitNotPublishing("ll", clock_->now + 100), SessState::Reaping);
 }
 
@@ -232,11 +232,11 @@ TEST(V2RequestParser, PrepareHappyPath)
                             std::string(88, 'a') + "\r\n";
     auto req = hipObj::v2::parsePrepareRequest(h, raw);
     ASSERT_TRUE(req.has_value());
-    EXPECT_EQ(req->clientPsn, 0x00ff10u);
-    EXPECT_EQ(req->cookie, 0x1a2b3c4du);
+    EXPECT_EQ(req->clientPsn, 0x00ff10U);
+    EXPECT_EQ(req->cookie, 0x1a2b3c4dU);
     EXPECT_EQ(req->op, "GET");
     EXPECT_TRUE(req->hasOffset);
-    EXPECT_EQ(req->offset, 1024u);
+    EXPECT_EQ(req->offset, 1024U);
     EXPECT_EQ(req->authorization, "AWS4-HMAC-SHA256 Credential=AKIA/x");
 }
 
