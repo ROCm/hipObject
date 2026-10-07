@@ -10,13 +10,17 @@
  * client-side RC handshake.
  */
 
+#include <charconv>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -41,6 +45,40 @@ objectKey(const std::string &path)
     return path;
 }
 
+void
+usage(const char *prog)
+{
+    fprintf(stderr,
+            "usage: %s [--v2] [--v2-access-key KEY] [--v2-secret-key KEY] "
+            "[--hang-after-prepare] [port]\n",
+            prog);
+}
+
+/* Returns the value that follows the option at argv[i] and advances i
+ * past it. Exits with a usage error if the option is the last argument
+ * or is followed by another option. */
+const char *
+optionValue(int argc, char *argv[], int &i)
+{
+    if (i + 1 >= argc || std::string_view(argv[i + 1]).starts_with("--")) {
+        fprintf(stderr, "hipobj-rdma-test-server: %s requires a value\n", argv[i]);
+        usage(argv[0]);
+        std::exit(2);
+    }
+    return argv[++i];
+}
+
+/* Parses all of str as a number in the given base. Fails on an empty
+ * string, trailing characters, or a value that does not fit in T. */
+template <typename T>
+bool
+parseNumber(std::string_view str, T &out, int base = 10)
+{
+    const char *end = str.data() + str.size();
+    auto [ptr, ec]  = std::from_chars(str.data(), end, out, base);
+    return ec == std::errc() && ptr == end;
+}
+
 } // namespace
 
 int
@@ -58,19 +96,30 @@ main(int argc, char *argv[])
         if (arg == "--v2") {
             v2Mode = true;
         }
-        else if (arg == "--v2-access-key" && i + 1 < argc) {
-            accessKey = argv[++i];
+        else if (arg == "--v2-access-key") {
+            accessKey = optionValue(argc, argv, i);
         }
-        else if (arg == "--v2-secret-key" && i + 1 < argc) {
-            secretKey = argv[++i];
+        else if (arg == "--v2-secret-key") {
+            secretKey = optionValue(argc, argv, i);
         }
         else if (arg == "--hang-after-prepare") {
 #ifdef HIPOBJECT_V2_API
             hangAfterPrepare = true;
 #endif
         }
+        else if (arg[0] == '-') {
+            fprintf(stderr, "hipobj-rdma-test-server: unknown option %s\n", arg.c_str());
+            usage(argv[0]);
+            return 2;
+        }
         else {
-            port = std::atoi(arg.c_str());
+            uint16_t value = 0;
+            if (!parseNumber(arg, value) || value == 0) {
+                fprintf(stderr, "hipobj-rdma-test-server: invalid port %s\n", arg.c_str());
+                usage(argv[0]);
+                return 2;
+            }
+            port = value;
         }
     }
 

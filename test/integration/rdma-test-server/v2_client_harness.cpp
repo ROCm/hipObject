@@ -9,19 +9,23 @@
  * outcome for the E2E script.
  *
  *   v2-client-harness <endpoint-host> <port> <op> <target> <size>
- *     [--cookie-hex N] [--expect-status N] [--cancel-after]
+ *     [--expect N] [--cookie-hex N] [--ready-cookie-hex N] [--cancel]
  *
  * The data phase (RDMA) is exercised by the transport layer; this
  * harness validates the control semantics: session creation, cookie
  * echo, error statuses, cancel idempotency. */
 
 #include <cerrno>
+#include <charconv>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <map>
 #include <string>
+#include <string_view>
+#include <system_error>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -159,41 +163,100 @@ nowAmzDate()
     return buf;
 }
 
+void
+usage(const char *prog)
+{
+    fprintf(stderr,
+            "usage: %s host port op target size [--expect N] "
+            "[--cookie-hex N] [--ready-cookie-hex N] [--cancel]\n",
+            prog);
+}
+
+/* Returns the value that follows the option at argv[i] and advances i
+ * past it. Exits with a usage error if the option is the last argument
+ * or is followed by another option. */
+const char *
+optionValue(int argc, char *argv[], int &i)
+{
+    if (i + 1 >= argc || std::string_view(argv[i + 1]).starts_with("--")) {
+        fprintf(stderr, "harness: %s requires a value\n", argv[i]);
+        usage(argv[0]);
+        std::exit(2);
+    }
+    return argv[++i];
+}
+
+/* Parses all of str as a number in the given base. Fails on an empty
+ * string, trailing characters, or a value that does not fit in T. */
+template <typename T>
+bool
+parseNumber(std::string_view str, T &out, int base = 10)
+{
+    const char *end = str.data() + str.size();
+    auto [ptr, ec]  = std::from_chars(str.data(), end, out, base);
+    return ec == std::errc() && ptr == end;
+}
+
+[[noreturn]] void
+invalidValue(const char *prog, const char *what, const char *value)
+{
+    fprintf(stderr, "harness: invalid %s %s\n", what, value);
+    usage(prog);
+    std::exit(2);
+}
+
 } // namespace
 
 int
 main(int argc, char *argv[])
 {
     if (argc < 6) {
-        fprintf(stderr,
-                "usage: %s host port op target size [--expect N] "
-                "[--cookie-hex N] [--cancel]\n",
-                argv[0]);
+        usage(argv[0]);
         return 2;
     }
     const std::string host                = argv[1];
-    const int         port                = std::atoi(argv[2]);
+    uint16_t          port                = 0;
     const std::string op                  = argv[3];
     const std::string target              = argv[4];
-    const uint64_t    size                = std::strtoull(argv[5], nullptr, 10);
+    uint64_t          size                = 0;
     int               expect              = 200;
     uint32_t          cookie              = 0x11223344;
     uint32_t          readyCookie         = 0;
     bool              overrideReadyCookie = false;
     bool              doCancel            = false;
+    if (!parseNumber(argv[2], port) || port == 0) {
+        invalidValue(argv[0], "port", argv[2]);
+    }
+    if (!parseNumber(argv[5], size)) {
+        invalidValue(argv[0], "size", argv[5]);
+    }
     for (int i = 6; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--expect") == 0 && i + 1 < argc) {
-            expect = std::atoi(argv[++i]);
+        if (std::strcmp(argv[i], "--expect") == 0) {
+            const char *value = optionValue(argc, argv, i);
+            if (!parseNumber(value, expect) || expect < 100 || expect > 599) {
+                invalidValue(argv[0], "HTTP status", value);
+            }
         }
-        else if (std::strcmp(argv[i], "--cookie-hex") == 0 && i + 1 < argc) {
-            cookie = static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 16));
+        else if (std::strcmp(argv[i], "--cookie-hex") == 0) {
+            const char *value = optionValue(argc, argv, i);
+            if (!parseNumber(value, cookie, 16)) {
+                invalidValue(argv[0], "cookie", value);
+            }
         }
-        else if (std::strcmp(argv[i], "--ready-cookie-hex") == 0 && i + 1 < argc) {
-            readyCookie         = static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 16));
+        else if (std::strcmp(argv[i], "--ready-cookie-hex") == 0) {
+            const char *value = optionValue(argc, argv, i);
+            if (!parseNumber(value, readyCookie, 16)) {
+                invalidValue(argv[0], "cookie", value);
+            }
             overrideReadyCookie = true;
         }
         else if (std::strcmp(argv[i], "--cancel") == 0) {
             doCancel = true;
+        }
+        else {
+            fprintf(stderr, "harness: unknown option %s\n", argv[i]);
+            usage(argv[0]);
+            return 2;
         }
     }
 
