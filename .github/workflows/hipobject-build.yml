@@ -25,15 +25,27 @@ permissions:
 
 jobs:
   build:
-    name: Build (V2 API ${{ matrix.v2_api }})
+    name: >-
+      Build (V2 API ${{ matrix.v2_api }},
+      ${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }})
     runs-on: ubuntu-latest
     strategy:
-      # Every other lane builds with the default (ON), so this is the only
-      # place the V2-off configuration gets compiled. Let both finish so a
-      # failure in one doesn't hide the state of the other.
+      # Every other workflow builds the default configuration (V2 API on,
+      # shared library, no sanitizers), so this is the only place the V2-off,
+      # static, and sanitizer configurations get compiled and tested. Let
+      # every job finish so a failure in one doesn't hide the state of the
+      # others.
       fail-fast: false
       matrix:
         v2_api: [ON, OFF]
+        shared_libs: [ON, OFF]
+        sanitizers: [OFF]
+        include:
+          # One AddressSanitizer job (HIPOBJ_SANITIZER_TYPE defaults to
+          # address) with the default configuration
+          - v2_api: ON
+            shared_libs: ON
+            sanitizers: ON
     container:
       image: rocm/dev-ubuntu-24.04:10.0.0-full
       options: --user root
@@ -65,10 +77,12 @@ jobs:
             -DBUILD_TESTING=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON \
-            -DHIPOBJECT_V2_API=${{ matrix.v2_api }}
+            -DHIPOBJECT_V2_API=${{ matrix.v2_api }} \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }} \
+            -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizers }}
 
       - name: Build
-        run: cmake --build build -j$(nproc)
+        run: cmake --build build -j"$(nproc)"
 
       - name: Test
         run: |
