@@ -17,7 +17,6 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     # Basic "high" warning levels
     -Wall
     -Wextra
-    -Wno-unused-parameter # TODO: Fix diagnostics and re-enable
 
     # Avoid non-standard C/C++ behavior
     # Can't use -pedantic with nvcc at this time, as nvcc

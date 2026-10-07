@@ -462,7 +462,7 @@ TEST_F(V2RegistryTest, TopologyFieldsReachQpAttrs)
     EXPECT_EQ(hipObj::v2::transitionQpToInitV2(&dh_, conn), 0);
     union ibv_gid gid;
     std::memset(&gid, 0, sizeof(gid));
-    EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, 0, gid, 0xAABBCC), 0);
+    EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, gid, 0xAABBCC), 0);
     EXPECT_EQ(hipObj::v2::transitionQpToRtsV2(conn, &dh_, 0x112233), 0);
     /* PSNs captured by the modify spy. */
     ASSERT_FALSE(g_fake.qpAttrRqPsn.empty());
@@ -486,11 +486,11 @@ TEST_F(V2RegistryTest, OutOfRangeGidIndexRejected)
     std::memset(&gid, 0, sizeof(gid));
     for (int gidIndex : {-1, 256}) {
         dh_.gidIndex = gidIndex;
-        EXPECT_NE(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, 0, gid, 0xAABBCC), 0) << gidIndex;
+        EXPECT_NE(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, gid, 0xAABBCC), 0) << gidIndex;
     }
     EXPECT_TRUE(g_fake.qpAttrRqPsn.empty());
     dh_.gidIndex = 255;
-    EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, 0, gid, 0xAABBCC), 0);
+    EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(&dh_, conn, 42, gid, 0xAABBCC), 0);
     EXPECT_EQ(g_fake.qpAttrRqPsn.size(), 1u);
     bool qpOk = true, cqOk = true;
     hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);

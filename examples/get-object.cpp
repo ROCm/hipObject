@@ -28,6 +28,7 @@ static int
 stubSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
     (void)ctx;
+    (void)token;
     fprintf(stderr,
             "[get-object] would send RDMA token "
             "(%zu bytes) via S3 GET x-amz-rdma-token\n",
