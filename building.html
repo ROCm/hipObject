@@ -440,57 +440,69 @@ sudo<span class="w"> </span>make<span class="w"> </span>install
 </tr>
 </thead>
 <tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BNXT</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CMAKE_BUILD_TYPE</span></code></p></td>
+<td><p>RelWithDebInfo</p></td>
+<td><p>Build type (see below)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BNXT</span></code></p></td>
 <td><p>ON</p></td>
 <td><p>Build Thor-2 RDMA backend</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_IONIC</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_IONIC</span></code></p></td>
 <td><p>ON</p></td>
 <td><p>Build ionic RDMA backend</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">BUILD_SHARED_LIBS</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">BUILD_SHARED_LIBS</span></code></p></td>
 <td><p>ON</p></td>
 <td><p>Build shared library</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">BUILD_TESTING</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">BUILD_TESTING</span></code></p></td>
 <td><p>ON</p></td>
 <td><p>Build and register tests</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BUILD_DOCS</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BUILD_DOCS</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Build documentation</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_DOCS_ONLY</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_DOCS_ONLY</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Docs targets only (no HIP)</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Build minio-cpp RDMA bridge</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INTEGRATION_TESTS</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INTEGRATION_TESTS</span></code></p></td>
 <td><p>ON</p></td>
 <td><p>Build RC test server</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FETCH_CUOBJECT_CLIENT</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FETCH_CUOBJECT_CLIENT</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Fetch libcuobjclient 1.2.0.59</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FIND_CUOBJECT_SERVER</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FIND_CUOBJECT_SERVER</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Find libcuobjserver + probe</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
 <td><p>see below</p></td>
 <td><p>Path to ROCm install</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
 <td><p>detected</p></td>
 <td><p>ROCm version</p></td>
 </tr>
 </tbody>
 </table>
 </div>
+<p><code class="docutils literal notranslate"><span class="pre">CMAKE_BUILD_TYPE</span></code> can be <code class="docutils literal notranslate"><span class="pre">Debug</span></code>, <code class="docutils literal notranslate"><span class="pre">Release</span></code>,
+<code class="docutils literal notranslate"><span class="pre">RelWithDebInfo</span></code>, or <code class="docutils literal notranslate"><span class="pre">None</span></code>. <code class="docutils literal notranslate"><span class="pre">RelWithDebInfo</span></code> and <code class="docutils literal notranslate"><span class="pre">Release</span></code>
+builds are optimized and compile out the library’s <code class="docutils literal notranslate"><span class="pre">assert()</span></code>
+checks. They also enable <code class="docutils literal notranslate"><span class="pre">_FORTIFY_SOURCE=3</span></code> when building with
+Clang or GCC 12 and later. Use <code class="docutils literal notranslate"><span class="pre">Debug</span></code> when
+developing hipObject or running it under a sanitizer. Multi-config
+generators, such as Ninja Multi-Config, ignore <code class="docutils literal notranslate"><span class="pre">CMAKE_BUILD_TYPE</span></code>
+and pick the configuration at build time.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> and <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> can also be set in the
 environment. If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> isn’t set but <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is,
 <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code> for

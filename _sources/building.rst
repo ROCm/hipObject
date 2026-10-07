@@ -42,22 +42,32 @@ Build Steps
 CMake Options
 -------------
 
-================================ ========= =============================
-Option                           Default   Description
-================================ ========= =============================
-``HIPOBJ_BNXT``                  ON        Build Thor-2 RDMA backend
-``HIPOBJ_IONIC``                 ON        Build ionic RDMA backend
-``BUILD_SHARED_LIBS``            ON        Build shared library
-``BUILD_TESTING``                ON        Build and register tests
-``HIPOBJ_BUILD_DOCS``            OFF       Build documentation
-``HIPOBJ_DOCS_ONLY``             OFF       Docs targets only (no HIP)
-``HIPOBJ_MINIO_CLIENT``          OFF       Build minio-cpp RDMA bridge
-``HIPOBJ_INTEGRATION_TESTS``     ON        Build RC test server
-``HIPOBJ_FETCH_CUOBJECT_CLIENT`` OFF       Fetch libcuobjclient 1.2.0.59
-``HIPOBJ_FIND_CUOBJECT_SERVER``  OFF       Find libcuobjserver + probe
-``ROCM_PATH``                    see below Path to ROCm install
-``ROCM_VERSION``                 detected  ROCm version
-================================ ========= =============================
+================================ ============== =============================
+Option                           Default        Description
+================================ ============== =============================
+``CMAKE_BUILD_TYPE``             RelWithDebInfo Build type (see below)
+``HIPOBJ_BNXT``                  ON             Build Thor-2 RDMA backend
+``HIPOBJ_IONIC``                 ON             Build ionic RDMA backend
+``BUILD_SHARED_LIBS``            ON             Build shared library
+``BUILD_TESTING``                ON             Build and register tests
+``HIPOBJ_BUILD_DOCS``            OFF            Build documentation
+``HIPOBJ_DOCS_ONLY``             OFF            Docs targets only (no HIP)
+``HIPOBJ_MINIO_CLIENT``          OFF            Build minio-cpp RDMA bridge
+``HIPOBJ_INTEGRATION_TESTS``     ON             Build RC test server
+``HIPOBJ_FETCH_CUOBJECT_CLIENT`` OFF            Fetch libcuobjclient 1.2.0.59
+``HIPOBJ_FIND_CUOBJECT_SERVER``  OFF            Find libcuobjserver + probe
+``ROCM_PATH``                    see below      Path to ROCm install
+``ROCM_VERSION``                 detected       ROCm version
+================================ ============== =============================
+
+``CMAKE_BUILD_TYPE`` can be ``Debug``, ``Release``,
+``RelWithDebInfo``, or ``None``. ``RelWithDebInfo`` and ``Release``
+builds are optimized and compile out the library's ``assert()``
+checks. They also enable ``_FORTIFY_SOURCE=3`` when building with
+Clang or GCC 12 and later. Use ``Debug`` when
+developing hipObject or running it under a sanitizer. Multi-config
+generators, such as Ninja Multi-Config, ignore ``CMAKE_BUILD_TYPE``
+and pick the configuration at build time.
 
 ``ROCM_PATH`` and ``ROCM_VERSION`` can also be set in the
 environment. If ``ROCM_PATH`` isn't set but ``ROCM_VERSION`` is,
