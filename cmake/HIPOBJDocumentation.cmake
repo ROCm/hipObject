@@ -95,6 +95,7 @@ if(HIPOBJ_BUILD_DOCS)
     ${CMAKE_SOURCE_DIR}/docs/Doxyfile.in
     ${CMAKE_BINARY_DIR}/Doxyfile
     @ONLY
+    ESCAPE_QUOTES
   )
 
   # Configure conf.py (substitutes Breathe XML path)
@@ -102,6 +103,7 @@ if(HIPOBJ_BUILD_DOCS)
     ${CMAKE_SOURCE_DIR}/docs/conf.py
     ${CMAKE_BINARY_DIR}/docs-sphinx/conf.py
     @ONLY
+    ESCAPE_QUOTES
   )
 
   # ── Doxygen target: source headers -> XML ────────────
