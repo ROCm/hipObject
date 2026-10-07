@@ -30,6 +30,7 @@ extern "C" {
  * - @ref error
  * - @ref buffer
  * - @ref io
+ * - @ref v2
  */
 
 /*!
@@ -37,6 +38,23 @@ extern "C" {
  * @defgroup error Errors and Error Handling
  * @defgroup buffer Buffer Registration
  * @defgroup io Data Transfer (GET / PUT)
+ */
+
+/*!
+ * @defgroup v2 Experimental V2 API (hipobj-rc-v2)
+ *
+ * @warning The V2 API is experimental. It may change incompatibly or be
+ * removed in any release. hipObjGetV2() and hipObjPutV2() are not
+ * implemented yet and return hipObjNotSupported.
+ *
+ * The V2 API runs each transfer over the hipobj-rc-v2 control protocol:
+ * two round trips on a dedicated control endpoint, PREPARE and then READY,
+ * whose response is FINAL. CANCEL abandons a prepared transfer.
+ *
+ * These declarations, and the hipObjNotSupported and hipObjBusy error
+ * codes, only exist when HIPOBJECT_V2_API is defined. The
+ * HIPOBJECT_V2_API CMake option (ON by default) builds the V2 API and
+ * defines the macro for everything that links hipobj::hipobj.
  */
 
 /* -------------------------------------------------------
@@ -75,8 +93,8 @@ typedef enum {
     hipObjSizeTooLarge,
     hipObjInternalError,
 #ifdef HIPOBJECT_V2_API
-    hipObjNotSupported, /*!< Server explicitly does not support hipobj-rc-v2 */
-    hipObjBusy,         /*!< Server backpressure (503) and retries exhausted */
+    hipObjNotSupported, /*!< V2 API: server explicitly does not support hipobj-rc-v2 */
+    hipObjBusy,         /*!< V2 API: server backpressure (503) and retries exhausted */
 #endif
 } hipObjOpError_t;
 
@@ -285,7 +303,7 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
 
 /*!
  * @brief V2 control endpoint settings
- * @ingroup core
+ * @ingroup v2
  *
  * The v2 protocol runs its prepare/ready/cancel exchange on a dedicated
  * control endpoint; there is no default port, the caller must supply one.
@@ -297,7 +315,7 @@ typedef struct {
 
 /*!
  * @brief V2 initialization configuration
- * @ingroup core
+ * @ingroup v2
  */
 typedef struct {
     hipObjConfig_t            v1;      /*!< All v1 fields */
@@ -309,7 +327,7 @@ typedef struct hipObjOpsV2 hipObjOpsV2_t;
 
 /*!
  * @brief Per-transfer request description for the v2 phases
- * @ingroup io
+ * @ingroup v2
  *
  * Borrow contract: string fields are owned by the library and remain
  * valid for the duration of a single callback invocation. Callbacks are
@@ -332,7 +350,7 @@ typedef struct {
                                                    from init) */
 } hipObjTransferReqV2_t;
 
-/*! @brief Response to PREPARE @ingroup io */
+/*! @brief Response to PREPARE @ingroup v2 */
 typedef struct {
     int      httpStatus;        /*!< Status code (200/501/403/413/503/500) */
     int      protocolEcho;      /*!< 1 when X-Amz-Rdma-Protocol: hipobj-rc-v2 seen */
@@ -342,7 +360,7 @@ typedef struct {
     uint32_t serverPsn;         /*!< Server PSN, 1..0xffffff (0 = invalid) */
 } hipObjPrepareReplyV2_t;
 
-/*! @brief FINAL response (the reply to READY) @ingroup io */
+/*! @brief FINAL response (the reply to READY) @ingroup v2 */
 typedef struct {
     int      httpStatus;      /*!< 200 (GET) / 204 (PUT) / 5xx / 409 / 408 */
     int      protocolEcho;    /*!< 1 when the protocol echo header was present */
@@ -356,7 +374,7 @@ typedef struct {
 
 /*!
  * @brief Phase-aware callbacks for the v2 control protocol
- * @ingroup io
+ * @ingroup v2
  *
  * Each send* callback performs one complete HTTP round trip on the
  * control endpoint and fills @p out from the response. All callbacks are
@@ -382,7 +400,7 @@ typedef struct hipObjOpsV2 {
 #if 0
 /*!
  * @brief Initialize the library for hipobj-rc-v2 transfers
- * @ingroup core
+ * @ingroup v2
  *
  * Mutually exclusive with hipObjInit: whichever is called first wins and
  * the other returns hipObjAlreadyInitialized until hipObjShutdown.
@@ -392,7 +410,7 @@ HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
 
 /*!
  * @brief V2 GET: download an object into a registered buffer
- * @ingroup io
+ * @ingroup v2
  *
  * Runs the two-round-trip protocol (PREPARE, then READY whose response
  * is FINAL) against the configured control endpoint. The transfer size
@@ -407,7 +425,7 @@ HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
 HIPOBJ_API hipObjError_t hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size,
                                      uint64_t offset, const char *query, hipObjOpsV2_t *ops, void *ctx);
 
-/*! @brief V2 PUT, same contract as hipObjGetV2 @ingroup io */
+/*! @brief V2 PUT, same contract as hipObjGetV2 @ingroup v2 */
 HIPOBJ_API hipObjError_t hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size,
                                      uint64_t offset, const char *query, hipObjOpsV2_t *ops, void *ctx);
 
