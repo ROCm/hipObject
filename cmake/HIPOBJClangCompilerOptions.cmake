@@ -184,7 +184,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wundefined-reinterpret-cast
     -Wunguarded-availability
     -Wunnamed-type-template-args
-    #-Wunreachable-code-aggressive # TODO: Fix diagnostics and re-enable
+    -Wunreachable-code-aggressive
     -Wused-but-marked-unused
     -Wvariadic-macros
     -Wvector-conversion
