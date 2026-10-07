@@ -136,6 +136,11 @@ jobs:
 
       - name: Build hipObject binaries (ROCm container)
         run: |
+          # Stage what the binaries load at run time in rocm-libs, which
+          # travels to the guest VMs with them: the ROCm libraries,
+          # pugixml, and the shared libhipobj. In this container the
+          # binaries' build-tree run path still finds libhipobj in
+          # /hipobject-build/src, so the check treats that as unstaged.
           docker run --rm \
             --user root \
             -v "${{ github.workspace }}:/hipobject:ro" \
@@ -165,13 +170,13 @@ jobs:
                        /hipobject-build/integrations/minio-cpp/minio-getput-rdma; do \
                 ldd \$b \
                   | awk '/=> \//{print \$3}' \
-                  | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so' \
+                  | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so|/libhipobj\.so' \
                   | xargs -r -I{} cp -L {} /hipobject-build/rocm-libs/; \
               done && \
               for b in /hipobject-build/test/integration/rdma-test-server/hipobj-rdma-test-server \
                        /hipobject-build/integrations/minio-cpp/minio-getput-rdma; do \
                 if LD_LIBRARY_PATH=/hipobject-build/rocm-libs ldd \$b \
-                     | grep 'not found'; then \
+                     | grep -E 'not found|=> /hipobject-build/src/'; then \
                   echo 'staged closure incomplete'; exit 1; \
                 fi; \
               done && \

@@ -3,9 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* User-defined literals for byte sizes
- * Modeled after hipFile's hipfile-literals.h
- */
+/* User-defined literals for byte sizes */
 
 #pragma once
 

@@ -75,7 +75,7 @@ set_property(CACHE HIPOBJ_CXX_STANDARD
   PROPERTY STRINGS "20" "23")
 
 option(BUILD_SHARED_LIBS
-  "Build using shared libraries" OFF)
+  "Build using shared libraries" ON)
 
 include(CTest)
 
