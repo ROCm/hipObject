@@ -1,11 +1,21 @@
 # hipObject
 
-[![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
-[![Build](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml)
-[![Documentation Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-documentation-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-documentation-check.yml)
-[![Format Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-format-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-format-check.yml)
-[![Spell Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-spell-check.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-spell-check.yml)
-[![Ansible Check](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml/badge.svg)](https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)][license]
+[![Build](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-build.yml?label=Build)][ci-build]
+[![Docs](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-documentation-check.yml?label=Docs)][ci-docs]
+[![clang-format](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-format-check.yml?label=clang-format)][ci-clang-format]
+[![ShellCheck](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-shellcheck.yml?label=ShellCheck)][ci-shellcheck]
+[![pylint](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-pylint.yml?label=pylint)][ci-pylint]
+[![cmakelint](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-cmakelint.yml?label=cmakelint)][ci-cmakelint]
+[![codespell](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-spell-check.yml?label=codespell)][ci-codespell]
+[![Ansible](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-ansible.yml?label=Ansible)][ci-ansible]
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/codeql.yml?label=CodeQL)][ci-codeql]
+[![MinIO Integration](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-minio-integration-check.yml?label=MinIO%20Integration)][ci-minio-integration]
+[![HW: AIS and Host Buffers](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-hardware-test-gpu-direct.yml?label=HW%3A%20AIS%20and%20Host%20Buffers)][ci-hw-gpu-direct]
+[![HW: Two-VM AIS and Host Buffers](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-hardware-test-two-vm-gpu-direct.yml?label=HW%3A%20Two-VM%20AIS%20and%20Host%20Buffers)][ci-hw-two-vm-gpu-direct]
+[![HW: Two-VM Protocol](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-hardware-test-two-vm-protocol.yml?label=HW%3A%20Two-VM%20Protocol)][ci-hw-two-vm-protocol]
+[![HW: S3 Backend](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-hardware-test-s3-backend.yml?label=HW%3A%20S3%20Backend)][ci-hw-s3-backend]
+[![HW: MinIO Bridge](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-hardware-test-minio-bridge.yml?label=HW%3A%20MinIO%20Bridge)][ci-hw-minio-bridge]
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)](INSTALL.md)
 [![ROCm](https://img.shields.io/badge/ROCm-supported-green.svg)](https://rocm.docs.amd.com)
 ![Language](https://img.shields.io/badge/language-C%20%7C%20C%2B%2B-orange.svg)
@@ -134,3 +144,22 @@ reference, and architecture.
 ## License
 
 MIT. See [LICENSE.md](LICENSE.md).
+
+<!-- References -->
+
+[license]: https://github.com/ROCm/hipObject/blob/develop/LICENSE.md
+[ci-build]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-build.yml
+[ci-docs]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-documentation-check.yml
+[ci-clang-format]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-format-check.yml
+[ci-shellcheck]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-shellcheck.yml
+[ci-pylint]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-pylint.yml
+[ci-cmakelint]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-cmakelint.yml
+[ci-codespell]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-spell-check.yml
+[ci-ansible]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-ansible.yml
+[ci-codeql]: https://github.com/ROCm/hipObject/actions/workflows/codeql.yml
+[ci-minio-integration]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-minio-integration-check.yml
+[ci-hw-gpu-direct]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-hardware-test-gpu-direct.yml
+[ci-hw-two-vm-gpu-direct]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-hardware-test-two-vm-gpu-direct.yml
+[ci-hw-two-vm-protocol]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-hardware-test-two-vm-protocol.yml
+[ci-hw-s3-backend]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-hardware-test-s3-backend.yml
+[ci-hw-minio-bridge]: https://github.com/ROCm/hipObject/actions/workflows/hipobject-hardware-test-minio-bridge.yml
