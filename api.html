@@ -807,7 +807,7 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv417hipObjBufRegisterPv6size_t">
 <span id="_CPPv317hipObjBufRegisterPv6size_t"></span><span id="_CPPv217hipObjBufRegisterPv6size_t"></span><span id="hipObjBufRegister__voidP.s"></span><span class="target" id="group__buffer_1ga6e5f4ed7bb337f3095fb232cfa9ff4cb"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufRegister</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv417hipObjBufRegisterPv6size_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Register a GPU buffer for RDMA transfers. </p>
-<p>Exports the GPU buffer via dmabuf and registers it with the RDMA NIC. Maximum 4 GiB per registration.</p>
+<p>Exports the GPU buffer via dmabuf and registers it with the RDMA NIC. Maximum 4 GiB per registration. The buffer must lie within a single HIP allocation: returns hipObjInvalidValue if it runs past the end of the allocation that holds devPtr.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
