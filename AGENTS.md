@@ -377,12 +377,18 @@ steps.
 Python code must run on **Python 3.10**. Don't use anything newer, such as
 `tomllib`, `except*`, or `typing.Self` (all 3.11).
 
-- **black** and **pylint**, both targeting 3.10. CI doesn't run either.
+- **black** and **pylint**, both targeting 3.10:
 
   ```bash
   git ls-files -z '*.py' | xargs -0 black --check --target-version py310
   git ls-files -z '*.py' | xargs -0 pylint --py-version=3.10
   ```
+
+  CI: [hipobject-pylint.yml](.github/workflows/hipobject-pylint.yml), when a
+  `.py` file or the workflow file changes. It pins both tools; use the same
+  versions locally if black's output differs from CI's. Neither tool sees
+  Python embedded in other files, such as the heredocs the hardware-test
+  workflows pass to `python3`, so keep those black-formatted by hand.
 
 - **vermin**, since black and pylint don't catch most uses of newer language
   features or modules (`pip install vermin`). It exits nonzero and prints
