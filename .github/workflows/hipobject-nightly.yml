@@ -233,11 +233,20 @@ jobs:
           fi
           # A tag can outlive its release, for example if a run failed
           # between deleting the release and creating the new one
-          if git ls-remote --exit-code \
+          tag_status=0
+          git ls-remote --exit-code \
               "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
-              refs/tags/nightly > /dev/null; then
-            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly"
-          fi
+              refs/tags/nightly > /dev/null || tag_status=$?
+          case "${tag_status}" in
+            0)
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly"
+              ;;
+            2) ;;
+            *)
+              echo "::error::could not query the nightly tag"
+              exit 1
+              ;;
+          esac
 
           gh release create nightly \
             --prerelease \
