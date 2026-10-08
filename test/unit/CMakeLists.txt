@@ -19,11 +19,11 @@ target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 if(HIPOBJECT_V2_API)
   # Server-side v2 sources for the session/handler unit tests.
   set(HIPOBJ_V2_SERVER_SOURCES
-    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_request.cpp
-    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_session.cpp
-    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_handlers.cpp
-    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_data_phase.cpp
-    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server/v2_backend.cpp)
+    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_request.cpp
+    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_session.cpp
+    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_handlers.cpp
+    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_data_phase.cpp
+    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_backend.cpp)
 
   hipobj_add_library(
     NAME hipobj_v2_server_objects
@@ -31,22 +31,22 @@ if(HIPOBJECT_V2_API)
     SRCS ${HIPOBJ_V2_SERVER_SOURCES})
   target_include_directories(hipobj_v2_server_objects
     PRIVATE
-      ${CMAKE_SOURCE_DIR}/include
-      ${CMAKE_SOURCE_DIR}/shared
-      ${CMAKE_SOURCE_DIR}/src
-      ${CMAKE_SOURCE_DIR}/src/common
-      ${CMAKE_SOURCE_DIR}/src/rdma
-      ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server)
+      ${PROJECT_SOURCE_DIR}/include
+      ${PROJECT_SOURCE_DIR}/shared
+      ${PROJECT_SOURCE_DIR}/src
+      ${PROJECT_SOURCE_DIR}/src/common
+      ${PROJECT_SOURCE_DIR}/src/rdma
+      ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server)
 endif()
 
 target_include_directories(hipobj_test_objects
   PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/shared
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/common
-    ${CMAKE_SOURCE_DIR}/src/rdma
-    ${CMAKE_SOURCE_DIR}/src/s3)
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/shared
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/src/common
+    ${PROJECT_SOURCE_DIR}/src/rdma
+    ${PROJECT_SOURCE_DIR}/src/s3)
 
 target_link_libraries(hipobj_test_objects
   PUBLIC

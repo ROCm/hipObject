@@ -57,13 +57,13 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
     target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJECT_V2_API)
   endif()
   target_include_directories(${TEST_NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/shared
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/common
-    ${CMAKE_SOURCE_DIR}/src/rdma
-    ${CMAKE_SOURCE_DIR}/src/s3
-    ${CMAKE_SOURCE_DIR}/test/integration/rdma-test-server
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/shared
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/src/common
+    ${PROJECT_SOURCE_DIR}/src/rdma
+    ${PROJECT_SOURCE_DIR}/src/s3
+    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server
   )
   add_test(NAME ${TEST_NAME}
     COMMAND ${TEST_NAME})
