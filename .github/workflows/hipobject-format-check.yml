@@ -13,8 +13,12 @@ on:
       - '.github/workflows/hipobject-format-check.yml'
   workflow_dispatch:
 
+# A newer commit on a pull request cancels the run for the older one.
+# Every other run (a push, a manual run) gets a group of its own: in a
+# shared group, a newer run replaces a pending one even without
+# cancel-in-progress, which would leave a commit untested.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 permissions:
