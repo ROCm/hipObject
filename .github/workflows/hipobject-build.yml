@@ -4,23 +4,30 @@ on:
   # Pull requests, pushes to develop, and manual runs. The push run
   # catches a develop that no single PR was tested against.
   #
-  # The ignored paths hold nothing this build compiles or runs: ansible/
-  # and ci/ belong to their own lanes, and the documentation inputs are
-  # only used with HIPOBJ_BUILD_DOCS, which is OFF here. The Documentation
-  # Check lane configures and builds those.
+  # The excluded paths hold nothing this build compiles or runs: ansible/
+  # and ci/ belong to their own lanes, the documentation inputs are only
+  # used with HIPOBJ_BUILD_DOCS, which is OFF here (the Documentation
+  # Check lane configures and builds those), and .github/ holds the other
+  # workflows and their configuration. This workflow's own file is added
+  # back last; a later pattern overrides an earlier one, which is why
+  # this is a paths list with negations and not paths-ignore, which
+  # can't add a path back.
   pull_request:
     branches: [develop]
-    paths-ignore: &paths-ignore
-      - '**/*.md'
-      - '**/*.rst'
-      - 'ansible/**'
-      - 'ci/**'
-      - 'cmake/HIPOBJDocumentation.cmake'
-      - 'docs/**'
-      - 'requirements.txt'
+    paths: &paths
+      - '**'
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!ansible/**'
+      - '!ci/**'
+      - '!cmake/HIPOBJDocumentation.cmake'
+      - '!docs/**'
+      - '!requirements.txt'
+      - '!.github/**'
+      - '.github/workflows/hipobject-build.yml'
   push:
     branches: [develop]
-    paths-ignore: *paths-ignore
+    paths: *paths
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.
