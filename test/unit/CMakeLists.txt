@@ -154,7 +154,7 @@ hipobj_add_fake_device_test(test-staging
 add_test(NAME test-staging-env
   COMMAND test-staging --gtest_filter=StagingEnvTest.*)
 set_tests_properties(test-staging-env PROPERTIES
-  ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=20;HIPOBJ_REQUIRE_GPU_DIRECT=1")a
+  ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=20;HIPOBJ_REQUIRE_GPU_DIRECT=1")
 
 hipobj_add_test(test-thread-safety
   test-thread-safety.cpp)
