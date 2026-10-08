@@ -243,16 +243,17 @@ jobs:
           OUT="${GUEST_OUTPUT_DIR}"
           eval "$(python3 - "$OUT" <<'PYEOF'
           import json, os, shlex, sys
+
           out = sys.argv[1]
           d = json.load(open(os.path.join(out, "vm-info.json")))
           here = lambda p: os.path.join(out, os.path.basename(p)) if p else ""
           keys = {
-            "VM_USER": d.get("username", "ci"),
-            "VM_DISK": here(d.get("image_path", "")),
-            "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
+              "VM_USER": d.get("username", "ci"),
+              "VM_DISK": here(d.get("image_path", "")),
+              "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
           }
           for k, v in keys.items():
-            print(f"{k}={shlex.quote(str(v))}")
+              print(f"{k}={shlex.quote(str(v))}")
           PYEOF
           )"
           chmod 600 "$SSH_KEY_PRIVATE"

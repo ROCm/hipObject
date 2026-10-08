@@ -1,0 +1,56 @@
+name: hipObject - pylint
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '**.py'
+      - '.github/workflows/hipobject-pylint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
+jobs:
+  pylint:
+    name: Lint Python files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # Pinned because black changes its style every year, and a new
+      # release would otherwise fail PRs that don't touch the code.
+      - name: Install black and pylint
+        run: python -m pip install black==26.10.0 pylint==4.1.2
+
+      # Both target Python 3.10, the oldest version hipObject supports.
+      - name: Lint Python files
+        run: |
+          mapfile -t files < <(git ls-files -- '*.py')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::No Python files found!"
+            exit 1
+          fi
+          echo "Linting the following files:"
+          printf '%s\n' "${files[@]}"
+          black --check --diff --target-version py310 "${files[@]}"
+          pylint --py-version=3.10 "${files[@]}"
