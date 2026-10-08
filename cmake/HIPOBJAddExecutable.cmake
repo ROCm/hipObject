@@ -7,6 +7,7 @@ include_guard(GLOBAL)
 include(GNUInstallDirs)
 include(HIPOBJClangTidy)
 include(HIPOBJCompilerOptions)
+include(HIPOBJIWYU)
 
 # Add an executable program using hipObject build conventions
 #
@@ -51,6 +52,7 @@ function(hipobj_add_executable)
   hipobj_set_compiler_flags(${arg_NAME})
   hipobj_set_linker_flags(${arg_NAME})
   hipobj_set_clang_tidy(${arg_NAME})
+  hipobj_set_iwyu(${arg_NAME})
 endfunction()
 
 # Add an executable test program using hipObject build conventions

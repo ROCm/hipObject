@@ -19,6 +19,10 @@
   `RelWithDebInfo` and `ROCM_PATH`.
 - The `HIPOBJ_WERROR` CMake option makes the build treat compiler
   warnings in hipObject's own code as errors. It defaults to `OFF`.
+- The `HIPOBJ_USE_IWYU` CMake option runs include-what-you-use on
+  hipObject's own code while it compiles, which prints suggestions for
+  `#include` lines to add or remove. The suggestions don't fail the
+  build. It defaults to `OFF`.
 
 ### Changed
 
