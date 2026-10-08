@@ -853,14 +853,14 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv49hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv">
 <span id="_CPPv39hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv"></span><span id="_CPPv29hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv"></span><span id="hipObjGet__hipObjHandle_t.voidP.s.off_t.hipObjOps_tP.voidP"></span><span class="target" id="group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGet</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjHandle_t" title="hipObjHandle_t"><span class="n"><span class="pre">hipObjHandle_t</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">handle</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="n"><span class="pre">off_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">offset</span></span>, <a class="reference internal" href="#_CPPv411hipObjOps_t" title="hipObjOps_t"><span class="n"><span class="pre">hipObjOps_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ops</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ctx</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv49hipObjGet14hipObjHandle_tPv6size_t5off_tP11hipObjOps_tPv" title="Link to this definition">#</a><br /></dt>
 <dd><p>GET: fetch an S3 object into a registered buffer via RDMA. </p>
-<p>The server performs an RDMA WRITE to push data into the registered buffer.</p>
+<p>The server performs an RDMA WRITE to push data into the registered buffer, starting <code class="docutils literal notranslate"><span class="pre">offset</span></code> bytes into it. The bytes from offset to offset + size must lie inside the buffer. hipObject doesn’t send an object offset; the request the callbacks make selects the part of the object to fetch.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>handle</strong> – S3 object handle (from application) </p></li>
 <li><p><strong>devPtr</strong> – Registered GPU or host buffer </p></li>
 <li><p><strong>size</strong> – Number of bytes to transfer </p></li>
-<li><p><strong>offset</strong> – Byte offset into the S3 object </p></li>
+<li><p><strong>offset</strong> – Byte offset into the registered buffer </p></li>
 <li><p><strong>ops</strong> – S3 SDK callbacks </p></li>
 <li><p><strong>ctx</strong> – User context passed to callbacks </p></li>
 </ul>
@@ -889,14 +889,14 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv49hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv">
 <span id="_CPPv39hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv"></span><span id="_CPPv29hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv"></span><span id="hipObjPut__hipObjHandle_t.voidCP.s.off_t.hipObjOps_tP.voidP"></span><span class="target" id="group__io_1gaf3a2695bab90023d0d40967e48489ff5"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjPut</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjHandle_t" title="hipObjHandle_t"><span class="n"><span class="pre">hipObjHandle_t</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">handle</span></span>, <span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="n"><span class="pre">off_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">offset</span></span>, <a class="reference internal" href="#_CPPv411hipObjOps_t" title="hipObjOps_t"><span class="n"><span class="pre">hipObjOps_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ops</span></span>, <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">ctx</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv49hipObjPut14hipObjHandle_tPKv6size_t5off_tP11hipObjOps_tPv" title="Link to this definition">#</a><br /></dt>
 <dd><p>PUT: store a registered buffer to an S3 object via RDMA. </p>
-<p>The server performs an RDMA READ to pull data from the registered buffer.</p>
+<p>The server performs an RDMA READ to pull data from the registered buffer, starting <code class="docutils literal notranslate"><span class="pre">offset</span></code> bytes into it. The bytes from offset to offset + size must lie inside the buffer. hipObject doesn’t send an object offset; the request the callbacks make selects where the data goes in the object.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>handle</strong> – S3 object handle (from application) </p></li>
 <li><p><strong>devPtr</strong> – Registered GPU or host buffer </p></li>
 <li><p><strong>size</strong> – Number of bytes to transfer </p></li>
-<li><p><strong>offset</strong> – Byte offset into the S3 object </p></li>
+<li><p><strong>offset</strong> – Byte offset into the registered buffer </p></li>
 <li><p><strong>ops</strong> – S3 SDK callbacks </p></li>
 <li><p><strong>ctx</strong> – User context passed to callbacks </p></li>
 </ul>
