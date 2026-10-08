@@ -25,6 +25,13 @@ if(HIPOBJ_USE_SANITIZERS)
   endif()
 endif()
 
+# An instrumented static library needs the code coverage profile runtime
+# (see HIPOBJCoverage.cmake). The shared library links it itself.
+if(HIPOBJ_USE_CODE_COVERAGE AND NOT BUILD_SHARED_LIBS)
+  string(APPEND HIPOBJ_INSTALL_TEST_CONSUMER_LINK_FLAGS
+    " -fprofile-instr-generate")
+endif()
+
 # The consumer finds hip and hsa-runtime64 (which the static library's
 # package config looks for) where this build found them
 set(HIPOBJ_INSTALL_TEST_PREFIX_PATH ${CMAKE_PREFIX_PATH})

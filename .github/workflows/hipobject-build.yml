@@ -52,19 +52,20 @@ jobs:
   build:
     name: >-
       Build (V2 API ${{ matrix.v2_api }},
-      ${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
+      ${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }}${{ matrix.coverage == 'ON' && ', coverage' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
     runs-on: ubuntu-latest
     strategy:
       # Every other workflow builds the default configuration (V2 API on,
       # shared library, no sanitizers), so this is the only place the V2-off,
-      # static, and sanitizer configurations get compiled and tested. Let
-      # every job finish so a failure in one doesn't hide the state of the
-      # others.
+      # static, sanitizer, and code coverage configurations get compiled and
+      # tested. Let every job finish so a failure in one doesn't hide the
+      # state of the others.
       fail-fast: false
       matrix:
         v2_api: [ON, OFF]
         shared_libs: [ON, OFF]
         sanitizers: [OFF]
+        coverage: [OFF]
         # Empty means the CMakeLists.txt default (RelWithDebInfo)
         build_type: ['']
         include:
@@ -75,7 +76,19 @@ jobs:
           - v2_api: ON
             shared_libs: ON
             sanitizers: ON
+            coverage: OFF
             build_type: Debug
+          # One code coverage job with the default configuration. Coverage
+          # needs Clang, so it builds with ROCm's, which makes it the one
+          # job that doesn't use GCC. It builds Debug, so the report's
+          # lines match the source.
+          - v2_api: ON
+            shared_libs: ON
+            sanitizers: OFF
+            coverage: ON
+            build_type: Debug
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
     container:
       image: rocm/dev-ubuntu-24.04:10.0.0-full
       options: --user root
@@ -105,7 +118,13 @@ jobs:
 
       # HIPOBJ_WERROR makes a new warning fail the build. It only
       # covers hipObject's own targets, not the code FetchContent pulls in.
+      #
+      # CMake picks the compilers up from CC and CXX, and ignores them when
+      # they're empty, as they are for the jobs that don't set cc and cxx.
       - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
         run: |
           cmake -B build \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
@@ -116,6 +135,7 @@ jobs:
             -DHIPOBJECT_V2_API=${{ matrix.v2_api }} \
             -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }} \
             -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizers }} \
+            -DHIPOBJ_USE_CODE_COVERAGE=${{ matrix.coverage }} \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build
@@ -124,3 +144,15 @@ jobs:
       - name: Test
         run: |
           cd build && ctest --output-on-failure
+
+      # The report's summary goes on the run's summary page
+      - name: Code coverage report
+        if: matrix.coverage == 'ON'
+        run: |
+          cmake --build build --target hipobj-coverage
+          {
+            echo '# Code coverage'
+            echo '```'
+            cat build/coverage/report.txt
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

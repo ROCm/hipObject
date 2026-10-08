@@ -65,6 +65,7 @@ if(NOT HIPOBJ_DOCS_ONLY)
 
 include(HIPOBJUseROCmCMake)
 include(HIPOBJSanitizers)
+include(HIPOBJCoverage)
 include(HIPOBJClangTidy)
 include(HIPOBJIWYU)
 include(HIPOBJAddLibraries)

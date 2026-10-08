@@ -23,6 +23,10 @@
   hipObject's own code while it compiles, which prints suggestions for
   `#include` lines to add or remove. The suggestions don't fail the
   build. It defaults to `OFF`.
+- The `HIPOBJ_USE_CODE_COVERAGE` CMake option builds hipObject with
+  LLVM code coverage instrumentation, and adds a `hipobj-coverage`
+  target that reports the library's coverage after the tests run. It
+  needs Clang and defaults to `OFF`.
 
 ### Changed
 

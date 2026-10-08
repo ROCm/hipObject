@@ -78,9 +78,10 @@ Notes:
   both RDMA backends—keep that difference in mind when debugging.
 - CI ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) builds this
   configuration in the `rocm/dev-ubuntu-24.04:10.0.0-full` image, along with
-  variants that add `-DHIPOBJECT_V2_API=OFF`, `-DBUILD_SHARED_LIBS=OFF`, or
-  `-DHIPOBJ_USE_SANITIZERS=ON` (AddressSanitizer). It is the only workflow that
-  builds these variants.
+  variants that add `-DHIPOBJECT_V2_API=OFF`, `-DBUILD_SHARED_LIBS=OFF`,
+  `-DHIPOBJ_USE_SANITIZERS=ON` (AddressSanitizer), or
+  `-DHIPOBJ_USE_CODE_COVERAGE=ON` (built with ROCm's amdclang, and reported on
+  the run's summary page). It is the only workflow that builds these variants.
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON` plus the dependencies
   already installed in [`.cursor/Dockerfile`](.cursor/Dockerfile); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
@@ -294,7 +295,9 @@ configuration files.
 - **No compiler warnings, with both GCC and Clang.** They warn about different
   things, so build with each, in separate build directories
   (`-DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++`, and `clang`/`clang++`).
-  CI doesn't build with both. The build turns on a long list of warnings
+  CI builds with GCC, apart from its one code coverage job, so it doesn't check
+  Clang's warnings across configurations. The build turns on a long list of
+  warnings
   ([`HIPOBJGNUCompilerOptions.cmake`](cmake/HIPOBJGNUCompilerOptions.cmake),
   [`HIPOBJClangCompilerOptions.cmake`](cmake/HIPOBJClangCompilerOptions.cmake))
   but doesn't use `-Werror` unless it's configured with `-DHIPOBJ_WERROR=ON`,
