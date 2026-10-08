@@ -488,11 +488,15 @@ sudo<span class="w"> </span>make<span class="w"> </span>install
 <td><p>OFF</p></td>
 <td><p>Treat warnings as errors</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CODE_COVERAGE</span></code></p></td>
+<td><p>OFF</p></td>
+<td><p>Build with code coverage</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
 <td><p>see below</p></td>
 <td><p>Path to ROCm install</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
 <td><p>detected</p></td>
 <td><p>ROCm version</p></td>
 </tr>
@@ -512,6 +516,29 @@ and pick the configuration at build time.</p>
 code that CMake fetches. It’s off by default so that a compiler
 hipObject hasn’t been tested with can’t break the build with a new
 warning. CI turns it on, and developers should too.</p>
+<p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CODE_COVERAGE</span></code> builds hipObject with LLVM’s
+source-based code coverage instrumentation. It needs Clang (or
+ROCm’s <code class="docutils literal notranslate"><span class="pre">amdclang</span></code>) as both the C and C++ compiler, and the
+<code class="docutils literal notranslate"><span class="pre">llvm-profdata</span></code> and <code class="docutils literal notranslate"><span class="pre">llvm-cov</span></code> from the same LLVM version, which
+CMake looks for next to the compiler. Set <code class="docutils literal notranslate"><span class="pre">HIPOBJ_LLVM_PROFDATA</span></code>
+and <code class="docutils literal notranslate"><span class="pre">HIPOBJ_LLVM_COV</span></code> if it doesn’t find them. Run the tests, then
+build the <code class="docutils literal notranslate"><span class="pre">hipobj-coverage</span></code> target to report the coverage of the
+library’s sources:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Debug<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DCMAKE_C_COMPILER<span class="o">=</span>clang<span class="w"> </span>-DCMAKE_CXX_COMPILER<span class="o">=</span>clang++<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DHIPOBJ_USE_CODE_COVERAGE<span class="o">=</span>ON
+cmake<span class="w"> </span>--build<span class="w"> </span>build
+<span class="o">(</span><span class="nb">cd</span><span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ctest<span class="o">)</span>
+cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>hipobj-coverage
+</pre></div>
+</div>
+<p>The report goes in <code class="docutils literal notranslate"><span class="pre">coverage/report.txt</span></code> (a summary for each file)
+and <code class="docutils literal notranslate"><span class="pre">coverage/lines.txt</span></code> (the coverage of each line) in the build
+directory. Every instrumented program writes its profile to
+<code class="docutils literal notranslate"><span class="pre">coverage/profraw</span></code> in the build directory, however it’s run, and
+the profiles add up over runs, so delete <code class="docutils literal notranslate"><span class="pre">coverage/profraw</span></code> to start
+over. Since the programs write to the build directory, don’t install
+or package a coverage build.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> and <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> can also be set in the
 environment. If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> isn’t set but <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is,
 <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code> for
