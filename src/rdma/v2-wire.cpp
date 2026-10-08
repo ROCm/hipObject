@@ -77,10 +77,8 @@ namespace v2 {
             /* Re-encode and compare. */
             static const char *tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             std::string        re;
-            auto               b6 = [&](int i) { return bytes[i / 8 * 6 + (i % 8)] >> 2; };
-            (void)b6;
-            uint32_t acc  = 0;
-            int      bits = 0;
+            uint32_t           acc  = 0;
+            int                bits = 0;
             for (int i = 0; i < 8; ++i) {
                 acc = (acc << 8) | bytes[i];
                 bits += 8;
@@ -89,8 +87,9 @@ namespace v2 {
                     re += tbl[(acc >> bits) & 0x3f];
                 }
             }
-            while (re.size() < 11)
-                re += tbl[acc & 0x3f];
+            /* 64 bits make 10 characters with 4 bits left over, which are the
+             * high bits of the 11th; its 2 low bits are padding */
+            re += tbl[(acc << (6 - bits)) & 0x3f];
             re += '=';
             return re == text;
         }
@@ -223,7 +222,10 @@ namespace v2 {
                 for (char c : value) {
                     if (c < '0' || c > '9')
                         return false;
-                    b = b * 10 + static_cast<uint64_t>(c - '0');
+                    /* A count that doesn't fit is malformed, not wrapped */
+                    if (__builtin_mul_overflow(b, 10U, &b) ||
+                        __builtin_add_overflow(b, static_cast<uint64_t>(c - '0'), &b))
+                        return false;
                 }
                 out.bytes = b;
             }

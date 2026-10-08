@@ -115,6 +115,11 @@
 - `hipObjGet()`, `hipObjPut()`, and `hipObjBufSync()` could accept an
   offset and size whose sum wrapped around, and advertise a range outside
   the registered buffer to the server or copy outside it.
+- The queue pair `hipObjInit()` creates didn't allow remote reads, which
+  the server needs to read a `hipObjPut()` buffer. hipObject used the wrong
+  values for the libibverbs access flags, so the queue pair allowed remote
+  and local writes instead of remote reads and writes. On a NIC that
+  enforces a queue pair's access flags, `hipObjPut()` could fail.
 
 ### Known issues
 

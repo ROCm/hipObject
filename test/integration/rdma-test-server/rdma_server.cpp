@@ -20,10 +20,6 @@ namespace hipobj::test {
 
 namespace {
 
-    constexpr int IBV_ACCESS_LOCAL_WRITE  = 0x4;
-    constexpr int IBV_ACCESS_REMOTE_READ  = 0x1;
-    constexpr int IBV_ACCESS_REMOTE_WRITE = 0x2;
-
     /* Every failure below used to be a bare `return -1`, which the HTTP layer
      * turns into "500 RDMA PUT failed" with no reply header -- indistinguishable,
      * from the client, from a server that does not speak the RDMA extension at
