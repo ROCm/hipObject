@@ -81,6 +81,32 @@ class MatchingCodeTest(unittest.TestCase):
         src = source(free="    // doesn't need an ApiGuard\n" + RETURN)
         self.assertEqual(problems(src=src), [])
 
+    def test_concurrent_raw_string_naming_guard_passes(self) -> None:
+        """A concurrent function may put the guard in a multiline raw
+        string"""
+        src = source(free='    puts(R"(\n' + GUARD + ')");\n' + RETURN)
+        self.assertEqual(problems(src=src), [])
+
+    def test_raw_string_with_delimiter_passes(self) -> None:
+        """A raw string with a delimiter can contain )" """
+        src = source(free='    puts(u8R"x(\n)" ApiGuard\n)x");\n' + RETURN)
+        self.assertEqual(problems(src=src), [])
+
+    def test_raw_string_with_quote_delimiter_passes(self) -> None:
+        """A raw string's delimiter can contain a quote"""
+        src = source(free='    puts(R""(\n' + GUARD + ')"");\n' + RETURN)
+        self.assertEqual(problems(src=src), [])
+
+    def test_raw_string_definition_line_is_ignored(self) -> None:
+        """A raw string line that looks like a definition isn't one"""
+        src = source(free='    puts(R"(\nhipObjFake(int x)\n)");\n' + RETURN)
+        self.assertEqual(problems(src=src), [])
+
+    def test_raw_string_directive_is_ignored(self) -> None:
+        """An #if 0 inside a raw string doesn't disable what follows"""
+        src = source(locked=GUARD + '    puts(R"(\n#if 0\n)");\n' + RETURN)
+        self.assertEqual(problems(src=src), [])
+
     def test_disabled_declaration_is_ignored(self) -> None:
         """An untagged declaration inside #if 0 isn't checked"""
         header = HEADER + "#if 0\nHIPOBJ_API hipObjError_t hipObjOff(void);\n#endif\n"
@@ -141,6 +167,10 @@ class SerializedDefinitionTest(unittest.TestCase):
         """The guard's code in a comment"""
         self.assert_unguarded("    /*\n" + GUARD + "    */\n" + RETURN)
 
+    def test_guard_in_raw_string(self) -> None:
+        """The guard's code in a multiline raw string"""
+        self.assert_unguarded('    puts(R"(\n' + GUARD + ')");\n' + RETURN)
+
 
 class TagTest(unittest.TestCase):
     """Problems with the tags and declarations are reported"""
@@ -153,6 +183,13 @@ class TagTest(unittest.TestCase):
     def test_concurrent_uses_guard(self) -> None:
         """A concurrent function that takes the lock"""
         found = problems(src=source(free=GUARD + RETURN))
+        self.assert_one_problem(found, "hipObjFree() is @concurrent")
+
+    def test_concurrent_uses_guard_after_digit_separator(self) -> None:
+        """A digit separator (1'000) doesn't start a character literal that
+        hides the guard"""
+        line = "    int n = 1'000; hipObj::ApiGuard guard; char c = 'a';\n"
+        found = problems(src=source(free=line + RETURN))
         self.assert_one_problem(found, "hipObjFree() is @concurrent")
 
     def test_missing_tag(self) -> None:
