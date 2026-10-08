@@ -105,7 +105,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wduplicate-method-arg
     -Wduplicate-method-match
     -Wendif-labels
-    #-Wexit-time-destructors # TODO: Fix diagnostics and re-enable
+    -Wexit-time-destructors
     -Wexpansion-to-defined
     -Wexplicit-ownership-type
     -Wextra-semi
@@ -118,7 +118,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wformat-type-confusion
     -Wfour-char-constants
     -Wfuse-ld-path
-    #-Wglobal-constructors # TODO: Fix diagnostics and re-enable
+    -Wglobal-constructors
     -Wheader-hygiene
     -Widiomatic-parentheses
     -Wimplicit-fallthrough

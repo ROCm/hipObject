@@ -16,10 +16,14 @@
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 
+#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -33,7 +37,9 @@ struct FakeState {
     std::vector<uint32_t> destroyedQpns;
 };
 
+HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 FakeState g_state;
+HIPOBJ_WARN_NO_EXIT_DTOR_ON
 
 struct ibv_cq *
 fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
@@ -312,3 +318,5 @@ TEST_F(WcTestData, Mismatches)
 }
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

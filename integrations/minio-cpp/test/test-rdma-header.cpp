@@ -6,7 +6,11 @@
 #include <gtest/gtest.h>
 #include <hipobj.h>
 
+#include "hipobj-warnings.h"
 #include "token.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 TEST(HipObjMinioHeader, FormatRdmaHeaderValue)
 {
@@ -57,3 +61,5 @@ TEST(HipObjMinioHeader, TokenClientNicFromGid)
     EXPECT_EQ(hipObjTokenClientNic(encoded.c_str(), nicIp, sizeof(nicIp)).opError, hipObjSuccess);
     EXPECT_STREQ(nicIp, "10.0.0.5");
 }
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

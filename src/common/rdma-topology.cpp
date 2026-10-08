@@ -20,6 +20,7 @@
 #include <hip/hip_runtime.h>
 
 #include "hip-seam.h"
+#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
@@ -254,7 +255,10 @@ GetClosestNicToGpu(int gpuIndex, const char *hca_list, const char **dev_name)
     }
 
     if (best_idx >= 0 && dev_name) {
+        /* Static so the pointer returned in *dev_name stays valid */
+        HIPOBJ_WARN_NO_EXIT_DTOR_OFF
         static std::string s_dev_name;
+        HIPOBJ_WARN_NO_EXIT_DTOR_ON
         s_dev_name = devices[static_cast<size_t>(best_idx)].dev_name;
         *dev_name  = s_dev_name.c_str();
     }

@@ -65,7 +65,8 @@ target_include_directories(hipobj_minio
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
-    ${PROJECT_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/shared)
 
 target_link_libraries(hipobj_minio
   PUBLIC

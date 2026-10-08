@@ -12,8 +12,12 @@
 
 #include <gtest/gtest.h>
 
+#include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "v2-wire.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -247,3 +251,5 @@ TEST(V2Wire, EnumAbiCompat)
 }
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

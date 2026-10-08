@@ -19,10 +19,14 @@
 #include <gtest/gtest.h>
 
 #include "buffer.h"
+#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -47,7 +51,9 @@ struct FakeIbv {
     }
 };
 
+HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 FakeIbv g_fake;
+HIPOBJ_WARN_NO_EXIT_DTOR_ON
 
 struct FakeCq {
     int magic = 0xC0;
@@ -552,3 +558,5 @@ TEST_F(V2RegistryTest, ReservationOwnership)
  * full loop; here the ring primitive is covered. */
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

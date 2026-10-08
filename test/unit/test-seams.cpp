@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include "hip-seam.h"
+#include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -25,6 +26,9 @@
 #include "rdma-topology.h"
 #include "state.h"
 #include "transport.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -558,3 +562,5 @@ namespace {
 } // namespace
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

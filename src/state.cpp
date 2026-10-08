@@ -5,6 +5,8 @@
 
 #include "state.h"
 
+#include "hipobj-warnings.h"
+
 namespace hipObj {
 
 // State override installed by tests; null means the real singleton is
@@ -14,7 +16,10 @@ static DriverState *g_state_override = nullptr;
 DriverState &
 getState()
 {
+    // Holds only strings and scalars, so destroying it at exit is safe
+    HIPOBJ_WARN_NO_EXIT_DTOR_OFF
     static DriverState state;
+    HIPOBJ_WARN_NO_EXIT_DTOR_ON
     return g_state_override ? *g_state_override : state;
 }
 

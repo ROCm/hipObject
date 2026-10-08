@@ -21,11 +21,17 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#include "hipobj-warnings.h"
 #include "ibv-ptr.h"
 
 namespace hipObj {
 
+/* Global by design; its destructor dlclose()s libibverbs at exit */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
+HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 IBVWrapper ibv;
+HIPOBJ_WARN_NO_EXIT_DTOR_ON
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
 
 namespace {
 

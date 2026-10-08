@@ -22,6 +22,7 @@
 #include <miniocpp/error.h>
 #include <miniocpp/http.h>
 
+#include "hipobj-warnings.h"
 #include "hipobj_minio/rdma.h"
 
 namespace hipobj::minio {
@@ -76,7 +77,10 @@ namespace {
     public:
         static HipObjRuntime &Instance()
         {
+            // Holds only a mutex and strings, so destroying it at exit is safe
+            HIPOBJ_WARN_NO_EXIT_DTOR_OFF
             static HipObjRuntime inst;
+            HIPOBJ_WARN_NO_EXIT_DTOR_ON
             return inst;
         }
 
