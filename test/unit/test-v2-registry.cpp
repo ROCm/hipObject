@@ -206,13 +206,15 @@ protected:
             }
             return 0;
         }
-        entry.conn          = conn;
+        entry.conn          = std::move(conn);
         entry.device        = dh;
         entry.reservationId = rid;
         entry.clientPsn     = 0x123456;
         return reg.insert(std::move(entry));
     }
 
+    /* install_ is declared first so it's destroyed last: the registry
+     * entries free their fake objects through the fake table. */
     std::unique_ptr<IbvFakeInstall>                 install_;
     std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_;
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;
@@ -388,7 +390,7 @@ TEST_F(V2RegistryTest, PartialRollbackFailureTombstone)
     EXPECT_TRUE(rollbackFailed);
     /* Tombstone: no qp, dangling cq under verb failure, rid held. */
     hipObj::v2::ConnectionEntryV2 entry;
-    entry.conn   = conn; /* cq non-null (destroy failed) */
+    entry.conn   = std::move(conn); /* cq non-null (destroy failed) */
     entry.device = &dh_;
     /* Design: tombstone releases the rid at insert (v11). */
     reg.retired().unreserve(rid);
@@ -428,8 +430,8 @@ TEST_F(V2RegistryTest, DefensiveBusyPath)
     hipObj::v2::ConnectionEntryV2 entry;
     auto                         *rawQp = new struct ibv_qp();
     std::memset(rawQp, 0, sizeof(*rawQp));
-    rawQp->qp_num       = 7;
-    entry.conn.qp       = rawQp;
+    rawQp->qp_num = 7;
+    entry.conn.qp.reset(rawQp); /* fakeDestroyQp() deletes it */
     entry.conn.qpNum    = 7;
     entry.device        = &dh_;
     entry.reservationId = 0;

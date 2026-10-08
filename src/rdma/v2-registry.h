@@ -40,15 +40,19 @@
 #include <vector>
 
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 
 namespace hipObj {
 
 struct DeviceHandle;
 
+/* Owns one qp/cq pair. qp is declared last so it is destroyed before
+ * the cq it uses. Move-assignment replaces cq first, so only move into
+ * a connection that is empty. */
 struct RcConnV2 {
-    struct ibv_cq *cq    = nullptr;
-    struct ibv_qp *qp    = nullptr;
-    uint32_t       qpNum = 0;
+    IbvCqPtr cq;
+    IbvQpPtr qp;
+    uint32_t qpNum = 0;
 };
 
 namespace v2 {
@@ -61,6 +65,8 @@ namespace v2 {
 
     using ConnId = uint64_t;
 
+    /* Move-only: the entry owns its connection's qp/cq. device is a
+     * non-owning reference to the shared handle. */
     struct ConnectionEntryV2 {
         RcConnV2      conn;
         DeviceHandle *device         = nullptr;

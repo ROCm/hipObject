@@ -13,6 +13,7 @@
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -66,6 +67,21 @@ FirstMismatch(const char *buf, size_t size, uint32_t seed)
     return size;
 }
 
+/* Frees the transfer buffer with the allocator that made it */
+struct BufferDeleter {
+    bool onGpu = false;
+
+    void operator()(char *ptr) const noexcept
+    {
+        if (onGpu) {
+            (void)hipFree(ptr);
+        }
+        else {
+            free(ptr);
+        }
+    }
+};
+
 } // namespace
 
 int
@@ -113,6 +129,8 @@ main(int argc, char *argv[])
 
     char *bufptr  = nullptr;
     void *dev_ptr = nullptr;
+    /* Owns bufptr (which is dev_ptr on the GPU path) */
+    std::unique_ptr<char, BufferDeleter> buffer(nullptr, BufferDeleter{gpu_enabled});
 
     if (gpu_enabled) {
         hipError_t err = hipMalloc(&dev_ptr, bufsize);
@@ -120,10 +138,10 @@ main(int argc, char *argv[])
             std::cerr << "hipMalloc failed: " << err << std::endl;
             return 1;
         }
+        buffer.reset(static_cast<char *>(dev_ptr));
         err = hipMemcpy(dev_ptr, expected.data(), bufsize, hipMemcpyHostToDevice);
         if (err != hipSuccess) {
             std::cerr << "hipMemcpy H2D failed: " << err << std::endl;
-            (void)hipFree(dev_ptr);
             return 1;
         }
         (void)hipDeviceSynchronize();
@@ -141,6 +159,7 @@ main(int argc, char *argv[])
             std::cerr << "posix_memalign failed\n";
             return 1;
         }
+        buffer.reset(bufptr);
         std::memcpy(bufptr, expected.data(), bufsize);
         std::cout << "Host buffer " << bufsize << " bytes\n";
     }
@@ -154,12 +173,6 @@ main(int argc, char *argv[])
     minio::s3::PutObjectResponse presp = client.PutObject(pargs);
     if (!presp) {
         std::cerr << "PUT failed: " << presp.Error().String() << std::endl;
-        if (gpu_enabled) {
-            (void)hipFree(dev_ptr);
-        }
-        else {
-            free(bufptr);
-        }
         return 1;
     }
     std::cout << "PUT ok etag=" << presp.etag << std::endl;
@@ -184,34 +197,17 @@ main(int argc, char *argv[])
     minio::s3::GetObjectResponse gresp = client.GetObject(gargs);
     if (!gresp) {
         std::cerr << "GET failed: " << gresp.Error().String() << std::endl;
-        if (gpu_enabled) {
-            (void)hipFree(dev_ptr);
-        }
-        else {
-            free(bufptr);
-        }
         return 1;
     }
     std::cout << "GET ok\n";
 
-    char *hostptr = static_cast<char *>(std::malloc(bufsize));
-    if (!hostptr) {
-        std::cerr << "malloc failed\n";
-        if (gpu_enabled) {
-            (void)hipFree(dev_ptr);
-        }
-        else {
-            free(bufptr);
-        }
-        return 1;
-    }
+    std::vector<char> hostbuf(bufsize);
+    char             *hostptr = hostbuf.data();
 
     if (gpu_enabled) {
         hipError_t err = hipMemcpy(hostptr, dev_ptr, bufsize, hipMemcpyDeviceToHost);
         if (err != hipSuccess) {
             std::cerr << "hipMemcpy failed: " << err << std::endl;
-            free(hostptr);
-            (void)hipFree(dev_ptr);
             return 1;
         }
     }
@@ -222,13 +218,6 @@ main(int argc, char *argv[])
     std::ofstream out("output.bin", std::ios::binary);
     if (!out) {
         std::cerr << "failed to open output.bin\n";
-        free(hostptr);
-        if (gpu_enabled) {
-            (void)hipFree(dev_ptr);
-        }
-        else {
-            free(bufptr);
-        }
         return 1;
     }
     out.write(hostptr, static_cast<std::streamsize>(bufsize));
@@ -250,14 +239,6 @@ main(int argc, char *argv[])
      * ordinary HTTP silently when no NIC is available, so without this a lane
      * that is meant to be exercising the RDMA data path passes over TCP. */
     std::cout << hipobj::minio::TransferStatsLine(hipobj::minio::TransferStatsSnapshot()) << "\n";
-
-    free(hostptr);
-    if (gpu_enabled) {
-        (void)hipFree(dev_ptr);
-    }
-    else {
-        free(bufptr);
-    }
 
     return ok ? 0 : 1;
 }

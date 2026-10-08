@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include <curl/curl.h>
@@ -18,6 +19,39 @@
 // parenthesize the function name to bypass the macro and call the function.
 
 namespace {
+
+struct CurlEasyDeleter {
+    void operator()(CURL *curl) const noexcept
+    {
+        curl_easy_cleanup(curl);
+    }
+};
+
+struct CurlSlistDeleter {
+    void operator()(struct curl_slist *list) const noexcept
+    {
+        curl_slist_free_all(list);
+    }
+};
+
+using CurlEasyPtr  = std::unique_ptr<CURL, CurlEasyDeleter>;
+using CurlSlistPtr = std::unique_ptr<struct curl_slist, CurlSlistDeleter>;
+
+// curl_slist_append() returns the head of the list, which is a new node
+// only when the list was empty, or NULL on failure without freeing the
+// list.
+bool
+appendHeader(CurlSlistPtr &list, const char *header)
+{
+    struct curl_slist *head = curl_slist_append(list.get(), header);
+    if (!head) {
+        return false;
+    }
+    if (!list) {
+        list.reset(head);
+    }
+    return true;
+}
 
 struct HeaderState {
     hipObjS3CurlCtx *cfg;
@@ -91,30 +125,29 @@ hipObjS3CurlSendRequest(void *ctx, const char *token, size_t tokenLen)
         return -1;
     }
 
-    CURL *curl = curl_easy_init();
+    CurlEasyPtr curl(curl_easy_init());
     if (!curl) {
         return -1;
     }
 
     std::string headerToken = "x-amz-rdma-token: ";
     headerToken.append(token, tokenLen);
-    struct curl_slist *headers = nullptr;
-    headers                    = curl_slist_append(headers, headerToken.c_str());
-    headers                    = curl_slist_append(headers, "Content-Length: 0");
+    CurlSlistPtr headers;
+    if (!appendHeader(headers, headerToken.c_str()) || !appendHeader(headers, "Content-Length: 0")) {
+        return -1;
+    }
 
     HeaderState state{cfg};
     cfg->lastReply[0] = '\0';
 
-    (curl_easy_setopt)(curl, CURLOPT_URL, buildUrl(cfg).c_str());
-    (curl_easy_setopt)(curl, CURLOPT_HTTPHEADER, headers);
-    (curl_easy_setopt)(curl, CURLOPT_CUSTOMREQUEST, cfg->isPut ? "PUT" : "GET");
-    (curl_easy_setopt)(curl, CURLOPT_HEADERFUNCTION, headerCallback);
-    (curl_easy_setopt)(curl, CURLOPT_HEADERDATA, &state);
+    (curl_easy_setopt)(curl.get(), CURLOPT_URL, buildUrl(cfg).c_str());
+    (curl_easy_setopt)(curl.get(), CURLOPT_HTTPHEADER, headers.get());
+    (curl_easy_setopt)(curl.get(), CURLOPT_CUSTOMREQUEST, cfg->isPut ? "PUT" : "GET");
+    (curl_easy_setopt)(curl.get(), CURLOPT_HEADERFUNCTION, headerCallback);
+    (curl_easy_setopt)(curl.get(), CURLOPT_HEADERDATA, &state);
 
-    CURLcode   rc       = curl_easy_perform(curl);
-    const long httpCode = rc == CURLE_OK ? responseCode(curl) : -1;
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    CURLcode   rc       = curl_easy_perform(curl.get());
+    const long httpCode = rc == CURLE_OK ? responseCode(curl.get()) : -1;
     if (rc != CURLE_OK) {
         return -1;
     }

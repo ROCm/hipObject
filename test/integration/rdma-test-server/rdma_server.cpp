@@ -10,7 +10,9 @@
 #include <cstring>
 
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 #include "ibv-wrapper.h"
+#include "malloc_ptr.h"
 #include "token.h"
 #include "transport.h"
 
@@ -92,7 +94,7 @@ namespace {
         wr.wr.rdma.rkey        = clientToken.rkey;
 
         ibv_send_wr *bad = nullptr;
-        if (hipObj::ibv.post_send(conn.qp, &wr, &bad) != 0) {
+        if (hipObj::ibv.post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
         return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, 10000);
@@ -116,7 +118,7 @@ namespace {
         wr.wr.rdma.rkey        = clientToken.rkey;
 
         ibv_send_wr *bad = nullptr;
-        if (hipObj::ibv.post_send(conn.qp, &wr, &bad) != 0) {
+        if (hipObj::ibv.post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
         return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, 10000);
@@ -125,9 +127,11 @@ namespace {
 } // namespace
 
 struct RdmaTestServer::Impl {
+    /* Destroyed in reverse order: the MR is deregistered and its buffer
+     * freed before the connection's PD and context go away. */
     hipObj::RcConnection conn{};
-    struct ibv_mr       *stagingMr   = nullptr;
-    void                *stagingBuf  = nullptr;
+    hipObj::MallocPtr    stagingBuf;
+    hipObj::IbvMrPtr     stagingMr;
     size_t               stagingSize = 64 * 1024 * 1024;
     bool                 ready       = false;
 
@@ -143,8 +147,7 @@ struct RdmaTestServer::Impl {
         if (!conn.qp) {
             return;
         }
-        hipObj::ibv.destroy_qp(conn.qp);
-        conn.qp = nullptr;
+        conn.qp.reset();
         if (hipObj::createRcQp(conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(conn) != 0) {
             fprintf(stderr, "hipobj-rdma-test-server: could not rebuild the RC QP; "
                             "the server can no longer serve RDMA\n");
@@ -152,12 +155,11 @@ struct RdmaTestServer::Impl {
         }
     }
 
-    ~Impl()
+    /* Releases everything after a failed setup */
+    void release()
     {
-        if (stagingMr) {
-            hipObj::ibv.dereg_mr(stagingMr);
-        }
-        std::free(stagingBuf);
+        stagingMr.reset();
+        stagingBuf.reset();
         hipObj::closeRdmaDevice(conn);
     }
 };
@@ -170,26 +172,20 @@ RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
     if (hipObj::openRdmaDevice(0, impl_->conn) != 0) {
         return;
     }
-    impl_->stagingBuf = std::malloc(impl_->stagingSize);
+    impl_->stagingBuf.reset(std::malloc(impl_->stagingSize));
     if (!impl_->stagingBuf) {
-        hipObj::closeRdmaDevice(impl_->conn);
+        impl_->release();
         return;
     }
-    impl_->stagingMr =
-        hipObj::ibv.reg_mr_host(impl_->conn.pd, impl_->stagingBuf, impl_->stagingSize,
-                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
+    impl_->stagingMr.reset(
+        hipObj::ibv.reg_mr_host(impl_->conn.pd.get(), impl_->stagingBuf.get(), impl_->stagingSize,
+                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!impl_->stagingMr) {
-        std::free(impl_->stagingBuf);
-        impl_->stagingBuf = nullptr;
-        hipObj::closeRdmaDevice(impl_->conn);
+        impl_->release();
         return;
     }
     if (hipObj::createRcQp(impl_->conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(impl_->conn) != 0) {
-        hipObj::ibv.dereg_mr(impl_->stagingMr);
-        impl_->stagingMr = nullptr;
-        std::free(impl_->stagingBuf);
-        impl_->stagingBuf = nullptr;
-        hipObj::closeRdmaDevice(impl_->conn);
+        impl_->release();
         return;
     }
     impl_->ready = true;
@@ -227,16 +223,16 @@ RdmaTestServer::rdmaWriteToClient(const std::string &tokenHeader, const std::vec
         return -1;
     }
 
-    std::memcpy(impl_->stagingBuf, data.data(), xferSize);
+    std::memcpy(impl_->stagingBuf.get(), data.data(), xferSize);
     if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
         impl_->resetQp();
         return rdmaFail("GET", "could not connect the RC QP to the client");
     }
-    if (postRdmaWrite(impl_->conn, impl_->stagingMr, xferSize, clientToken) != 0) {
+    if (postRdmaWrite(impl_->conn, impl_->stagingMr.get(), xferSize, clientToken) != 0) {
         impl_->resetQp();
         return rdmaFail("GET", "RDMA WRITE to the client buffer did not complete");
     }
-    hipObj::RdmaToken serverToken = buildServerToken(impl_->conn, impl_->stagingMr, xferSize);
+    hipObj::RdmaToken serverToken = buildServerToken(impl_->conn, impl_->stagingMr.get(), xferSize);
     replyHeader                   = hipObj::encodeReplyWithPeerToken(200, serverToken);
     impl_->resetQp();
     return 0;
@@ -273,13 +269,13 @@ RdmaTestServer::rdmaReadFromClient(const std::string &tokenHeader, size_t size, 
         impl_->resetQp();
         return rdmaFail("PUT", "could not connect the RC QP to the client");
     }
-    if (postRdmaRead(impl_->conn, impl_->stagingMr, xferSize, clientToken) != 0) {
+    if (postRdmaRead(impl_->conn, impl_->stagingMr.get(), xferSize, clientToken) != 0) {
         impl_->resetQp();
         return rdmaFail("PUT", "RDMA READ from the client buffer did not complete");
     }
-    data.assign(static_cast<uint8_t *>(impl_->stagingBuf),
-                static_cast<uint8_t *>(impl_->stagingBuf) + xferSize);
-    hipObj::RdmaToken serverToken = buildServerToken(impl_->conn, impl_->stagingMr, xferSize);
+    data.assign(static_cast<uint8_t *>(impl_->stagingBuf.get()),
+                static_cast<uint8_t *>(impl_->stagingBuf.get()) + xferSize);
+    hipObj::RdmaToken serverToken = buildServerToken(impl_->conn, impl_->stagingMr.get(), xferSize);
     replyHeader                   = hipObj::encodeReplyWithPeerToken(200, serverToken);
     impl_->resetQp();
     return 0;

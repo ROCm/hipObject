@@ -40,6 +40,8 @@
 #include <vector>
 
 #include "ibv-core.h"
+#include "ibv-ptr.h"
+#include "malloc_ptr.h"
 #include "v2-registry.h"
 
 namespace hipObj {
@@ -90,10 +92,6 @@ namespace v2 {
         bool destroyClaimed = false;
         bool destroying     = false;
         bool poisoned       = false;
-        /* Transport objects owned by the session. */
-        struct ibv_qp *qp     = nullptr;
-        struct ibv_cq *cq     = nullptr;
-        DeviceHandle  *device = nullptr;
         /* Client wire endpoints from the READY headers. */
         uint64_t clientMrAddr = 0; /* client MR address (PUT dest / GET src) */
         uint32_t clientMrRkey = 0; /* client MR rkey */
@@ -103,8 +101,15 @@ namespace v2 {
         union ibv_gid peerGid;
         bool          hasPeerGid = false;
         /* PUT staging (host buffer + MR owned by the session). */
-        void          *staging   = nullptr;
-        struct ibv_mr *stagingMr = nullptr;
+        MallocPtr staging;
+        IbvMrPtr  stagingMr;
+        /* Transport objects owned by the session. Declared after the
+         * staging members so the QP is destroyed before the MR that a
+         * posted work request may still reference. Member destruction
+         * ignores failures, so ControlHandlers relinquishes whatever
+         * survives its final reap instead of relying on this. */
+        RcConnV2      conn;
+        DeviceHandle *device = nullptr; /* shared, not owned */
     };
 
     class SessionTable {
@@ -157,6 +162,8 @@ namespace v2 {
          * entries (caller feeds the retired ring before calling). */
         void commitDestroy(const std::string &id, bool qpOk, bool cqOk);
 
+        /* Erases a session whose transport is gone. Refuses one that
+         * still holds a qp/cq or is mid-destroy. */
         bool eraseSession(const std::string &id);
 
         size_t size() const;

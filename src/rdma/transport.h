@@ -8,19 +8,23 @@
 #include <cstdint>
 
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 
 namespace hipObj {
 
 struct RdmaToken;
 
+/* Members are destroyed in reverse order (qp, cq, pd, ctx), which is the
+ * order ibverbs requires. Move-assignment replaces them in declaration
+ * order instead, so only move into a connection that is empty. */
 struct RcConnection {
-    struct ibv_context *ctx      = nullptr;
-    struct ibv_pd      *pd       = nullptr;
-    struct ibv_cq      *cq       = nullptr;
-    struct ibv_qp      *qp       = nullptr;
-    uint8_t             portNum  = 1;
-    int                 gidIndex = -1;
-    union ibv_gid       localGid = {};
+    IbvContextPtr ctx;
+    IbvPdPtr      pd;
+    IbvCqPtr      cq;
+    IbvQpPtr      qp;
+    uint8_t       portNum  = 1;
+    int           gidIndex = -1;
+    union ibv_gid localGid = {};
 };
 
 int  openRdmaDevice(int nicIndex, RcConnection &conn);

@@ -9,12 +9,15 @@
 #include <cstdint>
 #include <initializer_list>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 
 #include <gtest/gtest.h>
 
+#include "ibv-core.h"
+#include "ibv-wrapper.h"
 #include "v2-clock.h"
 #include "v2_request.h"
 #include "v2_session.h"
@@ -33,17 +36,42 @@ public:
     }
 };
 
+/* Swaps in no-op destroy verbs for its lifetime. Some tests give a
+ * session made-up qp/cq addresses; if a test fails before
+ * commitDestroy() drops them, the table's destructor destroys them
+ * through these fakes instead of passing them to libibverbs. */
+class FakeDestroyVerbs {
+public:
+    FakeDestroyVerbs() : saved_(hipObj::ibv.funcsForTest())
+    {
+        auto &funcs      = hipObj::ibv.funcsForTest();
+        funcs.destroy_qp = [](struct ibv_qp *) -> int { return 0; };
+        funcs.destroy_cq = [](struct ibv_cq *) -> int { return 0; };
+    }
+    ~FakeDestroyVerbs()
+    {
+        hipObj::ibv.funcsForTest() = saved_;
+    }
+
+    FakeDestroyVerbs(const FakeDestroyVerbs &)            = delete;
+    FakeDestroyVerbs &operator=(const FakeDestroyVerbs &) = delete;
+    FakeDestroyVerbs(FakeDestroyVerbs &&)                 = delete;
+    FakeDestroyVerbs &operator=(FakeDestroyVerbs &&)      = delete;
+
+private:
+    hipObj::IbvFuncs saved_;
+};
+
 class V2SessionTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        clock_     = new FakeClock;
-        prevClock_ = hipObj::v2::setClockSourceForTest(clock_);
+        clock_     = std::make_unique<FakeClock>();
+        prevClock_ = hipObj::v2::setClockSourceForTest(clock_.get());
     }
     void TearDown() override
     {
         hipObj::v2::setClockSourceForTest(prevClock_);
-        delete clock_;
     }
 
     hipObj::v2::V2Session makeSession(const std::string &id)
@@ -60,8 +88,15 @@ protected:
         return s;
     }
 
-    FakeClock               *clock_;
-    hipObj::v2::ClockSource *prevClock_;
+    std::unique_ptr<FakeClock> clock_;
+    hipObj::v2::ClockSource   *prevClock_;
+
+private:
+    /* Declared before table_ so the fakes outlive it (members are
+     * destroyed in reverse order, after TearDown()). */
+    FakeDestroyVerbs fakeVerbs_;
+
+protected:
     hipObj::v2::SessionTable table_;
 };
 
@@ -144,10 +179,11 @@ TEST_F(V2SessionTest, DestroyGateLifecycle)
 {
     table_.insert(makeSession("ii"));
     table_.toReaping("ii");
-    /* Fake live objects. */
+    /* Fake live objects. commitDestroy() only drops the handles; if
+     * the test fails first, the fixture's fake verbs destroy them. */
     table_.withSession("ii", [](hipObj::v2::V2Session &s) {
-        s.qp       = reinterpret_cast<struct ibv_qp *>(0x11);
-        s.cq       = reinterpret_cast<struct ibv_cq *>(0x22);
+        s.conn.qp.reset(reinterpret_cast<struct ibv_qp *>(0x11));
+        s.conn.cq.reset(reinterpret_cast<struct ibv_cq *>(0x22));
         s.ioActive = 0; /* finalizer already released */
     });
     EXPECT_TRUE(table_.claimDestroy("ii"));
@@ -156,8 +192,8 @@ TEST_F(V2SessionTest, DestroyGateLifecycle)
     /* Partial failure: qp destroyed, cq left. */
     table_.commitDestroy("ii", true, false);
     table_.withSession("ii", [](hipObj::v2::V2Session &s) {
-        EXPECT_EQ(s.qp, nullptr);
-        EXPECT_NE(s.cq, nullptr);
+        EXPECT_EQ(s.conn.qp, nullptr);
+        EXPECT_NE(s.conn.cq, nullptr);
         EXPECT_TRUE(s.poisoned);
         EXPECT_FALSE(s.destroying);
     });
@@ -196,8 +232,8 @@ TEST_F(V2SessionTest, AwaitOnErasedId)
     table_.insert(makeSession("ll"));
     table_.toReaping("ll");
     table_.withSession("ll", [](hipObj::v2::V2Session &s) {
-        s.qp       = nullptr;
-        s.cq       = nullptr;
+        s.conn.qp.reset();
+        s.conn.cq.reset();
         s.ioActive = 0;
     });
     table_.claimDestroy("ll");

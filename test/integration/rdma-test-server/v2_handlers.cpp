@@ -11,6 +11,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -20,6 +21,7 @@
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/v2-transport.h"
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 #include "token.h"
 #include "v2-clock.h"
 #include "v2-random.h"
@@ -47,21 +49,21 @@ namespace v2 {
             static hipObj::DeviceHandle *dh = nullptr;
             static std::once_flag        once;
             std::call_once(once, [] {
-                int                 n    = 0;
-                struct ibv_device **devs = hipObj::ibv.get_device_list(&n);
+                int                      n = 0;
+                hipObj::IbvDeviceListPtr devs(hipObj::ibv.get_device_list(&n));
                 if (devs != nullptr && n > 0) {
-                    struct ibv_context *ctx = hipObj::ibv.open_device(devs[0]);
+                    hipObj::IbvContextPtr ctx(hipObj::ibv.open_device(devs[0]));
                     if (ctx != nullptr) {
-                        struct ibv_pd        *pd     = hipObj::ibv.alloc_pd(ctx);
-                        hipObj::DeviceHandle *opened = new hipObj::DeviceHandle();
-                        opened->ctx                  = ctx;
-                        opened->pd                   = pd;
-                        opened->portNum              = 1;
-                        opened->gidIndex             = 0;
-                        hipObj::ibv.query_gid(ctx, 1, 0, &opened->localGid);
-                        dh = opened;
+                        auto opened = std::make_unique<hipObj::DeviceHandle>();
+                        opened->pd.reset(hipObj::ibv.alloc_pd(ctx.get()));
+                        opened->portNum  = 1;
+                        opened->gidIndex = 0;
+                        hipObj::ibv.query_gid(ctx.get(), 1, 0, &opened->localGid);
+                        opened->ctx = std::move(ctx);
+                        /* Intentionally never freed: the device stays open
+                         * for the life of the server. */
+                        dh = opened.release();
                     }
-                    hipObj::ibv.free_device_list(devs);
                 }
             });
             return dh;
@@ -176,6 +178,26 @@ namespace v2 {
             table_.toReaping(id);
             reapSession(id);
         }
+        /* Sessions still here hold a qp or cq that wouldn't destroy, or
+         * are pinned by io. Their members' deleters ignore failure, so
+         * don't let the table's destructor free them: work on a live qp
+         * may still reference the staging MR and buffer. Relinquish a
+         * surviving qp together with its staging; otherwise release the
+         * staging normally, which leaks the buffer if the MR won't
+         * deregister. */
+        for (const auto &id : table_.ids()) {
+            table_.withSession(id, [](V2Session &s) {
+                if (s.conn.qp != nullptr) {
+                    dropOwnership(s.stagingMr);
+                    dropOwnership(s.staging);
+                }
+                else {
+                    releaseStaging(s);
+                }
+                dropOwnership(s.conn.qp);
+                dropOwnership(s.conn.cq);
+            });
+        }
     }
 
     void ControlHandlers::reapSession(const std::string &id)
@@ -200,14 +222,18 @@ namespace v2 {
         bool     published = false;
         /* Destroy the QP/CQ first: a posted work request can still
          * reference the staging MR, so releasing memory before the QP
-         * is gone would let the NIC touch freed buffers. */
+         * is gone would let the NIC touch freed buffers.
+         *
+         * The connection is moved out of the session so the destroy
+         * verbs run without the table lock. Nothing else touches a
+         * claimed session's transport (the claim requires Reaping with
+         * no io reference), and the survivors of a failed destroy are
+         * moved back below for the retry. */
         hipObj::RcConnV2      conn;
         hipObj::DeviceHandle *s_dev = nullptr;
         table_.withSession(id, [&](V2Session &s) {
-            conn.qp    = s.qp;
-            conn.qpNum = s.serverQpn;
-            conn.cq    = s.cq;
-            s_dev      = s.device;
+            conn  = std::move(s.conn);
+            s_dev = s.device;
         });
         bool connRefHeld = false;
         table_.withSession(id, [&](V2Session &s) { connRefHeld = s.connRefHeld; });
@@ -220,15 +246,8 @@ namespace v2 {
                 hipObj::v2::releaseDevice(s_dev);
                 table_.withSession(id, [&](V2Session &s) { s.connRefHeld = false; });
             }
-            table_.withSession(id, [&](V2Session &s) {
-                if (qpOk) {
-                    s.qp = nullptr;
-                }
-                if (cqOk) {
-                    s.cq = nullptr;
-                }
-            });
         }
+        table_.withSession(id, [&](V2Session &s) { s.conn = std::move(conn); });
         table_.withSession(id, [&](V2Session &s) {
             res       = s.reservationId;
             qpn       = s.serverQpn;
@@ -439,21 +458,14 @@ namespace v2 {
                     hipObj::v2::releaseDevice(dh);
                 }
                 if (!qOk || !cOk) {
+                    /* The surviving handles move to the session in the
+                     * failure branch below. */
                     table_.withSession(id, [&](V2Session &s) {
-                        if (!qOk) {
-                            s.qp = conn.qp;
-                            /* A surviving QP keeps the reference alive for the
-                             * reaper retry - so the session must still claim
-                             * ownership of it. */
-                            s.connRefHeld = true;
-                        }
-                        else {
-                            s.connRefHeld = false;
-                        }
-                        if (!cOk) {
-                            s.cq = conn.cq;
-                        }
-                        s.device = dh;
+                        /* A surviving QP keeps the reference alive for the
+                         * reaper retry - so the session must still claim
+                         * ownership of it. */
+                        s.connRefHeld = !qOk;
+                        s.device      = dh;
                     });
                 }
                 else {
@@ -463,9 +475,8 @@ namespace v2 {
             }
             if (created) {
                 table_.withSession(id, [&](V2Session &s) {
-                    s.qp          = conn.qp;
-                    s.cq          = conn.cq;
                     s.serverQpn   = conn.qpNum;
+                    s.conn        = std::move(conn);
                     s.device      = dh;
                     s.connRefHeld = true;
                 });
@@ -473,17 +484,13 @@ namespace v2 {
             else {
                 /* Any failure - clean rollback, partial rollback, or a
                  * failed INIT - ends the PREPARE here. Surviving handles
-                 * stay on the session for the reaper; already-destroyed
-                 * pointers are null so overwriting them is a no-op that
-                 * preserves the state the earlier branches set. */
+                 * move to the session for the reaper; destroyed ones are
+                 * already null. */
                 table_.withSession(id, [&](V2Session &s) {
                     if (conn.qp != nullptr) {
-                        s.qp        = conn.qp;
                         s.serverQpn = conn.qpNum;
                     }
-                    if (conn.cq != nullptr) {
-                        s.cq = conn.cq;
-                    }
+                    s.conn   = std::move(conn);
                     s.device = dh;
                 });
                 table_.toReaping(id);
@@ -501,11 +508,11 @@ namespace v2 {
             V2Session stageScratch;
             stageScratch.op   = req.op;
             stageScratch.size = req.size;
-            bool staged       = stagePutBuffer(stageScratch, static_cast<size_t>(req.size), dh->pd);
+            bool staged       = stagePutBuffer(stageScratch, static_cast<size_t>(req.size), dh->pd.get());
             if (staged) {
                 table_.withSession(id, [&](V2Session &s) {
-                    s.staging   = stageScratch.staging;
-                    s.stagingMr = stageScratch.stagingMr;
+                    s.staging   = std::move(stageScratch.staging);
+                    s.stagingMr = std::move(stageScratch.stagingMr);
                 });
             }
             if (!staged) {
@@ -529,20 +536,20 @@ namespace v2 {
             /* Stage the object into the session buffer. The backend copy
              * runs on local state - holding the table lock across it
              * would serialize every other request behind this one. */
-            struct ibv_pd *pd = (dh != nullptr && dh->pd != nullptr) ? dh->pd : nullptr;
+            struct ibv_pd *pd = (dh != nullptr && dh->pd != nullptr) ? dh->pd.get() : nullptr;
             V2Session      stageScratch;
             stageScratch.op   = req.op;
             stageScratch.size = req.size;
             bool  staged      = stagePutBuffer(stageScratch, static_cast<size_t>(req.size), pd);
-            void *staging     = stageScratch.staging;
+            void *staging     = stageScratch.staging.get();
+            bool  copied      = staged && staging != nullptr &&
+                          backend_->read(req.target, req.offset, static_cast<size_t>(req.size), staging);
             if (staged) {
                 table_.withSession(id, [&](V2Session &s) {
-                    s.staging   = stageScratch.staging;
-                    s.stagingMr = stageScratch.stagingMr;
+                    s.staging   = std::move(stageScratch.staging);
+                    s.stagingMr = std::move(stageScratch.stagingMr);
                 });
             }
-            bool copied = staged && staging != nullptr &&
-                          backend_->read(req.target, req.offset, static_cast<size_t>(req.size), staging);
             /* A missing range on an existing object is a client error;
              * staging without a PD is fine on transport-free hosts where
              * the data phase is a no-op. */
@@ -682,24 +689,18 @@ namespace v2 {
             s.clientMrAddr = req.mrAddr;
             s.clientMrRkey = req.mrRkey;
             s.clientQpn    = req.qpn;
-            if (s.qp != nullptr && req.qpn != 0) {
-                hipObj::DeviceHandle dh;
-                dh.ctx                 = s.device ? s.device->ctx : nullptr;
-                dh.pd                  = s.device ? s.device->pd : nullptr;
-                dh.portNum             = s.device ? s.device->portNum : 1;
-                dh.gidIndex            = s.device ? s.device->gidIndex : 0;
-                union ibv_gid emptyGid = {};
-                dh.localGid            = s.device ? s.device->localGid : emptyGid;
-                hipObj::RcConnV2 conn;
-                conn.qp    = s.qp;
-                conn.qpNum = s.serverQpn;
+            if (s.conn.qp != nullptr && req.qpn != 0) {
+                /* A device-less session pairs with an empty handle */
+                hipObj::DeviceHandle noDevice;
+                noDevice.gidIndex        = 0;
+                hipObj::DeviceHandle *dh = s.device != nullptr ? s.device : &noDevice;
                 /* Same-HCA pairing: the server's own GID routes the
                  * loopback path on RoCE devices. */
                 /* Route to the real peer when the token carried its GID;
                  * same-HCA loopback (zero token) keeps the local GID. */
-                union ibv_gid peer = s.hasPeerGid ? s.peerGid : dh.localGid;
-                paired = hipObj::v2::transitionQpToRtrV2(&dh, conn, req.qpn, peer, s.clientPsn) == 0 &&
-                         hipObj::v2::transitionQpToRtsV2(conn, &dh, s.serverPsn) == 0;
+                union ibv_gid peer = s.hasPeerGid ? s.peerGid : dh->localGid;
+                paired = hipObj::v2::transitionQpToRtrV2(dh, s.conn, req.qpn, peer, s.clientPsn) == 0 &&
+                         hipObj::v2::transitionQpToRtsV2(s.conn, dh, s.serverPsn) == 0;
             }
         });
         if (!paired) {
@@ -711,48 +712,27 @@ namespace v2 {
         /* Data phase bounded by the transition deadline. The result
          * feeds FINAL directly; failures release the io reference here
          * because no response finalizer will run for them. */
-        DataPhaseStats  stats;
-        DataPhaseResult dpr;
-        uint64_t        deadline     = 0;
-        struct ibv_qp  *qp           = nullptr;
-        struct ibv_cq  *cq           = nullptr;
-        struct ibv_mr  *stagingMr    = nullptr;
-        uint64_t        clientMrAddr = 0;
-        uint32_t        clientMrRkey = 0;
-        uint32_t        clientQpn    = 0;
-        uint32_t        cookie       = 0;
-        uint64_t        size         = 0;
-        std::string     op;
+        DataPhaseStats stats;
+        uint64_t       deadline = 0;
+        DataPhaseView  view;
         table_.withSession(req.session, [&](V2Session &s) {
-            deadline     = s.clientDeadlineAt;
-            qp           = s.qp;
-            cq           = s.cq;
-            stagingMr    = s.stagingMr;
-            clientMrAddr = s.clientMrAddr;
-            clientMrRkey = s.clientMrRkey;
-            clientQpn    = s.clientQpn;
-            cookie       = s.cookie;
-            size         = s.size;
-            op           = s.op;
+            deadline          = s.clientDeadlineAt;
+            view.op           = s.op;
+            view.size         = s.size;
+            view.cookie       = s.cookie;
+            view.qp           = s.conn.qp.get();
+            view.cq           = s.conn.cq.get();
+            view.stagingMr    = s.stagingMr.get();
+            view.clientMrAddr = s.clientMrAddr;
+            view.clientMrRkey = s.clientMrRkey;
+            view.clientQpn    = s.clientQpn;
         });
         /* The transfer runs on a local snapshot: polling the CQ can
          * block for the whole T_exec window, and holding the session
          * table lock for that would stall every other request and the
          * reaper. The io reference taken above keeps the session (and
          * these objects) alive for the duration. */
-        {
-            V2Session snap;
-            snap.op           = op;
-            snap.size         = size;
-            snap.cookie       = cookie;
-            snap.qp           = qp;
-            snap.cq           = cq;
-            snap.stagingMr    = stagingMr;
-            snap.clientMrAddr = clientMrAddr;
-            snap.clientMrRkey = clientMrRkey;
-            snap.clientQpn    = clientQpn;
-            dpr               = runDataPhase(snap, deadline, stats);
-        }
+        DataPhaseResult dpr = runDataPhase(view, deadline, stats);
         if (dpr != DataPhaseResult::Ok) {
             table_.toReaping(req.session);
             table_.releaseIo(req.session);
@@ -769,7 +749,7 @@ namespace v2 {
             return error(500);
         }
 
-        if (op == "PUT") {
+        if (view.op == "PUT") {
             /* Persist the uploaded bytes. A control-plane-only exchange
              * (no client QP advertised) never transferred anything, so
              * there is nothing valid to store - the staged buffer is
@@ -780,7 +760,7 @@ namespace v2 {
             uint32_t    sessionClientQpn = 0;
             table_.withSession(req.session, [&](V2Session &s) {
                 target           = s.target;
-                staging          = s.staging;
+                staging          = s.staging.get();
                 sessionClientQpn = s.clientQpn;
             });
             if (sessionClientQpn != 0 && staging != nullptr) {

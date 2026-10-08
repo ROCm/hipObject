@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "no-destructor.h"
 #include "v2-clock.h"
 
 namespace hipObj {
@@ -165,12 +166,14 @@ namespace v2 {
         if (!entry.destroying) {
             return;
         }
+        /* The caller already destroyed these objects, so only drop the
+         * handles. Assigning nullptr would destroy them a second time. */
         if (qpGone) {
-            entry.conn.qp    = nullptr;
+            dropOwnership(entry.conn.qp);
             entry.conn.qpNum = 0;
         }
         if (cqGone) {
-            entry.conn.cq = nullptr;
+            dropOwnership(entry.conn.cq);
         }
         if (entry.conn.qp == nullptr && entry.conn.cq == nullptr) {
             entry.poisoned   = false;
@@ -230,14 +233,14 @@ namespace v2 {
 
     namespace {
 
-        ConnectionRegistry  g_registry;
-        ConnectionRegistry *g_registryOverride = nullptr;
+        NoDestructor<ConnectionRegistry> g_registry;
+        ConnectionRegistry              *g_registryOverride = nullptr;
 
     } // namespace
 
     ConnectionRegistry &registry()
     {
-        return g_registryOverride ? *g_registryOverride : g_registry;
+        return g_registryOverride ? *g_registryOverride : *g_registry;
     }
 
     ConnectionRegistry *setRegistryForTest(ConnectionRegistry *r)

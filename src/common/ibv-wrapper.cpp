@@ -21,6 +21,8 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#include "ibv-ptr.h"
+
 namespace hipObj {
 
 IBVWrapper ibv;
@@ -52,9 +54,9 @@ namespace {
 
 IBVWrapper::IBVWrapper()
 {
-    ibv_handle_ = dlopen("libibverbs.so", RTLD_NOW);
+    ibv_handle_.reset(dlopen("libibverbs.so", RTLD_NOW));
     if (!ibv_handle_)
-        ibv_handle_ = dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW);
+        ibv_handle_.reset(dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW));
     if (!ibv_handle_) {
         fprintf(stderr, "hipObj: Could not open libibverbs.so. RDMA disabled.\n");
         return;
@@ -67,14 +69,6 @@ IBVWrapper::IBVWrapper()
 
     init_dmabuf_support_flag();
     is_initialized = true;
-}
-
-IBVWrapper::~IBVWrapper()
-{
-    is_initialized = false;
-    if (ibv_handle_) {
-        dlclose(ibv_handle_);
-    }
 }
 
 void
@@ -115,10 +109,10 @@ IBVWrapper::init_function_table()
 {
 #define LOAD_SYM(field, prefix, name)                                                                        \
     do {                                                                                                     \
-        if (dlsym_load(funcs_.field, ibv_handle_, prefix, name) != 0)                                        \
+        if (dlsym_load(funcs_.field, ibv_handle_.get(), prefix, name) != 0)                                  \
             return -1;                                                                                       \
     } while (0)
-#define LOAD_SYM_OPT(field, prefix, name) dlsym_load_optional(funcs_.field, ibv_handle_, prefix, name)
+#define LOAD_SYM_OPT(field, prefix, name) dlsym_load_optional(funcs_.field, ibv_handle_.get(), prefix, name)
 
     LOAD_SYM(get_device_list, "ibv_", "get_device_list");
     LOAD_SYM(free_device_list, "ibv_", "free_device_list");
@@ -331,6 +325,72 @@ IBVWrapper::post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv
         return funcs_.post_recv(qp, wr, bad_wr);
     }
     return qp->context->ops.post_recv(qp, wr, bad_wr);
+}
+
+// ---- Smart pointer deleters (ibv-ptr.h) -----------------------------
+
+void
+IbvContextDeleter::operator()(struct ibv_context *ctx) const noexcept
+{
+    (void)ibv.close_device(ctx);
+}
+
+void
+IbvPdDeleter::operator()(struct ibv_pd *pd) const noexcept
+{
+    (void)ibv.dealloc_pd(pd);
+}
+
+void
+IbvCqDeleter::operator()(struct ibv_cq *cq) const noexcept
+{
+    (void)ibv.destroy_cq(cq);
+}
+
+void
+IbvQpDeleter::operator()(struct ibv_qp *qp) const noexcept
+{
+    (void)ibv.destroy_qp(qp);
+}
+
+void
+IbvMrDeleter::operator()(struct ibv_mr *mr) const noexcept
+{
+    (void)ibv.dereg_mr(mr);
+}
+
+void
+IbvDeviceListDeleter::operator()(struct ibv_device **list) const noexcept
+{
+    ibv.free_device_list(list);
+}
+
+int
+ibvDestroy(IbvQpPtr &qp)
+{
+    struct ibv_qp *raw = qp.release();
+    if (!raw) {
+        return 0;
+    }
+    int ret = ibv.destroy_qp(raw);
+    if (ret != 0) {
+        qp.reset(raw); /* still alive: hand it back for a retry */
+    }
+    return ret;
+}
+
+int
+ibvDestroy(IbvCqPtr &cq)
+{
+    struct ibv_cq *raw = cq.release();
+    if (!raw) {
+        return 0;
+    }
+    int ret = ibv.destroy_cq(raw);
+    if (ret != 0) {
+        cq.reset(raw); /* still alive: hand it back for a retry */
+    }
+    return ret;
 }
 
 } // namespace hipObj

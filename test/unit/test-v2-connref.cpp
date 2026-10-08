@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "malloc_ptr.h"
 #include "v2_backend.h"
 #include "v2_handlers.h"
 #include "v2_request.h"
@@ -36,6 +38,8 @@ struct FaultCtl {
     int initFails       = 0;
     int destroyQpFails  = 0;
     int destroyQpCalls  = 0;
+    int destroyCqCalls  = 0;
+    int deregMrCalls    = 0;
     int createQpCalls   = 0;
     int openDeviceCalls = 0;
     /* Non-zero base refs to catch a double release. */
@@ -84,6 +88,7 @@ fakeDestroyQp(struct ibv_qp *qp)
 int
 fakeDestroyCq(struct ibv_cq *cq)
 {
+    ++g_fault.destroyCqCalls;
     delete reinterpret_cast<FakeCq *>(cq);
     return 0;
 }
@@ -96,6 +101,31 @@ fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
     auto *qp   = new struct ibv_qp();
     qp->qp_num = 0x77;
     return qp;
+}
+
+/* A real (zeroed) ibv_mr: the PREPARE reply reads addr and rkey. */
+struct ibv_mr *
+fakeRegMrIova2(struct ibv_pd *, void *addr, size_t length, uintptr_t, int)
+{
+    auto *mr   = new struct ibv_mr();
+    mr->addr   = addr;
+    mr->length = length;
+    mr->rkey   = 0x5678;
+    return mr;
+}
+
+struct ibv_mr *
+fakeRegMr(struct ibv_pd *pd, void *addr, size_t length, int access)
+{
+    return fakeRegMrIova2(pd, addr, length, reinterpret_cast<uintptr_t>(addr), access);
+}
+
+int
+fakeDeregMr(struct ibv_mr *mr)
+{
+    ++g_fault.deregMrCalls;
+    delete mr;
+    return 0;
 }
 
 struct ibv_cq *
@@ -170,6 +200,23 @@ fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *g)
     return 0;
 }
 
+/* Frees the fake objects a test's handlers gave up on, skipping any a
+ * fake destroy verb already freed, so a regression fails the test's
+ * checks instead of double-freeing here. The test sets destroyQpFails,
+ * so fakeDestroyQp() never frees the QP. */
+void
+freeAbandonedFakes(struct ibv_qp *qp, struct ibv_cq *cq, struct ibv_mr *stagingMr, void *staging)
+{
+    delete qp;
+    if (g_fault.destroyCqCalls == 0) {
+        delete reinterpret_cast<FakeCq *>(cq);
+    }
+    if (g_fault.deregMrCalls == 0) {
+        delete stagingMr;
+        hipObj::FreeDeleter{}(staging);
+    }
+}
+
 /* Verifier stub: every request passes with an all-headers signed
  * list so the fault test reaches the transport path. */
 class PassAllVerifier : public hipObj::v2::SigV4Verifier {
@@ -204,19 +251,43 @@ protected:
         f.query_device     = fakeQueryDevice;
         f.close_device     = fakeCloseDevice;
         f.query_gid        = fakeQueryGid;
+        f.reg_mr           = fakeRegMr;
+        f.reg_mr_iova2     = fakeRegMrIova2;
+        f.dereg_mr         = fakeDeregMr;
         g_fault            = FaultCtl{};
-        verifier_          = new PassAllVerifier();
-        backend_           = new hipObj::v2::MemoryBackend();
+        verifier_          = std::make_unique<PassAllVerifier>();
+        backend_           = std::make_unique<hipObj::v2::MemoryBackend>();
     }
     void TearDown() override
     {
         hipObj::ibv.funcsForTest() = saved_;
-        delete verifier_;
-        delete backend_;
     }
-    hipObj::IbvFuncs           saved_;
-    hipObj::v2::SigV4Verifier *verifier_;
-    hipObj::v2::MemoryBackend *backend_;
+
+    /* A PUT PREPARE that reaches the transport path */
+    static hipObj::v2::PrepareRequest makePutPrepare()
+    {
+        hipObj::v2::PrepareRequest req;
+        req.protocol = "hipobj-rc-v2";
+        /* Real encoded token: RC transport, nonzero GID, so the server's
+           semantic checks accept it. */
+        hipObj::RdmaToken peerTokEnc{};
+        peerTokEnc.qpNum = 0x1234;
+        std::memset(peerTokEnc.gid, 0xab, sizeof(peerTokEnc.gid));
+        peerTokEnc.transport = hipObj::TRANSPORT_RC;
+        peerTokEnc.portNum   = 1;
+        req.token            = hipObj::encodeRdmaToken(peerTokEnc);
+        req.clientPsn        = 0x0a1b2c;
+        req.cookie           = 0x1a2b3c4d;
+        req.op               = "PUT";
+        req.target           = "/bucket/obj";
+        req.size             = 64;
+        req.authorization    = "AWS4-HMAC-SHA256 stub";
+        return req;
+    }
+
+    hipObj::IbvFuncs                           saved_;
+    std::unique_ptr<hipObj::v2::SigV4Verifier> verifier_;
+    std::unique_ptr<hipObj::v2::MemoryBackend> backend_;
 };
 
 /* INIT fails inside onPrepare and the first destroy fails: the
@@ -225,28 +296,11 @@ protected:
  * once against a non-zero base. */
 TEST_F(ConnRefFaultTest, InitAndDestroyFailureKeepsOwnership)
 {
-    hipObj::v2::ControlHandlers handlers(verifier_, backend_, hipObj::v2::ServerConfig{});
+    hipObj::v2::ControlHandlers handlers(verifier_.get(), backend_.get(), hipObj::v2::ServerConfig{});
     g_fault.initFails      = 1;
     g_fault.destroyQpFails = 1;
 
-    hipObj::v2::PrepareRequest req;
-    req.protocol = "hipobj-rc-v2";
-    /* Real encoded token: RC transport, nonzero GID, so the server's
-       semantic checks accept it. */
-    hipObj::RdmaToken peerTokEnc{};
-    peerTokEnc.qpNum = 0x1234;
-    std::memset(peerTokEnc.gid, 0xab, sizeof(peerTokEnc.gid));
-    peerTokEnc.transport = hipObj::TRANSPORT_RC;
-    peerTokEnc.portNum   = 1;
-    req.token            = hipObj::encodeRdmaToken(peerTokEnc);
-    req.clientPsn        = 0x0a1b2c;
-    req.cookie           = 0x1a2b3c4d;
-    req.op               = "PUT";
-    req.target           = "/bucket/obj";
-    req.size             = 64;
-    req.authorization    = "AWS4-HMAC-SHA256 stub";
-
-    auto r = handlers.onPrepare(req, "");
+    auto r = handlers.onPrepare(makePutPrepare(), "");
     ASSERT_EQ(r.status, 500) << "INIT failure must answer 500";
 
     auto ids = handlers.table().ids();
@@ -257,7 +311,7 @@ TEST_F(ConnRefFaultTest, InitAndDestroyFailureKeepsOwnership)
     bool                  sawConnRefHeld = false;
     hipObj::DeviceHandle *dev            = nullptr;
     handlers.table().withSession(sid, [&](hipObj::v2::V2Session &s) {
-        sawSurvivingQp = s.qp != nullptr;
+        sawSurvivingQp = s.conn.qp != nullptr;
         sawConnRefHeld = s.connRefHeld;
         dev            = s.device;
     });
@@ -281,6 +335,41 @@ TEST_F(ConnRefFaultTest, InitAndDestroyFailureKeepsOwnership)
     EXPECT_EQ(dev->connRefs.load(), base - 1U) << "no additional release after the session is gone";
 
     EXPECT_EQ(g_fault.destroyQpCalls, 2);
+}
+
+/* A session the handlers can't reap when they're destroyed (here, one
+ * whose PREPARE response never finished sending) still holds a live QP
+ * and registered staging. Member destruction must not tear those down:
+ * its deleters ignore failure, so the staging could be freed under a
+ * QP that might still be in use. The handlers give them up instead. */
+TEST_F(ConnRefFaultTest, DestructionRelinquishesUnreapedTransport)
+{
+    struct ibv_qp *qp        = nullptr;
+    struct ibv_cq *cq        = nullptr;
+    struct ibv_mr *stagingMr = nullptr;
+    void          *staging   = nullptr;
+    {
+        hipObj::v2::ControlHandlers handlers(verifier_.get(), backend_.get(), hipObj::v2::ServerConfig{});
+        g_fault.destroyQpFails = 1000; /* the QP may still be in use */
+        ASSERT_EQ(handlers.onPrepare(makePutPrepare(), "").status, 200);
+        auto ids = handlers.table().ids();
+        ASSERT_EQ(ids.size(), 1U);
+        handlers.table().withSession(ids[0], [&](hipObj::v2::V2Session &s) {
+            qp        = s.conn.qp.get();
+            cq        = s.conn.cq.get();
+            stagingMr = s.stagingMr.get();
+            staging   = s.staging.get();
+        });
+        ASSERT_NE(qp, nullptr);
+        ASSERT_NE(cq, nullptr);
+        ASSERT_NE(stagingMr, nullptr);
+        ASSERT_NE(staging, nullptr);
+        /* No finishPrepareSend(): the session keeps its io reference */
+    }
+    EXPECT_EQ(g_fault.destroyQpCalls, 0);
+    EXPECT_EQ(g_fault.destroyCqCalls, 0);
+    EXPECT_EQ(g_fault.deregMrCalls, 0);
+    freeAbandonedFakes(qp, cq, stagingMr, staging);
 }
 
 } // namespace

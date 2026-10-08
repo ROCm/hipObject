@@ -269,8 +269,8 @@ protected:
 TEST_F(IbvSeamTest, QpCreationAndTeardownUseTheTable)
 {
     hipObj::RcConnection conn;
-    conn.ctx = reinterpret_cast<struct ibv_context *>(0x1234);
-    conn.pd  = reinterpret_cast<struct ibv_pd *>(0x5678);
+    conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
+    conn.pd.reset(reinterpret_cast<struct ibv_pd *>(0x5678));
 
     EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
     EXPECT_EQ(g_calls.create_cq_calls, 1);

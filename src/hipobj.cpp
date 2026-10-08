@@ -23,6 +23,7 @@
 #include "hipobj-private.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
+#include "no-destructor.h"
 #include "rdma-topology.h"
 #include "state.h"
 #include "token.h"
@@ -34,8 +35,9 @@
 
 namespace hipObj {
 
-static BufferMap    g_bufferMap;
-static RcConnection g_conn;
+/* Never destroyed: hipObjShutdown() releases their resources */
+static NoDestructor<BufferMap>    g_bufferMap;
+static NoDestructor<RcConnection> g_conn;
 
 static hipObjError_t
 handleException()
@@ -54,22 +56,22 @@ handleException()
 static bool
 buildRdmaToken(const void *devPtr, size_t size, off_t offset, RdmaToken &token)
 {
-    struct ibv_mr *mr = g_bufferMap.lookupMr(const_cast<void *>(devPtr));
-    if (!mr || !g_conn.qp) {
+    struct ibv_mr *mr = g_bufferMap->lookupMr(const_cast<void *>(devPtr));
+    if (!mr || !g_conn->qp) {
         return false;
     }
-    size_t regSize = g_bufferMap.lookupSize(const_cast<void *>(devPtr));
+    size_t regSize = g_bufferMap->lookupSize(const_cast<void *>(devPtr));
     if (offset < 0 || static_cast<size_t>(offset) + size > regSize) {
         return false;
     }
     token.transport = TRANSPORT_RC;
-    token.qpNum     = g_conn.qp->qp_num;
-    std::memcpy(token.gid, g_conn.localGid.raw, 16);
+    token.qpNum     = g_conn->qp->qp_num;
+    std::memcpy(token.gid, g_conn->localGid.raw, 16);
     token.rkey = mr->rkey;
     token.remoteAddr =
-        g_bufferMap.lookupRemoteAddr(const_cast<void *>(devPtr)) + static_cast<uint64_t>(offset);
+        g_bufferMap->lookupRemoteAddr(const_cast<void *>(devPtr)) + static_cast<uint64_t>(offset);
     token.length  = size;
-    token.portNum = g_conn.portNum;
+    token.portNum = g_conn->portNum;
     token.lid     = 0;
     return true;
 }
@@ -80,7 +82,7 @@ finishTransferAfterReply(const char *reply, size_t replyLen, bool requiresDevice
     RdmaToken peerToken{};
     int       httpCode = 0;
     if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
-        if (connectRcPeer(g_conn, peerToken) != 0) {
+        if (connectRcPeer(*g_conn, peerToken) != 0) {
             return -1;
         }
     }
@@ -88,7 +90,7 @@ finishTransferAfterReply(const char *reply, size_t replyLen, bool requiresDevice
     // is unknown. With the current one-sided protocol the responder side
     // may not observe a completion at all (see issue #22), so this check
     // reports "no evidence of failure" rather than "transfer verified".
-    if (pollCompletion(g_conn, -1, 5000) != 0) {
+    if (pollCompletion(*g_conn, -1, 5000) != 0) {
         return -1;
     }
     if (!requiresDeviceSync) {
@@ -190,12 +192,12 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
 static hipObjError_t
 stageBuffer(void *devPtr, size_t size, off_t offset, bool toDevice)
 {
-    void *hostBuf = g_bufferMap.lookupHostBuf(devPtr);
+    void *hostBuf = g_bufferMap->lookupHostBuf(devPtr);
     if (!hostBuf) {
         /* the NIC reads and writes the caller's memory */
         return {hipObjSuccess, 0};
     }
-    size_t regSize = g_bufferMap.lookupSize(devPtr);
+    size_t regSize = g_bufferMap->lookupSize(devPtr);
     if (offset < 0 || static_cast<size_t>(offset) + size > regSize) {
         return {hipObjInvalidValue, 0};
     }
@@ -207,7 +209,7 @@ stageBuffer(void *devPtr, size_t size, off_t offset, bool toDevice)
 static hipObjError_t
 runRdmaTransfer(const void *devPtr, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
 {
-    bool      requiresDeviceSync = g_bufferMap.requiresDeviceSync(const_cast<void *>(devPtr));
+    bool      requiresDeviceSync = g_bufferMap->requiresDeviceSync(const_cast<void *>(devPtr));
     RdmaToken token{};
     if (!buildRdmaToken(devPtr, size, offset, token)) {
         return {hipObjRdmaError, 0};
@@ -321,19 +323,19 @@ try {
             return {hipObjNicNotFound, 0};
         }
     }
-    int ret = (devName) ? hipObj::openRdmaDeviceByName(devName, hipObj::g_conn)
-                        : hipObj::openRdmaDevice(nicIndex, hipObj::g_conn);
+    int ret = (devName) ? hipObj::openRdmaDeviceByName(devName, *hipObj::g_conn)
+                        : hipObj::openRdmaDevice(nicIndex, *hipObj::g_conn);
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
-    ret = hipObj::createRcQp(hipObj::g_conn, 256, 128, 128);
+    ret = hipObj::createRcQp(*hipObj::g_conn, 256, 128, 128);
     if (ret != 0) {
-        hipObj::closeRdmaDevice(hipObj::g_conn);
+        hipObj::closeRdmaDevice(*hipObj::g_conn);
         return {hipObjRdmaError, 0};
     }
-    ret = hipObj::transitionQpToInit(hipObj::g_conn);
+    ret = hipObj::transitionQpToInit(*hipObj::g_conn);
     if (ret != 0) {
-        hipObj::closeRdmaDevice(hipObj::g_conn);
+        hipObj::closeRdmaDevice(*hipObj::g_conn);
         return {hipObjRdmaError, 0};
     }
     state.initialized = true;
@@ -375,8 +377,8 @@ try {
         return {hipObjRdmaError, 0};
     }
 #endif /* HIPOBJECT_V2_API */
-    hipObj::g_bufferMap.deregisterAll();
-    hipObj::closeRdmaDevice(hipObj::g_conn);
+    hipObj::g_bufferMap->deregisterAll();
+    hipObj::closeRdmaDevice(*hipObj::g_conn);
     state.initialized = false;
     state.gpuDevice   = 0;
     state.endpoint.clear();
@@ -400,10 +402,10 @@ try {
     if (size > hipObj::MAX_MR_SIZE) {
         return {hipObjSizeTooLarge, 0};
     }
-    if (hipObj::g_bufferMap.isRegistered(devPtr)) {
+    if (hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap.registerBuffer(devPtr, size, hipObj::g_conn.pd);
+    int ret = hipObj::g_bufferMap->registerBuffer(devPtr, size, hipObj::g_conn->pd.get());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -426,10 +428,10 @@ try {
     if (size > hipObj::MAX_MR_SIZE) {
         return {hipObjSizeTooLarge, 0};
     }
-    if (hipObj::g_bufferMap.isRegistered(hostPtr)) {
+    if (hipObj::g_bufferMap->isRegistered(hostPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap.registerHostBuffer(hostPtr, size, hipObj::g_conn.pd);
+    int ret = hipObj::g_bufferMap->registerHostBuffer(hostPtr, size, hipObj::g_conn->pd.get());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -446,10 +448,10 @@ try {
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
     }
-    if (!hipObj::g_bufferMap.isRegistered(devPtr)) {
+    if (!hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufNotRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap.deregisterBuffer(devPtr);
+    int ret = hipObj::g_bufferMap->deregisterBuffer(devPtr);
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -470,7 +472,7 @@ try {
     if (!ops) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap.lookupMr(devPtr)) {
+    if (!hipObj::g_bufferMap->lookupMr(devPtr)) {
         return {hipObjBufNotRegistered, 0};
     }
     hipObjError_t err = hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
@@ -494,7 +496,7 @@ try {
     if (!ops) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap.lookupMr(const_cast<void *>(devPtr))) {
+    if (!hipObj::g_bufferMap->lookupMr(const_cast<void *>(devPtr))) {
         return {hipObjBufNotRegistered, 0};
     }
     hipObjError_t serr = hipObj::stageBuffer(const_cast<void *>(devPtr), size, offset, false);
@@ -517,7 +519,7 @@ try {
     if (!devPtr || (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE)) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap.isRegistered(devPtr)) {
+    if (!hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufNotRegistered, 0};
     }
     return hipObj::stageBuffer(devPtr, size, offset, direction == HIPOBJ_SYNC_TO_DEVICE);
@@ -539,7 +541,7 @@ try {
     if (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap.lookupMr(const_cast<void *>(devPtr))) {
+    if (!hipObj::g_bufferMap->lookupMr(const_cast<void *>(devPtr))) {
         return {hipObjBufNotRegistered, 0};
     }
     hipObj::RdmaToken token{};

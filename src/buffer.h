@@ -10,10 +10,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 
 namespace hipObj {
+
+/* Frees a host staging buffer allocated with hipHostMalloc() */
+struct HostBufDeleter {
+    void operator()(void *hostBuf) const noexcept;
+};
+
+using HostBufPtr = std::unique_ptr<void, HostBufDeleter>;
 
 class BufferMap {
 public:
@@ -47,14 +56,15 @@ public:
     size_t size() const;
 
 private:
+    /* hostBuf is declared before mr so the MR is deregistered before
+     * the staging buffer it covers is freed. */
     struct BufEntry {
-        struct ibv_mr *mr;
-        size_t         size;
-        bool           isDmabuf;
-        bool           ownsHostBuf;
-        uint64_t       remoteAddr;
-        void          *hostBuf;      /* non-null only on the bounce path */
-        size_t         refCount = 0; /* pinned by live v2 connections */
+        HostBufPtr hostBuf    = nullptr; /* non-null only on the bounce path */
+        IbvMrPtr   mr         = nullptr;
+        size_t     size       = 0;
+        bool       isDmabuf   = false;
+        uint64_t   remoteAddr = 0;
+        size_t     refCount   = 0; /* pinned by live v2 connections */
     };
 
     std::map<uintptr_t, BufEntry> entries_;

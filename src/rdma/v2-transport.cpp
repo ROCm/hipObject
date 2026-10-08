@@ -76,7 +76,7 @@ namespace v2 {
             attr.pkey_index      = 0;
             attr.port_num        = dh->portNum;
             attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-            applyVendorQpAttrs(dh->ctx, &attr);
+            applyVendorQpAttrs(dh->ctx.get(), &attr);
             int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
             return ibv.modify_qp(qp, &attr, mask);
         }
@@ -155,35 +155,26 @@ namespace v2 {
         if (rollbackFailed) {
             *rollbackFailed = false;
         }
-        conn.cq = ibv.create_cq(dh->ctx, kCqSize, nullptr, nullptr, 0);
+        conn.cq.reset(ibv.create_cq(dh->ctx.get(), kCqSize, nullptr, nullptr, 0));
         if (!conn.cq) {
             return -1;
         }
         struct ibv_qp_init_attr init;
         std::memset(&init, 0, sizeof(init));
         init.qp_type          = IBV_QPT_RC;
-        init.send_cq          = conn.cq;
-        init.recv_cq          = conn.cq;
+        init.send_cq          = conn.cq.get();
+        init.recv_cq          = conn.cq.get();
         init.cap.max_send_wr  = kMaxSendWr;
         init.cap.max_recv_wr  = kMaxRecvWr;
         init.cap.max_send_sge = 1;
         init.cap.max_recv_sge = 1;
-        conn.qp               = ibv.create_qp(dh->pd, &init);
+        conn.qp.reset(ibv.create_qp(dh->pd.get(), &init));
         if (!conn.qp) {
-            bool cqOk = true;
-            if (ibv.destroy_cq(conn.cq) != 0) {
-                cqOk = false;
-                /* Keep conn.cq when the destroy failed: clearing it would
-                 * lose the handle the caller needs for the reaper retry. */
-            }
-            else {
-                conn.cq = nullptr;
-            }
-            if (!cqOk) {
-                if (rollbackFailed) {
-                    *rollbackFailed = true;
-                }
-                return -1;
+            /* ibvDestroy() keeps conn.cq when the destroy fails: clearing
+             * it would lose the handle the caller needs for the reaper
+             * retry. */
+            if (ibvDestroy(conn.cq) != 0 && rollbackFailed) {
+                *rollbackFailed = true;
             }
             return -1;
         }
@@ -202,23 +193,13 @@ namespace v2 {
         if (cqOk) {
             *cqOk = true;
         }
-        /* A successful destroy clears the handle so callers storing
-         * the surviving pointers never re-destroy them. */
-        if (conn.qp) {
-            if (ibv.destroy_qp(conn.qp) == 0) {
-                conn.qp = nullptr;
-            }
-            else if (qpOk) {
-                *qpOk = false;
-            }
+        /* A successful destroy clears the handle; a failed one leaves
+         * the surviving object in conn for a retry. */
+        if (ibvDestroy(conn.qp) != 0 && qpOk) {
+            *qpOk = false;
         }
-        if (conn.cq) {
-            if (ibv.destroy_cq(conn.cq) == 0) {
-                conn.cq = nullptr;
-            }
-            else if (cqOk) {
-                *cqOk = false;
-            }
+        if (ibvDestroy(conn.cq) != 0 && cqOk) {
+            *cqOk = false;
         }
     }
 
@@ -236,7 +217,7 @@ namespace v2 {
         init.cap.max_recv_wr  = kMaxRecvWr;
         init.cap.max_send_sge = 1;
         init.cap.max_recv_sge = 1;
-        conn.qp               = ibv.create_qp(dh->pd, &init);
+        conn.qp.reset(ibv.create_qp(dh->pd.get(), &init));
         if (!conn.qp) {
             return -1;
         }
@@ -246,18 +227,19 @@ namespace v2 {
 
     int transitionQpToInitV2(DeviceHandle *dh, RcConnV2 &conn)
     {
-        return modifyQpToInit(dh, conn.qp);
+        return modifyQpToInit(dh, conn.qp.get());
     }
 
     int transitionQpToRtrV2(DeviceHandle *dh, RcConnV2 &conn, uint32_t destQpNum, union ibv_gid destGid,
                             uint32_t rqPsn)
     {
-        return modifyQpToRtr(dh->ctx, conn.qp, destQpNum, destGid, dh->gidIndex, rqPsn, dh->portNum);
+        return modifyQpToRtr(dh->ctx.get(), conn.qp.get(), destQpNum, destGid, dh->gidIndex, rqPsn,
+                             dh->portNum);
     }
 
     int transitionQpToRtsV2(RcConnV2 &conn, DeviceHandle *dh, uint32_t sqPsn)
     {
-        return modifyQpToRts(dh->ctx, conn.qp, sqPsn);
+        return modifyQpToRts(dh->ctx.get(), conn.qp.get(), sqPsn);
     }
 
     void releaseDevice(DeviceHandle *dh)
@@ -283,7 +265,7 @@ namespace v2 {
         wr.wr_id   = kRecvImm;
         wr.sg_list = nullptr;
         wr.num_sge = 0;
-        return ibv.post_recv(conn.qp, &wr, &bad);
+        return ibv.post_recv(conn.qp.get(), &wr, &bad);
     }
 
     int releaseConnection(ConnId id)
@@ -320,14 +302,13 @@ namespace v2 {
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
             psn = entry.clientPsn; /* recorded into the retired ring below */
             if (entry.conn.qp) {
-                qpOk = ibv.destroy_qp(entry.conn.qp) == 0;
+                qpOk = ibvDestroy(entry.conn.qp) == 0;
                 if (qpOk) {
                     if (rid != 0) {
                         /* Record the destroyed pair immediately; the tuple tracks
                          * the QP lifetime, independent of the CQ result below. */
                         reg.retired().record(rid, qpn, psn);
                     }
-                    entry.conn.qp    = nullptr;
                     entry.conn.qpNum = 0;
                 }
                 else {
@@ -338,12 +319,7 @@ namespace v2 {
                 /* No live qp: the reservation serves no future destroy. */
                 reg.retired().unreserve(rid);
             }
-            if (entry.conn.cq) {
-                cqOk = ibv.destroy_cq(entry.conn.cq) == 0;
-                if (cqOk) {
-                    entry.conn.cq = nullptr;
-                }
-            }
+            cqOk = ibvDestroy(entry.conn.cq) == 0;
         });
         reg.commitDestroy(id, qpOk, cqOk);
         if (qpOk && cqOk) {
@@ -363,6 +339,7 @@ namespace v2 {
             return kReleaseBusy;
         }
 
+        /* Non-owning copies; the entry keeps ownership of qp and cq. */
         struct Captured {
             struct ibv_qp *qp     = nullptr;
             struct ibv_cq *cq     = nullptr;
@@ -373,8 +350,8 @@ namespace v2 {
         } cap;
 
         bool found = reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
-            cap.qp     = entry.conn.qp;
-            cap.cq     = entry.conn.cq;
+            cap.qp     = entry.conn.qp.get();
+            cap.cq     = entry.conn.cq.get();
             cap.device = entry.device;
             cap.rid    = entry.reservationId;
             cap.qpn    = entry.conn.qpNum;
@@ -386,8 +363,11 @@ namespace v2 {
             return kReleaseLeftover;
         }
 
-        /* Destroy the old qp; on failure keep the live qp and return. */
-        if (ibv.destroy_qp(cap.qp) != 0) {
+        /* Destroy the old qp; on failure keep the live qp and return.
+         * Starts as a failure so a missing entry takes the same path. */
+        int destroyRet = -1;
+        reg.withEntry(id, [&](ConnectionEntryV2 &entry) { destroyRet = ibvDestroy(entry.conn.qp); });
+        if (destroyRet != 0) {
             reg.retired().unreserve(slotB);
             return kReleaseLeftover;
         }
@@ -402,7 +382,6 @@ namespace v2 {
          * reservationId without a qp. */
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
             entry.reservationId = 0;
-            entry.conn.qp       = nullptr;
             entry.conn.qpNum    = 0;
         });
 
@@ -418,7 +397,7 @@ namespace v2 {
         }
 
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
-            entry.conn.qp       = fresh.qp;
+            entry.conn.qp       = std::move(fresh.qp);
             entry.conn.qpNum    = fresh.qpNum;
             entry.reservationId = cap.rid;
         });

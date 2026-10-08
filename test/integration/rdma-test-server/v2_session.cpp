@@ -170,14 +170,16 @@ namespace v2 {
             return;
         }
         V2Session &s = it->second;
+        /* The caller already destroyed these objects, so only drop the
+         * handles. Assigning nullptr would destroy them a second time. */
         if (qpOk) {
-            s.qp        = nullptr;
+            dropOwnership(s.conn.qp);
             s.serverQpn = 0;
         }
         if (cqOk) {
-            s.cq = nullptr;
+            dropOwnership(s.conn.cq);
         }
-        if (s.qp == nullptr && s.cq == nullptr) {
+        if (s.conn.qp == nullptr && s.conn.cq == nullptr) {
             it->second.ioActive = 0;
             entries_.erase(it);
             notifyAll(cv_);
@@ -194,7 +196,10 @@ namespace v2 {
         if (it == entries_.end()) {
             return false;
         }
-        if (it->second.qp != nullptr || it->second.cq != nullptr) {
+        /* A destroying session's transport is temporarily moved out
+         * (see ControlHandlers::reapSession()), so empty handles alone
+         * don't mean it's done. */
+        if (it->second.destroying || it->second.conn.qp != nullptr || it->second.conn.cq != nullptr) {
             return false;
         }
         entries_.erase(it);

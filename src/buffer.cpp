@@ -70,20 +70,18 @@ namespace {
         return required;
     }
 
-    void freeOwnedHostBuffer(void *hostBuf)
-    {
-        if (!hostBuf) {
-            return;
-        }
-        auto freeFn = hipObj::hipOps().hipHostFree;
-        if (freeFn) {
-            (void)freeFn(hostBuf);
-            return;
-        }
-        (void)hipHostFree(hostBuf);
-    }
-
 } // namespace
+
+void
+HostBufDeleter::operator()(void *hostBuf) const noexcept
+{
+    auto freeFn = hipObj::hipOps().hipHostFree;
+    if (freeFn) {
+        (void)freeFn(hostBuf);
+        return;
+    }
+    (void)hipHostFree(hostBuf);
+}
 
 int
 BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
@@ -92,10 +90,10 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(), size) != 0) {
         return -1;
     }
-    int            access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    struct ibv_mr *mr     = ibv.reg_mr(pd, devPtr, size, access);
+    int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    IbvMrPtr mr(ibv.reg_mr(pd, devPtr, size, access));
     if (mr) {
-        entries_[key] = {mr, size, true, false, key, nullptr};
+        entries_[key] = BufEntry{.mr = std::move(mr), .size = size, .isDmabuf = true, .remoteAddr = key};
         return 0;
     }
 
@@ -116,17 +114,23 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
                 size, devPtr);
     }
 
-    void      *hostBuf = nullptr;
-    hipError_t err     = hipObj::hipOps().hipHostMalloc(&hostBuf, size, hipHostMallocDefault);
-    if (err != hipSuccess || !hostBuf) {
+    void      *rawHostBuf = nullptr;
+    hipError_t err        = hipObj::hipOps().hipHostMalloc(&rawHostBuf, size, hipHostMallocDefault);
+    if (err != hipSuccess || !rawHostBuf) {
         return -1;
     }
-    mr = ibv.reg_mr_host(pd, hostBuf, size, access);
+    HostBufPtr hostBuf(rawHostBuf);
+    mr.reset(ibv.reg_mr_host(pd, hostBuf.get(), size, access));
     if (!mr) {
-        freeOwnedHostBuffer(hostBuf);
         return -1;
     }
-    entries_[key] = {mr, size, false, true, reinterpret_cast<uint64_t>(hostBuf), hostBuf};
+    /* Read the address before hostBuf is moved into the entry */
+    auto remoteAddr = reinterpret_cast<uint64_t>(hostBuf.get());
+    entries_[key]   = BufEntry{.hostBuf    = std::move(hostBuf),
+                               .mr         = std::move(mr),
+                               .size       = size,
+                               .isDmabuf   = false,
+                               .remoteAddr = remoteAddr};
     return 0;
 }
 
@@ -137,12 +141,15 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
     if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(), size) != 0) {
         return -1;
     }
-    int            access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    struct ibv_mr *mr     = ibv.reg_mr_host(pd, hostPtr, size, access);
+    int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    IbvMrPtr mr(ibv.reg_mr_host(pd, hostPtr, size, access));
     if (!mr) {
         return -1;
     }
-    entries_[key] = {mr, size, false, false, reinterpret_cast<uint64_t>(hostPtr), nullptr};
+    entries_[key] = BufEntry{.mr         = std::move(mr),
+                             .size       = size,
+                             .isDmabuf   = false,
+                             .remoteAddr = reinterpret_cast<uint64_t>(hostPtr)};
     return 0;
 }
 uint64_t
@@ -164,11 +171,7 @@ BufferMap::deregisterBuffer(void *devPtr)
     if (it->second.refCount > 0) {
         return -1; /* pinned by a live v2 connection */
     }
-    BufEntry &ent = it->second;
-    ibv.dereg_mr(ent.mr);
-    if (ent.ownsHostBuf && ent.hostBuf) {
-        freeOwnedHostBuffer(ent.hostBuf);
-    }
+    /* Deregisters the MR, then frees any staging buffer */
     entries_.erase(it);
     return 0;
 }
@@ -176,12 +179,6 @@ BufferMap::deregisterBuffer(void *devPtr)
 void
 BufferMap::deregisterAll()
 {
-    for (auto &[key, ent] : entries_) {
-        ibv.dereg_mr(ent.mr);
-        if (ent.ownsHostBuf && ent.hostBuf) {
-            freeOwnedHostBuffer(ent.hostBuf);
-        }
-    }
     entries_.clear();
 }
 
@@ -193,7 +190,7 @@ BufferMap::lookupMr(void *devPtr)
     if (it == entries_.end()) {
         return nullptr;
     }
-    return it->second.mr;
+    return it->second.mr.get();
 }
 
 void *
@@ -201,7 +198,7 @@ BufferMap::lookupHostBuf(void *devPtr) const
 {
     uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
     auto      it  = entries_.find(key);
-    return it == entries_.end() ? nullptr : it->second.hostBuf;
+    return it == entries_.end() ? nullptr : it->second.hostBuf.get();
 }
 
 size_t
