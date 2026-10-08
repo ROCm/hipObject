@@ -1,0 +1,265 @@
+name: hipObject - Nightly
+
+# Builds DEB packages of develop every night and publishes them as the
+# "nightly" prerelease, which each run replaces. There's one set of
+# packages for each Ubuntu release and ROCm version in the build matrix.
+#
+# A pull request that changes this file builds the packages as a check,
+# and so does a manual run from any branch, but only a run on develop
+# publishes them.
+on:
+  # Every day at 06:23 UTC
+  schedule:
+    - cron: "23 6 * * *"
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/hipobject-nightly.yml'
+  workflow_dispatch:
+
+# Pull request runs are checks, so a newer commit cancels the run for
+# the older one. Every other run shares one group and is never
+# cancelled, so only one run publishes at a time.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
+# The build and the publish are separate jobs so that the token that can
+# write to the repository is never present while the repository's code
+# (cmake, the compiler, the tests) runs. The build jobs have a read-only
+# token and don't keep it; the publish job has the write token but only
+# uploads the packages the build jobs made.
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.version.outputs.build }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      # The package release is "0.<commit time>.g<short hash>", from the
+      # commit's UTC committer time to the second. It sorts each night's
+      # packages above the night before's, and below the "1" of a real
+      # release. The build jobs add "~<Ubuntu release>", as ROCm's own
+      # packages do, which keeps the file names apart.
+      #
+      # A scheduled run skips the build when the "nightly" release is
+      # already complete on this commit, since the packages would be the
+      # same. The tag alone doesn't show that: it can outlive its release
+      # (see the publish job). The release has to be published too. gh
+      # release create keeps a release a draft until every asset has
+      # uploaded, and a draft has no tag, so a published release with
+      # the tag on this commit has all of this commit's packages. If gh
+      # can't read the release, the run builds and publishes it again.
+      - name: Compute the package release
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          nightly_ref=$(git ls-remote \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
+            refs/tags/nightly)
+          nightly_sha=${nightly_ref%%$'\t'*}
+          if [[ "${GITHUB_EVENT_NAME}" == schedule \
+              && "${nightly_sha}" == "${GITHUB_SHA}" \
+              && "$(gh release view nightly -R "${GITHUB_REPOSITORY}" \
+                    --json isDraft --jq .isDraft)" == false ]]; then
+            echo "::notice::the nightly is already ${GITHUB_SHA}"
+            echo "build=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          commit_date=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
+            --jq .commit.committer.date)
+          commit_time=$(date -u -d "${commit_date}" +%Y%m%d%H%M%S)
+          release="0.${commit_time}.g${GITHUB_SHA::7}"
+          echo "Package release: ${release}"
+          {
+            echo "build=true"
+            echo "release=${release}"
+          } >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build (Ubuntu ${{ matrix.ubuntu }}, ROCm ${{ matrix.rocm }})
+    needs: version
+    if: needs.version.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      # Publish nothing unless every package builds, but let every job
+      # finish so a failure in one doesn't hide the state of the others
+      fail-fast: false
+      matrix:
+        ubuntu: ['22.04', '24.04']
+        rocm: [10.1.0, 7.14.1]
+        include:
+          # The build only turns on _FORTIFY_SOURCE with GCC 12 or later
+          # (see HIPOBJGNUCompilerOptions.cmake), and Ubuntu 22.04's
+          # default is GCC 11. Its libstdc++ comes from GCC 12, so what
+          # GCC 12 builds runs on a stock 22.04.
+          - ubuntu: '22.04'
+            compiler_packages: g++-12
+            cc: gcc-12
+            cxx: g++-12
+    container:
+      image: rocm/dev-ubuntu-${{ matrix.ubuntu }}:${{ matrix.rocm }}-full
+      options: --user root
+    env:
+      ROCM_VERSION: ${{ matrix.rocm }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        env:
+          COMPILER_PACKAGES: ${{ matrix.compiler_packages }}
+        run: |
+          read -ra compiler_packages <<< "${COMPILER_PACKAGES}"
+          apt-get update
+          apt-get install -y \
+            cmake \
+            git \
+            libcurl4-openssl-dev \
+            libibverbs-dev \
+            libnuma-dev \
+            libssl-dev \
+            "${compiler_packages[@]}"
+
+      # The image sets ROCM_PATH to /opt/rocm, which in the ROCm 7.11+
+      # layout only holds links into the installed versions. Build against,
+      # and install into, the version's own directory instead, as ROCm's
+      # packages do. The test programs find libamdhip64 through
+      # LD_LIBRARY_PATH (see hipobject-build.yml).
+      - name: Find ROCm
+        run: |
+          rocm_path="/opt/rocm/core-${ROCM_VERSION%.*}"
+          if [[ ! -d "${rocm_path}" ]]; then
+            echo "::error::ROCm ${ROCM_VERSION} isn't in ${rocm_path}"
+            exit 1
+          fi
+          {
+            echo "ROCM_PATH=${rocm_path}"
+            echo "LD_LIBRARY_PATH=${rocm_path}/lib"
+          } >> "${GITHUB_ENV}"
+
+      # rocm-cmake reads the package release from the environment when
+      # hipObject is configured. CMake picks the compilers up from CC and
+      # CXX, and ignores them when they're empty.
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          CPACK_DEBIAN_PACKAGE_RELEASE: ${{ needs.version.outputs.release }}~${{ matrix.ubuntu }}
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DHIPOBJ_WERROR=ON \
+            -DHIPOBJ_BNXT=ON \
+            -DHIPOBJ_IONIC=ON
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test
+        run: |
+          cd build && ctest --output-on-failure
+
+      - name: Package
+        run: |
+          cd build && cpack -G DEB -B "${PWD}/packages"
+          ls -l packages/*.deb
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hipobject-nightly-ubuntu${{ matrix.ubuntu }}-rocm${{ matrix.rocm }}
+          path: build/packages/*.deb
+          if-no-files-found: error
+          # Long enough to re-run a failed publish
+          retention-days: 7
+
+  # Only a run on develop publishes, and a pull request's run never does
+  publish:
+    name: Publish
+    needs: [version, build]
+    if: >-
+      github.event_name != 'pull_request'
+      && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and its tag
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: hipobject-nightly-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/packages
+
+      # Replace the old release and tag with new ones on this commit. The
+      # old release is gone until the new one is created, a few seconds
+      # later. --latest=false keeps the nightly from ever being shown as
+      # the latest release.
+      - name: Publish the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE: ${{ needs.version.outputs.release }}
+        run: |
+          cd "${RUNNER_TEMP}/packages"
+          sha256sum -- *.deb > SHA256SUMS
+
+          # GitHub shows each line break in a release's notes, so each
+          # paragraph is one line
+          notes="${RUNNER_TEMP}/notes.md"
+          cat > "${notes}" << EOF
+          A development build of hipObject from develop at ${GITHUB_SHA}, package release ${RELEASE}. It's replaced every night that develop changes.
+
+          This build is for testing. It isn't a supported release, and its API can change at any time.
+
+          Pick the packages for your Ubuntu release and ROCm version. The file names include the Ubuntu release, and the last part of the version before the "-" is the ROCm version with each "." replaced by "0" (100100 is ROCm 10.1.0). Install the runtime package, and the development package if you build against hipObject:
+
+          \`\`\`bash
+          sudo apt install ./hipobject_<version>_amd64.deb ./hipobject-dev_<version>_amd64.deb
+          \`\`\`
+
+          The packages install into \`/opt/rocm/core-<major>.<minor>\`. SHA256SUMS has the checksums of the packages.
+          EOF
+
+          if gh release view nightly > /dev/null 2>&1; then
+            gh release delete nightly --cleanup-tag --yes
+          fi
+          # A tag can outlive its release, for example if a run failed
+          # between deleting the release and creating the new one
+          tag_status=0
+          git ls-remote --exit-code \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
+              refs/tags/nightly > /dev/null || tag_status=$?
+          case "${tag_status}" in
+            0)
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly"
+              ;;
+            2) ;;
+            *)
+              echo "::error::could not query the nightly tag"
+              exit 1
+              ;;
+          esac
+
+          gh release create nightly \
+            --prerelease \
+            --latest=false \
+            --target "${GITHUB_SHA}" \
+            --title "hipObject nightly" \
+            --notes-file "${notes}" \
+            -- *.deb SHA256SUMS
