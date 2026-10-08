@@ -6,9 +6,11 @@
  * Unit tests for the qp conflict-discard procedure and data-phase
  * completion validation. */
 
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -21,6 +23,7 @@
 #include "ibv-wrapper.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
+#include "vendor-ops.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -267,6 +270,214 @@ TEST_F(V2ConflictTest, DiscardRecreateFailureReleases)
     EXPECT_EQ(reg.pendingReserves(), 0U);
 }
 
+/* ---- qp setup and teardown -------------------------------------- */
+
+/* What the transport fakes below record, and how they fail */
+struct TransportFakes {
+    bool               createCqFails    = false;
+    bool               queryPortFails   = false;
+    bool               queryDeviceFails = false;
+    enum ibv_mtu       activeMtu        = IBV_MTU_4096;
+    uint32_t           vendorId         = 0;
+    struct ibv_qp_attr lastAttr         = {};
+    int                lastMask         = 0;
+    struct ibv_recv_wr lastRecv         = {};
+    int                recvs            = 0;
+};
+
+TransportFakes g_transport;
+
+struct ibv_cq *
+fakeCreateCqOrFail(struct ibv_context *ctx, int cqe, void *cqCtx, struct ibv_comp_channel *channel,
+                   int vector)
+{
+    if (g_transport.createCqFails) {
+        return nullptr;
+    }
+    return fakeCreateCq(ctx, cqe, cqCtx, channel, vector);
+}
+
+int
+fakeRecordingModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask)
+{
+    g_transport.lastAttr = *attr;
+    g_transport.lastMask = mask;
+    return 0;
+}
+
+int
+fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
+{
+    if (g_transport.queryPortFails) {
+        return -1;
+    }
+    std::memset(attr, 0, sizeof(*attr));
+    attr->active_mtu = g_transport.activeMtu;
+    return 0;
+}
+
+int
+fakeVendorQueryDevice(struct ibv_context *, struct ibv_device_attr *attr)
+{
+    if (g_transport.queryDeviceFails) {
+        return -1;
+    }
+    std::memset(attr, 0, sizeof(*attr));
+    attr->vendor_id = g_transport.vendorId;
+    return 0;
+}
+
+int
+fakeCloseDevice(struct ibv_context *)
+{
+    return 0;
+}
+
+int
+fakePostRecv(struct ibv_qp *, struct ibv_recv_wr *wr, struct ibv_recv_wr **)
+{
+    g_transport.lastRecv = *wr;
+    ++g_transport.recvs;
+    return 0;
+}
+
+class V2TransportTest : public V2ConflictTest {
+protected:
+    void SetUp() override
+    {
+        V2ConflictTest::SetUp();
+        g_transport        = TransportFakes{};
+        auto &funcs        = hipObj::ibv.funcsForTest();
+        funcs.create_cq    = fakeCreateCqOrFail;
+        funcs.modify_qp    = fakeRecordingModifyQp;
+        funcs.query_port   = fakeQueryPort;
+        funcs.query_device = fakeVendorQueryDevice;
+        funcs.close_device = fakeCloseDevice;
+        funcs.post_recv    = fakePostRecv;
+        dh_.gidIndex       = 0;
+    }
+
+    /* Gives the device a context, so the vendor attributes are looked up */
+    void setContext()
+    {
+        dh_.ctx.reset(reinterpret_cast<struct ibv_context *>(0x2));
+    }
+
+    int rtr(hipObj::RcConnV2 &conn)
+    {
+        union ibv_gid gid = {};
+        return hipObj::v2::transitionQpToRtrV2(&dh_, conn, 7, gid, 1);
+    }
+};
+
+TEST_F(V2TransportTest, InitGrantsOnlyRemoteReadAndWrite)
+{
+    hipObj::RcConnV2 conn;
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::transitionQpToInitV2(&dh_, conn), 0);
+    EXPECT_EQ(g_transport.lastAttr.qp_state, IBV_QPS_INIT);
+    EXPECT_EQ(g_transport.lastAttr.qp_access_flags,
+              static_cast<unsigned int>(IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+    EXPECT_EQ(g_transport.lastAttr.port_num, dh_.portNum);
+    hipObj::v2::releaseDevice(&dh_);
+}
+
+TEST_F(V2TransportTest, RtrPathMtuFollowsActivePortMtu)
+{
+    hipObj::RcConnV2 conn;
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+
+    ASSERT_EQ(rtr(conn), 0);
+    EXPECT_EQ(g_transport.lastAttr.path_mtu, IBV_MTU_4096);
+    g_transport.activeMtu = IBV_MTU_1024;
+    ASSERT_EQ(rtr(conn), 0);
+    EXPECT_EQ(g_transport.lastAttr.path_mtu, IBV_MTU_1024);
+
+    /* An MTU below 512, or none at all, falls back to 1024 */
+    g_transport.activeMtu = IBV_MTU_256;
+    ASSERT_EQ(rtr(conn), 0);
+    EXPECT_EQ(g_transport.lastAttr.path_mtu, IBV_MTU_1024);
+    g_transport.activeMtu      = IBV_MTU_4096;
+    g_transport.queryPortFails = true;
+    ASSERT_EQ(rtr(conn), 0);
+    EXPECT_EQ(g_transport.lastAttr.path_mtu, IBV_MTU_1024);
+    hipObj::v2::releaseDevice(&dh_);
+}
+
+TEST_F(V2TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
+{
+    hipObj::RcConnV2 conn;
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    for (int index : {-1, 256}) {
+        dh_.gidIndex = index;
+        EXPECT_EQ(rtr(conn), -1) << "index " << index;
+    }
+    EXPECT_EQ(g_transport.lastMask, 0);
+    hipObj::v2::releaseDevice(&dh_);
+}
+
+TEST_F(V2TransportTest, VendorAttributesNeedDeviceQuery)
+{
+    hipObj::RcConnV2 conn;
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    setContext();
+#ifdef HIPOBJ_BNXT
+    g_transport.vendorId = hipObj::VENDOR_ID_BROADCOM;
+#elif defined(HIPOBJ_IONIC)
+    g_transport.vendorId = hipObj::VENDOR_ID_PENSANDO;
+#endif
+#if defined(HIPOBJ_BNXT) || defined(HIPOBJ_IONIC)
+    ASSERT_EQ(rtr(conn), 0);
+    EXPECT_EQ(g_transport.lastAttr.timeout, 14);
+#endif
+
+    g_transport.queryDeviceFails = true;
+    ASSERT_EQ(rtr(conn), 0);
+    EXPECT_EQ(g_transport.lastAttr.timeout, 0);
+    hipObj::v2::releaseDevice(&dh_);
+}
+
+TEST_F(V2TransportTest, CreateFailsWithoutCq)
+{
+    g_transport.createCqFails = true;
+    hipObj::RcConnV2 conn;
+    bool             rollbackFailed = true;
+    EXPECT_EQ(hipObj::v2::createRcConnV2(&dh_, conn, &rollbackFailed), -1);
+    EXPECT_FALSE(rollbackFailed);
+    EXPECT_EQ(dh_.connRefs.load(), 0U);
+    EXPECT_EQ(g_state.createQpCalls, 0);
+}
+
+TEST_F(V2TransportTest, CreateQpOnlyNeedsCq)
+{
+    hipObj::RcConnV2 conn;
+    EXPECT_EQ(hipObj::v2::createRcQpOnly(&dh_, nullptr, conn), -1);
+    EXPECT_EQ(g_state.createQpCalls, 0);
+}
+
+TEST_F(V2TransportTest, ReleaseDeviceNeverUnderflows)
+{
+    dh_.connRefs = 1;
+    hipObj::v2::releaseDevice(&dh_);
+    EXPECT_EQ(dh_.connRefs.load(), 0U);
+    hipObj::v2::releaseDevice(&dh_);
+    EXPECT_EQ(dh_.connRefs.load(), 0U);
+    hipObj::v2::releaseDevice(nullptr);
+}
+
+TEST_F(V2TransportTest, PostsZeroSgeReceive)
+{
+    hipObj::RcConnV2 conn;
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::postRecvImm(&dh_, conn), 0);
+    EXPECT_EQ(g_transport.recvs, 1);
+    EXPECT_EQ(g_transport.lastRecv.wr_id, hipObj::v2::kRecvImm);
+    EXPECT_EQ(g_transport.lastRecv.num_sge, 0);
+    EXPECT_EQ(g_transport.lastRecv.sg_list, nullptr);
+    EXPECT_EQ(g_transport.lastRecv.next, nullptr);
+    hipObj::v2::releaseDevice(&dh_);
+}
+
 /* ---- completion validation -------------------------------------- */
 
 struct WcTestData : public ::testing::Test {
@@ -320,6 +531,34 @@ TEST_F(WcTestData, Mismatches)
     wc3.status = IBV_WC_WR_FLUSH_ERR;
     hipObj::v2::WcExpectation ok{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm, 0x1a2b3c4d};
     EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc3, ok, &reason));
+}
+
+/* A completion for some other work request is rejected, for either kind */
+TEST_F(WcTestData, WrongWorkRequest)
+{
+    for (auto [kind, op] : {std::pair{hipObj::v2::WcKind::kGet, IBV_WC_RECV_RDMA_WITH_IMM},
+                            std::pair{hipObj::v2::WcKind::kPut, IBV_WC_RECV}}) {
+        auto wc  = makeWc(op, IBV_WC_WITH_IMM, 0x1a2b3c4d);
+        wc.wr_id = hipObj::v2::kRecvImm + 1;
+        hipObj::v2::WcExpectation exp{kind, hipObj::v2::kRecvImm, 0x1a2b3c4d};
+        const char               *reason = nullptr;
+        EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
+        EXPECT_STREQ(reason, "unexpected wr_id");
+    }
+}
+
+/* A PUT needs a plain RECV that carries the cookie */
+TEST_F(WcTestData, PutMismatches)
+{
+    hipObj::v2::WcExpectation put{hipObj::v2::WcKind::kPut, hipObj::v2::kRecvImm, 0x1a2b3c4d};
+    const char               *reason = nullptr;
+
+    auto wc = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
+    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, put, &reason));
+    EXPECT_STREQ(reason, "expected RECV");
+
+    wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 0xdeadbeef);
+    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, put, &reason));
 }
 
 } // namespace

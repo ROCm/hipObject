@@ -56,6 +56,13 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
   if(HIPOBJECT_V2_API)
     target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJECT_V2_API)
   endif()
+  # So tests know which vendor backends hipobj_test_objects has
+  if(HIPOBJ_BNXT)
+    target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_BNXT)
+  endif()
+  if(HIPOBJ_IONIC)
+    target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_IONIC)
+  endif()
   target_include_directories(${TEST_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/shared

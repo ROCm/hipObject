@@ -256,6 +256,118 @@ finalOkHeaders()
     return "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\nX-Amz-Rdma-Cookie: 00c0ffee\r\n";
 }
 
+std::string
+withoutFinalCrlf(std::string headers)
+{
+    headers.resize(headers.size() - 2);
+    return headers;
+}
+
+TEST(V2Wire, SplitHeaderLineRejectsEmptyName)
+{
+    std::string n, v;
+    EXPECT_FALSE(splitHeaderLine("  : value", n, v));
+    EXPECT_FALSE(splitHeaderLine("\t:value", n, v));
+}
+
+TEST(V2Wire, PrepareToleratesBlankLinesAndMissingFinalCrlf)
+{
+    hipObj::v2::PrepareReply r;
+    std::string              h = "\r\n" + prepareOkHeaders(kGoodSession, "000001") + "\r\n";
+    EXPECT_TRUE(parsePrepareReply(200, h, r));
+    EXPECT_TRUE(parsePrepareReply(200, withoutFinalCrlf(prepareOkHeaders(kGoodSession, "000002")), r));
+    EXPECT_EQ(r.serverPsn, 2U);
+}
+
+TEST(V2Wire, PrepareRejectsMalformedLine)
+{
+    hipObj::v2::PrepareReply r;
+    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders(kGoodSession, "000001") + "NoColon\r\n", r));
+    EXPECT_FALSE(parsePrepareReply(501, "NoColon", r));
+}
+
+TEST(V2Wire, PrepareRejectsMalformedReplyHeader)
+{
+    for (const std::string &reply :
+         {std::string("200"), std::string("200") + kGoodToken, std::string("500:") + kGoodToken,
+          std::string("20:") + kGoodToken, std::string("2000:") + kGoodToken,
+          std::string("200:") + kGoodToken + "0"}) {
+        std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
+        h += "X-Amz-Rdma-Reply: " + reply + "\r\n";
+        h += std::string("X-Amz-Rdma-Session: ") + kGoodSession + "\r\n";
+        h += "X-Amz-Rdma-Psn: 000001\r\n";
+        hipObj::v2::PrepareReply r;
+        EXPECT_FALSE(parsePrepareReply(200, h, r)) << "reply " << reply;
+    }
+}
+
+TEST(V2Wire, PrepareSuccessNeedsTokenAndPsn)
+{
+    std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
+    h += std::string("X-Amz-Rdma-Session: ") + kGoodSession + "\r\n";
+    std::string withPsn   = h + "X-Amz-Rdma-Psn: 000001\r\n";
+    std::string withToken = h + "X-Amz-Rdma-Reply: 200:" + kGoodToken + "\r\n";
+
+    hipObj::v2::PrepareReply r;
+    EXPECT_FALSE(parsePrepareReply(200, withPsn, r));
+    EXPECT_FALSE(parsePrepareReply(200, withToken, r));
+    EXPECT_FALSE(parsePrepareReply(200, withToken + "X-Amz-Rdma-Psn: zzzzzz\r\n", r));
+}
+
+TEST(V2Wire, FinalToleratesBlankLinesAndMissingFinalCrlf)
+{
+    hipObj::v2::FinalReply r;
+    EXPECT_TRUE(parseFinalReply(200, "\r\n" + finalOkHeaders() + "\r\n", r));
+    EXPECT_TRUE(parseFinalReply(200, withoutFinalCrlf(finalOkHeaders()), r));
+    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
+}
+
+TEST(V2Wire, FinalRejectsMalformedLine)
+{
+    hipObj::v2::FinalReply r;
+    EXPECT_FALSE(parseFinalReply(200, finalOkHeaders() + "NoColon\r\n", r));
+}
+
+TEST(V2Wire, FinalRejectsMalformedCookie)
+{
+    for (const char *cookie : {"", "c0ffee", "00c0ffee0", "zzzzzzzz", "00c0ffeg", "0x00c0ff"}) {
+        std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
+        h += std::string("X-Amz-Rdma-Cookie: ") + cookie + "\r\n";
+        hipObj::v2::FinalReply r;
+        EXPECT_FALSE(parseFinalReply(200, h, r)) << "cookie \"" << cookie << "\"";
+    }
+
+    /* Hex digits in either case are fine */
+    hipObj::v2::FinalReply r;
+    EXPECT_TRUE(
+        parseFinalReply(200, "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\nX-Amz-Rdma-Cookie: 00C0FFEE\r\n", r));
+    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
+}
+
+TEST(V2Wire, FinalRejectsMalformedBytesTransferred)
+{
+    for (const char *bytes : {"", "12a", "-1", "+1", "1 2", "0x10"}) {
+        std::string            h = finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: " + bytes + "\r\n";
+        hipObj::v2::FinalReply r;
+        EXPECT_FALSE(parseFinalReply(200, h, r)) << "bytes \"" << bytes << "\"";
+    }
+}
+
+TEST(V2Wire, FinalReadsVersionId)
+{
+    hipObj::v2::FinalReply r;
+    EXPECT_TRUE(parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Version-Id: v42\r\n", r));
+    EXPECT_EQ(r.versionId, "v42");
+}
+
+TEST(V2Wire, FinalSuccessNeedsProtocolEcho)
+{
+    for (int status : {200, 204}) {
+        hipObj::v2::FinalReply r;
+        EXPECT_FALSE(parseFinalReply(status, "X-Amz-Rdma-Cookie: 00c0ffee\r\n", r)) << "status " << status;
+    }
+}
+
 /* Random 8-byte values and their base64, from Python's base64 module */
 constexpr const char *kChecksumVectors[] = {
     "SgtwPfgnR/s=", /* 4a0b703df82747fb */
@@ -323,6 +435,15 @@ TEST(V2Wire, FinalRejectsBytesTransferredThatOverflows)
     EXPECT_TRUE(parseFinalReply(
         200, finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: 0000000000000000000000042\r\n", r));
     EXPECT_EQ(r.bytes, 42U);
+}
+
+TEST(V2Wire, ChecksumRejectsMalformedText)
+{
+    std::string out;
+    /* 12 characters, but no padding */
+    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAAAAAAAAA", out));
+    /* Not base64 */
+    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAA-AAAAA=", out));
 }
 
 TEST(V2Wire, EnumAbiCompat)

@@ -6,6 +6,9 @@
 
 /* Unit tests for the v2 client phase machine (src/rdma/v2-state.*). */
 
+#include <cstdint>
+#include <cstring>
+
 #include <gtest/gtest.h>
 
 #include "hipobj-warnings.h"
@@ -110,8 +113,37 @@ TEST(V2State, ExposedMeansPastIdle)
 TEST(V2State, PhaseNames)
 {
     EXPECT_STREQ(hipObj::v2::phaseName(Phase::Idle), "Idle");
+    EXPECT_STREQ(hipObj::v2::phaseName(Phase::Negotiating), "Negotiating");
+    EXPECT_STREQ(hipObj::v2::phaseName(Phase::Connecting), "Connecting");
+    EXPECT_STREQ(hipObj::v2::phaseName(Phase::Ready), "Ready");
     EXPECT_STREQ(hipObj::v2::phaseName(Phase::Transferring), "Transferring");
     EXPECT_STREQ(hipObj::v2::phaseName(Phase::Draining), "Draining");
+
+    /* A value no enumerator has, as a corrupted phase would hold. Copy it
+     * in rather than cast it, which static analysis flags. */
+    const uint8_t raw = 6;
+    Phase         unknown;
+    static_assert(sizeof(unknown) == sizeof(raw));
+    std::memcpy(&unknown, &raw, sizeof(unknown));
+    EXPECT_STREQ(hipObj::v2::phaseName(unknown), "?");
+}
+
+TEST(V2State, NegotiationStartsOnlyFromIdle)
+{
+    for (int i = 1; i <= 5; ++i) {
+        Phase p = static_cast<Phase>(i);
+        EXPECT_FALSE(hipObj::v2::beginNegotiate(p)) << "phase " << i;
+        EXPECT_EQ(p, static_cast<Phase>(i));
+    }
+}
+
+TEST(V2State, PreExposureFailureReturnsToIdle)
+{
+    Phase p = Phase::Negotiating;
+    EXPECT_TRUE(hipObj::v2::fail(p, /*preExpose=*/true, /*apply=*/false));
+    EXPECT_EQ(p, Phase::Negotiating);
+    EXPECT_TRUE(hipObj::v2::fail(p, /*preExpose=*/true));
+    EXPECT_EQ(p, Phase::Idle);
 }
 
 } // namespace

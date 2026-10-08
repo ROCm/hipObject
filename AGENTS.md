@@ -83,8 +83,9 @@ Notes:
   configuration in the `rocm/dev-ubuntu-24.04:10.0.0-full` image, along with
   variants that add `-DHIPOBJECT_V2_API=OFF`, `-DBUILD_SHARED_LIBS=OFF`,
   `-DHIPOBJ_USE_SANITIZERS=ON` (AddressSanitizer), or
-  `-DHIPOBJ_USE_CODE_COVERAGE=ON` (built with ROCm's amdclang, and reported on
-  the run's summary page). It is the only workflow that builds these variants.
+  `-DHIPOBJ_USE_CODE_COVERAGE=ON` (built with ROCm's amdclang, reported on the
+  run's summary page, and failed below the [coverage target](#tests)). It is
+  the only workflow that builds these variants.
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON` plus the dependencies
   already installed in [`.cursor/Dockerfile`](.cursor/Dockerfile); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
@@ -113,6 +114,17 @@ Notes:
   [README.md](README.md) and [docs/interop.rst](docs/interop.rst).
 - The sanitizer builds are part of the mandatory checks; see
   [C and C++](#c-and-c).
+- **Code coverage: the library (`src/`) must keep at least 80% line coverage
+  from `ctest`.** CI's coverage job fails below that. Add tests with new or
+  changed code, including its error paths, rather than letting the number
+  drift down; aim for most of the lines a change adds to be covered. To
+  measure it, configure with Clang and `-DHIPOBJ_USE_CODE_COVERAGE=ON`, run
+  `ctest`, and build the `hipobj-coverage` target, which writes
+  `coverage/report.txt` and `coverage/lines.txt` in the build directory (see
+  [docs/building.rst](docs/building.rst)). Tests of the public API run
+  against the fake RDMA device and HIP runtime in
+  [`test/unit/fake-device.h`](test/unit/fake-device.h), which records the
+  calls and can make them fail.
 
 ## Public API
 
