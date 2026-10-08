@@ -71,6 +71,14 @@ if(HIPOBJECT_V2_API)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJECT_V2_API)
 endif()
 
+# A test of the public API that runs against the fake RDMA device and HIP
+# runtime in fake-device.h
+function(hipobj_add_fake_device_test TEST_NAME TEST_SOURCE)
+  hipobj_add_test(${TEST_NAME} ${TEST_SOURCE})
+  target_sources(${TEST_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/fake-device.cpp)
+endfunction()
+
 hipobj_add_test(test-rdma-token
   test-rdma-token.cpp)
 
@@ -127,8 +135,26 @@ hipobj_add_test(test-gid-select
 hipobj_add_test(test-buffer-registration
   test-buffer-registration.cpp)
 
-hipobj_add_test(test-api-args
+hipobj_add_fake_device_test(test-api-args
   test-api-args.cpp)
+
+hipobj_add_fake_device_test(test-api-exceptions
+  test-api-exceptions.cpp)
+
+hipobj_add_fake_device_test(test-transport
+  test-transport.cpp)
+
+hipobj_add_test(test-s3-control
+  test-s3-control.cpp)
+
+hipobj_add_fake_device_test(test-staging
+  test-staging.cpp)
+# hipObject reads these settings once and caches them, so the tests of
+# them run in a process of their own (see test-staging.cpp)
+add_test(NAME test-staging-env
+  COMMAND test-staging --gtest_filter=StagingEnvTest.*)
+set_tests_properties(test-staging-env PROPERTIES
+  ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=20;HIPOBJ_REQUIRE_GPU_DIRECT=1")a
 
 hipobj_add_test(test-thread-safety
   test-thread-safety.cpp)

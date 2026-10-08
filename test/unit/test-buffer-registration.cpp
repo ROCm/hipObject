@@ -11,6 +11,7 @@
 
 #include "buffer.h"
 #include "hip-seam.h"
+#include "hipobj-private.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -177,6 +178,27 @@ TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers)
     EXPECT_EQ(g_hostFreeCalls, 1);
     EXPECT_EQ(g_lastHostFree, g_lastHostMalloc);
     EXPECT_EQ(g_ibvLog.deregisterCalls, 1);
+}
+
+/* The public API checks these first, so the map's own checks are only
+ * reached directly */
+TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
+{
+    hipObj::BufferMap buffers;
+    auto             *pd          = reinterpret_cast<struct ibv_pd *>(1);
+    void             *gpuBuf      = reinterpret_cast<void *>(0x3000);
+    char              hostBuf[32] = {};
+
+    EXPECT_EQ(buffers.registerBuffer(gpuBuf, hipObj::MAX_MR_SIZE + 1, pd), -1);
+    EXPECT_EQ(buffers.registerHostBuffer(hostBuf, hipObj::MAX_MR_SIZE + 1, pd), -1);
+    EXPECT_EQ(g_ibvLog.registerCalls, 0);
+
+    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), 0);
+    ASSERT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), pd), 0);
+    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), -1);
+    EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), pd), -1);
+    EXPECT_EQ(g_ibvLog.registerCalls, 2);
+    EXPECT_EQ(buffers.lookupSize(gpuBuf), 64U);
 }
 
 } // namespace

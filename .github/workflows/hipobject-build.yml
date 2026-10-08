@@ -145,9 +145,12 @@ jobs:
         run: |
           cd build && ctest --output-on-failure
 
-      # The report's summary goes on the run's summary page
+      # The report's summary goes on the run's summary page. The job fails
+      # if the library's line coverage is below the target in AGENTS.md.
       - name: Code coverage report
         if: matrix.coverage == 'ON'
+        env:
+          MIN_LINE_COVERAGE: 80
         run: |
           cmake --build build --target hipobj-coverage
           {
@@ -156,3 +159,18 @@ jobs:
             cat build/coverage/report.txt
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+          # The TOTAL line's tenth field is the line coverage, e.g. 90.17%
+          awk -v min="${MIN_LINE_COVERAGE}" '
+            $1 == "TOTAL" { lines = $10 }
+            END {
+              if (lines == "") {
+                print "::error::No TOTAL line in the coverage report"
+                exit 1
+              }
+              sub(/%$/, "", lines)
+              if (lines + 0 < min) {
+                printf "::error::Line coverage is %s%%, below the %s%% target\n", lines, min
+                exit 1
+              }
+              printf "Line coverage is %s%% (target %s%%)\n", lines, min
+            }' build/coverage/report.txt

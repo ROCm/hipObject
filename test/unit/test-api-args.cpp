@@ -4,12 +4,11 @@
  *
  * Argument checks in the public API. Every function in hipobj.h is called
  * with each kind of bad argument, and with arguments just inside each
- * limit, without GPU or RDMA hardware: the fixture substitutes fakes for
- * libibverbs, the HIP runtime, NIC enumeration, and the driver state.
+ * limit, without GPU or RDMA hardware, using the fake device in
+ * fake-device.h.
  */
 
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <limits>
@@ -20,12 +19,10 @@
 #include <hip/hip_runtime_api.h>
 #include <sys/types.h>
 
+#include "fake-device.h"
 #include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
-#include "ibv-core.h"
-#include "ibv-wrapper.h"
-#include "nic-seam.h"
 #include "state.h"
 #include "token.h"
 
@@ -34,376 +31,21 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
-// ---- Fakes -------------------------------------------------------
-
-struct CallLog {
-    int sendRequest = 0;
-    int recvReply   = 0;
-    int registerMr  = 0;
-    int memcpy      = 0;
-};
-
-CallLog g_log;
-
-/* reg_mr fails for this address, so hipObjBufRegister() falls back to a
- * host staging buffer */
-void *g_failRegisterAddr = nullptr;
-
-int        g_deviceCount    = 1;
-hipError_t g_deviceCountErr = hipSuccess;
-
-struct ibv_device *g_devices[] = {reinterpret_cast<struct ibv_device *>(0x1), nullptr};
-
-struct ibv_device **
-fakeGetDeviceList(int *numDevices)
-{
-    if (numDevices) {
-        *numDevices = 1;
-    }
-    return g_devices;
-}
-
-void
-fakeFreeDeviceList(struct ibv_device **)
-{
-}
-
-struct ibv_context *
-fakeOpenDevice(struct ibv_device *)
-{
-    return reinterpret_cast<struct ibv_context *>(0x2);
-}
-
-int
-fakeCloseDevice(struct ibv_context *)
-{
-    return 0;
-}
-
-const char *
-fakeGetDeviceName(struct ibv_device *)
-{
-    return "mlx5_0";
-}
-
-int
-fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
-{
-    if (attr) {
-        std::memset(attr, 0, sizeof(*attr));
-    }
-    return 0;
-}
-
-int
-fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *gid)
-{
-    if (gid) {
-        std::memset(gid, 0, sizeof(*gid));
-    }
-    return 0;
-}
-
-struct ibv_pd *
-fakeAllocPd(struct ibv_context *)
-{
-    return reinterpret_cast<struct ibv_pd *>(0x3);
-}
-
-int
-fakeDeallocPd(struct ibv_pd *)
-{
-    return 0;
-}
-
-struct ibv_mr *
-fakeRegisterMr(struct ibv_pd *, void *addr, size_t, int)
-{
-    ++g_log.registerMr;
-    if (addr == g_failRegisterAddr) {
-        return nullptr;
-    }
-    auto *mr = static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
-    if (mr) {
-        mr->addr = addr;
-        mr->rkey = 0x1234;
-    }
-    return mr;
-}
-
-struct ibv_mr *
-fakeRegisterMrIova2(struct ibv_pd *pd, void *addr, size_t size, uintptr_t, int access)
-{
-    return fakeRegisterMr(pd, addr, size, access);
-}
-
-int
-fakeDeregisterMr(struct ibv_mr *mr)
-{
-    std::free(mr);
-    return 0;
-}
-
-struct ibv_cq *
-fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-{
-    return reinterpret_cast<struct ibv_cq *>(0x4);
-}
-
-int
-fakeDestroyCq(struct ibv_cq *)
-{
-    return 0;
-}
-
-struct ibv_qp *
-fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-{
-    auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
-    if (qp) {
-        qp->qp_num = 0x55;
-    }
-    return qp;
-}
-
-int
-fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *, int)
-{
-    return 0;
-}
-
-int
-fakeDestroyQp(struct ibv_qp *qp)
-{
-    std::free(qp);
-    return 0;
-}
-
-int
-fakePollCq(struct ibv_cq *, int, struct ibv_wc *wc)
-{
-    if (wc) {
-        std::memset(wc, 0, sizeof(*wc));
-        wc->status = IBV_WC_SUCCESS;
-    }
-    return 1;
-}
-
-hipError_t
-fakeGetDeviceNoDevice(int *)
-{
-    return hipErrorNoDevice;
-}
-
-hipError_t
-fakeGetDeviceCount(int *count)
-{
-    *count = g_deviceCountErr == hipSuccess ? g_deviceCount : 0;
-    return g_deviceCountErr;
-}
-
-/* No topology for any GPU, so hipObjInit() opens the hinted NIC */
-hipError_t
-fakeDeviceGetPCIBusId(char *, int, int)
-{
-    return hipErrorInvalidDevice;
-}
-
-hipError_t
-fakeDeviceSynchronize()
-{
-    return hipSuccess;
-}
-
-hipError_t
-fakeHostMalloc(void **ptr, size_t size, unsigned int)
-{
-    *ptr = std::malloc(size);
-    return *ptr ? hipSuccess : hipErrorOutOfMemory;
-}
-
-hipError_t
-fakeHostFree(void *ptr)
-{
-    std::free(ptr);
-    return hipSuccess;
-}
-
-hipError_t
-fakeMemcpy(void *, const void *, size_t, hipMemcpyKind)
-{
-    ++g_log.memcpy;
-    return hipSuccess;
-}
-
-/* What the fake HIP runtime reports for every pointer: its memory type, and
- * the allocation it's in */
-hipMemoryType g_memoryType        = hipMemoryTypeDevice;
-uintptr_t     g_allocBase         = 0;
-size_t        g_allocSize         = 0;
-hipError_t    g_addressRangeErr   = hipSuccess;
-int           g_addressRangeCalls = 0;
-
-hipError_t
-fakePointerGetAttributes(hipPointerAttribute_t *attr, const void *)
-{
-    *attr      = {};
-    attr->type = g_memoryType;
-    return hipSuccess;
-}
-
-hipError_t
-fakeMemGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t)
-{
-    ++g_addressRangeCalls;
-    if (g_addressRangeErr != hipSuccess) {
-        return g_addressRangeErr;
-    }
-    *base = reinterpret_cast<hipDeviceptr_t>(g_allocBase);
-    *size = g_allocSize;
-    return hipSuccess;
-}
-
-class EmptyNicEnumerator : public hipObj::NicEnumerator {
-public:
-    std::vector<hipObj::NicInfo> Enumerate(const char *) override
-    {
-        return {};
-    }
-};
-
-int
-fakeSendRequest(void *, const char *, size_t)
-{
-    ++g_log.sendRequest;
-    return 0;
-}
-
-int
-fakeRecvReply(void *, char *reply, size_t *replyLen)
-{
-    static constexpr char kReply[] = "200";
-    ++g_log.recvReply;
-    if (!replyLen || *replyLen < sizeof(kReply)) {
-        return -1;
-    }
-    std::memcpy(reply, kReply, sizeof(kReply));
-    *replyLen = sizeof(kReply);
-    return 0;
-}
-
-hipObjOps_t
-makeOps()
-{
-    hipObjOps_t ops = {};
-    ops.sendRequest = &fakeSendRequest;
-    ops.recvReply   = &fakeRecvReply;
-    return ops;
-}
+using hipObjTest::fake;
+using hipObjTest::fakeMemGetAddressRange;
+using hipObjTest::fakePointerGetAttributes;
+using hipObjTest::makeOps;
 
 /* Fake device addresses. reg_mr is faked, so nothing reads or writes
  * them. */
-void *const kDevBuf = reinterpret_cast<void *>(0x10000);
+void *const kDevBuf = hipObjTest::fakeDevBuf();
 
-constexpr size_t kBufSize = 64;
+constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 constexpr size_t kMaxMr   = 4ULL * 1024 * 1024 * 1024;
 
 // ---- Fixture -----------------------------------------------------
 
-class ApiArgsTest : public ::testing::Test {
-protected:
-    void SetUp() override
-    {
-        savedState_      = hipObj::setStateForTest(&state_);
-        savedEnumerator_ = hipObj::setNicEnumerator(&enumerator_);
-
-        savedHipOps_                = hipObj::hipOps();
-        hipObj::HipOps ops          = savedHipOps_;
-        ops.hipGetDevice            = &fakeGetDeviceNoDevice;
-        ops.hipGetDeviceCount       = &fakeGetDeviceCount;
-        ops.hipDeviceGetPCIBusId    = &fakeDeviceGetPCIBusId;
-        ops.hipDeviceSynchronize    = &fakeDeviceSynchronize;
-        ops.hipHostMalloc           = &fakeHostMalloc;
-        ops.hipHostFree             = &fakeHostFree;
-        ops.hipPointerGetAttributes = nullptr;
-        /* Without the async entries, staging uses hipMemcpy */
-        ops.hipMemcpy       = &fakeMemcpy;
-        ops.hipMemcpyAsync  = nullptr;
-        ops.hipEventCreate  = nullptr;
-        ops.hipEventRecord  = nullptr;
-        ops.hipEventQuery   = nullptr;
-        ops.hipEventDestroy = nullptr;
-        hipObj::hipOps()    = ops;
-
-        auto &funcs            = hipObj::ibv.funcsForTest();
-        savedFuncs_            = funcs;
-        funcs.get_device_list  = &fakeGetDeviceList;
-        funcs.free_device_list = &fakeFreeDeviceList;
-        funcs.open_device      = &fakeOpenDevice;
-        funcs.close_device     = &fakeCloseDevice;
-        funcs.get_device_name  = &fakeGetDeviceName;
-        funcs.query_port       = &fakeQueryPort;
-        funcs.query_gid        = &fakeQueryGid;
-        funcs.alloc_pd         = &fakeAllocPd;
-        funcs.dealloc_pd       = &fakeDeallocPd;
-        funcs.reg_mr           = &fakeRegisterMr;
-        funcs.reg_mr_iova2     = &fakeRegisterMrIova2;
-        funcs.dereg_mr         = &fakeDeregisterMr;
-        funcs.create_cq        = &fakeCreateCq;
-        funcs.destroy_cq       = &fakeDestroyCq;
-        funcs.create_qp        = &fakeCreateQp;
-        funcs.modify_qp        = &fakeModifyQp;
-        funcs.destroy_qp       = &fakeDestroyQp;
-        funcs.poll_cq          = &fakePollCq;
-
-        savedIbvInitialized_       = hipObj::ibv.is_initialized;
-        hipObj::ibv.is_initialized = true;
-
-        g_log              = {};
-        g_failRegisterAddr = nullptr;
-        g_deviceCount      = 1;
-        g_deviceCountErr   = hipSuccess;
-    }
-
-    void TearDown() override
-    {
-        (void)hipObjShutdown();
-        hipObj::ibv.is_initialized = savedIbvInitialized_;
-        hipObj::ibv.funcsForTest() = savedFuncs_;
-        hipObj::hipOps()           = savedHipOps_;
-        hipObj::setNicEnumerator(savedEnumerator_);
-        hipObj::setStateForTest(savedState_);
-    }
-
-    static hipObjConfig_t makeConfig()
-    {
-        hipObjConfig_t config = {};
-        config.gpuDevice      = -1;
-        config.nicHint        = "mlx5_0";
-        return config;
-    }
-
-    static void init()
-    {
-        hipObjConfig_t config = makeConfig();
-        ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
-    }
-
-    /* Initializes and registers kBufSize bytes at kDevBuf */
-    static void initAndRegister()
-    {
-        ASSERT_NO_FATAL_FAILURE(init());
-        ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);
-    }
-
-    hipObj::DriverState    state_;
-    hipObj::DriverState   *savedState_ = nullptr;
-    EmptyNicEnumerator     enumerator_;
-    hipObj::NicEnumerator *savedEnumerator_ = nullptr;
-    hipObj::IbvFuncs       savedFuncs_      = {};
-    hipObj::HipOps         savedHipOps_;
-    bool                   savedIbvInitialized_ = false;
-};
+class ApiArgsTest : public hipObjTest::FakeDeviceTest {};
 
 // ---- hipObjGetErrorString ----------------------------------------
 
@@ -461,7 +103,7 @@ TEST_F(ApiArgsTest, EverythingButInitNeedsInit)
     EXPECT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, HIPOBJ_RDMA_OP_PUT, &token).opError,
               hipObjNotInitialized);
     EXPECT_EQ(token, nullptr);
-    EXPECT_EQ(g_log.sendRequest, 0);
+    EXPECT_EQ(fake().log.sendRequest, 0);
 
     /* Shutting down an uninitialized library is allowed */
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
@@ -497,7 +139,7 @@ TEST_F(ApiArgsTest, InitRejectsNegativeDeviceOtherThanMinusOne)
 
 TEST_F(ApiArgsTest, InitRejectsDeviceThatDoesNotExist)
 {
-    g_deviceCount = 2;
+    fake().deviceCount = 2;
     for (int device : {2, 3, std::numeric_limits<int>::max()}) {
         hipObjConfig_t config = makeConfig();
         config.gpuDevice      = device;
@@ -513,7 +155,7 @@ TEST_F(ApiArgsTest, InitRejectsDeviceThatDoesNotExist)
 
 TEST_F(ApiArgsTest, InitRejectsExplicitDeviceWithoutGpus)
 {
-    g_deviceCountErr      = hipErrorNoDevice;
+    fake().deviceCountErr = hipErrorNoDevice;
     hipObjConfig_t config = makeConfig();
     config.gpuDevice      = 0;
     EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue);
@@ -522,7 +164,7 @@ TEST_F(ApiArgsTest, InitRejectsExplicitDeviceWithoutGpus)
 
 TEST_F(ApiArgsTest, InitReportsDeviceCountFailure)
 {
-    g_deviceCountErr      = hipErrorInvalidValue;
+    fake().deviceCountErr = hipErrorInvalidValue;
     hipObjConfig_t config = makeConfig();
     config.gpuDevice      = 0;
 
@@ -561,14 +203,14 @@ TEST_P(RegisterArgsTest, RejectsNullPointer)
 {
     ASSERT_NO_FATAL_FAILURE(init());
     EXPECT_EQ(GetParam()(nullptr, kBufSize).opError, hipObjInvalidValue);
-    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(fake().log.registerMr, 0);
 }
 
 TEST_P(RegisterArgsTest, RejectsZeroSize)
 {
     ASSERT_NO_FATAL_FAILURE(init());
     EXPECT_EQ(GetParam()(kDevBuf, 0).opError, hipObjInvalidValue);
-    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(fake().log.registerMr, 0);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
 }
 
@@ -578,7 +220,7 @@ TEST_P(RegisterArgsTest, RejectsMoreThanMaxSize)
     for (size_t size : {kMaxMr + 1, std::numeric_limits<size_t>::max()}) {
         EXPECT_EQ(GetParam()(kDevBuf, size).opError, hipObjSizeTooLarge) << "size " << size;
     }
-    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(fake().log.registerMr, 0);
 
     EXPECT_EQ(GetParam()(kDevBuf, kMaxMr).opError, hipObjSuccess);
 }
@@ -589,7 +231,7 @@ TEST_P(RegisterArgsTest, RejectsBufferThatWrapsAddressSpace)
     void *top = reinterpret_cast<void *>(std::numeric_limits<uintptr_t>::max() - 15);
     EXPECT_EQ(GetParam()(top, 16).opError, hipObjInvalidValue);
     EXPECT_EQ(GetParam()(top, kMaxMr).opError, hipObjInvalidValue);
-    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(fake().log.registerMr, 0);
 
     EXPECT_EQ(GetParam()(top, 15).opError, hipObjSuccess);
 }
@@ -600,7 +242,7 @@ TEST_P(RegisterArgsTest, RejectsSecondRegistration)
     ASSERT_EQ(GetParam()(kDevBuf, kBufSize).opError, hipObjSuccess);
     EXPECT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjBufAlreadyRegistered);
     EXPECT_EQ(hipObjBufRegisterHost(kDevBuf, kBufSize).opError, hipObjBufAlreadyRegistered);
-    EXPECT_EQ(g_log.registerMr, 1);
+    EXPECT_EQ(fake().log.registerMr, 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(ApiArgs, RegisterArgsTest,
@@ -625,11 +267,11 @@ protected:
         ops.hipPointerGetAttributes = &fakePointerGetAttributes;
         ops.hipMemGetAddressRange   = &fakeMemGetAddressRange;
 
-        g_memoryType        = hipMemoryTypeDevice;
-        g_allocBase         = kAllocBase;
-        g_allocSize         = kAllocSize;
-        g_addressRangeErr   = hipSuccess;
-        g_addressRangeCalls = 0;
+        fake().memoryType        = hipMemoryTypeDevice;
+        fake().allocBase         = kAllocBase;
+        fake().allocSize         = kAllocSize;
+        fake().addressRangeErr   = hipSuccess;
+        fake().addressRangeCalls = 0;
     }
 
     static void *at(size_t offset)
@@ -646,7 +288,7 @@ TEST_F(DeviceRangeTest, AcceptsRangeInsideAllocation)
     EXPECT_EQ(hipObjBufRegister(at(16), kAllocSize - 16).opError, hipObjSuccess);
     EXPECT_EQ(hipObjBufDeregister(at(16)).opError, hipObjSuccess);
     EXPECT_EQ(hipObjBufRegister(at(kAllocSize - 1), 1).opError, hipObjSuccess);
-    EXPECT_EQ(g_log.registerMr, 3);
+    EXPECT_EQ(fake().log.registerMr, 3);
 }
 
 TEST_F(DeviceRangeTest, RejectsRangePastEndOfAllocation)
@@ -655,7 +297,7 @@ TEST_F(DeviceRangeTest, RejectsRangePastEndOfAllocation)
     EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize + 1).opError, hipObjInvalidValue);
     EXPECT_EQ(hipObjBufRegister(at(16), kAllocSize - 15).opError, hipObjInvalidValue);
     EXPECT_EQ(hipObjBufRegister(at(kAllocSize - 1), 2).opError, hipObjInvalidValue);
-    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(fake().log.registerMr, 0);
     EXPECT_EQ(hipObjBufDeregister(at(0)).opError, hipObjBufNotRegistered);
 }
 
@@ -665,32 +307,32 @@ TEST_F(DeviceRangeTest, RejectsPointerOutsideReportedAllocation)
     /* A runtime that reports an allocation that doesn't hold the pointer */
     EXPECT_EQ(hipObjBufRegister(reinterpret_cast<void *>(kAllocBase - 1), 1).opError, hipObjInvalidValue);
     EXPECT_EQ(hipObjBufRegister(at(kAllocSize), 1).opError, hipObjInvalidValue);
-    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(fake().log.registerMr, 0);
 }
 
 TEST_F(DeviceRangeTest, RejectsBufferWhoseAllocationIsNotFound)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    g_addressRangeErr = hipErrorNotFound;
+    fake().addressRangeErr = hipErrorNotFound;
     EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjInvalidValue);
 
     hipObj::hipOps().hipMemGetAddressRange = nullptr;
     EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjInvalidValue);
-    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(fake().log.registerMr, 0);
 }
 
 TEST_F(DeviceRangeTest, DoesNotCheckOtherMemory)
 {
     ASSERT_NO_FATAL_FAILURE(init());
     /* The NIC's registration checks that host memory is mapped */
-    g_memoryType = hipMemoryTypeHost;
+    fake().memoryType = hipMemoryTypeHost;
     EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize + 1).opError, hipObjSuccess);
-    EXPECT_EQ(g_addressRangeCalls, 0);
+    EXPECT_EQ(fake().addressRangeCalls, 0);
 
     /* hipObjBufRegisterHost() takes host memory, so it doesn't look */
-    g_memoryType = hipMemoryTypeDevice;
+    fake().memoryType = hipMemoryTypeDevice;
     EXPECT_EQ(hipObjBufRegisterHost(at(16), kAllocSize).opError, hipObjSuccess);
-    EXPECT_EQ(g_addressRangeCalls, 0);
+    EXPECT_EQ(fake().addressRangeCalls, 0);
 }
 
 // ---- hipObjBufDeregister -----------------------------------------
@@ -733,9 +375,9 @@ protected:
     {
         EXPECT_EQ(GetParam()(devPtr, size, offset, ops).opError, expected)
             << "size " << size << ", offset " << offset;
-        EXPECT_EQ(g_log.sendRequest, 0);
-        EXPECT_EQ(g_log.recvReply, 0);
-        EXPECT_EQ(g_log.memcpy, 0);
+        EXPECT_EQ(fake().log.sendRequest, 0);
+        EXPECT_EQ(fake().log.recvReply, 0);
+        EXPECT_EQ(fake().log.memcpy, 0);
     }
 };
 
@@ -810,15 +452,15 @@ TEST_P(TransferArgsTest, AcceptsRangeAtEndOfBuffer)
     hipObjOps_t ops = makeOps();
     EXPECT_EQ(GetParam()(kDevBuf, 1, kBufSize - 1, &ops).opError, hipObjSuccess);
     EXPECT_EQ(GetParam()(kDevBuf, kBufSize, 0, &ops).opError, hipObjSuccess);
-    EXPECT_EQ(g_log.sendRequest, 2);
-    EXPECT_EQ(g_log.recvReply, 2);
+    EXPECT_EQ(fake().log.sendRequest, 2);
+    EXPECT_EQ(fake().log.recvReply, 2);
 }
 
 TEST_P(TransferArgsTest, ChecksStagedBuffersBeforeCopying)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    void *staged       = reinterpret_cast<void *>(0x30000);
-    g_failRegisterAddr = staged;
+    void *staged             = reinterpret_cast<void *>(0x30000);
+    fake().fail.registerAddr = staged;
     ASSERT_EQ(hipObjBufRegister(staged, kBufSize).opError, hipObjSuccess);
 
     hipObjOps_t ops = makeOps();
@@ -826,7 +468,7 @@ TEST_P(TransferArgsTest, ChecksStagedBuffersBeforeCopying)
     expectRejected(staged, std::numeric_limits<size_t>::max(), 1, &ops, hipObjInvalidValue);
 
     EXPECT_EQ(GetParam()(staged, 1, kBufSize - 1, &ops).opError, hipObjSuccess);
-    EXPECT_EQ(g_log.memcpy, 1);
+    EXPECT_EQ(fake().log.memcpy, 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(ApiArgs, TransferArgsTest, ::testing::Values(&callGet, &callPut),
@@ -869,14 +511,14 @@ TEST_F(ApiArgsTest, SyncRejectsRangeOutsideDirectBuffer)
                   hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, 1, kBufSize - 1, direction).opError, hipObjSuccess);
     }
-    EXPECT_EQ(g_log.memcpy, 0);
+    EXPECT_EQ(fake().log.memcpy, 0);
 }
 
 TEST_F(ApiArgsTest, SyncRejectsRangeOutsideStagedBuffer)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    void *staged       = reinterpret_cast<void *>(0x30000);
-    g_failRegisterAddr = staged;
+    void *staged             = reinterpret_cast<void *>(0x30000);
+    fake().fail.registerAddr = staged;
     ASSERT_EQ(hipObjBufRegister(staged, kBufSize).opError, hipObjSuccess);
 
     for (int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
@@ -884,11 +526,11 @@ TEST_F(ApiArgsTest, SyncRejectsRangeOutsideStagedBuffer)
         EXPECT_EQ(hipObjBufSync(staged, std::numeric_limits<size_t>::max(), 1, direction).opError,
                   hipObjInvalidValue);
     }
-    EXPECT_EQ(g_log.memcpy, 0);
+    EXPECT_EQ(fake().log.memcpy, 0);
 
     EXPECT_EQ(hipObjBufSync(staged, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
     EXPECT_EQ(hipObjBufSync(staged, 1, kBufSize - 1, HIPOBJ_SYNC_TO_DEVICE).opError, hipObjSuccess);
-    EXPECT_EQ(g_log.memcpy, 2);
+    EXPECT_EQ(fake().log.memcpy, 2);
 }
 
 // ---- hipObjGetRdmaToken and hipObjPutRdmaToken -------------------

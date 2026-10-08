@@ -361,6 +361,45 @@ TEST_F(V2RegistryTest, UnknownConnIdIsNoOp)
     EXPECT_FALSE(hipObj::v2::registry().isPoisoned(9999));
 }
 
+/* The registry's own guards against out-of-order use */
+TEST_F(V2RegistryTest, RegistryRejectsOutOfOrderUse)
+{
+    auto &reg = hipObj::v2::registry();
+
+    /* Insertion needs a reserved slot */
+    EXPECT_EQ(reg.insert(hipObj::v2::ConnectionEntryV2{}), 0U);
+
+    /* Unknown ids */
+    EXPECT_FALSE(reg.claimDestroy(9999));
+    reg.commitDestroy(9999, true, true);
+    EXPECT_FALSE(reg.eraseDestroyed(9999));
+    EXPECT_FALSE(reg.withEntry(9999, [](hipObj::v2::ConnectionEntryV2 &) { FAIL() << "called"; }));
+
+    auto id = makeConn(&dh_);
+    ASSERT_NE(id, 0U);
+    std::vector<hipObj::v2::ConnId> ids;
+    reg.forEachId([&ids](hipObj::v2::ConnId each) { ids.push_back(each); });
+    EXPECT_EQ(ids, std::vector<hipObj::v2::ConnId>{id});
+
+    /* A commit without a claim, or an erase while the objects are live,
+     * does nothing */
+    reg.commitDestroy(id, true, true);
+    EXPECT_FALSE(reg.eraseDestroyed(id));
+    EXPECT_FALSE(reg.isPoisoned(id));
+    EXPECT_EQ(reg.size(), 1U);
+
+    /* Only one claimant */
+    EXPECT_TRUE(reg.claimDestroy(id));
+    EXPECT_FALSE(reg.claimDestroy(id));
+    EXPECT_FALSE(reg.eraseDestroyed(id));
+    EXPECT_EQ(g_fake.destroyQpCalls, 0);
+
+    /* Unreserving reservation 0, which means "none", does nothing */
+    const size_t reserved = reg.retired().reservedCount();
+    reg.retired().unreserve(0);
+    EXPECT_EQ(reg.retired().reservedCount(), reserved);
+}
+
 /* Double release destroys each object once. */
 TEST_F(V2RegistryTest, DoubleReleaseClaimsOnce)
 {
