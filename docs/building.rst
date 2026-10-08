@@ -57,6 +57,7 @@ Option                           Default        Description
 ``HIPOBJ_FETCH_CUOBJECT_CLIENT`` OFF            Fetch libcuobjclient 1.2.0.59
 ``HIPOBJ_FIND_CUOBJECT_SERVER``  OFF            Find libcuobjserver + probe
 ``HIPOBJ_WERROR``                OFF            Treat warnings as errors
+``HIPOBJ_USE_CODE_COVERAGE``     OFF            Build with code coverage
 ``ROCM_PATH``                    see below      Path to ROCm install
 ``ROCM_VERSION``                 detected       ROCm version
 ================================ ============== =============================
@@ -75,6 +76,32 @@ and pick the configuration at build time.
 code that CMake fetches. It's off by default so that a compiler
 hipObject hasn't been tested with can't break the build with a new
 warning. CI turns it on, and developers should too.
+
+``HIPOBJ_USE_CODE_COVERAGE`` builds hipObject with LLVM's
+source-based code coverage instrumentation. It needs Clang (or
+ROCm's ``amdclang``) as both the C and C++ compiler, and the
+``llvm-profdata`` and ``llvm-cov`` from the same LLVM version, which
+CMake looks for next to the compiler. Set ``HIPOBJ_LLVM_PROFDATA``
+and ``HIPOBJ_LLVM_COV`` if it doesn't find them. Run the tests, then
+build the ``hipobj-coverage`` target to report the coverage of the
+library's sources:
+
+.. code-block:: bash
+
+   cmake -B build -DCMAKE_BUILD_TYPE=Debug \
+     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+     -DHIPOBJ_USE_CODE_COVERAGE=ON
+   cmake --build build
+   (cd build && ctest)
+   cmake --build build --target hipobj-coverage
+
+The report goes in ``coverage/report.txt`` (a summary for each file)
+and ``coverage/lines.txt`` (the coverage of each line) in the build
+directory. Every instrumented program writes its profile to
+``coverage/profraw`` in the build directory, however it's run, and
+the profiles add up over runs, so delete ``coverage/profraw`` to start
+over. Since the programs write to the build directory, don't install
+or package a coverage build.
 
 ``ROCM_PATH`` and ``ROCM_VERSION`` can also be set in the
 environment. If ``ROCM_PATH`` isn't set but ``ROCM_VERSION`` is,

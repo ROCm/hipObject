@@ -12,6 +12,7 @@ include_guard(GLOBAL)
 
 include(CheckLinkerFlag)
 include(HIPOBJClangCompilerOptions)
+include(HIPOBJCoverage)
 include(HIPOBJGNUCompilerOptions)
 include(HIPOBJSanitizers)
 
@@ -24,8 +25,8 @@ check_linker_flag(CXX "-Wl,-z,noexecstack"
 option(HIPOBJ_WERROR
   "Treat compiler warnings as errors in hipObject targets" OFF)
 
-# Add the compiler-specific warning flags (and -Werror and sanitizer
-# flags, if enabled) to a target
+# Add the compiler-specific warning flags (and -Werror, sanitizer, and
+# code coverage flags, if enabled) to a target
 #
 # NOTE: The warning flags are only applied to C++ sources since many
 #       of them are invalid for C.
@@ -45,6 +46,10 @@ function(hipobj_set_compiler_flags target)
 
   if(HIPOBJ_USE_SANITIZERS)
     hipobj_add_sanitizers(${target})
+  endif()
+
+  if(HIPOBJ_USE_CODE_COVERAGE)
+    hipobj_add_coverage(${target})
   endif()
 endfunction()
 

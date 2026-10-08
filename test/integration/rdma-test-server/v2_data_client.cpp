@@ -98,8 +98,6 @@ struct ClientVerbs {
     ClientVerbs &operator=(ClientVerbs &&)      = delete;
 };
 
-uint32_t gCookie = 0;
-
 int
 connectTcp(const char *host, int port)
 {
@@ -209,8 +207,6 @@ headerValue(const std::string &resp, const std::string &name)
 int
 runTransfer(const char *host, int port, const char *op, const char *target, uint64_t size, uint32_t cookie)
 {
-    gCookie = cookie;
-
     /* ---- verbs setup (client side) ---- */
     ClientVerbs verbs;
     int         n = 0;
