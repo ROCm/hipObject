@@ -55,7 +55,7 @@ if(PROJECT_IS_TOP_LEVEL AND NOT HIPOBJ_IS_MULTI_CONFIG)
   endif()
   set_property(CACHE CMAKE_BUILD_TYPE
     PROPERTY STRINGS
-    "Debug" "Release" "RelWithDebInfo" "None")
+    "Debug" "Release" "RelWithDebInfo" "MinSizeRel" "None")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH
