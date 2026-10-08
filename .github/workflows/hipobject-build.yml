@@ -103,11 +103,14 @@ jobs:
             libssl-dev \
             rpm
 
+      # HIPOBJ_WERROR makes a new warning fail the build. It only
+      # covers hipObject's own targets, not the code FetchContent pulls in.
       - name: Configure
         run: |
           cmake -B build \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DBUILD_TESTING=ON \
+            -DHIPOBJ_WERROR=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON \
             -DHIPOBJECT_V2_API=${{ matrix.v2_api }} \

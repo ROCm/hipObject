@@ -56,6 +56,7 @@ Option                           Default        Description
 ``HIPOBJ_INTEGRATION_TESTS``     ON             Build RC test server
 ``HIPOBJ_FETCH_CUOBJECT_CLIENT`` OFF            Fetch libcuobjclient 1.2.0.59
 ``HIPOBJ_FIND_CUOBJECT_SERVER``  OFF            Find libcuobjserver + probe
+``HIPOBJ_WERROR``                OFF            Treat warnings as errors
 ``ROCM_PATH``                    see below      Path to ROCm install
 ``ROCM_VERSION``                 detected       ROCm version
 ================================ ============== =============================
@@ -68,6 +69,12 @@ Clang or GCC 12 and later. Use ``Debug`` when
 developing hipObject or running it under a sanitizer. Multi-config
 generators, such as Ninja Multi-Config, ignore ``CMAKE_BUILD_TYPE``
 and pick the configuration at build time.
+
+``HIPOBJ_WERROR`` adds ``-Werror`` to hipObject's own targets
+(the library, tests, examples, and tools), but not to third-party
+code that CMake fetches. It's off by default so that a compiler
+hipObject hasn't been tested with can't break the build with a new
+warning. CI turns it on, and developers should too.
 
 ``ROCM_PATH`` and ``ROCM_VERSION`` can also be set in the
 environment. If ``ROCM_PATH`` isn't set but ``ROCM_VERSION`` is,

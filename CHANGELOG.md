@@ -17,6 +17,8 @@
   `add_subdirectory()`. When it is, it leaves the build type and install
   prefix to the parent project instead of defaulting them to
   `RelWithDebInfo` and `ROCM_PATH`.
+- The `HIPOBJ_WERROR` CMake option makes the build treat compiler
+  warnings in hipObject's own code as errors. It defaults to `OFF`.
 
 ### Changed
 
