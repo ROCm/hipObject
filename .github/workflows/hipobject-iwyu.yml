@@ -1,0 +1,112 @@
+name: hipObject - IWYU
+
+# Builds with HIPOBJ_USE_IWYU to check that include-what-you-use still
+# runs. IWYU's suggestions are advisory: they're listed in the job summary
+# and a warning annotation, but they don't fail the job. It fails only
+# when IWYU itself fails, which means building with HIPOBJ_USE_IWYU is
+# broken.
+#
+# Don't make this a required check. Which suggestions IWYU makes depends
+# on its version, so a new image or IWYU package can change them.
+
+on:
+  # The same triggers and paths as the Build workflow, since anything that
+  # it compiles can break IWYU, plus this workflow's own file and scripts.
+  # The paths are a list with negations and not paths-ignore, so the last
+  # entries can add paths back (see hipobject-build.yml).
+  pull_request:
+    branches: [develop]
+    paths: &paths
+      - '**'
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!ansible/**'
+      - '!ci/**'
+      - '!cmake/HIPOBJDocumentation.cmake'
+      - '!docs/**'
+      - '!requirements.txt'
+      - '!.github/**'
+      - 'ci/iwyu/**'
+      - '.github/workflows/hipobject-iwyu.yml'
+  push:
+    branches: [develop]
+    paths: *paths
+  workflow_dispatch:
+
+# A newer commit on a pull request cancels the run for the older one.
+# Every other run (a push, a manual run) gets a group of its own: in a
+# shared group, a newer run replaces a pending one even without
+# cancel-in-progress, which would leave a commit untested.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
+jobs:
+  iwyu:
+    name: include-what-you-use (advisory)
+    runs-on: ubuntu-latest
+    container:
+      image: rocm/dev-ubuntu-24.04:10.0.0-full
+      options: --user root
+    env:
+      ROCM_PATH: /opt/rocm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Ninja keeps each command's output together, so IWYU's output for
+      # one file isn't interleaved with another's in the build log
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            cmake \
+            git \
+            iwyu \
+            libcurl4-openssl-dev \
+            libibverbs-dev \
+            libnuma-dev \
+            libssl-dev \
+            ninja-build
+
+      # CMake hides IWYU's failures (see ci/iwyu/iwyu-wrapper.sh), so it
+      # runs IWYU through a wrapper that records every run for the check
+      # step.
+      #
+      # The iwyu package installs clang, so the compilers are set to GCC
+      # rather than left to whichever c++ CMake finds first. GCC also
+      # checks that IWYU's clang copes with the GCC-only warning flags.
+      #
+      # HIPOBJ_WERROR is off: the Build workflow checks for warnings, and
+      # this job is only about IWYU.
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DBUILD_TESTING=ON \
+            -DHIPOBJ_BNXT=ON \
+            -DHIPOBJ_IONIC=ON \
+            -DHIPOBJ_USE_IWYU=ON \
+            -DHIPOBJ_IWYU_EXE="$PWD/ci/iwyu/iwyu-wrapper.sh"
+
+      - name: Build
+        run: |
+          mkdir build/iwyu-runs
+          HIPOBJ_IWYU_LOG_DIR="$PWD/build/iwyu-runs" \
+            cmake --build build -j"$(nproc)"
+
+      - name: Check IWYU
+        run: ci/iwyu/check-iwyu.sh build/iwyu-runs "$GITHUB_STEP_SUMMARY"

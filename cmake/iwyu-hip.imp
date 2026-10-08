@@ -1,0 +1,3 @@
+[
+  { "include": ["<hip/driver_types.h>", "private", "<hip/hip_runtime_api.h>", "public"] }
+]

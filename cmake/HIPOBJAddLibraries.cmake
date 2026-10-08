@@ -6,6 +6,7 @@ include_guard(GLOBAL)
 
 include(HIPOBJClangTidy)
 include(HIPOBJCompilerOptions)
+include(HIPOBJIWYU)
 
 # Add a library using hipObject build conventions
 #
@@ -60,4 +61,5 @@ function(hipobj_add_library)
   hipobj_set_compiler_flags(${arg_NAME})
   hipobj_set_linker_flags(${arg_NAME})
   hipobj_set_clang_tidy(${arg_NAME})
+  hipobj_set_iwyu(${arg_NAME})
 endfunction()

@@ -314,6 +314,35 @@ configuration files.
   already marks its headers `SYSTEM` and builds it with its warnings off.
 - **clang-tidy**: configure with `-DHIPOBJ_USE_CLANG_TIDY=ON` and build; it
   must report nothing. CI doesn't run clang-tidy.
+- **include-what-you-use (IWYU)**: configure with `-DHIPOBJ_USE_IWYU=ON` and
+  build; IWYU prints the `#include` lines it suggests adding or removing for
+  each file. Unlike the other checks, it doesn't have to report nothing, since
+  some of its suggestions are wrong. Make the suggestions that are right for
+  the files you touch, such as adding a header for a symbol the file uses but
+  only gets indirectly. Ignore the ones that are wrong, and leave the code as
+  it is. For example, IWYU asks for `<compare>` in files that compare
+  `std::chrono` time points (`steady_clock::now() < deadline`), because
+  libstdc++ implements those comparisons with `operator<=>`, but `<chrono>`
+  already includes `<compare>`, as the standard requires. Other wrong
+  suggestions IWYU makes here:
+  - Removing `ibv-core.h` from a header that names the verbs types only as
+    `struct ibv_pd *` and the like. Without a prior declaration, that
+    declares a new `struct` in the enclosing namespace (`hipObj::ibv_pd`,
+    not libibverbs' `::ibv_pd`), so keep the include.
+  - Removing `<cstdint>` from `src/hipobj.cpp` because the public header
+    includes `<stdint.h>`. C++ code includes `<cstdint>` (see
+    [C++ code](#c-code)).
+  - Adding `<memory>` "for allocator" where a file only uses containers.
+  - Removing a forward declaration, with no text, at a lambda's line.
+  - Naming a library's internal header rather than its public one. Fix these
+    with a mapping in a `cmake/iwyu-*.imp` file instead, as
+    [`cmake/iwyu-hip.imp`](cmake/iwyu-hip.imp) does for
+    `<hip/driver_types.h>`, which only compiles after
+    `<hip/hip_runtime_api.h>`.
+
+  CI ([hipobject-iwyu.yml](.github/workflows/hipobject-iwyu.yml)) runs IWYU
+  but only fails if IWYU itself stops working. It lists the suggestions in
+  the job summary without failing.
 - **Sanitizer-clean**: the tests must run without a report from
   AddressSanitizer, UndefinedBehaviorSanitizer, or ThreadSanitizer. Use one
   build directory per sanitizer, configured with `-DHIPOBJ_USE_SANITIZERS=ON`
