@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)][license]
 [![Build](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-build.yml?label=Build)][ci-build]
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FROCm%2FhipObject%2Fbadges%2Fcoverage.json)][ci-build]
 [![Docs](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-documentation-check.yml?label=Docs)][ci-docs]
 [![clang-format](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-format-check.yml?label=clang-format)][ci-clang-format]
 [![ShellCheck](https://img.shields.io/github/actions/workflow/status/ROCm/hipObject/hipobject-shellcheck.yml?label=ShellCheck)][ci-shellcheck]

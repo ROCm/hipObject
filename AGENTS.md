@@ -84,8 +84,10 @@ Notes:
   variants that add `-DHIPOBJECT_V2_API=OFF`, `-DBUILD_SHARED_LIBS=OFF`,
   `-DHIPOBJ_USE_SANITIZERS=ON` (AddressSanitizer), or
   `-DHIPOBJ_USE_CODE_COVERAGE=ON` (built with ROCm's amdclang, reported on the
-  run's summary page, and failed below the [coverage target](#tests)). It is
-  the only workflow that builds these variants.
+  run's summary page, and failed below the [coverage target](#tests); on
+  `develop`, a job then publishes the result to the `badges` branch for the
+  README's Coverage badge). It is the only workflow that builds these
+  variants.
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON` plus the dependencies
   already installed in [`.cursor/Dockerfile`](.cursor/Dockerfile); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
