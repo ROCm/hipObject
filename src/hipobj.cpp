@@ -6,13 +6,17 @@
 #include "hipobj.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -31,6 +35,7 @@
 #ifdef HIPOBJECT_V2_API
 #include "v2-registry.h"
 #include "v2-transport.h"
+#include "v2-wire.h"
 #endif
 
 namespace hipObj {
@@ -53,6 +58,52 @@ handleException()
     }
 }
 
+/* True when [offset, offset + size) lies inside a registration of regSize
+ * bytes. Compares without computing offset + size, which could wrap. */
+static bool
+rangeInRegistration(off_t offset, size_t size, size_t regSize)
+{
+    if (offset < 0 || std::cmp_greater(offset, regSize)) {
+        return false;
+    }
+    return size <= regSize - static_cast<size_t>(offset);
+}
+
+/* Checks the arguments to a call that registers [ptr, ptr + size) */
+static hipObjError_t
+checkRegistrationArgs(const void *ptr, size_t size)
+{
+    if (!ptr || size == 0) {
+        return {hipObjInvalidValue, 0};
+    }
+    if (size > MAX_MR_SIZE) {
+        return {hipObjSizeTooLarge, 0};
+    }
+    /* The end of the buffer, ptr + size, must not wrap */
+    if (size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr)) {
+        return {hipObjInvalidValue, 0};
+    }
+    return {hipObjSuccess, 0};
+}
+
+/* Checks the arguments to a call that uses [offset, offset + size) of the
+ * buffer registered at devPtr */
+static hipObjError_t
+checkBufferArgs(const void *devPtr, size_t size, off_t offset)
+{
+    if (!devPtr || size == 0 || offset < 0) {
+        return {hipObjInvalidValue, 0};
+    }
+    void *ptr = const_cast<void *>(devPtr);
+    if (!g_bufferMap->isRegistered(ptr)) {
+        return {hipObjBufNotRegistered, 0};
+    }
+    if (!rangeInRegistration(offset, size, g_bufferMap->lookupSize(ptr))) {
+        return {hipObjInvalidValue, 0};
+    }
+    return {hipObjSuccess, 0};
+}
+
 static bool
 buildRdmaToken(const void *devPtr, size_t size, off_t offset, RdmaToken &token)
 {
@@ -61,7 +112,7 @@ buildRdmaToken(const void *devPtr, size_t size, off_t offset, RdmaToken &token)
         return false;
     }
     size_t regSize = g_bufferMap->lookupSize(const_cast<void *>(devPtr));
-    if (offset < 0 || static_cast<size_t>(offset) + size > regSize) {
+    if (!rangeInRegistration(offset, size, regSize)) {
         return false;
     }
     token.transport = TRANSPORT_RC;
@@ -198,7 +249,7 @@ stageBuffer(void *devPtr, size_t size, off_t offset, bool toDevice)
         return {hipObjSuccess, 0};
     }
     size_t regSize = g_bufferMap->lookupSize(devPtr);
-    if (offset < 0 || static_cast<size_t>(offset) + size > regSize) {
+    if (!rangeInRegistration(offset, size, regSize)) {
         return {hipObjInvalidValue, 0};
     }
     void *host = static_cast<char *>(hostBuf) + offset;
@@ -229,6 +280,134 @@ runRdmaTransfer(const void *devPtr, size_t size, off_t offset, hipObjOps_t *ops,
     }
     return {hipObjSuccess, 0};
 }
+
+#ifdef HIPOBJECT_V2_API
+/* The most any S3 service allows: AWS once allowed 255-character bucket
+ * names, and object keys are at most 1024 bytes */
+constexpr size_t kMaxBucketLenV2 = 255;
+constexpr size_t kMaxKeyLenV2    = 1024;
+
+/* True for a non-empty string of at most maxLen bytes. Scans at most
+ * maxLen + 1 bytes. */
+static bool
+isValidNameV2(const char *name, size_t maxLen)
+{
+    if (!name) {
+        return false;
+    }
+    size_t len = strnlen(name, maxLen + 1);
+    return len > 0 && len <= maxLen;
+}
+
+/* The characters RFC 3986 leaves unreserved, which a canonical query
+ * never escapes */
+static bool
+isUnreserved(char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
+           c == '.' || c == '_' || c == '~';
+}
+
+/* The value of an uppercase hex digit, or -1 for anything else */
+static int
+upperHexValue(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+/* True when every character of a query key or value is unreserved or part
+ * of a %XX escape with uppercase hex digits for a byte that isn't
+ * unreserved */
+static bool
+isEncodedQueryComponent(std::string_view component)
+{
+    for (size_t i = 0; i < component.size(); ++i) {
+        const char c = component[i];
+        if (isUnreserved(c)) {
+            continue;
+        }
+        if (c != '%' || component.size() - i < 3) {
+            return false;
+        }
+        const int hi = upperHexValue(component[i + 1]);
+        const int lo = upperHexValue(component[i + 2]);
+        if (hi < 0 || lo < 0 || isUnreserved(static_cast<char>((hi << 4) | lo))) {
+            return false;
+        }
+        i += 2;
+    }
+    return true;
+}
+
+/* A canonical query string, in the SigV4 form the V2 target uses, is a
+ * list of key=value parameters separated by '&', with the '=' present
+ * even when the value is empty. Keys and values are percent-encoded with
+ * uppercase hex digits, escaping only the characters that aren't
+ * unreserved, and the parameters are sorted by key and then by value. The
+ * string goes into the request as is, so anything else, such as a space
+ * or a CR or LF, is rejected. NULL and "" mean no query. */
+static bool
+isValidCanonicalQueryV2(const char *query)
+{
+    if (!query || *query == '\0') {
+        return true;
+    }
+    const std::string_view all(query);
+    std::string_view       prevKey;
+    std::string_view       prevValue;
+    size_t                 start = 0;
+    for (;;) {
+        const size_t           end   = all.find('&', start);
+        const std::string_view param = all.substr(start, end == std::string_view::npos ? end : end - start);
+        const size_t           eq    = param.find('=');
+        if (eq == std::string_view::npos) {
+            return false;
+        }
+        const std::string_view key   = param.substr(0, eq);
+        const std::string_view value = param.substr(eq + 1);
+        if (key.empty() || !isEncodedQueryComponent(key) || !isEncodedQueryComponent(value)) {
+            return false;
+        }
+        if (start > 0 && (key < prevKey || (key == prevKey && value < prevValue))) {
+            return false;
+        }
+        if (end == std::string_view::npos) {
+            return true;
+        }
+        prevKey   = key;
+        prevValue = value;
+        start     = end + 1;
+    }
+}
+
+/* Checks the arguments to hipObjGetV2() and hipObjPutV2() */
+static hipObjError_t
+checkTransferArgsV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
+                    const char *query, const hipObjOpsV2_t *ops)
+{
+    if (!isValidNameV2(bucket, kMaxBucketLenV2) || !isValidNameV2(key, kMaxKeyLenV2) || !devPtr ||
+        size == 0 || !isValidCanonicalQueryV2(query)) {
+        return {hipObjInvalidValue, 0};
+    }
+    if (!ops || !ops->sendPrepare || !ops->sendReady || !ops->sendCancel) {
+        return {hipObjInvalidValue, 0};
+    }
+    if (size > v2::kMaxTransferSize) {
+        return {hipObjSizeTooLarge, 0};
+    }
+    /* The end of the object range, offset + size, must not wrap */
+    if (offset > std::numeric_limits<uint64_t>::max() - size) {
+        return {hipObjInvalidValue, 0};
+    }
+    return {hipObjSuccess, 0};
+}
+#endif /* HIPOBJECT_V2_API */
 
 } // namespace hipObj
 
@@ -281,7 +460,8 @@ hipObjGetErrorString(hipObjOpError_t err)
 hipObjError_t
 hipObjInit(hipObjConfig_t *config)
 try {
-    if (!config) {
+    // flags is reserved, and -1 is the only negative gpuDevice
+    if (!config || config->flags != 0 || config->gpuDevice < -1) {
         return {hipObjInvalidValue, 0};
     }
     hipObj::DriverState &state = hipObj::getState();
@@ -303,6 +483,21 @@ try {
                 return {hipObjRdmaError, static_cast<int>(err)};
             }
             gpuDevice = -1;
+        }
+    }
+    else {
+        // An explicit device has to exist, even when a NIC hint means its
+        // topology isn't needed
+        int        deviceCount = 0;
+        hipError_t err         = hipObj::hipOps().hipGetDeviceCount(&deviceCount);
+        if (err == hipErrorNoDevice) {
+            deviceCount = 0;
+        }
+        else if (err != hipSuccess) {
+            return {hipObjRdmaError, static_cast<int>(err)};
+        }
+        if (gpuDevice >= deviceCount) {
+            return {hipObjInvalidValue, 0};
         }
     }
     const char *devName  = nullptr;
@@ -399,8 +594,9 @@ try {
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
     }
-    if (size > hipObj::MAX_MR_SIZE) {
-        return {hipObjSizeTooLarge, 0};
+    hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
     if (hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
@@ -422,11 +618,9 @@ try {
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
     }
-    if (!hostPtr) {
-        return {hipObjInvalidValue, 0};
-    }
-    if (size > hipObj::MAX_MR_SIZE) {
-        return {hipObjSizeTooLarge, 0};
+    hipObjError_t err = hipObj::checkRegistrationArgs(hostPtr, size);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
     if (hipObj::g_bufferMap->isRegistered(hostPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
@@ -447,6 +641,9 @@ try {
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
+    }
+    if (!devPtr) {
+        return {hipObjInvalidValue, 0};
     }
     if (!hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufNotRegistered, 0};
@@ -469,13 +666,14 @@ try {
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
     }
-    if (!ops) {
+    if (!ops || !ops->sendRequest || !ops->recvReply) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap->lookupMr(devPtr)) {
-        return {hipObjBufNotRegistered, 0};
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, offset);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
-    hipObjError_t err = hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
+    err = hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
     if (err.opError != hipObjSuccess) {
         return err;
     }
@@ -493,15 +691,16 @@ try {
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
     }
-    if (!ops) {
+    if (!ops || !ops->sendRequest || !ops->recvReply) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap->lookupMr(const_cast<void *>(devPtr))) {
-        return {hipObjBufNotRegistered, 0};
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, offset);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
-    hipObjError_t serr = hipObj::stageBuffer(const_cast<void *>(devPtr), size, offset, false);
-    if (serr.opError != hipObjSuccess) {
-        return serr;
+    err = hipObj::stageBuffer(const_cast<void *>(devPtr), size, offset, false);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
     return hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
 }
@@ -516,11 +715,12 @@ try {
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
     }
-    if (!devPtr || (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE)) {
+    if (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap->isRegistered(devPtr)) {
-        return {hipObjBufNotRegistered, 0};
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, offset);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
     return hipObj::stageBuffer(devPtr, size, offset, direction == HIPOBJ_SYNC_TO_DEVICE);
 }
@@ -535,14 +735,12 @@ try {
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
     }
-    if (!devPtr || !outToken || size == 0) {
+    if (!outToken || (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET)) {
         return {hipObjInvalidValue, 0};
     }
-    if (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET) {
-        return {hipObjInvalidValue, 0};
-    }
-    if (!hipObj::g_bufferMap->lookupMr(const_cast<void *>(devPtr))) {
-        return {hipObjBufNotRegistered, 0};
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, 0);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
     hipObj::RdmaToken token{};
     if (!hipObj::buildRdmaToken(devPtr, size, 0, token)) {
@@ -618,18 +816,36 @@ catch (...) {
 }
 
 #ifdef HIPOBJECT_V2_API
-// Not yet implemented — callers fall back to the v1 RDMA path.
+// Not implemented yet. The arguments are checked, then callers are told
+// to fall back to the v1 RDMA path.
 hipObjError_t
-hipObjPutV2(const char *, const char *, const void *, uint64_t, uint64_t, const char *, hipObjOpsV2_t *,
-            void *)
-{
+hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
+            const char *query, hipObjOpsV2_t *ops, void *ctx)
+try {
+    (void)ctx;
+    hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
+    if (err.opError != hipObjSuccess) {
+        return err;
+    }
     return {hipObjNotSupported, 0};
+}
+catch (...) {
+    return hipObj::handleException();
 }
 
 hipObjError_t
-hipObjGetV2(const char *, const char *, void *, uint64_t, uint64_t, const char *, hipObjOpsV2_t *, void *)
-{
+hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
+            const char *query, hipObjOpsV2_t *ops, void *ctx)
+try {
+    (void)ctx;
+    hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
+    if (err.opError != hipObjSuccess) {
+        return err;
+    }
     return {hipObjNotSupported, 0};
+}
+catch (...) {
+    return hipObj::handleException();
 }
 #endif /* HIPOBJECT_V2_API */
 

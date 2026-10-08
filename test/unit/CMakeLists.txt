@@ -116,3 +116,6 @@ hipobj_add_test(test-gid-select
 
 hipobj_add_test(test-buffer-registration
   test-buffer-registration.cpp)
+
+hipobj_add_test(test-api-args
+  test-api-args.cpp)

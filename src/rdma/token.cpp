@@ -8,9 +8,9 @@
 #include "token.h"
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <sstream>
+#include <string_view>
 
 #include <netinet/in.h>
 
@@ -49,6 +49,95 @@ namespace {
         return code == 200 || code == 204 || code == 206;
     }
 
+    /* Decodes exactly kTokenHexLen hex characters. The transport byte must
+     * be one of the TransportType values. */
+    bool decodeTokenHex(std::string_view tokenHex, RdmaToken &out)
+    {
+        if (tokenHex.size() != kTokenHexLen)
+            return false;
+
+        uint8_t buf[kTokenBinaryLen];
+        for (size_t i = 0; i < kTokenBinaryLen; ++i) {
+            if (!decodeHexBytePair(tokenHex[i * 2], tokenHex[i * 2 + 1], buf[i]))
+                return false;
+        }
+        if (buf[0] != TRANSPORT_DC && buf[0] != TRANSPORT_RC)
+            return false;
+
+        size_t off    = 0;
+        out.transport = buf[off++];
+        std::memcpy(&out.qpNum, buf + off, 4);
+        off += 4;
+        std::memcpy(out.gid, buf + off, 16);
+        off += 16;
+        std::memcpy(&out.rkey, buf + off, 4);
+        off += 4;
+        std::memcpy(&out.remoteAddr, buf + off, 8);
+        off += 8;
+        std::memcpy(&out.length, buf + off, 8);
+        off += 8;
+        out.portNum = buf[off++];
+        std::memcpy(&out.lid, buf + off, 2);
+        return true;
+    }
+
+    /* Parses an x-amz-rdma-reply value in one of the forms docs/interop.rst
+     * lists: "ok", "err", a three-digit HTTP status, or "200:" followed by
+     * an 88-hex peer token. Trailing NUL, CR, and LF characters are
+     * ignored; anything else that doesn't match is rejected. The outputs are
+     * only written on success, and hasPeerToken says whether peerToken was. */
+    bool parseReply(const char *reply, size_t replyLen, int &httpCode, RdmaToken &peerToken,
+                    bool &hasPeerToken)
+    {
+        if (!reply)
+            return false;
+
+        size_t len = replyLen;
+        while (len > 0 && (reply[len - 1] == '\0' || reply[len - 1] == '\n' || reply[len - 1] == '\r')) {
+            --len;
+        }
+        const std::string_view value(reply, len);
+
+        if (value == "ok") {
+            httpCode     = 200;
+            hasPeerToken = false;
+            return true;
+        }
+        if (value == "err") {
+            httpCode     = -1;
+            hasPeerToken = false;
+            return true;
+        }
+
+        const std::string_view status = value.substr(0, value.find(':'));
+        if (status.size() != 3)
+            return false;
+        int code = 0;
+        for (char c : status) {
+            if (c < '0' || c > '9')
+                return false;
+            code = code * 10 + (c - '0');
+        }
+        if (code < 100 || code > 599)
+            return false;
+
+        if (status.size() == value.size()) {
+            httpCode     = code;
+            hasPeerToken = false;
+            return true;
+        }
+        /* Only a successful reply carries a peer token */
+        if (code != 200)
+            return false;
+        RdmaToken token;
+        if (!decodeTokenHex(value.substr(status.size() + 1), token))
+            return false;
+        httpCode     = code;
+        peerToken    = token;
+        hasPeerToken = true;
+        return true;
+    }
+
 } // namespace
 
 std::string
@@ -84,72 +173,16 @@ decodeRdmaTokenHex(const char *tokenHex, RdmaToken &out)
 {
     if (!tokenHex)
         return false;
-    size_t hexLen = std::strlen(tokenHex);
-    if (hexLen != kTokenHexLen)
-        return false;
-
-    uint8_t buf[kTokenBinaryLen];
-    for (size_t i = 0; i < kTokenBinaryLen; ++i) {
-        if (!decodeHexBytePair(tokenHex[i * 2], tokenHex[i * 2 + 1], buf[i]))
-            return false;
-    }
-
-    size_t off    = 0;
-    out.transport = buf[off++];
-    std::memcpy(&out.qpNum, buf + off, 4);
-    off += 4;
-    std::memcpy(out.gid, buf + off, 16);
-    off += 16;
-    std::memcpy(&out.rkey, buf + off, 4);
-    off += 4;
-    std::memcpy(&out.remoteAddr, buf + off, 8);
-    off += 8;
-    std::memcpy(&out.length, buf + off, 8);
-    off += 8;
-    out.portNum = buf[off++];
-    std::memcpy(&out.lid, buf + off, 2);
-    return true;
+    /* Bound the scan: anything longer than a token is rejected anyway */
+    return decodeTokenHex(std::string_view(tokenHex, strnlen(tokenHex, kTokenHexLen + 1)), out);
 }
 
 bool
 parseRdmaReplyHttpCode(const char *reply, size_t replyLen, int &httpCode)
 {
-    if (!reply || replyLen == 0)
-        return false;
-
-    size_t len = replyLen;
-    while (len > 0 && (reply[len - 1] == '\0' || reply[len - 1] == '\n' || reply[len - 1] == '\r')) {
-        --len;
-    }
-    if (len == 0)
-        return false;
-
-    if (len >= 2 && reply[0] == 'o' && reply[1] == 'k') {
-        httpCode = 200;
-        return true;
-    }
-    if (len >= 3 && reply[0] == 'e' && reply[1] == 'r' && reply[2] == 'r') {
-        httpCode = -1;
-        return true;
-    }
-
-    char tmp[512];
-    if (len >= sizeof(tmp))
-        return false;
-    std::memcpy(tmp, reply, len);
-    tmp[len] = '\0';
-
-    char *colon = std::strchr(tmp, ':');
-    if (colon) {
-        *colon = '\0';
-    }
-
-    char *end  = nullptr;
-    long  code = std::strtol(tmp, &end, 10);
-    if (end == tmp || *end != '\0')
-        return false;
-    httpCode = static_cast<int>(code);
-    return true;
+    RdmaToken peerToken;
+    bool      hasPeerToken = false;
+    return parseReply(reply, replyLen, httpCode, peerToken, hasPeerToken);
 }
 
 bool
@@ -213,43 +246,14 @@ formatRdmaHeaderValue(const char *tokenHex, const void *buf, size_t size)
 bool
 parsePeerTokenFromReply(const char *reply, size_t replyLen, RdmaToken &peerToken, int &httpCode)
 {
-    if (!reply || replyLen == 0)
+    int       code = 0;
+    RdmaToken token;
+    bool      hasPeerToken = false;
+    if (!parseReply(reply, replyLen, code, token, hasPeerToken) || !hasPeerToken)
         return false;
-
-    size_t len = replyLen;
-    while (len > 0 && (reply[len - 1] == '\0' || reply[len - 1] == '\n' || reply[len - 1] == '\r')) {
-        --len;
-    }
-    if (len == 0)
-        return false;
-
-    const char *colon = static_cast<const char *>(std::memchr(reply, ':', len));
-    if (!colon || colon == reply) {
-        return false;
-    }
-
-    size_t codeLen = static_cast<size_t>(colon - reply);
-    char   codeBuf[16];
-    if (codeLen >= sizeof(codeBuf))
-        return false;
-    std::memcpy(codeBuf, reply, codeLen);
-    codeBuf[codeLen] = '\0';
-
-    char *end  = nullptr;
-    long  code = std::strtol(codeBuf, &end, 10);
-    if (end == codeBuf || *end != '\0')
-        return false;
-    httpCode = static_cast<int>(code);
-
-    const char *tokenHex    = colon + 1;
-    size_t      tokenHexLen = len - codeLen - 1;
-    if (tokenHexLen != kTokenHexLen)
-        return false;
-
-    char tokenCopy[kTokenHexLen + 1];
-    std::memcpy(tokenCopy, tokenHex, tokenHexLen);
-    tokenCopy[tokenHexLen] = '\0';
-    return decodeRdmaTokenHex(tokenCopy, peerToken);
+    peerToken = token;
+    httpCode  = code;
+    return true;
 }
 
 std::string

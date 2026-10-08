@@ -262,12 +262,16 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  *        buffer via RDMA
  *
  * The server performs an RDMA WRITE to push data into
- * the registered buffer.
+ * the registered buffer, starting @p offset bytes into
+ * it. The bytes from offset to offset + size must lie
+ * inside the buffer. hipObject doesn't send an object
+ * offset; the request the callbacks make selects the
+ * part of the object to fetch.
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
  * @param size    Number of bytes to transfer
- * @param offset  Byte offset into the S3 object
+ * @param offset  Byte offset into the registered buffer
  * @param ops     S3 SDK callbacks
  * @param ctx     User context passed to callbacks
  * @return hipObjError_t
@@ -281,12 +285,16 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  *        via RDMA
  *
  * The server performs an RDMA READ to pull data from
- * the registered buffer.
+ * the registered buffer, starting @p offset bytes into
+ * it. The bytes from offset to offset + size must lie
+ * inside the buffer. hipObject doesn't send an object
+ * offset; the request the callbacks make selects where
+ * the data goes in the object.
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
  * @param size    Number of bytes to transfer
- * @param offset  Byte offset into the S3 object
+ * @param offset  Byte offset into the registered buffer
  * @param ops     S3 SDK callbacks
  * @param ctx     User context passed to callbacks
  * @return hipObjError_t

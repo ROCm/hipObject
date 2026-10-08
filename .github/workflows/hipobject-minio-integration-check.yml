@@ -144,13 +144,14 @@ jobs:
 
       - name: S3 control-plane PUT (no RDMA hardware — expect 501 fallback)
         run: |
-          # No RDMA NIC is present in the CI runner; MinIO should respond
-          # with x-amz-rdma-reply: 501, and the example exits 1 as expected.
+          # The CI runner has no GPU, so hipObjInit() rejects the example's
+          # GPU 0 as a device that doesn't exist, and the example exits 1.
+          # The other patterns cover a runner with a GPU but no RDMA NIC.
           put_output=$(./build/examples/put-object \
             "$TEST_SIZE" \
             --live "$MINIO_ENDPOINT" "$TEST_BUCKET" "$TEST_OBJECT" 2>&1 || true)
           echo "$put_output"
-          echo "$put_output" | grep -qE "would send RDMA token|NIC not found|S3 error|501" || \
+          echo "$put_output" | grep -qE "hipObjInit failed: Invalid value|would send RDMA token|NIC not found|S3 error|501" || \
             { echo "ERROR: unexpected output from put-object"; exit 1; }
 
       - name: Seed object via mc for GET test
@@ -160,11 +161,12 @@ jobs:
 
       - name: S3 control-plane GET (no RDMA hardware — expect 501 fallback)
         run: |
+          # Fails the same way as the PUT step
           get_output=$(./build/examples/get-object \
             "$TEST_SIZE" \
             --live "$MINIO_ENDPOINT" "$TEST_BUCKET" "$TEST_OBJECT" 2>&1 || true)
           echo "$get_output"
-          echo "$get_output" | grep -qE "would send RDMA token|NIC not found|S3 error|501" || \
+          echo "$get_output" | grep -qE "hipObjInit failed: Invalid value|would send RDMA token|NIC not found|S3 error|501" || \
             { echo "ERROR: unexpected output from get-object"; exit 1; }
 
       - name: Verify MinIO served requests (sanity check server logs)

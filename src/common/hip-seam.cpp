@@ -12,6 +12,7 @@ void
 hipOpsDefaults(HipOps &ops)
 {
     ops.hipGetDevice            = &hipGetDevice;
+    ops.hipGetDeviceCount       = &hipGetDeviceCount;
     ops.hipDeviceGetPCIBusId    = &hipDeviceGetPCIBusId;
     ops.hipHostMalloc           = &hipHostMalloc;
     ops.hipHostFree             = &hipHostFree;
