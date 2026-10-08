@@ -102,7 +102,10 @@ Notes:
     installed. The Cursor Cloud image doesn't install `rpm`, so the RPM test
     is skipped there.
   - `hipobj-thread-safety-tags` and `hipobj-thread-safety-tags-selftest` are
-    only registered when CMake finds Python 3.10 or later.
+    only registered when CMake finds Python 3.10 or later. CI's Build
+    workflow skips changes to only their Python files, and
+    [hipobject-pylint.yml](.github/workflows/hipobject-pylint.yml) runs them
+    with Python 3.10 instead.
 - The GPU-direct and RDMA data paths are tested against emulated hardware
   (rocm-ernic's ionic NIC and rocjitsu's GPU, under QEMU) by the
   `.github/workflows/hipobject-hardware-test-*.yml` workflows, and against real

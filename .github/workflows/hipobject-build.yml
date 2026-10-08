@@ -8,10 +8,13 @@ on:
   # and ci/ belong to their own lanes, the documentation inputs are only
   # used with HIPOBJ_BUILD_DOCS, which is OFF here (the Documentation
   # Check lane configures and builds those), and .github/ holds the other
-  # workflows and their configuration. This workflow's own file is added
-  # back last; a later pattern overrides an earlier one, which is why
-  # this is a paths list with negations and not paths-ignore, which
-  # can't add a path back.
+  # workflows and their configuration. The thread-safety checker's Python
+  # files are excluded too: ctest runs the checker and its self-test, but
+  # so does the pylint workflow, which runs for any change to them. A
+  # change to what the checker reads (hipobj.h, hipobj.cpp) still runs
+  # this build. This workflow's own file is added back last; a later
+  # pattern overrides an earlier one, which is why this is a paths list
+  # with negations and not paths-ignore, which can't add a path back.
   pull_request:
     branches: [develop]
     paths: &paths
@@ -23,6 +26,7 @@ on:
       - '!cmake/HIPOBJDocumentation.cmake'
       - '!docs/**'
       - '!requirements.txt'
+      - '!test/thread-safety/*.py'
       - '!.github/**'
       - '.github/workflows/hipobject-build.yml'
   push:

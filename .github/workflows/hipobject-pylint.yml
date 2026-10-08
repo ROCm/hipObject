@@ -39,10 +39,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # 3.10, the oldest version hipObject supports, runs the thread-safety
+      # checker below. The last version listed is the default, python.
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: |
+            3.10
+            3.12
 
       # Pinned because black changes its style every year, and a new
       # release would otherwise fail PRs that don't touch the code.
@@ -61,3 +65,12 @@ jobs:
           printf '%s\n' "${files[@]}"
           black --check --diff --target-version py310 "${files[@]}"
           pylint --py-version=3.10 "${files[@]}"
+
+      # The Build workflow runs these through ctest, but skips changes that
+      # touch only the checker's Python files, so they run here. -B keeps
+      # Python from writing __pycache__ into the checkout.
+      - name: Test the thread-safety checker
+        run: |
+          python3.10 -B test/thread-safety/test_check_thread_safety_tags.py
+          python3.10 -B test/thread-safety/check_thread_safety_tags.py \
+            include/hipobj.h src/hipobj.cpp
