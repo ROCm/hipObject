@@ -6,6 +6,7 @@ add_subdirectory(unit)
 add_subdirectory(exports)
 add_subdirectory(header)
 add_subdirectory(subproject)
+add_subdirectory(thread-safety)
 
 # The install and package tests need the install rules
 if(NOT CMAKE_SKIP_INSTALL_RULES)

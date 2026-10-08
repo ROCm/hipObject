@@ -97,6 +97,30 @@
   only call the HIP runtime API, so they don't need the kernel-language
   declarations, and a program that uses hipObject from host code only
   needs the same header.
+- The public API can be called from multiple threads. Functions that use
+  the library's state (`hipObjInit()`, `hipObjShutdown()`, buffer
+  registration, transfers, `hipObjBufSync()`, and `hipObjGetRdmaToken()`,
+  as well as `hipObjGetV2()` and `hipObjPutV2()`) are serialized: they
+  run one at a time across the process, and a call waits for the one in
+  progress to finish, so only one transfer runs at a time. They used to
+  have no synchronization, and calling them from more than one thread at
+  a time could corrupt the library's state or crash. The other functions
+  can be called from any thread at any time. Each function's
+  documentation now says which kind it is, and the new Thread Safety
+  section of the API reference explains both, along with what
+  applications have to do themselves.
+- A `hipObjOps_t` callback that calls a serialized function now gets
+  `hipObjInvalidValue`, since the callbacks run while the library holds
+  its lock. Such calls used to run.
+- `hipObjGetVersionString()` no longer writes to a shared buffer on every
+  call, which was a data race when two threads called it at once.
+- The library links CMake's `Threads::Threads`, which adds `-pthread`
+  where the C library needs it (glibc before 2.34, for example). The
+  static library's CMake package finds `Threads` for consumers, as it
+  does `hip` and `hsa-runtime64`.
+- Building the documentation (`HIPOBJ_BUILD_DOCS`) requires Breathe 4.36
+  or later, up from 4.35. The documentation build installs it from
+  `requirements.txt` into its own virtual environment.
 
 ### Removed
 

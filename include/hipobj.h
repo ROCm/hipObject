@@ -27,6 +27,7 @@ extern "C" {
  *
  * @section contents Contents
  * - @ref core
+ * - @ref threads
  * - @ref error
  * - @ref buffer
  * - @ref io
@@ -41,11 +42,67 @@ extern "C" {
  */
 
 /*!
+ * @defgroup threads Thread Safety
+ *
+ * hipObject can be called from any number of threads. Each function's
+ * documentation says which of these it is:
+ *
+ * - **Serialized** functions use the library's state: whether it's
+ *   initialized, the registered buffers, and the RDMA connection. They
+ *   run one at a time across the whole process. Each one takes a
+ *   library-wide lock and holds it until it returns, so a serialized
+ *   call waits for the one in progress, on any thread, to finish.
+ * - **Concurrent** functions don't use the library's state. They can be
+ *   called from any thread at any time, including while a serialized
+ *   function runs and from a callback. As with any C function, calls that
+ *   run at the same time mustn't share a buffer that one of them writes
+ *   to, or a token that one of them releases.
+ *
+ * Since serialized calls run one at a time, only one transfer is in
+ * progress at a time, and calling hipObject from more threads doesn't
+ * move data any faster. A call can also wait a long time for another
+ * thread's transfer, which holds the lock for as long as the transfer
+ * takes: while the application's callbacks send the S3 request and wait
+ * for the response, while hipObject copies the buffer through host
+ * memory (for a buffer that the NIC can't reach directly), and while it
+ * waits for the RDMA transfer to complete.
+ *
+ * hipObjShutdown() waits for the serialized call in progress to finish.
+ * Calls made after it, on any thread, that need an initialized library
+ * fail with hipObjNotInitialized until hipObjInit() is called again.
+ *
+ * **Callbacks.** hipObjGet() and hipObjPut() run the hipObjOps_t
+ * callbacks with the lock held. A callback can call concurrent
+ * functions. If it calls a serialized function, that function returns
+ * hipObjInvalidValue instead of waiting for a lock its own thread holds.
+ * A callback also mustn't wait for another thread that's calling a
+ * serialized function, since that thread is waiting for the lock:
+ * neither can continue, and hipObject can't detect it.
+ *
+ * **Transfers made of several calls.** The lock covers one call, not a
+ * sequence of calls. A transfer that the application drives itself,
+ * with hipObjGetRdmaToken(), its own S3 request, and hipObjBufSync(), is
+ * several calls, and other threads' calls can run between them.
+ * hipObject uses one RDMA connection for every transfer, so the
+ * application must make sure that such a transfer doesn't overlap any
+ * other transfer, on any thread.
+ *
+ * Serializing the library is how hipObject works now, not a promise: a
+ * later release may run transfers concurrently.
+ */
+
+/* The generated documentation leaves out the warning below, through the
+ * undefined HIPOBJ_HEADER_ONLY label, and shows the copy in docs/api.rst
+ * at the top of the section instead. Breathe would move this one to the
+ * end of the description. */
+/*!
  * @defgroup v2 Experimental V2 API (hipobj-rc-v2)
  *
+ * @if HIPOBJ_HEADER_ONLY
  * @warning The V2 API is experimental. It may change incompatibly or be
  * removed in any release. hipObjGetV2() and hipObjPutV2() are not
  * implemented yet and return hipObjNotSupported.
+ * @endif
  *
  * The V2 API runs each transfer over the hipobj-rc-v2 control protocol:
  * two round trips on a dedicated control endpoint, PREPARE and then READY,
@@ -111,6 +168,7 @@ typedef struct {
 /*!
  * @brief Return a human-readable string for an
  *        operation error code
+ * @concurrent
  * @ingroup error
  */
 HIPOBJ_API const char *hipObjGetErrorString(hipObjOpError_t err);
@@ -132,6 +190,10 @@ typedef void *hipObjHandle_t;
  * hipObject can inject RDMA tokens into S3 requests
  * and receive RDMA reply tags from the server.  This
  * mirrors cuObject's CUObjOps_t pattern.
+ *
+ * The callbacks run while hipObject holds its API lock,
+ * so they can't call serialized functions; see
+ * @ref threads.
  *
  * @ingroup core
  */
@@ -196,6 +258,7 @@ typedef struct {
  *
  * @param config  Pointer to configuration struct
  * @return hipObjError_t
+ * @serialized
  * @ingroup core
  */
 HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t *config);
@@ -207,6 +270,7 @@ HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t *config);
  * buffers are implicitly deregistered.
  *
  * @return hipObjError_t
+ * @serialized
  * @ingroup core
  */
 HIPOBJ_API hipObjError_t hipObjShutdown(void);
@@ -227,6 +291,7 @@ HIPOBJ_API hipObjError_t hipObjShutdown(void);
  * @param devPtr  Pointer returned by hipMalloc
  * @param size    Size of the buffer in bytes
  * @return hipObjError_t
+ * @serialized
  * @ingroup buffer
  */
 HIPOBJ_API hipObjError_t hipObjBufRegister(void *devPtr, size_t size);
@@ -242,6 +307,7 @@ HIPOBJ_API hipObjError_t hipObjBufRegister(void *devPtr, size_t size);
  * @param hostPtr  Pointer to CPU-accessible memory
  * @param size     Size of the buffer in bytes
  * @return hipObjError_t
+ * @serialized
  * @ingroup buffer
  */
 HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void *hostPtr, size_t size);
@@ -252,6 +318,7 @@ HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void *hostPtr, size_t size);
  * @param devPtr  Pointer previously passed to
  *                hipObjBufRegister or hipObjBufRegisterHost
  * @return hipObjError_t
+ * @serialized
  * @ingroup buffer
  */
 HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
@@ -278,6 +345,7 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * @param ops     S3 SDK callbacks
  * @param ctx     User context passed to callbacks
  * @return hipObjError_t
+ * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t size, off_t offset,
@@ -301,6 +369,7 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * @param ops     S3 SDK callbacks
  * @param ctx     User context passed to callbacks
  * @return hipObjError_t
+ * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset,
@@ -391,6 +460,9 @@ typedef struct {
  * control endpoint and fills @p out from the response. All callbacks are
  * required for v2 transfers. The v1 member is unused by the v2 entry
  * points and is kept for structural forward compatibility.
+ *
+ * The callbacks run while hipObject holds its API lock, so they can't
+ * call serialized functions; see @ref threads.
  */
 typedef struct hipObjOpsV2 {
     hipObjOps_t v1;
@@ -415,6 +487,8 @@ typedef struct hipObjOpsV2 {
  *
  * Mutually exclusive with hipObjInit: whichever is called first wins and
  * the other returns hipObjAlreadyInitialized until hipObjShutdown.
+ *
+ * @serialized
  */
 HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
 #endif
@@ -432,11 +506,17 @@ HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
  * never retried or fallen back. The session lifetime is the function
  * scope: on return the session is terminated and the connection
  * quiesced.
+ *
+ * @serialized
  */
 HIPOBJ_API hipObjError_t hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size,
                                      uint64_t offset, const char *query, hipObjOpsV2_t *ops, void *ctx);
 
-/*! @brief V2 PUT, same contract as hipObjGetV2 @ingroup v2 */
+/*!
+ * @brief V2 PUT, same contract as hipObjGetV2
+ * @serialized
+ * @ingroup v2
+ */
 HIPOBJ_API hipObjError_t hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size,
                                      uint64_t offset, const char *query, hipObjOpsV2_t *ops, void *ctx);
 
@@ -460,6 +540,7 @@ HIPOBJ_API hipObjError_t hipObjPutV2(const char *bucket, const char *key, const 
  * buffer; hipObjGet()/hipObjPut() and the V2 entry points do it
  * themselves.
  *
+ * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction);
@@ -470,12 +551,14 @@ HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, 
  * The caller must release @p *outToken with hipObjPutRdmaToken().
  * @p op is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved).
  *
+ * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjGetRdmaToken(const void *devPtr, size_t size, int op, char **outToken);
 
 /*!
  * @brief Release a token allocated by hipObjGetRdmaToken()
+ * @concurrent
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char *token);
@@ -486,6 +569,7 @@ HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char *token);
  * On success writes the HTTP-style reply code (200, 204, 206, 501)
  * to @p httpCode.
  *
+ * @concurrent
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char *reply, size_t replyLen, int *httpCode);
@@ -497,12 +581,14 @@ HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char *reply, size_t replyLen
  * carries an IPv4-mapped RoCEv2 suffix.  Returns hipObjSuccess with
  * an empty string when no address is encoded.
  *
+ * @concurrent
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjTokenClientNic(const char *token, char *nicIp, size_t nicIpLen);
 
 /*!
  * @brief Return the library version as a string
+ * @concurrent
  * @ingroup core
  */
 HIPOBJ_API const char *hipObjGetVersionString(void);

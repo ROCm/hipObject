@@ -37,16 +37,18 @@ rocm_install(
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hipobj
 )
 
-# The static library's target links hip::host and
-# hsa-runtime64::hsa-runtime64, so hipobj-config.cmake has to find them
-# before it loads the targets file. The shared library records these
-# dependencies itself and its target doesn't refer to them.
+# The static library's target links hip::host,
+# hsa-runtime64::hsa-runtime64, and Threads::Threads, so
+# hipobj-config.cmake has to find them before it loads the targets file.
+# The shared library records these dependencies itself and its target
+# doesn't refer to them.
 rocm_export_targets(
   TARGETS hipobj::hipobj
   NAMESPACE hipobj::
   STATIC_DEPENDS
     PACKAGE hip CONFIG
     PACKAGE hsa-runtime64 CONFIG
+    PACKAGE Threads
 )
 
 # Package dependencies

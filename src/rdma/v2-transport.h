@@ -10,7 +10,8 @@
  * topology) with a connection reference count; RcConnV2 owns one
  * qp/cq pair. v2 entry points route through these helpers so the
  * registry, capacity accounting, and the retired ring stay
- * consistent. Everything runs under v2::apiLock(). */
+ * consistent. Everything runs under the library-wide API lock (ApiGuard,
+ * in state.h). */
 
 #pragma once
 

@@ -8,9 +8,9 @@
  *
  * Ownership model: the shared DeviceHandle owns
  * ctx/pd plus topology; each RcConnV2 owns exactly one qp/cq pair.
- * The registry serializes every mutation behind the library-wide
- * apiLock, so entries, capacity accounting, and the retired ring are
- * consistent without additional locks.
+ * Every caller holds the library-wide API lock (ApiGuard, in state.h),
+ * so entries, capacity accounting, and the retired ring are consistent
+ * without additional locks.
  *
  * Entry lifecycle:
  *
@@ -35,7 +35,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -106,7 +105,7 @@ namespace v2 {
 
         /* Reserved -> Recorded with (qpn, psn) and a fresh expiry.
          * Precondition: reservationId is Reserved and owned by the caller
-         * (guaranteed by construction: all callers hold the apiLock and
+         * (guaranteed by construction: all callers hold the API lock and
          * the single-entry ownership invariant). */
         void record(uint64_t reservationId, uint32_t qpn, uint32_t psn);
 
@@ -130,12 +129,6 @@ namespace v2 {
         size_t            used_              = 0;
         size_t            reserved_          = 0;
     };
-
-    /* Library-wide lock. All v2 operations (and v1 entry points touching
-     * shared state) run under this non-recursive mutex. Callbacks must
-     * not re-enter the library; the contract is documented on the public
-     * ops structures. */
-    std::mutex &apiLock();
 
     class ConnectionRegistry {
     public:
@@ -184,7 +177,7 @@ namespace v2 {
             }
         }
 
-        /* Access to the shared retired ring (apiLock held by callers). */
+        /* Access to the shared retired ring (API lock held by callers). */
         RetiredRing &retired();
 
 #ifdef HIPOBJ_UNIT_TESTS

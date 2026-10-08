@@ -575,7 +575,7 @@ TEST_F(V2RegistryTest, ReservationOwnership)
     ASSERT_NE(ridA, 0U);
     /* Recording with an unrelated tuple through the same id is the
      * owner's action; unreserve by another party is prevented by the
-     * single apiLock contract (not directly testable). Verify record
+     * single API lock contract (not directly testable). Verify record
      * consumes exactly the owned slot: */
     ring.record(ridA, 9, 9);
     EXPECT_TRUE(ring.contains(9, 9));
