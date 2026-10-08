@@ -89,7 +89,8 @@ target_link_libraries(hipobj
   PRIVATE
     hip::host
     hsa-runtime64::hsa-runtime64
-    dl)
+    dl
+    Threads::Threads)
 
 # A shared library records its own dependency on the C++ runtime. The
 # static library doesn't, so a consumer linking with the C compiler

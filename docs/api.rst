@@ -12,6 +12,13 @@ Core Functionality
    :content-only:
    :members:
 
+Thread Safety
+-------------
+
+.. doxygengroup:: threads
+   :desc-only:
+   :no-title:
+
 Errors and Error Handling
 -------------------------
 
@@ -43,17 +50,16 @@ Experimental V2 API (hipobj-rc-v2)
    ``hipObjGetV2()`` and ``hipObjPutV2()`` are not
    implemented yet and return ``hipObjNotSupported``.
 
-The V2 API runs each transfer over the hipobj-rc-v2
-control protocol: two round trips on a dedicated control
-endpoint, PREPARE and then READY, whose response is
-FINAL. CANCEL abandons a prepared transfer.
+.. This warning is a copy of the one in hipobj.h, which
+   Doxygen leaves out (it's in an @if HIPOBJ_HEADER_ONLY
+   block) because Breathe would move it to the end of the
+   description. Keep the two in sync. The rest of the
+   description comes from the header, in two directives,
+   since :content-only: leaves it out.
 
-These declarations, and the ``hipObjNotSupported`` and
-``hipObjBusy`` error codes, only exist when
-``HIPOBJECT_V2_API`` is defined. The ``HIPOBJECT_V2_API``
-CMake option (``ON`` by default) builds the V2 API and
-defines the macro for everything that links
-``hipobj::hipobj``.
+.. doxygengroup:: v2
+   :desc-only:
+   :no-title:
 
 .. doxygengroup:: v2
    :content-only:

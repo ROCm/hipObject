@@ -39,6 +39,13 @@ MACRO_EXPANSION        = YES
 PREDEFINED             = HIPOBJ_API= \
                          __attribute__(x)=
 
+# Thread-safety tags. Every function in the public header has
+# one of them; test/thread-safety/check_thread_safety_tags.py
+# checks that, and that they match what the code does. The
+# "threads" group in hipobj.h explains both. ^^ is a newline.
+ALIASES                = "serialized=@par Thread safety^^Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See @ref threads." \
+                         "concurrent=@par Thread safety^^Concurrent: can be called from any thread at any time, including from a callback, as long as calls that run at the same time don't share a buffer that one of them writes to or a token that one of them releases. See @ref threads."
+
 # The hipobj-rc-v2 API surface in hipobj.h is gated on
 # HIPOBJECT_V2_API. CMake appends a "PREDEFINED +=" line
 # here when that build option is on (the default), so the

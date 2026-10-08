@@ -60,13 +60,20 @@ endfunction()
 # Parameters: Same as hipobj_add_executable()
 #
 # NOTE: Adds -UNDEBUG so test programs always have assert() available,
-#       even in release builds.
+#       even in release builds, and compiles and links them with
+#       -pthread.
 function(hipobj_add_test_executable)
   hipobj_add_executable(${ARGN})
 
   # Only NAME is needed here; hipobj_add_executable() validated the rest
   cmake_parse_arguments(PARSE_ARGV 0 arg "" "NAME" "")
   target_compile_options(${arg_NAME} PRIVATE -UNDEBUG)
+
+  # -pthread is critical for sanitizer builds through TheRock, as it is
+  # for hipFile's tests. It's needed even where Threads::Threads adds
+  # nothing, so it's added explicitly. NEVER REMOVE IT.
+  target_compile_options(${arg_NAME} PRIVATE -pthread)
+  target_link_options(${arg_NAME} PRIVATE -pthread)
 endfunction()
 
 # Install a program that links hipobj

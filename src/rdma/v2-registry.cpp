@@ -16,12 +16,6 @@
 namespace hipObj {
 namespace v2 {
 
-    std::mutex &apiLock()
-    {
-        static std::mutex lock;
-        return lock;
-    }
-
     // ---- RetiredRing ---------------------------------------------------
 
     size_t RetiredRing::collectExpired(uint64_t nowMs)
@@ -72,7 +66,7 @@ namespace v2 {
     void RetiredRing::record(uint64_t reservationId, uint32_t qpn, uint32_t psn)
     {
         /* Precondition: reservationId refers to a Reserved slot owned by
-         * the caller. All call sites hold the apiLock and the entry
+         * the caller. All call sites hold the API lock and the entry
          * invariant, so a miss is a programming error; treat it as a
          * no-op rather than corrupting the ring. */
         for (auto &slot : slots_) {

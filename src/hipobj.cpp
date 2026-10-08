@@ -5,6 +5,7 @@
 
 #include "hipobj.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -13,7 +14,6 @@
 #include <exception>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -64,6 +64,10 @@ handleException()
         return {hipObjInternalError, 0};
     }
 }
+
+/* Returned by a locked entry point when a callback calls it, where taking
+ * the API lock again would deadlock (see ApiGuard) */
+constexpr hipObjError_t kReentryError = {hipObjInvalidValue, 0};
 
 /* True when [offset, offset + size) lies inside a registration of regSize
  * bytes. Compares without computing offset + size, which could wrap. */
@@ -467,6 +471,10 @@ hipObjGetErrorString(hipObjOpError_t err)
 hipObjError_t
 hipObjInit(hipObjConfig_t *config)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     // flags is reserved, and -1 is the only negative gpuDevice
     if (!config || config->flags != 0 || config->gpuDevice < -1) {
         return {hipObjInvalidValue, 0};
@@ -556,12 +564,15 @@ catch (...) {
 hipObjError_t
 hipObjShutdown(void)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjSuccess, 0};
     }
 #ifdef HIPOBJECT_V2_API
-    std::lock_guard<std::mutex> apiGuard(hipObj::v2::apiLock());
     /* v2 first: release every connection (destroy retries included);
      * leftover poison must stop the teardown so the failure is
      * visible instead of violating the PD/context lifetime rule. */
@@ -597,6 +608,10 @@ catch (...) {
 hipObjError_t
 hipObjBufRegister(void *devPtr, size_t size)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
@@ -624,6 +639,10 @@ catch (...) {
 hipObjError_t
 hipObjBufRegisterHost(void *hostPtr, size_t size)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
@@ -648,6 +667,10 @@ catch (...) {
 hipObjError_t
 hipObjBufDeregister(void *devPtr)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
@@ -671,6 +694,10 @@ catch (...) {
 hipObjError_t
 hipObjGet(hipObjHandle_t handle, void *devPtr, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     (void)handle;
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
@@ -696,6 +723,10 @@ catch (...) {
 hipObjError_t
 hipObjPut(hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     (void)handle;
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
@@ -721,6 +752,10 @@ catch (...) {
 hipObjError_t
 hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
@@ -741,6 +776,10 @@ catch (...) {
 hipObjError_t
 hipObjGetRdmaToken(const void *devPtr, size_t size, int op, char **outToken)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
@@ -817,9 +856,15 @@ catch (...) {
 const char *
 hipObjGetVersionString(void)
 try {
-    static char buf[32];
-    snprintf(buf, sizeof(buf), "%d.%d.%d", HIPOBJ_VERSION_MAJOR, HIPOBJ_VERSION_MINOR, HIPOBJ_VERSION_PATCH);
-    return buf;
+    /* Formatted once: C++ runs a function-local static's initializer
+     * exactly once, even when several threads call this at the same time */
+    static const std::array<char, 32> version = [] {
+        std::array<char, 32> buf{};
+        std::snprintf(buf.data(), buf.size(), "%d.%d.%d", HIPOBJ_VERSION_MAJOR, HIPOBJ_VERSION_MINOR,
+                      HIPOBJ_VERSION_PATCH);
+        return buf;
+    }();
+    return version.data();
 }
 catch (...) {
     return "0.0.0";
@@ -832,6 +877,10 @@ hipObjError_t
 hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     (void)ctx;
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {
@@ -847,6 +896,10 @@ hipObjError_t
 hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
             const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
     (void)ctx;
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {

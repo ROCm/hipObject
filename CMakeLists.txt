@@ -89,6 +89,13 @@ find_package(hsa-runtime64 CONFIG REQUIRED)
 message(STATUS
   "hsa-runtime64 @ ${hsa-runtime64_DIR}")
 
+# The library uses std::mutex and std::this_thread. Where the C library
+# needs it (glibc before 2.34, for example), Threads::Threads adds
+# -pthread rather than just -lpthread. With glibc 2.34 and later, which
+# includes the pthread functions, it adds nothing.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 option(HIPOBJ_BNXT
   "Build BNXT (Thor-2) RDMA provider" ON)
 option(HIPOBJ_IONIC

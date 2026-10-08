@@ -15,6 +15,9 @@ that will survive that move:
 - **Ask before changing compile or link options, dependency handling, or any
   other non-trivial CMake.** A superproject build has requirements that a
   standalone build doesn't show, so a change that works here can break there.
+  For example, test programs are compiled and linked with `-pthread`
+  (`hipobj_add_test_executable()`), even where it looks redundant, because
+  TheRock's sanitizer builds need it. Never remove it.
 - **Don't assume hipObject is the top-level CMake project.** In new CMake code,
   use `PROJECT_SOURCE_DIR`/`PROJECT_BINARY_DIR` or
   `CMAKE_CURRENT_SOURCE_DIR`/`CMAKE_CURRENT_BINARY_DIR` rather than
@@ -98,6 +101,8 @@ Notes:
     to build and read their packages (`dpkg`, or `rpmbuild` and `rpm`) aren't
     installed. The Cursor Cloud image doesn't install `rpm`, so the RPM test
     is skipped there.
+  - `hipobj-thread-safety-tags` and `hipobj-thread-safety-tags-selftest` are
+    only registered when CMake finds Python 3.10 or later.
 - The GPU-direct and RDMA data paths are tested against emulated hardware
   (rocm-ernic's ionic NIC and rocjitsu's GPU, under QEMU) by the
   `.github/workflows/hipobject-hardware-test-*.yml` workflows, and against real
@@ -130,6 +135,32 @@ Notes:
   and are written to C++11.** The build compiles them as C++20 like everything
   else, so nothing catches newer constructs in them; keep them to C++11 by
   hand.
+
+## Thread safety
+
+The public header documents what callers can rely on, in its `threads` group
+(the Thread Safety section of the API reference); read it before you add or
+change a public function. These are the rules for keeping the code in line
+with it:
+
+- **Tag every public function `@serialized` or `@concurrent`** in its
+  documentation comment. The tags are Doxygen aliases defined in
+  [`docs/Doxyfile.in`](docs/Doxyfile.in).
+- **A serialized function takes the API lock on its first line**, by creating
+  a `hipObj::ApiGuard` ([`src/state.h`](src/state.h)), and returns
+  `kReentryError` when the guard's `owns()` is false. Any function that reads
+  or changes library state is serialized. A concurrent function doesn't take
+  the lock, and doesn't touch library state or write to anything else shared,
+  such as a `static` buffer. The `hipobj-thread-safety-tags` test
+  ([`test/thread-safety`](test/thread-safety)) fails when a function's tag
+  and its definition disagree.
+- **Don't call a public function from inside the library.** The lock isn't
+  recursive, so the call would get `kReentryError`.
+- **State that the API lock protects doesn't need a lock of its own.**
+- **Test concurrency changes with ThreadSanitizer** (see
+  [C and C++](#c-and-c)), and add a new serialized function to the tests in
+  [`test/unit/test-thread-safety.cpp`](test/unit/test-thread-safety.cpp),
+  including the list of functions that a callback can't call.
 
 ## C++ code
 
@@ -254,7 +285,9 @@ afford more.
 - **Keep the hot path lean.** Avoid heap allocations, copying the payload (the
   host-staged fallback is the only path that copies it), string formatting and
   logging on success, system calls that aren't needed, and HIP calls that
-  synchronize. Hold locks briefly, and don't add new ones without a reason.
+  synchronize. Don't add locks without a reason, and hold them briefly. The
+  API lock is the exception: it's held for a whole call by design (see
+  [Thread safety](#thread-safety)).
 - **Modern C++ is compatible with this.** `std::unique_ptr`, `std::span`, and
   `std::string_view` cost nothing over their C equivalents. Watch for the
   constructs that do cost something, such as copying a `std::shared_ptr`

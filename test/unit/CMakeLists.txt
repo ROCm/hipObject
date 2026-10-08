@@ -16,6 +16,10 @@ hipobj_add_library(
 
 target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 
+# Compiled only for the tests, so compiled with -pthread like them (see
+# hipobj_add_test_executable()). NEVER REMOVE IT.
+target_compile_options(hipobj_test_objects PRIVATE -pthread)
+
 if(HIPOBJECT_V2_API)
   # Server-side v2 sources for the session/handler unit tests.
   set(HIPOBJ_V2_SERVER_SOURCES
@@ -37,6 +41,8 @@ if(HIPOBJECT_V2_API)
       ${PROJECT_SOURCE_DIR}/src/common
       ${PROJECT_SOURCE_DIR}/src/rdma
       ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server)
+  # Like hipobj_test_objects. NEVER REMOVE IT.
+  target_compile_options(hipobj_v2_server_objects PRIVATE -pthread)
 endif()
 
 target_include_directories(hipobj_test_objects
@@ -52,7 +58,8 @@ target_link_libraries(hipobj_test_objects
   PUBLIC
     hip::host
     hsa-runtime64::hsa-runtime64
-    stdc++)
+    stdc++
+    Threads::Threads)
 
 if(HIPOBJ_BNXT)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_BNXT)
@@ -122,3 +129,8 @@ hipobj_add_test(test-buffer-registration
 
 hipobj_add_test(test-api-args
   test-api-args.cpp)
+
+hipobj_add_test(test-thread-safety
+  test-thread-safety.cpp)
+# A deadlock fails the test instead of hanging the run
+set_tests_properties(test-thread-safety PROPERTIES TIMEOUT 120)
