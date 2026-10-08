@@ -4,13 +4,16 @@ on:
   pull_request:
     branches: [develop]
     # The extensions match the lint action's "extensions" input below.
-    paths:
+    paths: &paths
       - '**.c'
       - '**.cpp'
       - '**.h'
       - '**.hpp'
       - '.clang-format'
       - '.github/workflows/hipobject-format-check.yml'
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.

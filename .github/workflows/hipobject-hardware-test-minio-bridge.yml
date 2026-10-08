@@ -27,9 +27,8 @@
 name: hipObject - Hardware Test - MinIO Bridge
 
 on:
-  # PR-gated and manual only. Nothing reaches develop without passing
-  # this on the PR, so a second post-merge run would buy nothing but
-  # queue time.
+  # Pull requests, pushes to develop, and manual runs. The push run
+  # catches a develop that no single PR was tested against.
   #
   # The paths are what this lane builds and runs, so a change it cannot
   # observe doesn't spend VM time. Unit, header and install tests,
@@ -40,7 +39,7 @@ on:
   # decides whether it counts.
   pull_request:
     branches: [develop]
-    paths:
+    paths: &paths
       - "CMakeLists.txt"
       - "cmake/HIPOBJAddExecutable.cmake"
       - "cmake/HIPOBJAddLibraries.cmake"
@@ -66,6 +65,9 @@ on:
       - "!src/rdma/bnxt/**"
       - "!test/integration/rdma-test-server/run-v2-e2e.sh"
       - "!**/*.md"
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.

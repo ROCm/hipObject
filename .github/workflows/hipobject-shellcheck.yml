@@ -3,9 +3,12 @@ name: hipObject - ShellCheck
 on:
   pull_request:
     branches: [develop]
-    paths:
+    paths: &paths
       - '**.sh'
       - '.github/workflows/hipobject-shellcheck.yml'
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 permissions:

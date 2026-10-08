@@ -3,9 +3,12 @@ name: hipObject - pylint
 on:
   pull_request:
     branches: [develop]
-    paths:
+    paths: &paths
       - '**.py'
       - '.github/workflows/hipobject-pylint.yml'
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 permissions:

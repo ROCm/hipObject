@@ -3,6 +3,8 @@ name: hipObject - Spell Check
 on:
   pull_request:
     branches: [develop]
+  push:
+    branches: [develop]
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.

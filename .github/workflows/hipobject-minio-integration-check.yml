@@ -8,7 +8,7 @@ on:
   # matches decides whether it counts.
   pull_request:
     branches: [develop]
-    paths:
+    paths: &paths
       - "CMakeLists.txt"
       - "cmake/**"
       - "examples/**"
@@ -19,6 +19,9 @@ on:
       - "!cmake/HIPOBJClangTidy.cmake"
       - "!cmake/HIPOBJDocumentation.cmake"
       - "!**/*.md"
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.
