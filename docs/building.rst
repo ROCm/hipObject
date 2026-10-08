@@ -148,6 +148,19 @@ zlib, and pugixml with ``HIPOBJ_MINIO_CLIENT``). The RPM
 package requires these libraries by soname (e.g.,
 ``libcurl.so.4()(64bit)``).
 
+Nightly Packages
+^^^^^^^^^^^^^^^^
+
+DEB packages of the ``develop`` branch are built every night
+that it changes, and published as the `nightly prerelease
+<https://github.com/ROCm/hipObject/releases/tag/nightly>`_,
+which each new build replaces. There are packages for Ubuntu
+22.04 and 24.04, each built for ROCm 10.1.0 and 7.14.1. They
+install into ``/opt/rocm/core-<major>.<minor>``, and their
+release is ``0.<commit time>.g<commit>~<Ubuntu release>``, so
+a newer nightly upgrades an older one. The nightly packages
+are for testing, and aren't a supported release.
+
 MinIO C++ RDMA Bridge
 ---------------------
 
