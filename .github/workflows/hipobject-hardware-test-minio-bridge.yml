@@ -132,7 +132,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/rocm-ernic
-          ref: develop
+          # Pinned to the last develop commit known to work here; later commits
+          # break these lanes. Bump intentionally, like the images.
+          ref: f7e3ecb18fca02fe9d1e6685952ee10d4a78efe3
           path: rocm-ernic
           persist-credentials: false
 
