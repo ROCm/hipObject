@@ -147,7 +147,7 @@ jobs:
           cmake --build build -j"$(nproc)"
 
       - name: Unit tests
-        run: cd build && ctest --output-on-failure
+        run: cd build && ctest --output-on-failure -j"$(nproc)"
 
       - name: S3 control-plane PUT (no RDMA hardware — expect 501 fallback)
         run: |

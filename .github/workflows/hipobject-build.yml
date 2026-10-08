@@ -147,7 +147,7 @@ jobs:
 
       - name: Test
         run: |
-          cd build && ctest --output-on-failure
+          cd build && ctest --output-on-failure -j"$(nproc)"
 
       # The report's summary goes on the run's summary page. The job fails
       # if the library's line coverage is below the target in AGENTS.md.
