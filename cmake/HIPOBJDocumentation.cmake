@@ -34,11 +34,11 @@ if(HIPOBJ_BUILD_DOCS)
 
   # ── Python venv with Sphinx + Breathe ────────────────
   set(HIPOBJ_DOCS_VENV
-    "${CMAKE_BINARY_DIR}/docs-venv")
+    "${PROJECT_BINARY_DIR}/docs-venv")
   set(HIPOBJ_DOCS_VENV_STAMP
     "${HIPOBJ_DOCS_VENV}/stamp")
   set(HIPOBJ_DOCS_REQUIREMENTS
-    "${CMAKE_SOURCE_DIR}/requirements.txt")
+    "${PROJECT_SOURCE_DIR}/requirements.txt")
 
   if(WIN32)
     set(HIPOBJ_VENV_BIN
@@ -72,12 +72,12 @@ if(HIPOBJ_BUILD_DOCS)
 
   # ── Paths ────────────────────────────────────────────
   set(HIPOBJ_DOC_PATH
-    "${CMAKE_BINARY_DIR}/docs")
+    "${PROJECT_BINARY_DIR}/docs")
   set(BREATHE_DOC_XML_DIR
     "${HIPOBJ_DOC_PATH}/xml")
 
   set(HIPOBJ_DOXYFILE_INPUT
-    "${CMAKE_SOURCE_DIR}/include")
+    "${PROJECT_SOURCE_DIR}/include")
 
   # ── Preprocessor defines for Doxygen ─────────────────
   # include/hipobj.h only declares the hipobj-rc-v2 API
@@ -92,16 +92,16 @@ if(HIPOBJ_BUILD_DOCS)
 
   # Configure Doxyfile (substitutes @VARIABLES@)
   configure_file(
-    ${CMAKE_SOURCE_DIR}/docs/Doxyfile.in
-    ${CMAKE_BINARY_DIR}/Doxyfile
+    ${PROJECT_SOURCE_DIR}/docs/Doxyfile.in
+    ${PROJECT_BINARY_DIR}/Doxyfile
     @ONLY
     ESCAPE_QUOTES
   )
 
   # Configure conf.py (substitutes Breathe XML path)
   configure_file(
-    ${CMAKE_SOURCE_DIR}/docs/conf.py
-    ${CMAKE_BINARY_DIR}/docs-sphinx/conf.py
+    ${PROJECT_SOURCE_DIR}/docs/conf.py
+    ${PROJECT_BINARY_DIR}/docs-sphinx/conf.py
     @ONLY
     ESCAPE_QUOTES
   )
@@ -109,8 +109,8 @@ if(HIPOBJ_BUILD_DOCS)
   # ── Doxygen target: source headers -> XML ────────────
   add_custom_target(doxygen
     COMMAND ${DOXYGEN_EXECUTABLE}
-      ${CMAKE_BINARY_DIR}/Doxyfile
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+      ${PROJECT_BINARY_DIR}/Doxyfile
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Generating Doxygen XML"
     VERBATIM
   )
@@ -124,11 +124,11 @@ if(HIPOBJ_BUILD_DOCS)
     COMMAND ${SPHINX_BUILD}
       -b html
       -d ${HIPOBJ_DOC_PATH}/doctrees
-      -c ${CMAKE_BINARY_DIR}/docs-sphinx
-      ${CMAKE_SOURCE_DIR}/docs
+      -c ${PROJECT_BINARY_DIR}/docs-sphinx
+      ${PROJECT_SOURCE_DIR}/docs
       ${HIPOBJ_DOC_PATH}/html
     DEPENDS doxygen docs-venv
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Building Sphinx HTML documentation"
     VERBATIM
   )

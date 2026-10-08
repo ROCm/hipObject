@@ -24,7 +24,7 @@ set_target_properties(hipobj_header_check PROPERTIES
   CXX_EXTENSIONS OFF)
 
 target_include_directories(hipobj_header_check
-  PRIVATE ${CMAKE_SOURCE_DIR}/include)
+  PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
 target_compile_definitions(hipobj_header_check
   PRIVATE HIPOBJECT_V2_API)

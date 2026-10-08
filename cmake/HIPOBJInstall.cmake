@@ -33,7 +33,7 @@ set_target_properties(hipobj PROPERTIES
 rocm_install(TARGETS hipobj)
 
 rocm_install(
-  FILES ${CMAKE_SOURCE_DIR}/include/hipobj.h
+  FILES ${PROJECT_SOURCE_DIR}/include/hipobj.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hipobj
 )
 
@@ -93,7 +93,7 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 # CPack license setup
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 # rocm-cmake sets CPACK_SET_DESTDIR on Linux, which conflicts with

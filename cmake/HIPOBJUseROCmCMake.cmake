@@ -100,7 +100,9 @@ hipobj_split_rocm_version("${ROCM_VERSION}"
 message(STATUS "Using ROCM_VERSION: ${ROCM_VERSION}")
 message(STATUS "ROCM_PATH set to: ${ROCM_PATH}")
 
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+# When hipObject is a subproject, the install prefix is the
+# superproject's to choose
+if(PROJECT_IS_TOP_LEVEL AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}"
     CACHE PATH
     "The path where hipObject should be installed"

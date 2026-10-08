@@ -43,7 +43,7 @@ set(HIPOBJ_INSTALL_TEST_SETTINGS
 file(CONFIGURE
   OUTPUT ${HIPOBJ_INSTALL_TEST_SETTINGS}
   CONTENT [[
-set(BUILD_DIR "@CMAKE_BINARY_DIR@")
+set(BUILD_DIR "@PROJECT_BINARY_DIR@")
 set(TEST_DIR "@CMAKE_CURRENT_BINARY_DIR@/install-test")
 set(CONSUMER_SOURCE_DIR "@CMAKE_CURRENT_SOURCE_DIR@/consumer")
 set(GENERATOR "@CMAKE_GENERATOR@")
@@ -93,19 +93,21 @@ endfunction()
 
 set(HIPOBJ_PACKAGE_TEST_DEPENDENCIES
   ${CMAKE_CURRENT_BINARY_DIR}/package-test-dependencies.cmake)
-# A deferred call's arguments are evaluated when it runs, in the
+# A deferred call's arguments are evaluated when it runs, in hipObject's
 # top-level directory, so use EVAL to pass the file name's value now
 cmake_language(EVAL CODE "
-  cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]]
+  cmake_language(DEFER DIRECTORY [[${PROJECT_SOURCE_DIR}]]
     CALL hipobj_write_package_test_dependencies
       [[${HIPOBJ_PACKAGE_TEST_DEPENDENCIES}]])")
 
+# CPack always writes its configuration to the top of the build tree,
+# even when hipObject is a subproject
 set(HIPOBJ_PACKAGE_TEST_SETTINGS
   ${CMAKE_CURRENT_BINARY_DIR}/package-test-settings.cmake)
 file(CONFIGURE
   OUTPUT ${HIPOBJ_PACKAGE_TEST_SETTINGS}
   CONTENT [[
-set(BUILD_DIR "@CMAKE_BINARY_DIR@")
+set(BUILD_DIR "@PROJECT_BINARY_DIR@")
 set(DEPENDENCIES "@HIPOBJ_PACKAGE_TEST_DEPENDENCIES@")
 set(TEST_DIR "@CMAKE_CURRENT_BINARY_DIR@/package-test")
 set(CPACK_CONFIG "@CMAKE_BINARY_DIR@/CPackConfig.cmake")

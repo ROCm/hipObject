@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.21)
 include(FetchContent)
 
 list(APPEND CMAKE_PREFIX_PATH
-  ${CMAKE_SOURCE_DIR}/cmake/minio-deps)
+  ${PROJECT_SOURCE_DIR}/cmake/minio-deps)
 
 # minio-cpp and the dependencies we fetch for it aren't installed, so
 # build them static. This is a normal variable, so it only applies to
@@ -18,7 +18,7 @@ list(APPEND CMAKE_PREFIX_PATH
 set(BUILD_SHARED_LIBS OFF)
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
-include(${CMAKE_SOURCE_DIR}/cmake/HIPOBJMinioCppDeps.cmake)
+include(${PROJECT_SOURCE_DIR}/cmake/HIPOBJMinioCppDeps.cmake)
 include(HIPOBJSystemIncludes)
 
 set(MINIO_CPP_ENABLE_RDMA OFF CACHE BOOL "" FORCE)
@@ -65,7 +65,7 @@ target_include_directories(hipobj_minio
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
-    ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/include)
 
 target_link_libraries(hipobj_minio
   PUBLIC

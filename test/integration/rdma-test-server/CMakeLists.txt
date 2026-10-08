@@ -6,20 +6,20 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   main.cpp
   http_server.cpp
   rdma_server.cpp
-  ${CMAKE_SOURCE_DIR}/src/common/ibv-wrapper.cpp
-  ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp
-  ${CMAKE_SOURCE_DIR}/src/rdma/transport.cpp
-  ${CMAKE_SOURCE_DIR}/src/common/hip-seam.cpp
-  ${CMAKE_SOURCE_DIR}/src/common/rdma-topology.cpp
-  ${CMAKE_SOURCE_DIR}/src/common/rdma-numa-wrapper.cpp)
+  ${PROJECT_SOURCE_DIR}/src/common/ibv-wrapper.cpp
+  ${PROJECT_SOURCE_DIR}/src/rdma/token.cpp
+  ${PROJECT_SOURCE_DIR}/src/rdma/transport.cpp
+  ${PROJECT_SOURCE_DIR}/src/common/hip-seam.cpp
+  ${PROJECT_SOURCE_DIR}/src/common/rdma-topology.cpp
+  ${PROJECT_SOURCE_DIR}/src/common/rdma-numa-wrapper.cpp)
 
 if(HIPOBJ_BNXT)
   list(APPEND HIPOBJ_TEST_SERVER_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/rdma/bnxt/bnxt-backend.cpp)
+    ${PROJECT_SOURCE_DIR}/src/rdma/bnxt/bnxt-backend.cpp)
 endif()
 if(HIPOBJ_IONIC)
   list(APPEND HIPOBJ_TEST_SERVER_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/rdma/ionic/ionic-backend.cpp)
+    ${PROJECT_SOURCE_DIR}/src/rdma/ionic/ionic-backend.cpp)
 endif()
 if(HIPOBJECT_V2_API)
   list(APPEND HIPOBJ_TEST_SERVER_SOURCES
@@ -29,11 +29,11 @@ if(HIPOBJECT_V2_API)
     v2_sigv4.cpp
     v2_backend.cpp
     v2_handlers.cpp
-    ${CMAKE_SOURCE_DIR}/src/rdma/v2-clock.cpp
-    ${CMAKE_SOURCE_DIR}/src/rdma/v2-random.cpp
-    ${CMAKE_SOURCE_DIR}/src/rdma/v2-registry.cpp
-    ${CMAKE_SOURCE_DIR}/src/rdma/v2-transport.cpp
-    ${CMAKE_SOURCE_DIR}/src/rdma/v2-wire.cpp)
+    ${PROJECT_SOURCE_DIR}/src/rdma/v2-clock.cpp
+    ${PROJECT_SOURCE_DIR}/src/rdma/v2-random.cpp
+    ${PROJECT_SOURCE_DIR}/src/rdma/v2-registry.cpp
+    ${PROJECT_SOURCE_DIR}/src/rdma/v2-transport.cpp
+    ${PROJECT_SOURCE_DIR}/src/rdma/v2-wire.cpp)
 endif()
 
 hipobj_add_test_executable(
@@ -41,12 +41,12 @@ hipobj_add_test_executable(
   SRCS ${HIPOBJ_TEST_SERVER_SOURCES})
 
 target_include_directories(hipobj-rdma-test-server PRIVATE
-  ${CMAKE_SOURCE_DIR}/include
-  ${CMAKE_SOURCE_DIR}/shared
-  ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_SOURCE_DIR}/src/common
-  ${CMAKE_SOURCE_DIR}/src/rdma
-  ${CMAKE_SOURCE_DIR}/src/s3
+  ${PROJECT_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/shared
+  ${PROJECT_SOURCE_DIR}/src
+  ${PROJECT_SOURCE_DIR}/src/common
+  ${PROJECT_SOURCE_DIR}/src/rdma
+  ${PROJECT_SOURCE_DIR}/src/s3
   ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(hipobj-rdma-test-server PRIVATE
@@ -81,19 +81,19 @@ if(HIPOBJECT_V2_API)
     SRCS
       v2_client_harness.cpp
       v2_sigv4.cpp
-      ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
+      ${PROJECT_SOURCE_DIR}/src/rdma/token.cpp)
   target_include_directories(v2-client-harness PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/common)
+    ${PROJECT_SOURCE_DIR}/src/common)
 
   hipobj_add_test_executable(
     NAME v2-data-client
     SRCS
       v2_data_client.cpp
       v2_sigv4.cpp
-      ${CMAKE_SOURCE_DIR}/src/rdma/token.cpp)
+      ${PROJECT_SOURCE_DIR}/src/rdma/token.cpp)
   target_include_directories(v2-data-client PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/src/common)
+    ${PROJECT_SOURCE_DIR}/src/common)
   target_link_libraries(v2-data-client PRIVATE OpenSSL::Crypto)
 
   find_library(IBVERBS_LIB ibverbs)

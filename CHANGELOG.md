@@ -13,6 +13,10 @@
 - The `ROCM_VERSION` CMake and environment variable sets the ROCm
   version, which selects the package dependencies and the default
   `ROCM_PATH`. It defaults to the version of the ROCm in `ROCM_PATH`.
+- hipObject can be built as part of another CMake project with
+  `add_subdirectory()`. When it is, it leaves the build type and install
+  prefix to the parent project instead of defaulting them to
+  `RelWithDebInfo` and `ROCM_PATH`.
 
 ### Changed
 

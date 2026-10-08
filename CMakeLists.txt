@@ -44,10 +44,11 @@ endif()
 # multi-config. Multi-config generators (Ninja Multi-Config, Xcode,
 # etc.) pick the configuration at build time and don't use
 # CMAKE_BUILD_TYPE. For single-config generators, project() creates an
-# empty cache entry, so FORCE is needed to replace it.
+# empty cache entry, so FORCE is needed to replace it. When hipObject is
+# a subproject, the build type is the superproject's to choose.
 get_property(HIPOBJ_IS_MULTI_CONFIG GLOBAL
   PROPERTY GENERATOR_IS_MULTI_CONFIG)
-if(NOT HIPOBJ_IS_MULTI_CONFIG)
+if(PROJECT_IS_TOP_LEVEL AND NOT HIPOBJ_IS_MULTI_CONFIG)
   if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
       "Build type" FORCE)
@@ -58,7 +59,7 @@ if(NOT HIPOBJ_IS_MULTI_CONFIG)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH
-  ${CMAKE_SOURCE_DIR}/cmake)
+  ${PROJECT_SOURCE_DIR}/cmake)
 
 if(NOT HIPOBJ_DOCS_ONLY)
 
