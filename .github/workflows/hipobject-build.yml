@@ -180,8 +180,9 @@ jobs:
                 printf "::error::Bad line coverage in the report: %s\n", lines
                 exit 1
               }
-              color = lines + 0 >= 90 ? "brightgreen" : \
-                lines + 0 >= min ? "yellowgreen" : "red"
+              # Coverage below the target fails the job, so the badge is
+              # never published with it and keeps the last passing value.
+              color = lines + 0 >= 90 ? "brightgreen" : "yellowgreen"
               printf "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"%s%%\",\"color\":\"%s\"}\n", \
                 lines, color > badge
               close(badge)
