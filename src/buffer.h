@@ -26,6 +26,12 @@ struct HostBufDeleter {
 
 using HostBufPtr = std::unique_ptr<void, HostBufDeleter>;
 
+/* False when ptr is device memory and [ptr, ptr + size) doesn't fit inside
+ * the HIP allocation that holds ptr, or when that allocation can't be
+ * found. Memory the HIP runtime doesn't report as device memory passes:
+ * registering it with the NIC checks that it's mapped. */
+bool isValidDeviceRange(void *ptr, size_t size);
+
 class BufferMap {
 public:
     static constexpr size_t kMaxEntries = 256;

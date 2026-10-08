@@ -38,6 +38,7 @@ using HipEventRecordFn          = hipError_t (*)(hipEvent_t, hipStream_t);
 using HipEventQueryFn           = hipError_t (*)(hipEvent_t);
 using HipEventDestroyFn         = hipError_t (*)(hipEvent_t);
 using HipPointerGetAttributesFn = hipError_t (*)(hipPointerAttribute_t *, const void *);
+using HipMemGetAddressRangeFn   = hipError_t (*)(hipDeviceptr_t *, size_t *, hipDeviceptr_t);
 
 struct HipOps {
     HipGetDeviceFn            hipGetDevice            = nullptr;
@@ -54,6 +55,7 @@ struct HipOps {
     HipEventQueryFn           hipEventQuery           = nullptr;
     HipEventDestroyFn         hipEventDestroy         = nullptr;
     HipPointerGetAttributesFn hipPointerGetAttributes = nullptr;
+    HipMemGetAddressRangeFn   hipMemGetAddressRange   = nullptr;
 };
 
 /* Populates a table with the real HIP entry points. Called once for the

@@ -220,6 +220,9 @@ HIPOBJ_API hipObjError_t hipObjShutdown(void);
  *
  * Exports the GPU buffer via dmabuf and registers it
  * with the RDMA NIC.  Maximum 4 GiB per registration.
+ * The buffer must lie within a single HIP allocation:
+ * returns hipObjInvalidValue if it runs past the end
+ * of the allocation that holds devPtr.
  *
  * @param devPtr  Pointer returned by hipMalloc
  * @param size    Size of the buffer in bytes
