@@ -39,7 +39,6 @@
 #include <utility>
 #include <vector>
 
-#include "ibv-core.h"
 #include "ibv-ptr.h"
 #include "replace-by-move.h"
 

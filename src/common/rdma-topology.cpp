@@ -13,11 +13,12 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
 #include "hipobj-warnings.h"

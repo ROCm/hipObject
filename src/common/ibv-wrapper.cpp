@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include "hipobj-warnings.h"
+#include "ibv-core.h"
 #include "ibv-ptr.h"
 
 namespace hipObj {

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -19,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include "buffer.h"
 #include "control.h"

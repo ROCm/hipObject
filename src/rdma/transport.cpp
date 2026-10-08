@@ -9,6 +9,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <thread>
 #include <utility>
 

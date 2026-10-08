@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 
 #include "buffer.h"
 #include "hip-seam.h"

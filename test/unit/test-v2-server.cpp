@@ -20,6 +20,7 @@
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "v2-clock.h"
+#include "v2-registry.h"
 #include "v2_request.h"
 #include "v2_session.h"
 

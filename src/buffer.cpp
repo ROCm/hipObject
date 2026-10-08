@@ -9,10 +9,11 @@
 #include <cstdlib>
 #include <utility>
 
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
 #include "hipobj-private.h"
+#include "ibv-core.h"
 #include "ibv-wrapper.h"
 
 namespace hipObj {

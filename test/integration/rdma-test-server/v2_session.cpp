@@ -6,6 +6,8 @@
 
 #include "v2_session.h"
 
+#include <chrono>
+#include <memory>
 #include <utility>
 
 #include "v2-clock.h"

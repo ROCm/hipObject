@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 
 #include "../../../src/common/ibv-core.h"
+#include "../../../src/common/ibv-ptr.h"
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-registry.h"

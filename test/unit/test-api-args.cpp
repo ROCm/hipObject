@@ -8,15 +8,16 @@
  * libibverbs, the HIP runtime, NIC enumeration, and the driver state.
  */
 
-#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 #include <sys/types.h>
 
 #include "hip-seam.h"
