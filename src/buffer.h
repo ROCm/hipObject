@@ -11,9 +11,11 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <utility>
 
 #include "ibv-core.h"
 #include "ibv-ptr.h"
+#include "replace-by-move.h"
 
 namespace hipObj {
 
@@ -57,14 +59,26 @@ public:
 
 private:
     /* hostBuf is declared before mr so the MR is deregistered before
-     * the staging buffer it covers is freed. */
-    struct BufEntry {
+     * the staging buffer it covers is freed. Move assignment destroys
+     * the target first, so it releases them in that order too. */
+    struct BufEntry final {
         HostBufPtr hostBuf    = nullptr; /* non-null only on the bounce path */
         IbvMrPtr   mr         = nullptr;
         size_t     size       = 0;
         bool       isDmabuf   = false;
         uint64_t   remoteAddr = 0;
         size_t     refCount   = 0; /* pinned by live v2 connections */
+
+        BufEntry()                            = default;
+        ~BufEntry()                           = default;
+        BufEntry(const BufEntry &)            = delete;
+        BufEntry &operator=(const BufEntry &) = delete;
+        BufEntry(BufEntry &&) noexcept        = default;
+        BufEntry &operator=(BufEntry &&other) noexcept
+        {
+            replaceByMove(*this, std::move(other));
+            return *this;
+        }
     };
 
     std::map<uintptr_t, BufEntry> entries_;

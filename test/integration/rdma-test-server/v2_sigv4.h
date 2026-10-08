@@ -28,7 +28,14 @@ namespace v2 {
 
     class SigV4Verifier {
     public:
+        SigV4Verifier()          = default;
         virtual ~SigV4Verifier() = default;
+
+        /* Copying through a base reference would copy only the base part */
+        SigV4Verifier(const SigV4Verifier &)            = delete;
+        SigV4Verifier &operator=(const SigV4Verifier &) = delete;
+        SigV4Verifier(SigV4Verifier &&)                 = delete;
+        SigV4Verifier &operator=(SigV4Verifier &&)      = delete;
 
         /* Verifies the Authorization header in rawHeaderBlock against
          * method/uri (the request target) and body. Returns the parsed

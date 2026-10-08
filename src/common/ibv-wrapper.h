@@ -45,6 +45,14 @@ struct IbvFuncs {
 class IBVWrapper {
 public:
     IBVWrapper();
+    ~IBVWrapper() = default;
+
+    /* There is one instance, the global ibv. A moved-from wrapper would
+     * keep its function table without keeping libibverbs loaded. */
+    IBVWrapper(const IBVWrapper &)            = delete;
+    IBVWrapper &operator=(const IBVWrapper &) = delete;
+    IBVWrapper(IBVWrapper &&)                 = delete;
+    IBVWrapper &operator=(IBVWrapper &&)      = delete;
 
     bool is_initialized = false;
 

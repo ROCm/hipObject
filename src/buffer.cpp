@@ -93,7 +93,11 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr mr(ibv.reg_mr(pd, devPtr, size, access));
     if (mr) {
-        entries_[key] = BufEntry{.mr = std::move(mr), .size = size, .isDmabuf = true, .remoteAddr = key};
+        BufEntry &entry  = entries_[key];
+        entry.mr         = std::move(mr);
+        entry.size       = size;
+        entry.isDmabuf   = true;
+        entry.remoteAddr = key;
         return 0;
     }
 
@@ -124,13 +128,13 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (!mr) {
         return -1;
     }
+    BufEntry &entry = entries_[key];
     /* Read the address before hostBuf is moved into the entry */
-    auto remoteAddr = reinterpret_cast<uint64_t>(hostBuf.get());
-    entries_[key]   = BufEntry{.hostBuf    = std::move(hostBuf),
-                               .mr         = std::move(mr),
-                               .size       = size,
-                               .isDmabuf   = false,
-                               .remoteAddr = remoteAddr};
+    entry.remoteAddr = reinterpret_cast<uint64_t>(hostBuf.get());
+    entry.hostBuf    = std::move(hostBuf);
+    entry.mr         = std::move(mr);
+    entry.size       = size;
+    entry.isDmabuf   = false;
     return 0;
 }
 
@@ -146,10 +150,11 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
     if (!mr) {
         return -1;
     }
-    entries_[key] = BufEntry{.mr         = std::move(mr),
-                             .size       = size,
-                             .isDmabuf   = false,
-                             .remoteAddr = reinterpret_cast<uint64_t>(hostPtr)};
+    BufEntry &entry  = entries_[key];
+    entry.mr         = std::move(mr);
+    entry.size       = size;
+    entry.isDmabuf   = false;
+    entry.remoteAddr = reinterpret_cast<uint64_t>(hostPtr);
     return 0;
 }
 uint64_t

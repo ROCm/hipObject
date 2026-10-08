@@ -17,7 +17,14 @@ namespace v2 {
 
     class RandomSource {
     public:
+        RandomSource()          = default;
         virtual ~RandomSource() = default;
+
+        /* Copying through a base reference would copy only the base part */
+        RandomSource(const RandomSource &)            = delete;
+        RandomSource &operator=(const RandomSource &) = delete;
+        RandomSource(RandomSource &&)                 = delete;
+        RandomSource &operator=(RandomSource &&)      = delete;
 
         /* Draws 32 random bits. Returns false only when the underlying
          * entropy source failed; callers treat that as an internal error

@@ -41,18 +41,30 @@
 
 #include "ibv-core.h"
 #include "ibv-ptr.h"
+#include "replace-by-move.h"
 
 namespace hipObj {
 
 struct DeviceHandle;
 
 /* Owns one qp/cq pair. qp is declared last so it is destroyed before
- * the cq it uses. Move-assignment replaces cq first, so only move into
- * a connection that is empty. */
-struct RcConnV2 {
+ * the cq it uses. Move assignment destroys the target first, so it
+ * releases them in that order too. */
+struct RcConnV2 final {
     IbvCqPtr cq;
     IbvQpPtr qp;
     uint32_t qpNum = 0;
+
+    RcConnV2()                            = default;
+    ~RcConnV2()                           = default;
+    RcConnV2(const RcConnV2 &)            = delete;
+    RcConnV2 &operator=(const RcConnV2 &) = delete;
+    RcConnV2(RcConnV2 &&) noexcept        = default;
+    RcConnV2 &operator=(RcConnV2 &&other) noexcept
+    {
+        replaceByMove(*this, std::move(other));
+        return *this;
+    }
 };
 
 namespace v2 {

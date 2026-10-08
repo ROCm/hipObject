@@ -120,6 +120,11 @@ public:
         hipObj::ibv.funcsForTest() = saved_;
     }
 
+    IbvFakeInstall(const IbvFakeInstall &)            = delete;
+    IbvFakeInstall &operator=(const IbvFakeInstall &) = delete;
+    IbvFakeInstall(IbvFakeInstall &&)                 = delete;
+    IbvFakeInstall &operator=(IbvFakeInstall &&)      = delete;
+
 private:
     hipObj::IbvFuncs saved_;
 };

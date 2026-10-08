@@ -111,6 +111,9 @@ endif()
 hipobj_add_test(test-seams
   test-seams.cpp)
 
+hipobj_add_test(test-replace-by-move
+  test-replace-by-move.cpp)
+
 hipobj_add_test(test-gid-select
   test-gid-select.cpp)
 

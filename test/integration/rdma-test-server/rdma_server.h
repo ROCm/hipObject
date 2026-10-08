@@ -20,6 +20,8 @@ public:
 
     RdmaTestServer(const RdmaTestServer &)            = delete;
     RdmaTestServer &operator=(const RdmaTestServer &) = delete;
+    RdmaTestServer(RdmaTestServer &&)                 = delete;
+    RdmaTestServer &operator=(RdmaTestServer &&)      = delete;
 
     bool isReady() const;
 

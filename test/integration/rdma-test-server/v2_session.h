@@ -42,6 +42,7 @@
 #include "ibv-core.h"
 #include "ibv-ptr.h"
 #include "malloc_ptr.h"
+#include "replace-by-move.h"
 #include "v2-registry.h"
 
 namespace hipObj {
@@ -60,7 +61,7 @@ namespace v2 {
         Reaping,
     };
 
-    struct V2Session {
+    struct V2Session final {
         std::string id; /* 32 hex */
         SessState   state = SessState::Prepared;
         std::string op;
@@ -105,11 +106,24 @@ namespace v2 {
         IbvMrPtr  stagingMr;
         /* Transport objects owned by the session. Declared after the
          * staging members so the QP is destroyed before the MR that a
-         * posted work request may still reference. Member destruction
-         * ignores failures, so ControlHandlers relinquishes whatever
-         * survives its final reap instead of relying on this. */
+         * posted work request may still reference. Move assignment
+         * destroys the target first, so it releases them in that order
+         * too. Member destruction ignores failures, so ControlHandlers
+         * relinquishes whatever survives its final reap instead of
+         * relying on this. */
         RcConnV2      conn;
         DeviceHandle *device = nullptr; /* shared, not owned */
+
+        V2Session()                             = default;
+        ~V2Session()                            = default;
+        V2Session(const V2Session &)            = delete;
+        V2Session &operator=(const V2Session &) = delete;
+        V2Session(V2Session &&) noexcept        = default;
+        V2Session &operator=(V2Session &&other) noexcept
+        {
+            replaceByMove(*this, std::move(other));
+            return *this;
+        }
     };
 
     class SessionTable {

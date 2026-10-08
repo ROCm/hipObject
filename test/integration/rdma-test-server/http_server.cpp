@@ -146,6 +146,9 @@ HttpServer::HttpServer(int port)
 HttpServer::~HttpServer()
 {
     stop();
+    if (listen_fd_ >= 0) {
+        close(listen_fd_);
+    }
 }
 
 void

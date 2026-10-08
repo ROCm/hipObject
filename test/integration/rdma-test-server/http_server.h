@@ -42,6 +42,12 @@ public:
     explicit HttpServer(int port);
     ~HttpServer();
 
+    /* The accept loop and its workers hold this */
+    HttpServer(const HttpServer &)            = delete;
+    HttpServer &operator=(const HttpServer &) = delete;
+    HttpServer(HttpServer &&)                 = delete;
+    HttpServer &operator=(HttpServer &&)      = delete;
+
     void setHandler(HttpHandler handler);
 
     /* v1 single-shot accept loop (unchanged behavior). */

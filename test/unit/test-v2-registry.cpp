@@ -44,6 +44,7 @@ struct FakeIbv {
     int                                deallocPdCalls = 0;
     std::vector<std::vector<uint32_t>> qpAttrRqPsn;
     std::vector<std::vector<uint32_t>> qpAttrSqPsn;
+    std::vector<const void *>          destroyed; /* qps and cqs, in destroy order */
 
     void reset()
     {
@@ -86,6 +87,7 @@ fakeDestroyCq(struct ibv_cq *cq)
         errno = EBUSY;
         return 1;
     }
+    g_fake.destroyed.push_back(cq);
     delete reinterpret_cast<FakeCq *>(cq);
     return 0;
 }
@@ -114,6 +116,7 @@ fakeDestroyQp(struct ibv_qp *qp)
         errno = EBUSY;
         return 1;
     }
+    g_fake.destroyed.push_back(qp);
     delete qp;
     return 0;
 }
@@ -174,6 +177,11 @@ public:
     {
         hipObj::ibv.funcsForTest() = saved_;
     }
+
+    IbvFakeInstall(const IbvFakeInstall &)            = delete;
+    IbvFakeInstall &operator=(const IbvFakeInstall &) = delete;
+    IbvFakeInstall(IbvFakeInstall &&)                 = delete;
+    IbvFakeInstall &operator=(IbvFakeInstall &&)      = delete;
 
 private:
     hipObj::IbvFuncs saved_;
@@ -288,6 +296,29 @@ TEST_F(V2RegistryTest, ConnectionOnlyTeardown)
     EXPECT_EQ(g_fake.destroyCqCalls, 1);
     EXPECT_EQ(g_fake.deallocPdCalls, 0);
     EXPECT_EQ(hipObj::v2::registry().size(), 0U);
+}
+
+/* Move assignment over a live connection destroys its qp before the cq
+ * the qp uses, as the destructor does, and takes over the source's
+ * pair without destroying it. */
+TEST_F(V2RegistryTest, MoveAssignDestroysQpBeforeCq)
+{
+    hipObj::RcConnV2 target;
+    hipObj::RcConnV2 source;
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, target), 0);
+    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, source), 0);
+    const void    *oldQp    = target.qp.get();
+    const void    *oldCq    = target.cq.get();
+    struct ibv_qp *newQp    = source.qp.get();
+    struct ibv_cq *newCq    = source.cq.get();
+    uint32_t       newQpNum = source.qpNum;
+
+    target = std::move(source);
+
+    EXPECT_EQ(g_fake.destroyed, (std::vector<const void *>{oldQp, oldCq}));
+    EXPECT_EQ(target.qp.get(), newQp);
+    EXPECT_EQ(target.cq.get(), newCq);
+    EXPECT_EQ(target.qpNum, newQpNum);
 }
 
 /* destroy_qp failure poisons the entry. */
