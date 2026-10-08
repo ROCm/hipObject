@@ -17,8 +17,8 @@ own it:
     }
 
 A concurrent function's definition mustn't use ApiGuard at all. Comments
-and string literals don't count for either check. The "threads" group in
-hipobj.h explains what the tags mean.
+and literals, including raw string literals, don't count for either
+check. The "threads" group in hipobj.h explains what the tags mean.
 
 Usage: check_thread_safety_tags.py <hipobj.h> <hipobj.cpp>
 
@@ -34,11 +34,25 @@ from pathlib import Path
 
 TAGS = ("serialized", "concurrent")
 
-# A comment, or a string or character literal. Literals are matched so
-# that a comment marker inside one isn't taken for a comment.
-COMMENT_OR_LITERAL = re.compile(
-    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'",
-    re.DOTALL,
+# The tokens that can hide quotes or comment markers: a comment, a number,
+# or a string or character literal, including a raw string, which can span
+# lines. Matching them all in one left-to-right pass means a comment marker
+# inside a literal isn't taken for a comment, a quote inside a comment isn't
+# taken for a literal, and a digit separator in a number (1'000) isn't taken
+# for the start of a character literal. An encoding prefix (u8, u, U, L) is
+# only a prefix when it doesn't end a longer identifier. A raw string's
+# delimiter is up to 16 characters, any but a space, a parenthesis, a
+# backslash, or the control whitespace characters, so it can contain ".
+TOKEN = re.compile(
+    r"""
+      (?P<comment> //[^\n]* | /\*.*?\*/ )
+    | (?P<number> (?<![\w.]) \.?\d (?: [eEpP][+-] | '?[\w.] )* )
+    | (?P<raw> (?<!\w) (?:u8|[uUL])?
+               R"(?P<delim>[^\x20()\\\t\v\f\r\n]{0,16})\( .*? \)(?P=delim)" )
+    | (?P<string> (?:(?<!\w)(?:u8|[uUL]))? " (?:\\.|[^"\\\n])* " )
+    | (?P<char> (?:(?<!\w)(?:u8|[uUL]))? ' (?:\\.|[^'\\\n])* ' )
+    """,
+    re.DOTALL | re.VERBOSE,
 )
 
 # A public function's declaration in the header, which starts a line
@@ -120,20 +134,19 @@ def drop_disabled_code(text: str) -> str:
 
 
 def blank_comments_and_literals(text: str) -> str:
-    """Replace each comment, and what's between the quotes of each string
-    and character literal, with spaces, keeping the newlines.
+    """Replace each comment and literal with spaces, keeping the newlines.
 
-    What's left is code, so text in a comment or a literal can't look
-    like a use of ApiGuard.
+    What's left is code, so text in a comment or a literal can't look like
+    a use of ApiGuard or the start of a definition, and the line numbers
+    don't change.
     """
 
     def blank(match: re.Match[str]) -> str:
-        token = match.group(0)
-        if token.startswith("/"):
-            return re.sub(r"[^\n]", " ", token)
-        return token[0] + " " * (len(token) - 2) + token[-1]
+        if match.group("number") is not None:
+            return match.group(0)
+        return re.sub(r"[^\n]", " ", match.group(0))
 
-    return COMMENT_OR_LITERAL.sub(blank, text)
+    return TOKEN.sub(blank, text)
 
 
 def find_declarations(header: str) -> list[Declaration]:
@@ -155,7 +168,9 @@ def find_declarations(header: str) -> list[Declaration]:
 def find_definitions(source: str) -> dict[str, Definition]:
     """Find the public functions in the source, and how each one uses
     the API lock"""
-    source = blank_comments_and_literals(drop_disabled_code(source))
+    # Comments and literals go first, as in the compiler, so that a
+    # directive inside one is ignored
+    source = drop_disabled_code(blank_comments_and_literals(source))
     matches = list(DEFINITION.finditer(source))
     definitions = {}
     for i, match in enumerate(matches):
