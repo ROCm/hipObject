@@ -53,8 +53,14 @@ jobs:
       # release. The build jobs add "~<Ubuntu release>", as ROCm's own
       # packages do, which keeps the file names apart.
       #
-      # A scheduled run skips the build when the "nightly" tag is already
-      # on this commit, since the packages would be the same.
+      # A scheduled run skips the build when the "nightly" release is
+      # already complete on this commit, since the packages would be the
+      # same. The tag alone doesn't show that: it can outlive its release
+      # (see the publish job). The release has to be published too. gh
+      # release create keeps a release a draft until every asset has
+      # uploaded, and a draft has no tag, so a published release with
+      # the tag on this commit has all of this commit's packages. If gh
+      # can't read the release, the run builds and publishes it again.
       - name: Compute the package release
         id: version
         env:
@@ -65,7 +71,9 @@ jobs:
             refs/tags/nightly)
           nightly_sha=${nightly_ref%%$'\t'*}
           if [[ "${GITHUB_EVENT_NAME}" == schedule \
-              && "${nightly_sha}" == "${GITHUB_SHA}" ]]; then
+              && "${nightly_sha}" == "${GITHUB_SHA}" \
+              && "$(gh release view nightly -R "${GITHUB_REPOSITORY}" \
+                    --json isDraft --jq .isDraft)" == false ]]; then
             echo "::notice::the nightly is already ${GITHUB_SHA}"
             echo "build=false" >> "${GITHUB_OUTPUT}"
             exit 0
