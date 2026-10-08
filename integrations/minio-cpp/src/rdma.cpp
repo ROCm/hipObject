@@ -268,7 +268,13 @@ namespace {
                 hipObjPutRdmaToken(token);
                 return -1;
             }
-            query = "uploadId=" + sctx->uploadId + "&partNumber=" + std::to_string(sctx->partNumber);
+            // hipObjPutV2() takes a canonical query: percent-encoded, with
+            // the keys sorted. Upload IDs can contain reserved characters
+            // such as '+' and '/', and Multimap encodes and sorts.
+            minio::utils::Multimap query_params;
+            query_params.Add("uploadId", sctx->uploadId);
+            query_params.Add("partNumber", std::to_string(sctx->partNumber));
+            query = query_params.ToQueryString();
         }
 
         hipObjError_t err = hipObjPutV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0,
@@ -277,6 +283,11 @@ namespace {
 
         if (err.opError == hipObjNotSupported) {
             RDMA_TRACE("v2 put: unsupported (client v2 is a stub); falling back to v1");
+            return kRdmaNotSupported;
+        }
+        if (err.opError == hipObjSizeTooLarge) {
+            // v2 caps a transfer at 2^31-1 bytes; v1 can move it
+            RDMA_TRACE("v2 put: %zu bytes is too large for v2; falling back to v1", size);
             return kRdmaNotSupported;
         }
         if (err.opError != hipObjSuccess) {
@@ -307,6 +318,11 @@ namespace {
 
         if (err.opError == hipObjNotSupported) {
             RDMA_TRACE("v2 get: unsupported (client v2 is a stub); falling back to v1");
+            return kRdmaNotSupported;
+        }
+        if (err.opError == hipObjSizeTooLarge) {
+            // v2 caps a transfer at 2^31-1 bytes; v1 can move it
+            RDMA_TRACE("v2 get: %zu bytes is too large for v2; falling back to v1", size);
             return kRdmaNotSupported;
         }
         if (err.opError != hipObjSuccess) {

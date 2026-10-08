@@ -25,6 +25,7 @@
 namespace hipObj {
 
 using HipGetDeviceFn            = hipError_t (*)(int *);
+using HipGetDeviceCountFn       = hipError_t (*)(int *);
 using HipDeviceGetPCIBusIdFn    = hipError_t (*)(char *, int, int);
 using HipHostMallocFn           = hipError_t (*)(void **, size_t, unsigned int);
 using HipHostFreeFn             = hipError_t (*)(void *);
@@ -40,6 +41,7 @@ using HipPointerGetAttributesFn = hipError_t (*)(hipPointerAttribute_t *, const 
 
 struct HipOps {
     HipGetDeviceFn            hipGetDevice            = nullptr;
+    HipGetDeviceCountFn       hipGetDeviceCount       = nullptr;
     HipDeviceGetPCIBusIdFn    hipDeviceGetPCIBusId    = nullptr;
     HipHostMallocFn           hipHostMalloc           = nullptr;
     HipHostFreeFn             hipHostFree             = nullptr;

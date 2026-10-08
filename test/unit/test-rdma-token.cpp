@@ -141,6 +141,44 @@ TEST(RdmaReply, LegacyOkHasNoPeerToken)
     EXPECT_FALSE(hipObj::parsePeerTokenFromReply("ok", 2, parsed, code));
 }
 
+TEST(RdmaReply, ParsePeerTokenRejectsMalformedReply)
+{
+    hipObj::RdmaToken peer;
+    peer.transport            = hipObj::TRANSPORT_RC;
+    const std::string token   = hipObj::encodeRdmaToken(peer);
+    const std::string cases[] = {
+        "200",
+        "+200:" + token,
+        "0200:" + token,
+        "20:" + token,
+        "600:" + token,
+        "206:" + token,
+        "404:" + token,
+        "200:" + token.substr(1),
+        "200:" + token + "0",
+        "200:03" + token.substr(2),
+    };
+    for (const std::string &reply : cases) {
+        hipObj::RdmaToken parsed;
+        parsed.qpNum = 1234;
+        int code     = 5678;
+        EXPECT_FALSE(hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code))
+            << "reply \"" << reply << "\"";
+        EXPECT_EQ(parsed.qpNum, 1234U);
+        EXPECT_EQ(code, 5678);
+    }
+}
+
+TEST(RdmaToken, DecodeRejectsUnknownTransport)
+{
+    hipObj::RdmaToken token;
+    token.transport     = 0x02;
+    std::string encoded = hipObj::encodeRdmaToken(token);
+
+    hipObj::RdmaToken parsed;
+    EXPECT_FALSE(hipObj::decodeRdmaTokenHex(encoded.c_str(), parsed));
+}
+
 TEST(RdmaToken, ParseClientNicFromGid)
 {
     hipObj::RdmaToken token;
