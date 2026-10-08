@@ -17,7 +17,15 @@ namespace v2 {
 
     class ClockSource {
     public:
-        virtual ~ClockSource()   = default;
+        ClockSource()          = default;
+        virtual ~ClockSource() = default;
+
+        /* Copying through a base reference would copy only the base part */
+        ClockSource(const ClockSource &)            = delete;
+        ClockSource &operator=(const ClockSource &) = delete;
+        ClockSource(ClockSource &&)                 = delete;
+        ClockSource &operator=(ClockSource &&)      = delete;
+
         virtual uint64_t nowMs() = 0;
     };
 

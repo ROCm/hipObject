@@ -120,6 +120,13 @@ namespace {
             return initialized_;
         }
 
+        ~HipObjRuntime() = default;
+
+        HipObjRuntime(const HipObjRuntime &)            = delete;
+        HipObjRuntime &operator=(const HipObjRuntime &) = delete;
+        HipObjRuntime(HipObjRuntime &&)                 = delete;
+        HipObjRuntime &operator=(HipObjRuntime &&)      = delete;
+
     private:
         HipObjRuntime() = default;
 
@@ -142,6 +149,11 @@ namespace {
                 hipObjBufDeregister(ptr);
             }
         }
+
+        ScopedBufRegistration(const ScopedBufRegistration &)            = delete;
+        ScopedBufRegistration &operator=(const ScopedBufRegistration &) = delete;
+        ScopedBufRegistration(ScopedBufRegistration &&)                 = delete;
+        ScopedBufRegistration &operator=(ScopedBufRegistration &&)      = delete;
     };
 
 } // namespace

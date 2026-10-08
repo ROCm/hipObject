@@ -48,6 +48,12 @@ namespace v2 {
         ControlHandlers(SigV4Verifier *verifier, MemoryBackend *backend, ServerConfig cfg);
         ~ControlHandlers();
 
+        /* The reaper thread holds this */
+        ControlHandlers(const ControlHandlers &)            = delete;
+        ControlHandlers &operator=(const ControlHandlers &) = delete;
+        ControlHandlers(ControlHandlers &&)                 = delete;
+        ControlHandlers &operator=(ControlHandlers &&)      = delete;
+
         /* Each handler receives the parsed request plus the raw header
          * block (already part of the request struct through headers). */
         HandlerResult onPrepare(const PrepareRequest &req, const std::string &rawHeaders);

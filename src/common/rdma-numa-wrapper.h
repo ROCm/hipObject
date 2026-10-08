@@ -14,6 +14,14 @@ namespace hipObj {
 class NUMAWrapper {
 public:
     NUMAWrapper();
+    ~NUMAWrapper() = default;
+
+    /* There is one instance, the global numa. A moved-from wrapper would
+     * keep its function pointer without keeping libnuma loaded. */
+    NUMAWrapper(const NUMAWrapper &)            = delete;
+    NUMAWrapper &operator=(const NUMAWrapper &) = delete;
+    NUMAWrapper(NUMAWrapper &&)                 = delete;
+    NUMAWrapper &operator=(NUMAWrapper &&)      = delete;
 
     int num_configured_nodes() const;
 

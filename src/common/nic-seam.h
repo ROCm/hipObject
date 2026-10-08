@@ -31,7 +31,15 @@ struct NicInfo {
  * implementation walks ibverbs + sysfs; tests substitute a fake. */
 class NicEnumerator {
 public:
-    virtual ~NicEnumerator()                                     = default;
+    NicEnumerator()          = default;
+    virtual ~NicEnumerator() = default;
+
+    /* Copying through a base reference would copy only the base part */
+    NicEnumerator(const NicEnumerator &)            = delete;
+    NicEnumerator &operator=(const NicEnumerator &) = delete;
+    NicEnumerator(NicEnumerator &&)                 = delete;
+    NicEnumerator &operator=(NicEnumerator &&)      = delete;
+
     virtual std::vector<NicInfo> Enumerate(const char *hca_list) = 0;
 };
 

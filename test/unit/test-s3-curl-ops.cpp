@@ -107,6 +107,12 @@ public:
         }
     }
 
+    // The worker thread holds this
+    StubHttpServer(const StubHttpServer &)            = delete;
+    StubHttpServer &operator=(const StubHttpServer &) = delete;
+    StubHttpServer(StubHttpServer &&)                 = delete;
+    StubHttpServer &operator=(StubHttpServer &&)      = delete;
+
     // Usable right after construction; the value never changes.
     const std::string &endpoint() const
     {
