@@ -60,9 +60,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          nightly_sha=$(git ls-remote \
+          nightly_ref=$(git ls-remote \
             "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
-            refs/tags/nightly | cut -f1)
+            refs/tags/nightly)
+          nightly_sha=${nightly_ref%%$'\t'*}
           if [[ "${GITHUB_EVENT_NAME}" == schedule \
               && "${nightly_sha}" == "${GITHUB_SHA}" ]]; then
             echo "::notice::the nightly is already ${GITHUB_SHA}"
