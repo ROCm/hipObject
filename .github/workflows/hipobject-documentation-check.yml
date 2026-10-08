@@ -3,13 +3,16 @@ name: hipObject - Documentation Check
 on:
   pull_request:
     branches: [develop]
-    paths:
+    paths: &paths
       - 'docs/**'
       - 'include/**/*.h'
       - 'README.md'
       - 'requirements.txt'
       - 'cmake/HIPOBJDocumentation.cmake'
       - '.github/workflows/hipobject-documentation-check.yml'
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.

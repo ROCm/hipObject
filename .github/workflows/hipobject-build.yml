@@ -1,27 +1,16 @@
 name: hipObject - Build
 
 on:
-  # The one lane that also fires post-merge: it is the cheapest thing that
-  # compiles the tree, so it is the canary for a develop that no single PR
-  # was tested against.
+  # Pull requests, pushes to develop, and manual runs. The push run
+  # catches a develop that no single PR was tested against.
   #
   # The ignored paths hold nothing this build compiles or runs: ansible/
   # and ci/ belong to their own lanes, and the documentation inputs are
   # only used with HIPOBJ_BUILD_DOCS, which is OFF here. The Documentation
   # Check lane configures and builds those.
-  push:
-    branches: [develop]
-    paths-ignore:
-      - '**/*.md'
-      - '**/*.rst'
-      - 'ansible/**'
-      - 'ci/**'
-      - 'cmake/HIPOBJDocumentation.cmake'
-      - 'docs/**'
-      - 'requirements.txt'
   pull_request:
     branches: [develop]
-    paths-ignore:
+    paths-ignore: &paths-ignore
       - '**/*.md'
       - '**/*.rst'
       - 'ansible/**'
@@ -29,6 +18,9 @@ on:
       - 'cmake/HIPOBJDocumentation.cmake'
       - 'docs/**'
       - 'requirements.txt'
+  push:
+    branches: [develop]
+    paths-ignore: *paths-ignore
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.

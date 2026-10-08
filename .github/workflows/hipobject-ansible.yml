@@ -6,9 +6,12 @@ name: hipObject - Ansible Check
 on:
   pull_request:
     branches: [develop]
-    paths:
+    paths: &paths
       - "ansible/**"
       - ".github/workflows/hipobject-ansible.yml"
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.

@@ -3,11 +3,14 @@ name: hipObject - cmakelint
 on:
   pull_request:
     branches: [develop]
-    paths:
+    paths: &paths
       - '**.cmake'
       - '**/CMakeLists.txt'
       - '.cmakelintrc'
       - '.github/workflows/hipobject-cmakelint.yml'
+  push:
+    branches: [develop]
+    paths: *paths
   workflow_dispatch:
 
 permissions:
