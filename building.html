@@ -484,11 +484,15 @@ sudo<span class="w"> </span>make<span class="w"> </span>install
 <td><p>OFF</p></td>
 <td><p>Find libcuobjserver + probe</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_WERROR</span></code></p></td>
+<td><p>OFF</p></td>
+<td><p>Treat warnings as errors</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
 <td><p>see below</p></td>
 <td><p>Path to ROCm install</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
 <td><p>detected</p></td>
 <td><p>ROCm version</p></td>
 </tr>
@@ -503,6 +507,11 @@ Clang or GCC 12 and later. Use <code class="docutils literal notranslate"><span 
 developing hipObject or running it under a sanitizer. Multi-config
 generators, such as Ninja Multi-Config, ignore <code class="docutils literal notranslate"><span class="pre">CMAKE_BUILD_TYPE</span></code>
 and pick the configuration at build time.</p>
+<p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_WERROR</span></code> adds <code class="docutils literal notranslate"><span class="pre">-Werror</span></code> to hipObject’s own targets
+(the library, tests, examples, and tools), but not to third-party
+code that CMake fetches. It’s off by default so that a compiler
+hipObject hasn’t been tested with can’t break the build with a new
+warning. CI turns it on, and developers should too.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> and <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> can also be set in the
 environment. If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> isn’t set but <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is,
 <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code> for
