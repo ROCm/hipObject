@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <utility>
 
 #include <arpa/inet.h>

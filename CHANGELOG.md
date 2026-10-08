@@ -88,6 +88,11 @@
   used to describe it as an offset into the S3 object, but it has always
   been used as a buffer offset. The request your callbacks make selects
   the part of the object to transfer.
+- The example programs, including the MinIO bridge's `minio-getput-rdma`,
+  include `<hip/hip_runtime_api.h>` instead of `<hip/hip_runtime.h>`. They
+  only call the HIP runtime API, so they don't need the kernel-language
+  declarations, and a program that uses hipObject from host code only
+  needs the same header.
 
 ### Removed
 

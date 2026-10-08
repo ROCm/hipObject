@@ -6,6 +6,7 @@
 
 #include "v2-registry.h"
 
+#include <memory>
 #include <utility>
 
 #include "hipobj-warnings.h"

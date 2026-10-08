@@ -15,7 +15,7 @@
 #include <cstring>
 #include <memory>
 
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include "hipobj.h"
 

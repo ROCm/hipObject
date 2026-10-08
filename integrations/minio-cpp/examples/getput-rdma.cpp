@@ -18,7 +18,7 @@
 #include <system_error>
 #include <vector>
 
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <miniocpp/client.h>
 #include <unistd.h>

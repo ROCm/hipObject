@@ -10,11 +10,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include <arpa/inet.h>
 
+#include "../../../src/common/ibv-core.h"
 #include "../../../src/common/ibv-wrapper.h"
 #include "ibv-ptr.h"
 #include "malloc_ptr.h"

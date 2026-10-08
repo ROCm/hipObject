@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
 #include "hipobj-warnings.h"
