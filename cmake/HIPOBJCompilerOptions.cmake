@@ -18,8 +18,14 @@ include(HIPOBJSanitizers)
 check_linker_flag(CXX "-Wl,-z,noexecstack"
   HIPOBJ_LINKER_SUPPORTS_NOEXECSTACK)
 
-# Add the compiler-specific warning flags (and sanitizer flags, if
-# enabled) to a target
+# Off by default so a downstream or superproject build is never broken
+# by a warning from a compiler version we haven't seen. CI turns it on,
+# so new warnings still fail the build there.
+option(HIPOBJ_WERROR
+  "Treat compiler warnings as errors in hipObject targets" OFF)
+
+# Add the compiler-specific warning flags (and -Werror and sanitizer
+# flags, if enabled) to a target
 #
 # NOTE: The warning flags are only applied to C++ sources since many
 #       of them are invalid for C.
@@ -32,6 +38,10 @@ function(hipobj_set_compiler_flags target)
   endif()
   target_compile_options(${target} PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${flags}>")
+
+  if(HIPOBJ_WERROR)
+    target_compile_options(${target} PRIVATE -Werror)
+  endif()
 
   if(HIPOBJ_USE_SANITIZERS)
     hipobj_add_sanitizers(${target})

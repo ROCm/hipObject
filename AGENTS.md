@@ -297,8 +297,9 @@ configuration files.
   CI doesn't build with both. The build turns on a long list of warnings
   ([`HIPOBJGNUCompilerOptions.cmake`](cmake/HIPOBJGNUCompilerOptions.cmake),
   [`HIPOBJClangCompilerOptions.cmake`](cmake/HIPOBJClangCompilerOptions.cmake))
-  but doesn't use `-Werror`, so a build that succeeds can still fail this
-  check. Read the build output.
+  but doesn't use `-Werror` unless it's configured with `-DHIPOBJ_WERROR=ON`,
+  as CI's build workflow is, so configure with it on or read the build
+  output.
 - **Suppress a warning only when it's unavoidable**, and then only with the
   macros in [`shared/hipobj-warnings.h`](shared/hipobj-warnings.h), never with
   raw `#pragma`s, `-Wno-…` flags, or changes to the warning lists. Add an
