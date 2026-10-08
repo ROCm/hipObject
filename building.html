@@ -373,7 +373,10 @@
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-steps">Build Steps</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cmake-options">CMake Options</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nightly-packages">Nightly Packages</a></li>
+</ul>
+</li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#minio-c-rdma-bridge">MinIO C++ RDMA Bridge</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cuobject-interoperability">cuObject Interoperability</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#building-documentation">Building Documentation</a></li>
@@ -590,6 +593,17 @@ libraries the examples link, such as libcurl (and OpenSSL,
 zlib, and pugixml with <code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code>). The RPM
 package requires these libraries by soname (e.g.,
 <code class="docutils literal notranslate"><span class="pre">libcurl.so.4()(64bit)</span></code>).</p>
+<section id="nightly-packages">
+<h3>Nightly Packages<a class="headerlink" href="#nightly-packages" title="Link to this heading">#</a></h3>
+<p>DEB packages of the <code class="docutils literal notranslate"><span class="pre">develop</span></code> branch are built every night
+that it changes, and published as the <a class="reference external" href="https://github.com/ROCm/hipObject/releases/tag/nightly">nightly prerelease</a>,
+which each new build replaces. There are packages for Ubuntu
+22.04 and 24.04, each built for ROCm 10.1.0 and 7.14.1. They
+install into <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>, and their
+release is <code class="docutils literal notranslate"><span class="pre">0.&lt;commit</span> <span class="pre">time&gt;.g&lt;commit&gt;~&lt;Ubuntu</span> <span class="pre">release&gt;</span></code>, so
+a newer nightly upgrades an older one. The nightly packages
+are for testing, and aren’t a supported release.</p>
+</section>
 </section>
 <section id="minio-c-rdma-bridge">
 <h2>MinIO C++ RDMA Bridge<a class="headerlink" href="#minio-c-rdma-bridge" title="Link to this heading">#</a></h2>
@@ -711,7 +725,10 @@ library paths at runtime.</p></li>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-steps">Build Steps</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cmake-options">CMake Options</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nightly-packages">Nightly Packages</a></li>
+</ul>
+</li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#minio-c-rdma-bridge">MinIO C++ RDMA Bridge</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cuobject-interoperability">cuObject Interoperability</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#building-documentation">Building Documentation</a></li>
