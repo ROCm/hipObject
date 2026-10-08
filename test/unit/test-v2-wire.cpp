@@ -7,7 +7,10 @@
 /* Unit tests for the hipobj-rc-v2 wire helpers (src/rdma/v2-wire.*).
  * These are pure parsing/formatting tests and need no RDMA hardware. */
 
+#include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -240,6 +243,86 @@ TEST(V2Wire, BuildTarget)
     EXPECT_EQ(buildTarget("bucket", "key name", ""), "/bucket/key%20name");
     EXPECT_EQ(buildTarget("b", "k", "partNumber=1"), "/b/k?partNumber=1");
     EXPECT_EQ(buildTarget("b", "a/b", ""), "/b/a/b");
+}
+
+// ---- Malformed replies -------------------------------------------
+//
+// Everything in a reply comes from the network, so a malformed field must
+// make the parse fail rather than be skipped or guessed at.
+
+std::string
+finalOkHeaders()
+{
+    return "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\nX-Amz-Rdma-Cookie: 00c0ffee\r\n";
+}
+
+/* Random 8-byte values and their base64, from Python's base64 module */
+constexpr const char *kChecksumVectors[] = {
+    "SgtwPfgnR/s=", /* 4a0b703df82747fb */
+    "Fve3Nk/IrLU=", /* 16f7b7364fc8acb5 */
+    "N2gfkb93B2Y=", /* 37681f91bf770766 */
+    "XTk8Sf9zDzE=", /* 5d393c49ff730f31 */
+    "F43S3Er4qGc=", /* 178dd2dc4af8a867 */
+    "fnb8dg4CzFo=", /* 7e76fc760e02cc5a */
+    "E8F9EFTNlIc=", /* 13c17d1054cd9487 */
+    "mxFRIVnUDRQ=", /* 9b11512159d40d14 */
+    "+/v7+/v7+/s=", /* fbfbfbfbfbfbfbfb */
+    "//////////8=", /* ffffffffffffffff */
+    "AAAAAAAAAAE=", /* 0000000000000001 */
+};
+
+TEST(V2Wire, ChecksumAcceptsCanonicalBase64)
+{
+    for (const char *checksum : kChecksumVectors) {
+        std::string out;
+        EXPECT_TRUE(validateChecksumText(std::string("CRC64NVME ") + checksum, out)) << checksum;
+        EXPECT_EQ(out, checksum);
+
+        hipObj::v2::FinalReply r;
+        EXPECT_TRUE(
+            parseFinalReply(204, finalOkHeaders() + "X-Amz-Rdma-Checksum: CRC64NVME " + checksum + "\r\n", r))
+            << checksum;
+        EXPECT_EQ(r.checksumB64, checksum);
+    }
+}
+
+TEST(V2Wire, ChecksumRejectsPaddingBits)
+{
+    /* The last character before the '=' carries 4 bits of the checksum and
+     * 2 bits of padding, which must be zero. Setting either padding bit
+     * gives text that decodes, but isn't canonical. */
+    const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (const char *checksum : kChecksumVectors) {
+        for (size_t padding : {1U, 2U, 3U}) {
+            std::string text = checksum;
+            size_t      v    = alphabet.find(text[10]);
+            ASSERT_NE(v, std::string::npos);
+            text[10] = alphabet[v | padding];
+            std::string out;
+            EXPECT_FALSE(validateChecksumText("CRC64NVME " + text, out)) << text;
+        }
+    }
+}
+
+TEST(V2Wire, FinalRejectsBytesTransferredThatOverflows)
+{
+    hipObj::v2::FinalReply r;
+    EXPECT_TRUE(
+        parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: 18446744073709551615\r\n", r));
+    EXPECT_EQ(r.bytes, std::numeric_limits<uint64_t>::max());
+
+    /* UINT64_MAX + 1, which overflows in the addition; and a value that
+     * overflows in the multiplication. Neither may wrap to a small count. */
+    for (const char *bytes : {"18446744073709551616", "18446744073709551620", "99999999999999999999",
+                              "100000000000000000000", "184467440737095516150"}) {
+        std::string h = finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: " + bytes + "\r\n";
+        EXPECT_FALSE(parseFinalReply(200, h, r)) << "bytes " << bytes;
+    }
+
+    /* Leading zeros don't overflow */
+    EXPECT_TRUE(parseFinalReply(
+        200, finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: 0000000000000000000000042\r\n", r));
+    EXPECT_EQ(r.bytes, 42U);
 }
 
 TEST(V2Wire, EnumAbiCompat)

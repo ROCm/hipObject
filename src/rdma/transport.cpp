@@ -13,6 +13,7 @@
 #include <thread>
 #include <utility>
 
+#include "ibv-core.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "rdma-topology.h"
@@ -20,13 +21,6 @@
 #include "vendor-ops.h"
 
 namespace hipObj {
-
-namespace {
-
-    constexpr int IBV_ACCESS_REMOTE_READ  = 0x1;
-    constexpr int IBV_ACCESS_REMOTE_WRITE = 0x2;
-
-} // namespace
 
 int
 openRdmaDevice(int nicIndex, RcConnection &conn)

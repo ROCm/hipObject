@@ -20,10 +20,6 @@ namespace hipObj {
 
 namespace {
 
-    constexpr int IBV_ACCESS_REMOTE_READ  = 0x1;
-    constexpr int IBV_ACCESS_REMOTE_WRITE = 0x2;
-    constexpr int IBV_ACCESS_LOCAL_WRITE  = 0x4;
-
     int validateRegistration(bool isRegistered, size_t entryCount, size_t size)
     {
         if (size > MAX_MR_SIZE) {

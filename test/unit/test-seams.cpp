@@ -204,6 +204,10 @@ namespace {
         int destroy_qp_calls   = 0;
         int dealloc_pd_calls   = 0;
         int close_device_calls = 0;
+        int modify_qp_calls    = 0;
+        int modify_qp_mask     = 0;
+        /* From the last modify_qp() */
+        unsigned int qp_access_flags = 0;
     };
 
     IbvCallLog g_calls;
@@ -244,6 +248,14 @@ namespace {
         return 0;
     }
 
+    int fakeRecordingModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask)
+    {
+        ++g_calls.modify_qp_calls;
+        g_calls.modify_qp_mask  = mask;
+        g_calls.qp_access_flags = attr->qp_access_flags;
+        return 0;
+    }
+
 } // namespace
 
 class IbvSeamTest : public ::testing::Test {
@@ -260,6 +272,7 @@ protected:
         funcs.destroy_qp   = &fakeDestroyQp;
         funcs.dealloc_pd   = &fakeDeallocPd;
         funcs.close_device = &fakeCloseDevice;
+        funcs.modify_qp    = &fakeRecordingModifyQp;
         g_calls            = IbvCallLog();
     }
 
@@ -289,6 +302,22 @@ TEST_F(IbvSeamTest, QpCreationAndTeardownUseTheTable)
     EXPECT_EQ(g_calls.close_device_calls, 1);
     EXPECT_EQ(conn.qp, nullptr);
     EXPECT_EQ(conn.ctx, nullptr);
+}
+
+TEST_F(IbvSeamTest, InitTransitionGrantsRemoteReadAndWrite)
+{
+    hipObj::RcConnection conn;
+    conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
+    conn.pd.reset(reinterpret_cast<struct ibv_pd *>(0x5678));
+    ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
+
+    ASSERT_EQ(hipObj::transitionQpToInit(conn), 0);
+    EXPECT_EQ(g_calls.modify_qp_calls, 1);
+    EXPECT_NE(g_calls.modify_qp_mask & IBV_QP_ACCESS_FLAGS, 0);
+    /* The peer reads the buffer for a PUT and writes it for a GET, and
+     * nothing else */
+    EXPECT_EQ(g_calls.qp_access_flags,
+              static_cast<unsigned int>(IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
 }
 
 namespace {
