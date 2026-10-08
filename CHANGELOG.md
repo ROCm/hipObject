@@ -48,7 +48,10 @@
     doesn't exist.
   - `hipObjBufRegister()` and `hipObjBufRegisterHost()` reject a NULL
     pointer, a size of 0, and a buffer that would wrap past the end of the
-    address space. `hipObjBufDeregister()` rejects a NULL pointer.
+    address space. `hipObjBufRegister()` also rejects a GPU buffer that
+    runs past the end of the HIP allocation it's in, or whose allocation
+    the HIP runtime can't find. `hipObjBufDeregister()` rejects a NULL
+    pointer.
   - `hipObjGet()`, `hipObjPut()`, `hipObjBufSync()`, and
     `hipObjGetRdmaToken()` reject a NULL pointer, a size of 0, a negative
     offset, and a range that doesn't fit inside the registered buffer.

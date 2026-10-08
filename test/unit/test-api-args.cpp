@@ -235,6 +235,34 @@ fakeMemcpy(void *, const void *, size_t, hipMemcpyKind)
     return hipSuccess;
 }
 
+/* What the fake HIP runtime reports for every pointer: its memory type, and
+ * the allocation it's in */
+hipMemoryType g_memoryType        = hipMemoryTypeDevice;
+uintptr_t     g_allocBase         = 0;
+size_t        g_allocSize         = 0;
+hipError_t    g_addressRangeErr   = hipSuccess;
+int           g_addressRangeCalls = 0;
+
+hipError_t
+fakePointerGetAttributes(hipPointerAttribute_t *attr, const void *)
+{
+    *attr      = {};
+    attr->type = g_memoryType;
+    return hipSuccess;
+}
+
+hipError_t
+fakeMemGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t)
+{
+    ++g_addressRangeCalls;
+    if (g_addressRangeErr != hipSuccess) {
+        return g_addressRangeErr;
+    }
+    *base = reinterpret_cast<hipDeviceptr_t>(g_allocBase);
+    *size = g_allocSize;
+    return hipSuccess;
+}
+
 class EmptyNicEnumerator : public hipObj::NicEnumerator {
 public:
     std::vector<hipObj::NicInfo> Enumerate(const char *) override
@@ -579,6 +607,90 @@ INSTANTIATE_TEST_SUITE_P(ApiArgs, RegisterArgsTest,
                          [](const ::testing::TestParamInfo<RegisterFn> &paramInfo) {
                              return paramInfo.param == &hipObjBufRegister ? "Device" : "Host";
                          });
+
+// ---- hipObjBufRegister: range of the HIP allocation --------------
+
+/* The HIP runtime reports every pointer as device memory in one
+ * allocation, [kAllocBase, kAllocBase + kAllocSize) */
+class DeviceRangeTest : public ApiArgsTest {
+protected:
+    static constexpr uintptr_t kAllocBase = 0x200000;
+    static constexpr size_t    kAllocSize = 4096;
+
+    void SetUp() override
+    {
+        ApiArgsTest::SetUp();
+        hipObj::HipOps &ops         = hipObj::hipOps();
+        ops.hipPointerGetAttributes = &fakePointerGetAttributes;
+        ops.hipMemGetAddressRange   = &fakeMemGetAddressRange;
+
+        g_memoryType        = hipMemoryTypeDevice;
+        g_allocBase         = kAllocBase;
+        g_allocSize         = kAllocSize;
+        g_addressRangeErr   = hipSuccess;
+        g_addressRangeCalls = 0;
+    }
+
+    static void *at(size_t offset)
+    {
+        return reinterpret_cast<void *>(kAllocBase + offset);
+    }
+};
+
+TEST_F(DeviceRangeTest, AcceptsRangeInsideAllocation)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+    EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjSuccess);
+    EXPECT_EQ(hipObjBufDeregister(at(0)).opError, hipObjSuccess);
+    EXPECT_EQ(hipObjBufRegister(at(16), kAllocSize - 16).opError, hipObjSuccess);
+    EXPECT_EQ(hipObjBufDeregister(at(16)).opError, hipObjSuccess);
+    EXPECT_EQ(hipObjBufRegister(at(kAllocSize - 1), 1).opError, hipObjSuccess);
+    EXPECT_EQ(g_log.registerMr, 3);
+}
+
+TEST_F(DeviceRangeTest, RejectsRangePastEndOfAllocation)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+    EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize + 1).opError, hipObjInvalidValue);
+    EXPECT_EQ(hipObjBufRegister(at(16), kAllocSize - 15).opError, hipObjInvalidValue);
+    EXPECT_EQ(hipObjBufRegister(at(kAllocSize - 1), 2).opError, hipObjInvalidValue);
+    EXPECT_EQ(g_log.registerMr, 0);
+    EXPECT_EQ(hipObjBufDeregister(at(0)).opError, hipObjBufNotRegistered);
+}
+
+TEST_F(DeviceRangeTest, RejectsPointerOutsideReportedAllocation)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+    /* A runtime that reports an allocation that doesn't hold the pointer */
+    EXPECT_EQ(hipObjBufRegister(reinterpret_cast<void *>(kAllocBase - 1), 1).opError, hipObjInvalidValue);
+    EXPECT_EQ(hipObjBufRegister(at(kAllocSize), 1).opError, hipObjInvalidValue);
+    EXPECT_EQ(g_log.registerMr, 0);
+}
+
+TEST_F(DeviceRangeTest, RejectsBufferWhoseAllocationIsNotFound)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+    g_addressRangeErr = hipErrorNotFound;
+    EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjInvalidValue);
+
+    hipObj::hipOps().hipMemGetAddressRange = nullptr;
+    EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjInvalidValue);
+    EXPECT_EQ(g_log.registerMr, 0);
+}
+
+TEST_F(DeviceRangeTest, DoesNotCheckOtherMemory)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+    /* The NIC's registration checks that host memory is mapped */
+    g_memoryType = hipMemoryTypeHost;
+    EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize + 1).opError, hipObjSuccess);
+    EXPECT_EQ(g_addressRangeCalls, 0);
+
+    /* hipObjBufRegisterHost() takes host memory, so it doesn't look */
+    g_memoryType = hipMemoryTypeDevice;
+    EXPECT_EQ(hipObjBufRegisterHost(at(16), kAllocSize).opError, hipObjSuccess);
+    EXPECT_EQ(g_addressRangeCalls, 0);
+}
 
 // ---- hipObjBufDeregister -----------------------------------------
 

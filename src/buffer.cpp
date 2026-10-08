@@ -72,6 +72,31 @@ namespace {
 
 } // namespace
 
+bool
+isValidDeviceRange(void *ptr, size_t size)
+{
+    if (!isDevicePointer(ptr)) {
+        return true;
+    }
+    HipOps &ops = hipOps();
+    if (!ops.hipMemGetAddressRange) {
+        return false;
+    }
+    hipDeviceptr_t base      = nullptr;
+    size_t         allocSize = 0;
+    if (ops.hipMemGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
+        return false;
+    }
+    auto start = reinterpret_cast<uintptr_t>(base);
+    auto addr  = reinterpret_cast<uintptr_t>(ptr);
+    if (addr < start || addr - start >= allocSize) {
+        return false;
+    }
+    /* Compared against the space left rather than as addr + size, which
+     * could wrap */
+    return size <= allocSize - (addr - start);
+}
+
 void
 HostBufDeleter::operator()(void *hostBuf) const noexcept
 {

@@ -604,6 +604,9 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
+    if (!hipObj::isValidDeviceRange(devPtr, size)) {
+        return {hipObjInvalidValue, 0};
+    }
     if (hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }

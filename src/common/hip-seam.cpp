@@ -25,6 +25,7 @@ hipOpsDefaults(HipOps &ops)
     ops.hipEventQuery           = &hipEventQuery;
     ops.hipEventDestroy         = &hipEventDestroy;
     ops.hipPointerGetAttributes = &hipPointerGetAttributes;
+    ops.hipMemGetAddressRange   = &hipMemGetAddressRange;
 }
 
 HipOps &
