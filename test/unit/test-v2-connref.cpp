@@ -229,10 +229,7 @@ public:
     std::optional<hipObj::v2::VerifiedCredential> verify(const std::string &, const std::string &,
                                                          const std::string &, const std::string &) override
     {
-        hipObj::v2::VerifiedCredential cred;
-        cred.accessKey     = "k";
-        cred.signedHeaders = "*";
-        return cred;
+        return hipObj::v2::VerifiedCredential{.accessKey = "k", .signedHeaders = "*"};
     }
 };
 
