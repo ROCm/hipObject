@@ -25,6 +25,7 @@
 #include "control.h"
 #include "hip-seam.h"
 #include "hipobj-private.h"
+#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "no-destructor.h"
@@ -40,9 +41,14 @@
 
 namespace hipObj {
 
-/* Never destroyed: hipObjShutdown() releases their resources */
+/* Never destroyed: hipObjShutdown() releases their resources. Clang still
+ * warns, since NoDestructor's empty destructor isn't trivial. */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
+HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 static NoDestructor<BufferMap>    g_bufferMap;
 static NoDestructor<RcConnection> g_conn;
+HIPOBJ_WARN_NO_EXIT_DTOR_ON
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
 
 static hipObjError_t
 handleException()

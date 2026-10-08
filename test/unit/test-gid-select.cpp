@@ -10,7 +10,11 @@
 
 #include <gtest/gtest.h>
 
+#include "hipobj-warnings.h"
 #include "rdma-topology.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -117,3 +121,5 @@ TEST(GidSelect, NoUsableEntryReturnsMinusOne)
     EXPECT_EQ(pick({}), -1);
     EXPECT_EQ(pick({zero, ipv4Mapped(1, 0)}), -1);
 }
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

@@ -20,12 +20,16 @@
 #include <sys/types.h>
 
 #include "hip-seam.h"
+#include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "state.h"
 #include "token.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -1159,3 +1163,5 @@ INSTANTIATE_TEST_SUITE_P(ApiArgs, TransferV2ArgsTest, ::testing::Values(&callGet
 #endif /* HIPOBJECT_V2_API */
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

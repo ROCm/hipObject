@@ -10,8 +10,12 @@
 
 #include "buffer.h"
 #include "hip-seam.h"
+#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -175,3 +179,5 @@ TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers)
 }
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

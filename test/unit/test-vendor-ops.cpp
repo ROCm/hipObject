@@ -7,7 +7,11 @@
 
 #include <gtest/gtest.h>
 
+#include "hipobj-warnings.h"
 #include "vendor-ops.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 TEST(VendorOps, ProviderNameBnxt)
 {
@@ -58,3 +62,5 @@ TEST(VendorOps, VendorIdPensando)
 {
     EXPECT_EQ(hipObj::VENDOR_ID_PENSANDO, static_cast<uint32_t>(0x1DD8));
 }
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

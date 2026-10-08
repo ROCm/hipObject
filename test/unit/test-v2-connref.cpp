@@ -25,12 +25,16 @@
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "hipobj-warnings.h"
 #include "malloc_ptr.h"
 #include "v2_backend.h"
 #include "v2_handlers.h"
 #include "v2_request.h"
 #include "v2_session.h"
 #include "v2_sigv4.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -373,3 +377,5 @@ TEST_F(ConnRefFaultTest, DestructionRelinquishesUnreapedTransport)
 }
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

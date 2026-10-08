@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "hipobj-warnings.h"
 #include "no-destructor.h"
 #include "v2-clock.h"
 
@@ -233,8 +234,14 @@ namespace v2 {
 
     namespace {
 
+        /* Clang warns even though it's never destroyed, since
+         * NoDestructor's empty destructor isn't trivial */
+        HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
+        HIPOBJ_WARN_NO_EXIT_DTOR_OFF
         NoDestructor<ConnectionRegistry> g_registry;
-        ConnectionRegistry              *g_registryOverride = nullptr;
+        HIPOBJ_WARN_NO_EXIT_DTOR_ON
+        HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
+        ConnectionRegistry *g_registryOverride = nullptr;
 
     } // namespace
 

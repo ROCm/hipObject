@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -23,6 +24,9 @@
 #include "v2-registry.h"
 #include "v2-transport.h"
 #include "v2-wire.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -136,8 +140,10 @@ protected:
     static std::vector<uint32_t> g_sqPsn;
 };
 
+HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 std::vector<uint32_t> V2PsnDeliveryTest::g_rqPsn;
 std::vector<uint32_t> V2PsnDeliveryTest::g_sqPsn;
+HIPOBJ_WARN_NO_EXIT_DTOR_ON
 
 TEST_F(V2PsnDeliveryTest, PsnsReachQpAttrs)
 {
@@ -184,3 +190,5 @@ TEST(V2CookiePresenceTest, ParserSetsPresence)
 }
 
 } // namespace
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

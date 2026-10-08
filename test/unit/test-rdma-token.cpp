@@ -7,7 +7,11 @@
 
 #include <gtest/gtest.h>
 
+#include "hipobj-warnings.h"
 #include "token.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 TEST(RdmaToken, EncodeProducesHexString)
 {
@@ -195,3 +199,5 @@ TEST(RdmaToken, ParseClientNicFromGid)
     EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded.c_str(), nicIp, sizeof(nicIp)));
     EXPECT_STREQ(nicIp, "192.168.1.42");
 }
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

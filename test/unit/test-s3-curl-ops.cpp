@@ -26,7 +26,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "hipobj-warnings.h"
 #include "s3_curl_ops.h"
+
+/* Google Test registers each test with a global constructor */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
@@ -503,3 +507,5 @@ TEST(S3CurlOps, RecvReplyNullArgs)
     EXPECT_EQ(-1, hipObjS3CurlRecvReply(&ctx, nullptr, &len));
     EXPECT_EQ(-1, hipObjS3CurlRecvReply(&ctx, reply, nullptr));
 }
+
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

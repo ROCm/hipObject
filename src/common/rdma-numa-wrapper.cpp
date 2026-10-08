@@ -9,6 +9,8 @@
 
 #include <dlfcn.h>
 
+#include "hipobj-warnings.h"
+
 namespace hipObj {
 
 NUMAWrapper::NUMAWrapper()
@@ -32,6 +34,11 @@ NUMAWrapper::num_configured_nodes() const
     return 1;
 }
 
+/* Global by design; its destructor dlclose()s libnuma at exit */
+HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
+HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 NUMAWrapper numa;
+HIPOBJ_WARN_NO_EXIT_DTOR_ON
+HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
 
 } // namespace hipObj
