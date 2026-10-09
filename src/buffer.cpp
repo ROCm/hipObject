@@ -179,13 +179,6 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
     entry.remoteAddr = reinterpret_cast<uint64_t>(hostPtr);
     return 0;
 }
-uint64_t
-BufferMap::lookupRemoteAddr(void *devPtr) const
-{
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
-    return it == entries_.end() ? 0 : it->second.remoteAddr;
-}
 
 int
 BufferMap::deregisterBuffer(void *devPtr)
@@ -209,49 +202,18 @@ BufferMap::deregisterAll()
     entries_.clear();
 }
 
-struct ibv_mr *
-BufferMap::lookupMr(void *devPtr)
+const BufferMap::BufEntry *
+BufferMap::find(const void *devPtr) const
 {
     uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
     auto      it  = entries_.find(key);
-    if (it == entries_.end()) {
-        return nullptr;
-    }
-    return it->second.mr.get();
-}
-
-void *
-BufferMap::lookupHostBuf(void *devPtr) const
-{
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
-    return it == entries_.end() ? nullptr : it->second.hostBuf.get();
-}
-
-size_t
-BufferMap::lookupSize(void *devPtr) const
-{
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
-    if (it == entries_.end()) {
-        return 0;
-    }
-    return it->second.size;
+    return it == entries_.end() ? nullptr : &it->second;
 }
 
 bool
-BufferMap::isRegistered(void *devPtr) const
+BufferMap::isRegistered(const void *devPtr) const
 {
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    return entries_.find(key) != entries_.end();
-}
-
-bool
-BufferMap::requiresDeviceSync(void *devPtr) const
-{
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
-    return it != entries_.end() && it->second.isDmabuf;
+    return find(devPtr) != nullptr;
 }
 
 #ifdef HIPOBJECT_V2_API

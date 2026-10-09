@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <sys/types.h>
 
 #include "fake-device.h"
 #include "hipobj-warnings.h"
@@ -441,6 +442,24 @@ failRecvReply(void *, char *, size_t *)
     return 5;
 }
 
+/* What recordSendRequest() was passed: the token's length, and its bytes
+ * up to and including the one after it */
+struct SentToken {
+    size_t               len = 0;
+    hipObj::RdmaTokenHex bytes{};
+};
+
+int
+recordSendRequest(void *ctx, const char *token, size_t tokenLen)
+{
+    auto *sent = static_cast<SentToken *>(ctx);
+    sent->len  = tokenLen;
+    if (tokenLen < sent->bytes.size()) {
+        std::memcpy(sent->bytes.data(), token, tokenLen + 1);
+    }
+    return 0;
+}
+
 class TransportTransferTest : public TransportTest, public ::testing::WithParamInterface<TransferFn> {
 protected:
     hipObjError_t transfer()
@@ -522,6 +541,33 @@ TEST_P(TransportTransferTest, ReportsS3Failures)
         EXPECT_EQ(transfer().opError, hipObjS3Error) << "reply \"" << reply << "\"";
     }
     EXPECT_EQ(fake().modifyQpCount, 1U);
+}
+
+TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    constexpr off_t  kOffset = 16;
+    constexpr size_t kSize   = kBufSize - 16;
+
+    hipObjOps_t ops = makeOps();
+    ops.sendRequest = &recordSendRequest;
+    for (bool isGet : {true, false}) {
+        SentToken     sent;
+        hipObjError_t err = isGet ? hipObjGet(nullptr, kDevBuf, kSize, kOffset, &ops, &sent)
+                                  : hipObjPut(nullptr, kDevBuf, kSize, kOffset, &ops, &sent);
+        ASSERT_EQ(err.opError, hipObjSuccess) << (isGet ? "get" : "put");
+
+        /* Callbacks that treat the token as a C string still work */
+        ASSERT_EQ(sent.len, hipObj::kRdmaTokenHexLen);
+        EXPECT_EQ(sent.bytes[hipObj::kRdmaTokenHexLen], '\0');
+
+        hipObj::RdmaToken token;
+        ASSERT_TRUE(hipObj::decodeRdmaTokenHex(sent.bytes.data(), token));
+        EXPECT_EQ(token.transport, hipObj::TRANSPORT_RC);
+        EXPECT_EQ(token.rkey, 0x1234U);
+        EXPECT_EQ(token.remoteAddr, reinterpret_cast<uint64_t>(kDevBuf) + kOffset);
+        EXPECT_EQ(token.length, kSize);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Transport, TransportTransferTest, ::testing::Values(&callGet, &callPut),

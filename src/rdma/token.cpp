@@ -9,7 +9,7 @@
 
 #include <cstdio>
 #include <cstring>
-#include <sstream>
+#include <string>
 #include <string_view>
 
 #include <netinet/in.h>
@@ -18,10 +18,10 @@ namespace hipObj {
 
 namespace {
 
-    const char HEX[] = "0123456789abcdef";
+    constexpr std::string_view kHexDigits = "0123456789abcdef";
 
     constexpr size_t kTokenBinaryLen = 1 + 4 + 16 + 4 + 8 + 8 + 1 + 2;
-    constexpr size_t kTokenHexLen    = kTokenBinaryLen * 2;
+    static_assert(kRdmaTokenHexLen == kTokenBinaryLen * 2);
 
     int hexNibble(char c)
     {
@@ -49,11 +49,11 @@ namespace {
         return code == 200 || code == 204 || code == 206;
     }
 
-    /* Decodes exactly kTokenHexLen hex characters. The transport byte must
-     * be one of the TransportType values. */
+    /* Decodes exactly kRdmaTokenHexLen hex characters. The transport byte
+     * must be one of the TransportType values. */
     bool decodeTokenHex(std::string_view tokenHex, RdmaToken &out)
     {
-        if (tokenHex.size() != kTokenHexLen)
+        if (tokenHex.size() != kRdmaTokenHexLen)
             return false;
 
         uint8_t buf[kTokenBinaryLen];
@@ -140,8 +140,8 @@ namespace {
 
 } // namespace
 
-std::string
-encodeRdmaToken(const RdmaToken &token)
+RdmaTokenHex
+encodeRdmaTokenHex(const RdmaToken &token)
 {
     uint8_t buf[kTokenBinaryLen];
     size_t  off = 0;
@@ -159,13 +159,20 @@ encodeRdmaToken(const RdmaToken &token)
     off += 8;
     buf[off++] = token.portNum;
     std::memcpy(buf + off, &token.lid, 2);
-    off += 2;
 
-    std::ostringstream oss;
-    for (size_t i = 0; i < off; ++i) {
-        oss << HEX[(buf[i] >> 4) & 0xf] << HEX[buf[i] & 0xf];
+    RdmaTokenHex hex{}; /* zeroed, so it ends with a NUL */
+    for (size_t i = 0; i < kTokenBinaryLen; ++i) {
+        hex[i * 2]     = kHexDigits[buf[i] >> 4];
+        hex[i * 2 + 1] = kHexDigits[buf[i] & 0xf];
     }
-    return oss.str();
+    return hex;
+}
+
+std::string
+encodeRdmaToken(const RdmaToken &token)
+{
+    const RdmaTokenHex hex = encodeRdmaTokenHex(token);
+    return {hex.data(), kRdmaTokenHexLen};
 }
 
 bool
@@ -174,7 +181,7 @@ decodeRdmaTokenHex(const char *tokenHex, RdmaToken &out)
     if (!tokenHex)
         return false;
     /* Bound the scan: anything longer than a token is rejected anyway */
-    return decodeTokenHex(std::string_view(tokenHex, strnlen(tokenHex, kTokenHexLen + 1)), out);
+    return decodeTokenHex(std::string_view(tokenHex, strnlen(tokenHex, kRdmaTokenHexLen + 1)), out);
 }
 
 bool
@@ -259,9 +266,11 @@ parsePeerTokenFromReply(const char *reply, size_t replyLen, RdmaToken &peerToken
 std::string
 encodeReplyWithPeerToken(int httpCode, const RdmaToken &peerToken)
 {
-    std::ostringstream oss;
-    oss << httpCode << ':' << encodeRdmaToken(peerToken);
-    return oss.str();
+    const RdmaTokenHex hex   = encodeRdmaTokenHex(peerToken);
+    std::string        reply = std::to_string(httpCode);
+    reply += ':';
+    reply.append(hex.data(), kRdmaTokenHexLen);
+    return reply;
 }
 
 } // namespace hipObj

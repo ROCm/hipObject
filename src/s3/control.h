@@ -6,13 +6,15 @@
 #pragma once
 
 #include <cstddef>
-#include <string>
+#include <string_view>
 
 #include "hipobj.h"
 
 namespace hipObj {
 
-int injectRdmaToken(hipObjOps_t *ops, void *ctx, const std::string &token);
+/* Passes token to sendRequest as is. The library passes an RdmaTokenHex,
+ * which keeps a NUL after the digits for callbacks that expect one. */
+int injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token);
 int receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, char *replyBuf, size_t *replyLen, int &rdmaStatus);
 
 } // namespace hipObj

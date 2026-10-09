@@ -127,9 +127,14 @@ TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
     char              hostBuf[32] = {};
 
     EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), reinterpret_cast<struct ibv_pd *>(1)), 0);
-    ASSERT_NE(buffers.lookupMr(hostBuf), nullptr);
-    EXPECT_EQ(buffers.lookupMr(hostBuf)->addr, hostBuf);
-    EXPECT_FALSE(buffers.requiresDeviceSync(hostBuf));
+    const auto *entry = buffers.find(hostBuf);
+    ASSERT_NE(entry, nullptr);
+    ASSERT_NE(entry->mr, nullptr);
+    EXPECT_EQ(entry->mr->addr, hostBuf);
+    EXPECT_EQ(entry->hostBuf, nullptr);
+    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(hostBuf));
+    EXPECT_EQ(entry->size, sizeof(hostBuf));
+    EXPECT_FALSE(entry->isDmabuf);
     EXPECT_EQ(g_hostMallocCalls, 0);
 
     EXPECT_EQ(buffers.deregisterBuffer(hostBuf), 0);
@@ -142,7 +147,11 @@ TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
     void             *gpuBuf = reinterpret_cast<void *>(0x4000);
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)), 0);
-    EXPECT_TRUE(buffers.requiresDeviceSync(gpuBuf));
+    const auto *entry = buffers.find(gpuBuf);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_TRUE(entry->isDmabuf);
+    EXPECT_EQ(entry->hostBuf, nullptr);
+    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(gpuBuf));
 
     EXPECT_EQ(buffers.deregisterBuffer(gpuBuf), 0);
 }
@@ -154,9 +163,13 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
     g_ibvLog.failRegisterAddr = gpuBuf;
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)), 0);
-    ASSERT_NE(buffers.lookupMr(gpuBuf), nullptr);
-    EXPECT_EQ(buffers.lookupMr(gpuBuf)->addr, g_lastHostMalloc);
-    EXPECT_FALSE(buffers.requiresDeviceSync(gpuBuf));
+    const auto *entry = buffers.find(gpuBuf);
+    ASSERT_NE(entry, nullptr);
+    ASSERT_NE(entry->mr, nullptr);
+    EXPECT_EQ(entry->mr->addr, g_lastHostMalloc);
+    EXPECT_EQ(entry->hostBuf.get(), g_lastHostMalloc);
+    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(g_lastHostMalloc));
+    EXPECT_FALSE(entry->isDmabuf);
     EXPECT_EQ(g_hostMallocCalls, 1);
 
     EXPECT_EQ(buffers.deregisterBuffer(gpuBuf), 0);
@@ -198,7 +211,27 @@ TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), -1);
     EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), pd), -1);
     EXPECT_EQ(g_ibvLog.registerCalls, 2);
-    EXPECT_EQ(buffers.lookupSize(gpuBuf), 64U);
+    ASSERT_NE(buffers.find(gpuBuf), nullptr);
+    EXPECT_EQ(buffers.find(gpuBuf)->size, 64U);
+}
+
+TEST_F(BufferRegistrationTest, FindsOnlyRegisteredBuffers)
+{
+    hipObj::BufferMap buffers;
+    void             *gpuBuf = reinterpret_cast<void *>(0x5000);
+
+    EXPECT_EQ(buffers.find(gpuBuf), nullptr);
+    EXPECT_FALSE(buffers.isRegistered(gpuBuf));
+
+    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)), 0);
+    EXPECT_NE(buffers.find(gpuBuf), nullptr);
+    EXPECT_TRUE(buffers.isRegistered(gpuBuf));
+    /* Only the start of a registration finds it */
+    EXPECT_EQ(buffers.find(static_cast<char *>(gpuBuf) + 1), nullptr);
+
+    ASSERT_EQ(buffers.deregisterBuffer(gpuBuf), 0);
+    EXPECT_EQ(buffers.find(gpuBuf), nullptr);
+    EXPECT_FALSE(buffers.isRegistered(gpuBuf));
 }
 
 } // namespace

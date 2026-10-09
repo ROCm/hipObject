@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstddef>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -31,6 +32,47 @@ TEST(RdmaToken, EncodeProducesHexString)
     EXPECT_EQ(encoded.size() % 2, 0U);
     EXPECT_EQ(encoded[0], '0');
     EXPECT_EQ(encoded[1], '1');
+}
+
+TEST(RdmaToken, EncodeHexIsNulTerminatedAndMatchesString)
+{
+    hipObj::RdmaToken token;
+    token.transport  = hipObj::TRANSPORT_RC;
+    token.qpNum      = 0x01020304;
+    token.gid[0]     = 0xfe;
+    token.gid[15]    = 0x80;
+    token.rkey       = 0xA5A5A5A5;
+    token.remoteAddr = 0xFFFFFFFFFFFFFFFFULL;
+    token.length     = 1;
+    token.portNum    = 0xff;
+    token.lid        = 0xabcd;
+
+    const hipObj::RdmaTokenHex hex = hipObj::encodeRdmaTokenHex(token);
+    EXPECT_EQ(hex[hipObj::kRdmaTokenHexLen], '\0');
+    EXPECT_EQ(std::string(hex.data()), hipObj::encodeRdmaToken(token));
+    for (size_t i = 0; i < hipObj::kRdmaTokenHexLen; ++i) {
+        EXPECT_TRUE((hex[i] >= '0' && hex[i] <= '9') || (hex[i] >= 'a' && hex[i] <= 'f')) << i;
+    }
+
+    hipObj::RdmaToken decoded;
+    ASSERT_TRUE(hipObj::decodeRdmaTokenHex(hex.data(), decoded));
+    EXPECT_EQ(decoded.qpNum, token.qpNum);
+    EXPECT_EQ(decoded.gid[0], token.gid[0]);
+    EXPECT_EQ(decoded.gid[15], token.gid[15]);
+    EXPECT_EQ(decoded.rkey, token.rkey);
+    EXPECT_EQ(decoded.remoteAddr, token.remoteAddr);
+    EXPECT_EQ(decoded.length, token.length);
+    EXPECT_EQ(decoded.portNum, token.portNum);
+    EXPECT_EQ(decoded.lid, token.lid);
+}
+
+TEST(RdmaToken, EncodeReplyWithPeerToken)
+{
+    hipObj::RdmaToken peer;
+    peer.transport = hipObj::TRANSPORT_RC;
+    peer.qpNum     = 7;
+
+    EXPECT_EQ(hipObj::encodeReplyWithPeerToken(200, peer), "200:" + hipObj::encodeRdmaToken(peer));
 }
 
 TEST(RdmaToken, EncodeRcTransportByte)
