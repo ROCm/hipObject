@@ -267,6 +267,25 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     )
   endif()
 
+  if(compiler_version VERSION_GREATER_EQUAL 22.1)
+    set(flags
+      # Misc warnings
+      -Walloc-size
+      -Wenum-compare-typo
+      -Wshadow-header
+      ${flags}
+    )
+  endif()
+
+  if(compiler_version VERSION_GREATER_EQUAL 23.1)
+    set(flags
+      # Misc warnings
+      -Wattribute-alias
+      -Wnonportable-include-path-separator
+      ${flags}
+    )
+  endif()
+
   # Only use _FORTIFY_SOURCE if the optimization level is -O2, -O3, or -Os
   hipobj_get_fortify_flags(fortify_flags)
 
