@@ -126,6 +126,10 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
 
   if(compiler_version VERSION_GREATER_EQUAL 15)
     set(flags
+      # Zero the padding bits in every initializer of an automatic
+      # variable, so stale stack memory can't leak through padding
+      # (Clang has no equivalent)
+      -fzero-init-padding-bits=all
       # Misc warnings
       -Wtrailing-whitespace
       # The kind names the only whitespace allowed, so =spaces flags
