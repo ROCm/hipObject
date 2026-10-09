@@ -114,7 +114,7 @@ Notes:
   [README.md](README.md) and [docs/interop.rst](docs/interop.rst).
 - The sanitizer builds are part of the mandatory checks; see
   [C and C++](#c-and-c).
-- **Code coverage: the library (`src/`) must keep at least 80% line coverage
+- **Code coverage: the library (`src/`) must keep at least 90% line coverage
   from `ctest`.** CI's coverage job fails below that. Add tests with new or
   changed code, including its error paths, rather than letting the number
   drift down; aim for most of the lines a change adds to be covered. To
