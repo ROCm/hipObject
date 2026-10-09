@@ -98,6 +98,26 @@ namespace v2 {
             return buf;
         }
 
+        /* The success replies are built by helpers that return a single
+         * named result. A handler that returns its own named result after
+         * returning error() elsewhere can't elide the copy (-Wnrvo). */
+        HandlerResult readyReply(uint32_t cookie, uint64_t bytes)
+        {
+            HandlerResult r;
+            r.status                                  = 200;
+            r.headers["X-Amz-Rdma-Protocol"]          = "hipobj-rc-v2";
+            r.headers["X-Amz-Rdma-Cookie"]            = hex32(cookie);
+            r.headers["X-Amz-Rdma-Bytes-Transferred"] = std::to_string(bytes);
+            return r;
+        }
+
+        HandlerResult cancelReply()
+        {
+            HandlerResult r;
+            r.status = 204;
+            return r;
+        }
+
         /* Strips spaces/tabs around a header name (mirrors the parser). */
         std::string trimName(const std::string &s)
         {
@@ -571,6 +591,11 @@ namespace v2 {
         }
         table_.withSession(id, [&](V2Session &s) { s.published = true; });
 
+        return prepareReply(id, serverPsn);
+    }
+
+    HandlerResult ControlHandlers::prepareReply(const std::string &id, uint32_t serverPsn)
+    {
         HandlerResult r;
         r.status                         = 200;
         r.headers["X-Amz-Rdma-Protocol"] = "hipobj-rc-v2";
@@ -768,14 +793,7 @@ namespace v2 {
             }
         }
 
-        uint64_t bytes = stats.bytes;
-
-        HandlerResult r;
-        r.status                                  = 200;
-        r.headers["X-Amz-Rdma-Protocol"]          = "hipobj-rc-v2";
-        r.headers["X-Amz-Rdma-Cookie"]            = hex32(req.cookie);
-        r.headers["X-Amz-Rdma-Bytes-Transferred"] = std::to_string(bytes);
-        return r;
+        return readyReply(req.cookie, stats.bytes);
     }
 
     HandlerResult ControlHandlers::onCancel(const CancelRequest &req, const std::string &rawHeaders)
@@ -797,9 +815,7 @@ namespace v2 {
         }
         /* Idempotent either way: absent, foreign (still 204 to avoid
          * probing), or reaped. */
-        HandlerResult r;
-        r.status = 204;
-        return r;
+        return cancelReply();
     }
 
 } // namespace v2
