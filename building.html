@@ -400,7 +400,7 @@
 <h3>Required<a class="headerlink" href="#required" title="Link to this heading">#</a></h3>
 <ul class="simple">
 <li><p>CMake 3.21 or later</p></li>
-<li><p>ROCm 6.x or later (provides HIP, HSA runtime)</p></li>
+<li><p>ROCm 7.14 or later (provides HIP, HSA runtime)</p></li>
 <li><p>C++20 capable compiler (e.g., g++ or amdclang++ from ROCm)</p></li>
 </ul>
 </section>
@@ -544,15 +544,13 @@ over. Since the programs write to the build directory, don’t install
 or package a coverage build.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> and <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> can also be set in the
 environment. If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> isn’t set but <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is,
-<code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code> for
-ROCm 7.11 and later, and to <code class="docutils literal notranslate"><span class="pre">/opt/rocm-&lt;version&gt;</span></code> for earlier
-releases. If neither is set, <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to
-<code class="docutils literal notranslate"><span class="pre">/opt/rocm/core</span></code> if it contains a ROCm installation, and
-otherwise to <code class="docutils literal notranslate"><span class="pre">/opt/rocm</span></code>.</p>
+<code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>. If
+neither is set, <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core</span></code> if it
+contains a ROCm installation, and otherwise to <code class="docutils literal notranslate"><span class="pre">/opt/rocm</span></code>.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> defaults to the version in
-<code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code>/.info/version, or in
-<code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code>/core/.info/version for the ROCm 7.11 and later
-layout, where <code class="docutils literal notranslate"><span class="pre">/opt/rocm</span></code> only contains links.</p>
+<code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code>/.info/version, or in <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code>/core/.info/version
+when <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> is <code class="docutils literal notranslate"><span class="pre">/opt/rocm</span></code>, which only contains links.
+Configuring fails if <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is earlier than 7.14.</p>
 </section>
 <section id="packaging">
 <h2>Packaging<a class="headerlink" href="#packaging" title="Link to this heading">#</a></h2>
