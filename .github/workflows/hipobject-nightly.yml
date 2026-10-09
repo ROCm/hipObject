@@ -217,6 +217,16 @@ jobs:
           RELEASE: ${{ needs.version.outputs.release }}
         run: |
           cd "${RUNNER_TEMP}/packages"
+
+          # GitHub replaces the "~" in an asset's name with "." when it
+          # uploads it, so rename the packages to the names they'll be
+          # downloaded with, or SHA256SUMS won't match them. Only the file
+          # names change: the versions in the packages keep their "~".
+          for f in *.deb; do
+            if [[ "${f}" == *"~"* ]]; then
+              mv -- "${f}" "${f//\~/.}"
+            fi
+          done
           sha256sum -- *.deb > SHA256SUMS
 
           # GitHub shows each line break in a release's notes, so each
@@ -233,7 +243,7 @@ jobs:
           sudo apt install ./hipobject_<version>_amd64.deb ./hipobject-dev_<version>_amd64.deb
           \`\`\`
 
-          The packages install into \`/opt/rocm/core-<major>.<minor>\`. SHA256SUMS has the checksums of the packages.
+          The packages install into \`/opt/rocm/core-<major>.<minor>\`. SHA256SUMS has the checksums of the packages; check the packages you downloaded with \`sha256sum --check --ignore-missing SHA256SUMS\` in the directory you downloaded them to.
           EOF
 
           if gh release view nightly > /dev/null 2>&1; then
@@ -263,3 +273,24 @@ jobs:
             --title "hipObject nightly" \
             --notes-file "${notes}" \
             -- *.deb SHA256SUMS
+
+      # Download the release the way a user would and check that it has
+      # the files that were uploaded, under the same names, and that they
+      # match SHA256SUMS. GitHub can change an asset's name when it
+      # uploads it, which breaks SHA256SUMS. The release is already
+      # published, so a failure here means it's broken and needs fixing.
+      - name: Check the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          published="${RUNNER_TEMP}/published"
+          gh release download nightly --dir "${published}"
+          cd "${published}"
+          if ! diff -u \
+              <(cd "${RUNNER_TEMP}/packages" && printf '%s\n' *) \
+              <(printf '%s\n' *); then
+            echo "::error::the release's files aren't the ones uploaded"
+            exit 1
+          fi
+          sha256sum --check --strict SHA256SUMS
