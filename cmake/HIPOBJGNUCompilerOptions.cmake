@@ -8,6 +8,7 @@
 
 include_guard(GLOBAL)
 
+include(CheckCXXCompilerFlag)
 include(HIPOBJFortifySource)
 
 function(hipobj_get_gnu_warning_flags outvar compiler_version)
@@ -32,6 +33,14 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     # Turn on stack protection options
     -fstack-clash-protection
     -fstack-protector-strong
+
+    # Keep null pointer checks the optimizer could prove redundant, and
+    # don't assume that pointers to different types never alias
+    -fno-delete-null-pointer-checks
+    -fno-strict-aliasing
+
+    # Check the preconditions of libstdc++ calls (bounds, etc.)
+    -D_GLIBCXX_ASSERTIONS
 
     # Misc warnings
     #-Waggregate-return # We return structs, but might be useful
@@ -86,6 +95,15 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     # TODO: Add size warnings when we pick a limit
   )
 
+  if(compiler_version VERSION_GREATER_EQUAL 11)
+    set(flags
+      # Zero the registers a function used when it returns, so their
+      # contents don't outlive the call or serve as ROP gadgets
+      -fzero-call-used-regs=used-gpr
+      ${flags}
+    )
+  endif()
+
   if(compiler_version VERSION_GREATER_EQUAL 12)
     set(flags
       # Misc warnings
@@ -137,6 +155,13 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
       -Wleading-whitespace=spaces
       ${flags}
     )
+  endif()
+
+  # Control-flow protection (Intel CET) only exists on x86
+  check_cxx_compiler_flag(-fcf-protection=full
+    HIPOBJ_COMPILER_SUPPORTS_CF_PROTECTION)
+  if(HIPOBJ_COMPILER_SUPPORTS_CF_PROTECTION)
+    list(APPEND flags -fcf-protection=full)
   endif()
 
   set(${outvar} ${flags} PARENT_SCOPE)

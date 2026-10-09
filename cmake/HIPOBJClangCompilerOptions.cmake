@@ -8,6 +8,7 @@
 
 include_guard(GLOBAL)
 
+include(CheckCXXCompilerFlag)
 include(CheckCXXSourceCompiles)
 include(CMakePushCheckState)
 include(HIPOBJFortifySource)
@@ -91,6 +92,18 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
 
     # Initialize local variables with a pattern
     -ftrivial-auto-var-init=pattern
+
+    # Zero the registers a function used when it returns, so their
+    # contents don't outlive the call or serve as ROP gadgets
+    -fzero-call-used-regs=used-gpr
+
+    # Keep null pointer checks the optimizer could prove redundant, and
+    # don't assume that pointers to different types never alias
+    -fno-delete-null-pointer-checks
+    -fno-strict-aliasing
+
+    # Check the preconditions of libstdc++ calls (bounds, etc.)
+    -D_GLIBCXX_ASSERTIONS
 
     # Misc warnings
     #
@@ -279,6 +292,10 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
 
   if(compiler_version VERSION_GREATER_EQUAL 23.1)
     set(flags
+      # Don't assume a bool loaded from memory holds 0 or 1, so a
+      # corrupted bool can't steer the optimized code
+      -fno-strict-bool
+
       # Misc warnings
       -Wattribute-alias
       -Wnonportable-include-path-separator
@@ -303,6 +320,13 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     ${fortify_flags}
     ${flags}
   )
+
+  # Control-flow protection (Intel CET) only exists on x86
+  check_cxx_compiler_flag(-fcf-protection=full
+    HIPOBJ_COMPILER_SUPPORTS_CF_PROTECTION)
+  if(HIPOBJ_COMPILER_SUPPORTS_CF_PROTECTION)
+    list(APPEND flags -fcf-protection=full)
+  endif()
 
   set(${outvar} ${flags} PARENT_SCOPE)
 
