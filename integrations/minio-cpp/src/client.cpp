@@ -14,6 +14,7 @@
 #include <iostream>
 #include <mutex>
 #include <sstream>
+#include <utility>
 
 #include <hip/hip_runtime_api.h>
 
@@ -217,6 +218,11 @@ Client::PutObject(minio::s3::PutObjectArgs args)
     }
 
     const size_t size = *args.size;
+    // minio-cpp's object_size is a long, which the HTTP paths below set, and
+    // long is only 32 bits on some platforms
+    if (!std::in_range<long>(size)) {
+        return minio::s3::PutObjectResponse(minio::error::Error("object size is too large"));
+    }
 
     hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {

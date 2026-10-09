@@ -9,10 +9,13 @@
 
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include <netinet/in.h>
+
+#include "hipobj-parse.h"
 
 namespace hipObj {
 
@@ -22,27 +25,6 @@ namespace {
 
     constexpr size_t kTokenBinaryLen = 1 + 4 + 16 + 4 + 8 + 8 + 1 + 2;
     static_assert(kRdmaTokenHexLen == kTokenBinaryLen * 2);
-
-    int hexNibble(char c)
-    {
-        if (c >= '0' && c <= '9')
-            return c - '0';
-        if (c >= 'a' && c <= 'f')
-            return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F')
-            return c - 'A' + 10;
-        return -1;
-    }
-
-    bool decodeHexBytePair(char hi, char lo, uint8_t &out)
-    {
-        int h = hexNibble(hi);
-        int l = hexNibble(lo);
-        if (h < 0 || l < 0)
-            return false;
-        out = static_cast<uint8_t>((h << 4) | l);
-        return true;
-    }
 
     bool isSuccessHttpCode(int code)
     {
@@ -58,8 +40,10 @@ namespace {
 
         uint8_t buf[kTokenBinaryLen];
         for (size_t i = 0; i < kTokenBinaryLen; ++i) {
-            if (!decodeHexBytePair(tokenHex[i * 2], tokenHex[i * 2 + 1], buf[i]))
+            const auto byte = parseNumber<uint8_t>(tokenHex.substr(i * 2, 2), 16);
+            if (!byte)
                 return false;
+            buf[i] = *byte;
         }
         if (buf[0] != TRANSPORT_DC && buf[0] != TRANSPORT_RC)
             return false;
@@ -112,14 +96,11 @@ namespace {
         const std::string_view status = value.substr(0, value.find(':'));
         if (status.size() != 3)
             return false;
-        int code = 0;
-        for (char c : status) {
-            if (c < '0' || c > '9')
-                return false;
-            code = code * 10 + (c - '0');
-        }
-        if (code < 100 || code > 599)
+        /* Unsigned, so a '-' sign is rejected too */
+        const auto parsed = parseNumber<unsigned>(status);
+        if (!parsed || *parsed < 100 || *parsed > 599)
             return false;
+        const int code = static_cast<int>(*parsed);
 
         if (status.size() == value.size()) {
             httpCode     = code;

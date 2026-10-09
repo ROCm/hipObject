@@ -11,6 +11,9 @@
 #include <cctype>
 #include <cinttypes>
 #include <cstdio>
+#include <optional>
+
+#include "hipobj-parse.h"
 
 namespace hipObj {
 namespace v2 {
@@ -202,32 +205,18 @@ namespace v2 {
             else if (name == "x-amz-rdma-cookie") {
                 if (value.size() != kCookieHexLen)
                     return false;
-                uint32_t v = 0;
-                for (char c : value) {
-                    int d = b64Val(c); /* reuse: hex via isHexDigit check below */
-                    (void)d;
-                    if (!isHexDigit(c))
-                        return false;
-                    int hv =
-                        (c <= '9') ? (c - '0') : (std::tolower(static_cast<unsigned char>(c)) - 'a' + 10);
-                    v = (v << 4) | static_cast<uint32_t>(hv);
-                }
-                out.cookieEcho = v;
+                const auto cookie = parseNumber<uint32_t>(value, 16);
+                if (!cookie)
+                    return false;
+                out.cookieEcho = *cookie;
                 sawCookie      = true;
             }
             else if (name == "x-amz-rdma-bytes-transferred") {
-                if (value.empty())
+                /* A count that doesn't fit is malformed, not wrapped */
+                const auto bytes = parseNumber<uint64_t>(value);
+                if (!bytes)
                     return false;
-                uint64_t b = 0;
-                for (char c : value) {
-                    if (c < '0' || c > '9')
-                        return false;
-                    /* A count that doesn't fit is malformed, not wrapped */
-                    if (__builtin_mul_overflow(b, 10U, &b) ||
-                        __builtin_add_overflow(b, static_cast<uint64_t>(c - '0'), &b))
-                        return false;
-                }
-                out.bytes = b;
+                out.bytes = *bytes;
             }
             else if (name == "x-amz-rdma-etag") {
                 out.etag = value;
@@ -278,16 +267,10 @@ namespace v2 {
     {
         if (s.size() != kPsnHexLen)
             return false;
-        uint32_t v = 0;
-        for (char c : s) {
-            if (!isHexDigit(c))
-                return false;
-            int hv = (c <= '9') ? (c - '0') : (std::tolower(static_cast<unsigned char>(c)) - 'a' + 10);
-            v      = (v << 4) | static_cast<uint32_t>(hv);
-        }
-        if (v == 0 || v > 0xffffff)
+        const auto v = parseNumber<uint32_t>(s, 16);
+        if (!v || *v == 0 || *v > 0xffffff)
             return false;
-        psn = v;
+        psn = *v;
         return true;
     }
 

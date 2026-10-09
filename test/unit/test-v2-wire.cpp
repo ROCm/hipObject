@@ -223,9 +223,16 @@ TEST(V2Wire, Psn)
     EXPECT_EQ(v, 1U);
     EXPECT_TRUE(parsePsn("ffffff", v));
     EXPECT_EQ(v, 0xffffffU);
+    EXPECT_TRUE(parsePsn("ABCDEF", v));
+    EXPECT_EQ(v, 0xabcdefU);
     EXPECT_FALSE(parsePsn("000000", v));
     EXPECT_FALSE(parsePsn("1000000", v));
     EXPECT_FALSE(parsePsn("zzzzzz", v));
+    for (const char *psn : {"+00001", "-00001", "0x0001", "00 001", " 00001", "00001 "}) {
+        v = 1234;
+        EXPECT_FALSE(parsePsn(psn, v)) << "psn \"" << psn << "\"";
+        EXPECT_EQ(v, 1234U);
+    }
 }
 
 TEST(V2Wire, FormatHelpers)
@@ -330,7 +337,8 @@ TEST(V2Wire, FinalRejectsMalformedLine)
 
 TEST(V2Wire, FinalRejectsMalformedCookie)
 {
-    for (const char *cookie : {"", "c0ffee", "00c0ffee0", "zzzzzzzz", "00c0ffeg", "0x00c0ff"}) {
+    for (const char *cookie : {"", "c0ffee", "00c0ffee0", "zzzzzzzz", "00c0ffeg", "0x00c0ff", "+0c0ffee",
+                               "-0c0ffee", "00 c0ffe"}) {
         std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
         h += std::string("X-Amz-Rdma-Cookie: ") + cookie + "\r\n";
         hipObj::v2::FinalReply r;

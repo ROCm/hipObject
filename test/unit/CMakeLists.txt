@@ -82,6 +82,16 @@ endfunction()
 hipobj_add_test(test-rdma-token
   test-rdma-token.cpp)
 
+hipobj_add_test(test-parse-number
+  test-parse-number.cpp)
+
+# The MinIO bridge's header parsing doesn't need minio-cpp, so it's tested
+# in every build, not only with HIPOBJ_MINIO_CLIENT
+hipobj_add_test(test-minio-bytes-transferred
+  test-minio-bytes-transferred.cpp)
+target_include_directories(test-minio-bytes-transferred PRIVATE
+  ${PROJECT_SOURCE_DIR}/integrations/minio-cpp/src)
+
 hipobj_add_test(test-vendor-ops
   test-vendor-ops.cpp)
 
@@ -155,6 +165,10 @@ add_test(NAME test-staging-env
   COMMAND test-staging --gtest_filter=StagingEnvTest.*)
 set_tests_properties(test-staging-env PROPERTIES
   ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=20;HIPOBJ_REQUIRE_GPU_DIRECT=1")
+add_test(NAME test-staging-bad-env
+  COMMAND test-staging --gtest_filter=StagingBadEnvTest.*)
+set_tests_properties(test-staging-bad-env PROPERTIES
+  ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=+20")
 
 hipobj_add_test(test-thread-safety
   test-thread-safety.cpp)
