@@ -5,16 +5,21 @@
 
 #include "hipobj_minio/rdma.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include <hipobj.h>
 #include <miniocpp/http.h>
 #include <miniocpp/request.h>
 #include <miniocpp/signer.h>
 #include <miniocpp/utils.h>
+
+#include "bytes-transferred.h"
 
 namespace hipobj::minio {
 
@@ -65,6 +70,16 @@ namespace {
             return {};
         }
         return std::string(nicIp);
+    }
+
+    // A response header's value, or std::nullopt if the response doesn't
+    // have the header. GetFront() alone returns "" for both.
+    std::optional<std::string> headerValue(const minio::utils::Multimap &headers, const char *name)
+    {
+        if (!headers.Contains(name)) {
+            return std::nullopt;
+        }
+        return headers.GetFront(name);
     }
 
     // ---------------------------------------------------------------------------
@@ -199,15 +214,12 @@ namespace {
         out->httpStatus   = res.status_code;
         out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
 
-        std::string bytes_hdr = res.headers.GetFront(kAmzRdmaBytesTransferred);
-        if (!bytes_hdr.empty()) {
-            try {
-                long long n = std::stoll(bytes_hdr);
-                out->bytes  = (n >= 0) ? static_cast<uint64_t>(n) : 0;
-            }
-            catch (const std::exception &) {
-            }
+        const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), 0);
+        if (!bytes) {
+            RDMA_TRACE("v2 ready: malformed %s header", kAmzRdmaBytesTransferred);
+            return -1;
         }
+        out->bytes = *bytes;
 
         std::string etag = res.headers.GetFront("etag");
         if (!etag.empty()) {
@@ -489,21 +501,14 @@ rdmaGet(S3RdmaContext *sctx, const char *token, const void *buf, size_t size)
         return -1;
     }
 
-    std::string bytes_hdr = res.headers.GetFront(kAmzRdmaBytesTransferred);
-    if (!bytes_hdr.empty()) {
-        try {
-            long long n = std::stoll(bytes_hdr);
-            if (n < 0) {
-                return -1;
-            }
-            return static_cast<ssize_t>(n);
-        }
-        catch (const std::exception &) {
-            return -1;
-        }
+    // Without the header, the whole buffer was transferred. The server can't
+    // have transferred more than that.
+    const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), size);
+    if (!bytes || *bytes > size || !std::in_range<ssize_t>(*bytes)) {
+        RDMA_TRACE("v1 get: malformed or out-of-range %s header", kAmzRdmaBytesTransferred);
+        return -1;
     }
-
-    return static_cast<ssize_t>(size);
+    return static_cast<ssize_t>(*bytes);
 }
 
 ssize_t

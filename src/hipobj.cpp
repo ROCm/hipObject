@@ -7,6 +7,7 @@
 
 #include <array>
 #include <chrono>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -14,6 +15,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -25,6 +27,7 @@
 #include "buffer.h"
 #include "control.h"
 #include "hip-seam.h"
+#include "hipobj-parse.h"
 #include "hipobj-private.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
@@ -158,27 +161,37 @@ finishTransferAfterReply(const char *reply, size_t replyLen, bool requiresDevice
     return (err == hipSuccess) ? 0 : -1;
 }
 
-/* Milliseconds to wait for a staging copy before giving up. A 1 MiB copy is
+/* How long to wait for a staging copy before giving up. A 1 MiB copy is
  * single-digit milliseconds on real hardware and ~170 ms on the emulated GPU
  * the CI lanes use, so the default is several orders of magnitude of slack.
  * It exists for one reason: a DMA that never completes must not become an
  * unkillable process. ROCm waits on the completion signal with
  * BusyWaitSignal::WaitRelaxed, which spins in userspace rather than blocking,
  * so a wedged copy shows up as a busy core and no kernel log at all -- there
- * is no other layer that will ever time this out. */
-static long
-stageTimeoutMs()
+ * is no other layer that will ever time this out.
+ *
+ * HIPOBJ_STAGE_TIMEOUT_MS overrides the default with a whole number of
+ * milliseconds. A value that isn't one, or is out of range, is ignored. */
+static std::chrono::milliseconds
+stageTimeout()
 {
-    static long ms = [] {
-        const char *env = getenv("HIPOBJ_STAGE_TIMEOUT_MS");
-        if (!env || !*env) {
-            return 30000L;
+    static const std::chrono::milliseconds timeout = [] {
+        constexpr std::chrono::milliseconds kDefault{30000};
+        /* Longer than any copy could take, and short enough that adding it
+         * to the current time can't overflow the clock */
+        constexpr std::chrono::milliseconds kMax = std::chrono::hours(24);
+
+        const char *env = std::getenv("HIPOBJ_STAGE_TIMEOUT_MS");
+        if (!env) {
+            return kDefault;
         }
-        char *end = nullptr;
-        long  v   = strtol(env, &end, 10);
-        return (end && *end == '\0' && v > 0) ? v : 30000L;
+        const auto ms = parseNumber<int64_t>(env);
+        if (!ms || *ms <= 0 || *ms > kMax.count()) {
+            return kDefault;
+        }
+        return std::chrono::milliseconds(*ms);
     }();
-    return ms;
+    return timeout;
 }
 
 /* hipMemcpy with a deadline. Async copy plus a recorded event polled to a
@@ -224,8 +237,8 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
         return {hipObjInternalError, 0};
     }
 
-    const long timeoutMs = stageTimeoutMs();
-    const auto deadline  = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    const std::chrono::milliseconds timeout  = stageTimeout();
+    const auto                      deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
         hipError_t q = ops.hipEventQuery(done);
         if (q == hipSuccess) {
@@ -237,9 +250,10 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
             return {hipObjInternalError, 0};
         }
         if (std::chrono::steady_clock::now() >= deadline) {
+            const int64_t timeoutMs = timeout.count();
             fprintf(stderr,
                     "hipObj: staging %s copy of %zu bytes did not complete within "
-                    "%ld ms; abandoning it. The GPU never signalled completion -- "
+                    "%" PRId64 " ms; abandoning it. The GPU never signalled completion -- "
                     "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
                     toDevice ? "host-to-device" : "device-to-host", size, timeoutMs);
             return {hipObjInternalError, 0};

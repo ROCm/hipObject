@@ -7,8 +7,12 @@
 #include "v2_request.h"
 
 #include <cctype>
-#include <cstdlib>
+#include <concepts>
+#include <cstddef>
+#include <string_view>
 #include <utility>
+
+#include "hipobj-parse.h"
 
 namespace hipObj {
 namespace v2 {
@@ -28,45 +32,14 @@ namespace v2 {
             return true;
         }
 
-        bool parseU32Hex(const std::string &s, uint32_t &out)
+        /* Parses bare hex (no 0x prefix) of at most as many digits as T
+         * holds, so leading zeros can't pad a field past its width */
+        template <std::unsigned_integral T> std::optional<T> parseHex(std::string_view s)
         {
-            if (s.empty() || s.size() > 8) {
-                return false;
+            if (s.size() > sizeof(T) * 2) {
+                return std::nullopt;
             }
-            uint32_t v = 0;
-            for (char c : s) {
-                int d;
-                if (std::isdigit(static_cast<unsigned char>(c))) {
-                    d = c - '0';
-                }
-                else {
-                    char lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                    d       = lc - 'a' + 10;
-                }
-                v = (v << 4) | static_cast<uint32_t>(d);
-            }
-            out = v;
-            return true;
-        }
-
-        bool parseU64Dec(const std::string &s, uint64_t &out)
-        {
-            if (s.empty() || s.size() > 20) {
-                return false;
-            }
-            uint64_t v = 0;
-            for (char c : s) {
-                if (!std::isdigit(static_cast<unsigned char>(c))) {
-                    return false;
-                }
-                uint64_t d = static_cast<uint64_t>(c - '0');
-                if (v > (UINT64_MAX - d) / 10) {
-                    return false; /* would overflow */
-                }
-                v = v * 10 + d;
-            }
-            out = v;
-            return true;
+            return parseNumber<T>(s, 16);
         }
 
         /* Extracts the exact Authorization header value from the raw block
@@ -142,18 +115,24 @@ namespace v2 {
         out.token = tok;
 
         it = headers.find("x-amz-rdma-psn");
-        if (it == headers.end() || !parseU32Hex(it->second, out.clientPsn) || out.clientPsn == 0 ||
-            out.clientPsn > 0x00ffffff) {
+        if (it == headers.end()) {
             return std::nullopt;
         }
+        const auto psn = parseHex<uint32_t>(it->second);
+        if (!psn || *psn == 0 || *psn > 0x00ffffff) {
+            return std::nullopt;
+        }
+        out.clientPsn = *psn;
 
         it = headers.find("x-amz-rdma-cookie");
-        if (it == headers.end() || !isHexDigits(it->second, 8, 8)) {
+        if (it == headers.end() || it->second.size() != 8) {
             return std::nullopt;
         }
-        uint32_t cookie = 0;
-        parseU32Hex(it->second, cookie);
-        out.cookie = cookie;
+        const auto cookie = parseHex<uint32_t>(it->second);
+        if (!cookie) {
+            return std::nullopt;
+        }
+        out.cookie = *cookie;
 
         it = headers.find("x-amz-rdma-op");
         if (it == headers.end() || (it->second != "GET" && it->second != "PUT")) {
@@ -168,15 +147,22 @@ namespace v2 {
         out.target = it->second;
 
         it = headers.find("x-amz-rdma-size");
-        if (it == headers.end() || !parseU64Dec(it->second, out.size) || out.size == 0) {
+        if (it == headers.end()) {
             return std::nullopt;
         }
+        const auto size = parseNumber<uint64_t>(it->second);
+        if (!size || *size == 0) {
+            return std::nullopt;
+        }
+        out.size = *size;
 
         it = headers.find("x-amz-rdma-offset");
         if (it != headers.end()) {
-            if (!parseU64Dec(it->second, out.offset)) {
+            const auto offset = parseNumber<uint64_t>(it->second);
+            if (!offset) {
                 return std::nullopt;
             }
+            out.offset    = *offset;
             out.hasOffset = true;
         }
 
@@ -204,40 +190,43 @@ namespace v2 {
         out.session = it->second;
 
         it = headers.find("x-amz-rdma-cookie");
-        if (it == headers.end() || !isHexDigits(it->second, 8, 8)) {
+        if (it == headers.end() || it->second.size() != 8) {
             return std::nullopt;
         }
-        uint32_t cookie = 0;
-        parseU32Hex(it->second, cookie);
-        out.cookie = cookie;
+        const auto cookie = parseHex<uint32_t>(it->second);
+        if (!cookie) {
+            return std::nullopt;
+        }
+        out.cookie = *cookie;
 
         /* Client MR endpoint for the data phase. Optional on a GET that
          * the server stages itself, required for PUT delivery and the
-         * GET READ pull. Parsed as bare hex without a 0x prefix. */
+         * GET READ pull. Parsed as bare hex without a 0x prefix.
+         * Present-but-empty fails too: a field that exists must carry a
+         * valid value. */
         it = headers.find("x-amz-rdma-mr-addr");
         if (it != headers.end()) {
-            /* Strict hex, and present-but-empty fails too: a field that
-             * exists must carry a valid value. Bare strtoull would also
-             * accept prefixes, whitespace and trailing garbage, which
-             * would poison the remote address. */
-            if (!isHexDigits(it->second, 1, 16)) {
+            const auto addr = parseHex<uint64_t>(it->second);
+            if (!addr) {
                 return std::nullopt;
             }
-            out.mrAddr = std::strtoull(it->second.c_str(), nullptr, 16);
+            out.mrAddr = *addr;
         }
         it = headers.find("x-amz-rdma-mr-rkey");
         if (it != headers.end()) {
-            if (!isHexDigits(it->second, 1, 8)) {
+            const auto rkey = parseHex<uint32_t>(it->second);
+            if (!rkey) {
                 return std::nullopt;
             }
-            out.mrRkey = static_cast<uint32_t>(std::strtoull(it->second.c_str(), nullptr, 16));
+            out.mrRkey = *rkey;
         }
         it = headers.find("x-amz-rdma-qpn");
         if (it != headers.end()) {
-            if (!isHexDigits(it->second, 1, 8)) {
+            const auto qpn = parseHex<uint32_t>(it->second);
+            if (!qpn) {
                 return std::nullopt;
             }
-            out.qpn = static_cast<uint32_t>(std::strtoull(it->second.c_str(), nullptr, 16));
+            out.qpn = *qpn;
         }
 
         out.authorization = rawAuthorization(rawHeaders);

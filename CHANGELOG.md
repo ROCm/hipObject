@@ -155,6 +155,15 @@
   base64 text was not the all-zero value.
 - The V2 final-reply parser could accept an `X-Amz-Rdma-Bytes-Transferred`
   value larger than `UINT64_MAX` after wrapping it to a smaller count.
+- The MinIO bridge read a malformed `X-Amz-Rdma-Bytes-Transferred` value
+  such as `12abc` as its leading number, and on the V2 path ignored a
+  value it couldn't read at all, reporting 0 bytes. A V1 GET also
+  accepted a count larger than the buffer. The transfer now fails
+  instead.
+- `HIPOBJ_STAGE_TIMEOUT_MS` accepted a leading `+` or whitespace, and a
+  value too large for a `long` overflowed the staging copy's deadline.
+  hipObject now uses the default 30-second timeout unless the value is a
+  plain number of milliseconds, from 1 to 86400000 (24 hours).
 - Building with GCC 15 warned about every line indented with spaces, and
   failed with `HIPOBJ_WERROR=ON`.
 - Optimized Clang builds against glibc 2.40 or later warned about every

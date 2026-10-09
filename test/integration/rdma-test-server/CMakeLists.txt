@@ -83,6 +83,7 @@ if(HIPOBJECT_V2_API)
       v2_sigv4.cpp
       ${PROJECT_SOURCE_DIR}/src/rdma/token.cpp)
   target_include_directories(v2-client-harness PRIVATE
+    ${PROJECT_SOURCE_DIR}/shared
     ${PROJECT_SOURCE_DIR}/src/common)
 
   hipobj_add_test_executable(
@@ -93,6 +94,7 @@ if(HIPOBJECT_V2_API)
       ${PROJECT_SOURCE_DIR}/src/rdma/token.cpp)
   target_include_directories(v2-data-client PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/shared
     ${PROJECT_SOURCE_DIR}/src/common)
   target_link_libraries(v2-data-client PRIVATE OpenSSL::Crypto)
 

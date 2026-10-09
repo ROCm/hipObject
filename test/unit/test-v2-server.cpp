@@ -305,6 +305,103 @@ TEST(V2RequestParser, PrepareRejectsBadFields)
     EXPECT_TRUE(hipObj::v2::parsePrepareRequest(h3, raw).has_value());
 }
 
+TEST(V2RequestParser, PrepareRejectsMalformedNumbers)
+{
+    const std::string raw  = "Authorization: sig\r\n";
+    const auto        good = hdrs({{"x-amz-rdma-protocol", "hipobj-rc-v2"},
+                                   {"x-amz-rdma-token", std::string(88, 'a')},
+                                   {"x-amz-rdma-psn", "000001"},
+                                   {"x-amz-rdma-cookie", "1a2b3c4d"},
+                                   {"x-amz-rdma-op", "GET"},
+                                   {"x-amz-rdma-target", "/k"},
+                                   {"x-amz-rdma-size", "1"},
+                                   {"x-amz-rdma-offset", "0"}});
+    ASSERT_TRUE(hipObj::v2::parsePrepareRequest(good, raw).has_value());
+
+    const std::pair<const char *, const char *> cases[] = {
+        {"x-amz-rdma-psn", ""},
+        {"x-amz-rdma-psn", "00000g"},
+        {"x-amz-rdma-psn", "+00001"},
+        {"x-amz-rdma-psn", "1000000"},
+        {"x-amz-rdma-psn", "000000001"},
+        {"x-amz-rdma-cookie", "1a2b3c4"},
+        {"x-amz-rdma-cookie", "-a2b3c4d"},
+        {"x-amz-rdma-cookie", "1a2b3c4g"},
+        {"x-amz-rdma-size", "0"},
+        {"x-amz-rdma-size", "+1"},
+        {"x-amz-rdma-size", " 1"},
+        {"x-amz-rdma-size", "1k"},
+        {"x-amz-rdma-size", "18446744073709551616"},
+        {"x-amz-rdma-offset", ""},
+        {"x-amz-rdma-offset", "-1"},
+        {"x-amz-rdma-offset", "0x10"},
+    };
+    for (const auto &[name, value] : cases) {
+        auto h  = good;
+        h[name] = value;
+        EXPECT_FALSE(hipObj::v2::parsePrepareRequest(h, raw).has_value()) << name << ": \"" << value << "\"";
+    }
+}
+
+TEST(V2RequestParser, ReadyParsesClientMrEndpoint)
+{
+    const std::string raw = "Authorization: AWS4 sig\r\n";
+    auto              h   = hdrs({
+        {"x-amz-rdma-protocol", "hipobj-rc-v2"},
+        {"x-amz-rdma-session", std::string(32, 'f')},
+        {"x-amz-rdma-cookie", "0000ABCD"},
+        {"x-amz-rdma-mr-addr", "7f0000001000"},
+        {"x-amz-rdma-mr-rkey", "ffffffff"},
+        {"x-amz-rdma-qpn", "1A2"},
+    });
+    auto              r   = hipObj::v2::parseReadyRequest(h, raw);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->cookie, 0xabcdU);
+    EXPECT_EQ(r->mrAddr, 0x7f0000001000ULL);
+    EXPECT_EQ(r->mrRkey, 0xffffffffU);
+    EXPECT_EQ(r->qpn, 0x1a2U);
+
+    h["x-amz-rdma-mr-addr"] = "ffffffffffffffff";
+    r                       = hipObj::v2::parseReadyRequest(h, raw);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->mrAddr, 0xffffffffffffffffULL);
+}
+
+TEST(V2RequestParser, ReadyRejectsMalformedNumbers)
+{
+    const std::string raw  = "Authorization: AWS4 sig\r\n";
+    const auto        good = hdrs({
+        {"x-amz-rdma-protocol", "hipobj-rc-v2"},
+        {"x-amz-rdma-session", std::string(32, 'f')},
+        {"x-amz-rdma-cookie", "00000001"},
+        {"x-amz-rdma-mr-addr", "1000"},
+        {"x-amz-rdma-mr-rkey", "1"},
+        {"x-amz-rdma-qpn", "1"},
+    });
+    ASSERT_TRUE(hipObj::v2::parseReadyRequest(good, raw).has_value());
+
+    const std::pair<const char *, const char *> cases[] = {
+        {"x-amz-rdma-cookie", "0000001"},
+        {"x-amz-rdma-cookie", "+0000001"},
+        {"x-amz-rdma-mr-addr", ""},
+        {"x-amz-rdma-mr-addr", "0x1000"},
+        {"x-amz-rdma-mr-addr", "+1000"},
+        {"x-amz-rdma-mr-addr", "1000 "},
+        {"x-amz-rdma-mr-addr", "00000000000000001"},
+        {"x-amz-rdma-mr-rkey", ""},
+        {"x-amz-rdma-mr-rkey", "-1"},
+        {"x-amz-rdma-mr-rkey", "100000000"},
+        {"x-amz-rdma-qpn", ""},
+        {"x-amz-rdma-qpn", "1g"},
+        {"x-amz-rdma-qpn", "000000001"},
+    };
+    for (const auto &[name, value] : cases) {
+        auto h  = good;
+        h[name] = value;
+        EXPECT_FALSE(hipObj::v2::parseReadyRequest(h, raw).has_value()) << name << ": \"" << value << "\"";
+    }
+}
+
 TEST(V2RequestParser, ReadyAndCancel)
 {
     const std::string raw = "Authorization: AWS4 sig\r\n";

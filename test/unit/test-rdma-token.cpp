@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cctype>
 #include <cstddef>
+#include <cstring>
+#include <initializer_list>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -223,6 +226,50 @@ TEST(RdmaToken, DecodeRejectsUnknownTransport)
 
     hipObj::RdmaToken parsed;
     EXPECT_FALSE(hipObj::decodeRdmaTokenHex(encoded.c_str(), parsed));
+}
+
+TEST(RdmaToken, DecodeAcceptsUppercaseHex)
+{
+    hipObj::RdmaToken token;
+    token.transport = hipObj::TRANSPORT_RC;
+    /* A made-up address with every hex letter in it. gitleaks's
+     * generic-api-key rule mistakes a random-looking value assigned to a
+     * "token" for a credential. */
+    token.remoteAddr    = 0xabcdef0123456789ULL; // gitleaks:allow
+    std::string encoded = hipObj::encodeRdmaToken(token);
+    for (char &c : encoded) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+
+    hipObj::RdmaToken parsed;
+    ASSERT_TRUE(hipObj::decodeRdmaTokenHex(encoded.c_str(), parsed));
+    EXPECT_EQ(parsed.remoteAddr, 0xabcdef0123456789ULL);
+}
+
+TEST(RdmaToken, DecodeRejectsBytesThatArentTwoHexDigits)
+{
+    hipObj::RdmaToken token;
+    token.transport              = hipObj::TRANSPORT_RC;
+    const std::string encoded    = hipObj::encodeRdmaToken(token);
+    const char *const badBytes[] = {"+1", "-1", " 1", "1 ", "0x", "g0", "0g"};
+    for (const char *bad : badBytes) {
+        /* Replace a byte in the middle of the token, in the GID */
+        std::string mangled = encoded;
+        mangled.replace(20, 2, bad);
+
+        hipObj::RdmaToken parsed;
+        EXPECT_FALSE(hipObj::decodeRdmaTokenHex(mangled.c_str(), parsed)) << "byte \"" << bad << "\"";
+    }
+}
+
+TEST(RdmaReply, ParseRejectsStatusThatIsntThreeDigits)
+{
+    for (const char *reply : {"+20", "-20", " 20", "20 ", "2 0", "0x1", "-99"}) {
+        int code = 5678;
+        EXPECT_FALSE(hipObj::parseRdmaReplyHttpCode(reply, std::strlen(reply), code))
+            << "reply \"" << reply << "\"";
+        EXPECT_EQ(code, 5678);
+    }
 }
 
 TEST(RdmaToken, ParseClientNicFromGid)

@@ -9,7 +9,8 @@
  * The StagingEnvTest tests need HIPOBJ_STAGE_TIMEOUT_MS and
  * HIPOBJ_REQUIRE_GPU_DIRECT, which hipObject reads once and caches, so they
  * skip unless they're set. CMakeLists.txt runs this program a second time,
- * with both set, for just those tests.
+ * with both set, for just those tests, and a third time with a malformed
+ * HIPOBJ_STAGE_TIMEOUT_MS for the StagingBadEnvTest tests.
  */
 
 #include <charconv>
@@ -370,6 +371,30 @@ TEST_F(StagingEnvTest, RequiringGpuDirectRefusesStaging)
     /* Host memory isn't GPU-direct to begin with */
     fake().memoryType = hipMemoryTypeHost;
     EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjSuccess);
+}
+
+/* For a HIPOBJ_STAGE_TIMEOUT_MS that isn't a plain number, such as "+20" */
+class StagingBadEnvTest : public StagingTest {
+protected:
+    void SetUp() override
+    {
+        const char *env = std::getenv("HIPOBJ_STAGE_TIMEOUT_MS");
+        if (!env || std::string_view(env).find_first_not_of("0123456789") == std::string_view::npos) {
+            GTEST_SKIP() << "needs a malformed HIPOBJ_STAGE_TIMEOUT_MS";
+        }
+        StagingTest::SetUp();
+    }
+};
+
+TEST_F(StagingBadEnvTest, IgnoresMalformedTimeout)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
+    /* At least 100 ms, since hipObject sleeps 1 ms between polls. That's
+     * well under the default timeout, and over the 20 ms that "+20" would
+     * mean if it weren't ignored. */
+    g_async.notReadyCount = 100;
+    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
+    EXPECT_EQ(g_async.destroys, 1);
 }
 
 } // namespace
