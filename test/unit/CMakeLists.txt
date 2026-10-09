@@ -95,6 +95,31 @@ target_include_directories(test-minio-bytes-transferred PRIVATE
 hipobj_add_test(test-vendor-ops
   test-vendor-ops.cpp)
 
+# Checks ibv-core.h against <infiniband/verbs.h>, so it's only built
+# where the rdma-core headers are installed. They have to be rdma-core
+# 49 or later, which added the newest member ibv-core.h declares,
+# ibv_port_attr's active_speed_ex.
+include(CheckCSourceCompiles)
+check_c_source_compiles("
+  #include <infiniband/verbs.h>
+  int main(void) { struct ibv_port_attr attr = {0}; return (int)attr.active_speed_ex; }"
+  HIPOBJ_HAVE_IBVERBS_49_HEADER)
+if(HIPOBJ_HAVE_IBVERBS_49_HEADER)
+  hipobj_add_test(test-ibv-layout
+    test-ibv-layout.cpp)
+  # ibv-layout-real.c is C so that it can include <infiniband/verbs.h>
+  # alongside the C++ code that includes ibv-core.h
+  target_sources(test-ibv-layout PRIVATE
+    ibv-layout-real.c)
+  set_target_properties(test-ibv-layout PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF)
+else()
+  message(STATUS
+    "rdma-core 49 or later headers not found; not building test-ibv-layout")
+endif()
+
 find_package(CURL QUIET)
 if(CURL_FOUND)
   find_package(Threads REQUIRED)

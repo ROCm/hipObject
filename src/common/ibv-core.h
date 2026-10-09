@@ -237,14 +237,13 @@ struct ibv_port_attr {
 
 /* Completion flags (wc_flags in struct ibv_wc). */
 enum ibv_wc_flags {
-    IBV_WC_GRH             = 1 << 0,
-    IBV_WC_WITH_IMM        = 1 << 1,
-    IBV_WC_IP_CSUM_OK      = 1 << 2,
-    IBV_WC_WITH_INV        = 1 << 3,
-    IBV_WC_TM_SYNC_REQ     = 1 << 4,
-    IBV_WC_TM_DATA_VALID   = 1 << 5,
-    IBV_WC_TM_MATCH_REQ    = 1 << 6,
-    IBV_WC_TM_DATA_VALID_2 = 1 << 7
+    IBV_WC_GRH           = 1 << 0,
+    IBV_WC_WITH_IMM      = 1 << 1,
+    IBV_WC_IP_CSUM_OK    = 1 << 2,
+    IBV_WC_WITH_INV      = 1 << 3,
+    IBV_WC_TM_SYNC_REQ   = 1 << 4,
+    IBV_WC_TM_MATCH      = 1 << 5,
+    IBV_WC_TM_DATA_VALID = 1 << 6,
 };
 
 enum ibv_wc_opcode {
@@ -552,10 +551,35 @@ struct ibv_sge {
 };
 
 /* -------------------------------------------------------------------------
- * 22. ibv_send_wr struct with union for rdma/atomic ops
+ * 22. ibv_mw_bind_info struct, ibv_send_wr struct with union for
+ *     rdma/atomic ops
  * ------------------------------------------------------------------------- */
 
 struct ibv_ah;
+struct ibv_mw;
+
+struct ibv_mw_bind_info {
+    struct ibv_mr *mr;
+    uint64_t       addr;
+    uint64_t       length;
+    unsigned int   mw_access_flags;
+};
+
+/* The types of ibv_send_wr's bind_mw and tso members. rdma-core leaves
+ * them unnamed, but C++ doesn't allow types to be declared in the
+ * anonymous union that holds the members. The names aren't part of the
+ * ABI, so the layout still matches. */
+struct ibv_send_wr_bind_mw {
+    struct ibv_mw          *mw;
+    uint32_t                rkey;
+    struct ibv_mw_bind_info bind_info;
+};
+
+struct ibv_send_wr_tso {
+    void    *hdr;
+    uint16_t hdr_sz;
+    uint16_t mss;
+};
 
 struct ibv_send_wr {
     uint64_t            wr_id;
@@ -585,6 +609,15 @@ struct ibv_send_wr {
             uint32_t       remote_qkey;
         } ud;
     } wr;
+    union {
+        struct {
+            uint32_t remote_srqn;
+        } xrc;
+    } qp_type;
+    union {
+        struct ibv_send_wr_bind_mw bind_mw;
+        struct ibv_send_wr_tso     tso;
+    };
 };
 
 /* -------------------------------------------------------------------------
