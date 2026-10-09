@@ -57,22 +57,17 @@ rocm_export_targets(
 # packages until there are separate release and development builds.
 #
 # libibverbs isn't a dependency, since hipObject loads it with dlopen().
-if(ROCM_VERSION VERSION_GREATER_EQUAL 7.11)
-  # rocm-core is a meta-package all legacy ROCm packages depend on. It
-  # doesn't exist in the current ROCm package repository, so suppress
-  # the dependency on it that rocm-cmake adds.
-  set(ROCM_DEP_ROCMCORE OFF CACHE BOOL "" FORCE)
-  set(HIPOBJ_ROCM_MM
-    "${HIPOBJ_ROCM_VERSION_MAJOR}.${HIPOBJ_ROCM_VERSION_MINOR}")
-  rocm_package_add_deb_dependencies(
-    DEPENDS "amdrocm-runtime-dev${HIPOBJ_ROCM_MM}")
-  rocm_package_add_rpm_dependencies(
-    DEPENDS "amdrocm-runtime-devel${HIPOBJ_ROCM_MM}")
-else()
-  rocm_package_add_dependencies(DEPENDS hip-runtime-amd)
-  rocm_package_add_deb_dependencies(DEPENDS hip-dev)
-  rocm_package_add_rpm_dependencies(DEPENDS hip-devel)
-endif()
+#
+# rocm-core is a meta-package all legacy ROCm packages depend on. It
+# doesn't exist in the current ROCm package repository, so suppress the
+# dependency on it that rocm-cmake adds.
+set(ROCM_DEP_ROCMCORE OFF CACHE BOOL "" FORCE)
+set(HIPOBJ_ROCM_MM
+  "${HIPOBJ_ROCM_VERSION_MAJOR}.${HIPOBJ_ROCM_VERSION_MINOR}")
+rocm_package_add_deb_dependencies(
+  DEPENDS "amdrocm-runtime-dev${HIPOBJ_ROCM_MM}")
+rocm_package_add_rpm_dependencies(
+  DEPENDS "amdrocm-runtime-devel${HIPOBJ_ROCM_MM}")
 
 # The system libraries the installed programs link (see
 # hipobj_add_runtime_library_dependency()). These go in the package-wide

@@ -132,13 +132,8 @@ set(license_file share/doc/hipobject/LICENSE.md)
 
 # The ROCm packages the library's package depends on
 set(rocm_mm "${ROCM_VERSION_MAJOR}.${ROCM_VERSION_MINOR}")
-if(ROCM_VERSION VERSION_GREATER_EQUAL 7.11)
-  set(rocm_depends "amdrocm-runtime${devel_suffix}${rocm_mm}")
-  set(rocm_not_depends rocm-core)
-else()
-  set(rocm_depends hip-runtime-amd hip${devel_suffix})
-  set(rocm_not_depends)
-endif()
+set(rocm_depends "amdrocm-runtime${devel_suffix}${rocm_mm}")
+set(rocm_not_depends rocm-core)
 
 # The system libraries the installed programs link, which the runtime
 # package depends on. A DEB dependency can list alternatives

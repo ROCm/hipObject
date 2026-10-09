@@ -8,7 +8,7 @@ Required
 ^^^^^^^^
 
 - CMake 3.21 or later
-- ROCm 6.x or later (provides HIP, HSA runtime)
+- ROCm 7.14 or later (provides HIP, HSA runtime)
 - C++20 capable compiler (e.g., g++ or amdclang++ from ROCm)
 
 Optional
@@ -105,16 +105,14 @@ or package a coverage build.
 
 ``ROCM_PATH`` and ``ROCM_VERSION`` can also be set in the
 environment. If ``ROCM_PATH`` isn't set but ``ROCM_VERSION`` is,
-``ROCM_PATH`` defaults to ``/opt/rocm/core-<major>.<minor>`` for
-ROCm 7.11 and later, and to ``/opt/rocm-<version>`` for earlier
-releases. If neither is set, ``ROCM_PATH`` defaults to
-``/opt/rocm/core`` if it contains a ROCm installation, and
-otherwise to ``/opt/rocm``.
+``ROCM_PATH`` defaults to ``/opt/rocm/core-<major>.<minor>``. If
+neither is set, ``ROCM_PATH`` defaults to ``/opt/rocm/core`` if it
+contains a ROCm installation, and otherwise to ``/opt/rocm``.
 
 ``ROCM_VERSION`` defaults to the version in
-``ROCM_PATH``/.info/version, or in
-``ROCM_PATH``/core/.info/version for the ROCm 7.11 and later
-layout, where ``/opt/rocm`` only contains links.
+``ROCM_PATH``/.info/version, or in ``ROCM_PATH``/core/.info/version
+when ``ROCM_PATH`` is ``/opt/rocm``, which only contains links.
+Configuring fails if ``ROCM_VERSION`` is earlier than 7.14.
 
 Packaging
 ---------

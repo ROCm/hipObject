@@ -54,16 +54,11 @@ endif()
 if(DEFINED ENV{ROCM_PATH})
   set(ROCM_INITIAL_PATH "$ENV{ROCM_PATH}")
 elseif(DEFINED ROCM_VERSION)
-  # ROCm 7.11+ installs to /opt/rocm/core-MAJOR.MINOR (new repo.amd.com
-  # layout); earlier releases install to /opt/rocm-MAJOR.MINOR.PATCH.
+  # ROCm installs to /opt/rocm/core-MAJOR.MINOR
   hipobj_split_rocm_version("${ROCM_VERSION}"
     HIPOBJ_ROCM_VERSION_MAJOR HIPOBJ_ROCM_VERSION_MINOR)
-  if(ROCM_VERSION VERSION_GREATER_EQUAL 7.11)
-    set(ROCM_INITIAL_PATH
-      "/opt/rocm/core-${HIPOBJ_ROCM_VERSION_MAJOR}.${HIPOBJ_ROCM_VERSION_MINOR}")
-  else()
-    set(ROCM_INITIAL_PATH "/opt/rocm-${ROCM_VERSION}")
-  endif()
+  set(ROCM_INITIAL_PATH
+    "/opt/rocm/core-${HIPOBJ_ROCM_VERSION_MAJOR}.${HIPOBJ_ROCM_VERSION_MINOR}")
 elseif(EXISTS "/opt/rocm/core/.info/version")
   set(ROCM_INITIAL_PATH "/opt/rocm/core")
 else()
@@ -73,9 +68,9 @@ set(ROCM_PATH "${ROCM_INITIAL_PATH}"
   CACHE PATH "The path to the ROCm installation")
 
 if(NOT DEFINED ROCM_VERSION)
-  # In the ROCm 7.11+ layout, /opt/rocm only holds links into the
-  # installed versions, and the version file is in /opt/rocm/core,
-  # which links to the selected version
+  # /opt/rocm only holds links into the installed versions, and the
+  # version file is in /opt/rocm/core, which links to the selected
+  # version
   if(EXISTS "${ROCM_PATH}/.info/version")
     set(HIPOBJ_ROCM_VERSION_PATH "${ROCM_PATH}/.info/version")
   elseif(EXISTS "${ROCM_PATH}/core/.info/version")
@@ -96,6 +91,13 @@ set(ROCM_VERSION "${ROCM_VERSION}"
 # HIPOBJInstall.cmake picks the package dependencies with these
 hipobj_split_rocm_version("${ROCM_VERSION}"
   HIPOBJ_ROCM_VERSION_MAJOR HIPOBJ_ROCM_VERSION_MINOR)
+
+set(HIPOBJ_MIN_ROCM_VERSION 7.14)
+if(ROCM_VERSION VERSION_LESS HIPOBJ_MIN_ROCM_VERSION)
+  message(FATAL_ERROR
+    "hipObject requires ROCm ${HIPOBJ_MIN_ROCM_VERSION} or later, but "
+    "ROCM_VERSION is ${ROCM_VERSION} (ROCM_PATH is ${ROCM_PATH}).")
+endif()
 
 message(STATUS "Using ROCM_VERSION: ${ROCM_VERSION}")
 message(STATUS "ROCM_PATH set to: ${ROCM_PATH}")
