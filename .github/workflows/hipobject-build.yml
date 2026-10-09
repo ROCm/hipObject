@@ -157,7 +157,7 @@ jobs:
       - name: Code coverage report
         if: matrix.coverage == 'ON'
         env:
-          MIN_LINE_COVERAGE: 80
+          MIN_LINE_COVERAGE: 90
         run: |
           cmake --build build --target hipobj-coverage
           {
