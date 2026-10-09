@@ -18,6 +18,8 @@ include(HIPOBJSanitizers)
 
 check_linker_flag(CXX "-Wl,-z,noexecstack"
   HIPOBJ_LINKER_SUPPORTS_NOEXECSTACK)
+check_linker_flag(CXX "-Wl,-z,now"
+  HIPOBJ_LINKER_SUPPORTS_NOW)
 
 # Off by default so a downstream or superproject build is never broken
 # by a warning from a compiler version we haven't seen. CI turns it on,
@@ -60,5 +62,11 @@ endfunction()
 function(hipobj_set_linker_flags target)
   if(HIPOBJ_LINKER_SUPPORTS_NOEXECSTACK)
     target_link_options(${target} PRIVATE "-Wl,-z,noexecstack")
+  endif()
+
+  # Resolve every symbol at load time, so the linker's RELRO segment
+  # can cover the whole GOT (full RELRO)
+  if(HIPOBJ_LINKER_SUPPORTS_NOW)
+    target_link_options(${target} PRIVATE "-Wl,-z,now")
   endif()
 endfunction()
