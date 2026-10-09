@@ -128,7 +128,9 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     set(flags
       # Misc warnings
       -Wtrailing-whitespace
-      -Wleading-whitespace=tabs
+      # The kind names the only whitespace allowed, so =spaces flags
+      # tab indentation
+      -Wleading-whitespace=spaces
       ${flags}
     )
   endif()

@@ -8,7 +8,33 @@
 
 include_guard(GLOBAL)
 
+include(CheckCXXSourceCompiles)
+include(CMakePushCheckState)
 include(HIPOBJFortifySource)
+
+# Check whether calls to the C library's fortified functions trip
+# -Wused-but-marked-unused
+#
+# With _FORTIFY_SOURCE, glibc 2.40 and later give clang printf-family
+# wrappers that are declared static __attribute__((__unused__)), so
+# every call to fprintf, snprintf, and the like warns. The result is
+# cached, so the check only runs once.
+function(hipobj_check_fortify_used_but_marked_unused outvar)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_FLAGS
+    "-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -Werror=used-but-marked-unused")
+  check_cxx_source_compiles("
+    #include <cstdio>
+    int main()
+    {
+        char buf[8];
+        std::snprintf(buf, sizeof(buf), \"%d\", 1);
+        std::fprintf(stderr, \"%s\", buf);
+        return 0;
+    }" HIPOBJ_FORTIFY_ALLOWS_USED_BUT_MARKED_UNUSED)
+  cmake_pop_check_state()
+  set(${outvar} ${HIPOBJ_FORTIFY_ALLOWS_USED_BUT_MARKED_UNUSED} PARENT_SCOPE)
+endfunction()
 
 function(hipobj_get_clang_warning_flags outvar compiler_version)
 
@@ -243,6 +269,17 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
 
   # Only use _FORTIFY_SOURCE if the optimization level is -O2, -O3, or -Os
   hipobj_get_fortify_flags(fortify_flags)
+
+  # Drop -Wused-but-marked-unused when the fortified C library functions
+  # trip it, since there's nothing to fix in hipObject's code. With a
+  # multi-config generator, this drops it from every configuration.
+  if(fortify_flags)
+    hipobj_check_fortify_used_but_marked_unused(fortify_allows_warning)
+    if(NOT fortify_allows_warning)
+      list(REMOVE_ITEM flags -Wused-but-marked-unused)
+    endif()
+  endif()
+
   set(flags
     ${fortify_flags}
     ${flags}

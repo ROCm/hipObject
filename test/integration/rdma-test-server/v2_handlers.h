@@ -79,6 +79,9 @@ namespace v2 {
     private:
         void reaperLoop();
 
+        /* Builds the 200 reply for a PREPARE that published session id */
+        HandlerResult prepareReply(const std::string &id, uint32_t serverPsn);
+
         SigV4Verifier    *verifier_;
         MemoryBackend    *backend_;
         ServerConfig      cfg_;

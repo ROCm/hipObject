@@ -155,6 +155,11 @@
   base64 text was not the all-zero value.
 - The V2 final-reply parser could accept an `X-Amz-Rdma-Bytes-Transferred`
   value larger than `UINT64_MAX` after wrapping it to a smaller count.
+- Building with GCC 15 warned about every line indented with spaces, and
+  failed with `HIPOBJ_WERROR=ON`.
+- Optimized Clang builds against glibc 2.40 or later warned about every
+  call to `fprintf()`, `snprintf()`, and similar functions, and failed
+  with `HIPOBJ_WERROR=ON`.
 
 ### Known issues
 
