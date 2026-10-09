@@ -7,11 +7,18 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
 namespace hipObj {
+
+/* Hex digits in an encoded token: two for each of its 44 bytes */
+inline constexpr size_t kRdmaTokenHexLen = 88;
+
+/* An encoded token: kRdmaTokenHexLen hex digits and a terminating NUL */
+using RdmaTokenHex = std::array<char, kRdmaTokenHexLen + 1>;
 
 enum TransportType : uint8_t {
     TRANSPORT_DC = 0x00,
@@ -28,6 +35,9 @@ struct RdmaToken {
     uint8_t  portNum    = 0;
     uint16_t lid        = 0;
 };
+
+/* Doesn't allocate, so it's the one the transfer path uses */
+RdmaTokenHex encodeRdmaTokenHex(const RdmaToken &token);
 
 std::string encodeRdmaToken(const RdmaToken &token);
 

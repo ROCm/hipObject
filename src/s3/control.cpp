@@ -10,12 +10,12 @@
 namespace hipObj {
 
 int
-injectRdmaToken(hipObjOps_t *ops, void *ctx, const std::string &token)
+injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token)
 {
     if (!ops || !ops->sendRequest) {
         return -1;
     }
-    return ops->sendRequest(ctx, token.c_str(), token.size());
+    return ops->sendRequest(ctx, token.data(), token.size());
 }
 
 int

@@ -98,43 +98,39 @@ checkRegistrationArgs(const void *ptr, size_t size)
 }
 
 /* Checks the arguments to a call that uses [offset, offset + size) of the
- * buffer registered at devPtr */
+ * buffer registered at devPtr. buf is g_bufferMap->find(devPtr). */
 static hipObjError_t
-checkBufferArgs(const void *devPtr, size_t size, off_t offset)
+checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size, off_t offset)
 {
     if (!devPtr || size == 0 || offset < 0) {
         return {hipObjInvalidValue, 0};
     }
-    void *ptr = const_cast<void *>(devPtr);
-    if (!g_bufferMap->isRegistered(ptr)) {
+    if (!buf) {
         return {hipObjBufNotRegistered, 0};
     }
-    if (!rangeInRegistration(offset, size, g_bufferMap->lookupSize(ptr))) {
+    if (!rangeInRegistration(offset, size, buf->size)) {
         return {hipObjInvalidValue, 0};
     }
     return {hipObjSuccess, 0};
 }
 
 static bool
-buildRdmaToken(const void *devPtr, size_t size, off_t offset, RdmaToken &token)
+buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset, RdmaToken &token)
 {
-    struct ibv_mr *mr = g_bufferMap->lookupMr(const_cast<void *>(devPtr));
-    if (!mr || !g_conn->qp) {
+    if (!buf.mr || !g_conn->qp) {
         return false;
     }
-    size_t regSize = g_bufferMap->lookupSize(const_cast<void *>(devPtr));
-    if (!rangeInRegistration(offset, size, regSize)) {
+    if (!rangeInRegistration(offset, size, buf.size)) {
         return false;
     }
     token.transport = TRANSPORT_RC;
     token.qpNum     = g_conn->qp->qp_num;
     std::memcpy(token.gid, g_conn->localGid.raw, 16);
-    token.rkey = mr->rkey;
-    token.remoteAddr =
-        g_bufferMap->lookupRemoteAddr(const_cast<void *>(devPtr)) + static_cast<uint64_t>(offset);
-    token.length  = size;
-    token.portNum = g_conn->portNum;
-    token.lid     = 0;
+    token.rkey       = buf.mr->rkey;
+    token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
+    token.length     = size;
+    token.portNum    = g_conn->portNum;
+    token.lid        = 0;
     return true;
 }
 
@@ -252,32 +248,29 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
     }
 }
 static hipObjError_t
-stageBuffer(void *devPtr, size_t size, off_t offset, bool toDevice)
+stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t offset, bool toDevice)
 {
-    void *hostBuf = g_bufferMap->lookupHostBuf(devPtr);
-    if (!hostBuf) {
+    if (!buf.hostBuf) {
         /* the NIC reads and writes the caller's memory */
         return {hipObjSuccess, 0};
     }
-    size_t regSize = g_bufferMap->lookupSize(devPtr);
-    if (!rangeInRegistration(offset, size, regSize)) {
+    if (!rangeInRegistration(offset, size, buf.size)) {
         return {hipObjInvalidValue, 0};
     }
-    void *host = static_cast<char *>(hostBuf) + offset;
+    void *host = static_cast<char *>(buf.hostBuf.get()) + offset;
     void *dev  = static_cast<char *>(devPtr) + offset;
     return stageCopyWithDeadline(dev, host, size, toDevice);
 }
 
 static hipObjError_t
-runRdmaTransfer(const void *devPtr, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
+runRdmaTransfer(const BufferMap::BufEntry &buf, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
 {
-    bool      requiresDeviceSync = g_bufferMap->requiresDeviceSync(const_cast<void *>(devPtr));
     RdmaToken token{};
-    if (!buildRdmaToken(devPtr, size, offset, token)) {
+    if (!buildRdmaToken(buf, size, offset, token)) {
         return {hipObjRdmaError, 0};
     }
-    std::string encoded = encodeRdmaToken(token);
-    if (injectRdmaToken(ops, ctx, encoded) != 0) {
+    const RdmaTokenHex encoded = encodeRdmaTokenHex(token);
+    if (injectRdmaToken(ops, ctx, std::string_view(encoded.data(), kRdmaTokenHexLen)) != 0) {
         return {hipObjS3Error, 0};
     }
     char   replyBuf[512];
@@ -286,7 +279,7 @@ runRdmaTransfer(const void *devPtr, size_t size, off_t offset, hipObjOps_t *ops,
     if (receiveRdmaReplyRaw(ops, ctx, replyBuf, &replyLen, rdmaStatus) != 0 || rdmaStatus != 0) {
         return {hipObjS3Error, 0};
     }
-    if (finishTransferAfterReply(replyBuf, replyLen, requiresDeviceSync) != 0) {
+    if (finishTransferAfterReply(replyBuf, replyLen, buf.isDmabuf) != 0) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -706,15 +699,16 @@ try {
     if (!ops || !ops->sendRequest || !ops->recvReply) {
         return {hipObjInvalidValue, 0};
     }
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, offset);
+    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
+    err = hipObj::runRdmaTransfer(*buf, size, offset, ops, ctx);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(devPtr, size, offset, true);
+    return hipObj::stageBuffer(devPtr, *buf, size, offset, true);
 }
 catch (...) {
     return hipObj::handleException();
@@ -735,15 +729,16 @@ try {
     if (!ops || !ops->sendRequest || !ops->recvReply) {
         return {hipObjInvalidValue, 0};
     }
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, offset);
+    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::stageBuffer(const_cast<void *>(devPtr), size, offset, false);
+    err = hipObj::stageBuffer(const_cast<void *>(devPtr), *buf, size, offset, false);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::runRdmaTransfer(devPtr, size, offset, ops, ctx);
+    return hipObj::runRdmaTransfer(*buf, size, offset, ops, ctx);
 }
 catch (...) {
     return hipObj::handleException();
@@ -763,11 +758,12 @@ try {
     if (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE) {
         return {hipObjInvalidValue, 0};
     }
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, offset);
+    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(devPtr, size, offset, direction == HIPOBJ_SYNC_TO_DEVICE);
+    return hipObj::stageBuffer(devPtr, *buf, size, offset, direction == HIPOBJ_SYNC_TO_DEVICE);
 }
 catch (...) {
     return hipObj::handleException();
@@ -787,20 +783,21 @@ try {
     if (!outToken || (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET)) {
         return {hipObjInvalidValue, 0};
     }
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, size, 0);
+    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, 0);
     if (err.opError != hipObjSuccess) {
         return err;
     }
     hipObj::RdmaToken token{};
-    if (!hipObj::buildRdmaToken(devPtr, size, 0, token)) {
+    if (!hipObj::buildRdmaToken(*buf, size, 0, token)) {
         return {hipObjRdmaError, 0};
     }
-    std::string encoded = hipObj::encodeRdmaToken(token);
-    char       *copy    = static_cast<char *>(std::malloc(encoded.size() + 1));
+    const hipObj::RdmaTokenHex encoded = hipObj::encodeRdmaTokenHex(token);
+    char                      *copy    = static_cast<char *>(std::malloc(encoded.size()));
     if (!copy) {
         return {hipObjInternalError, 0};
     }
-    std::memcpy(copy, encoded.c_str(), encoded.size() + 1);
+    std::memcpy(copy, encoded.data(), encoded.size());
     *outToken = copy;
     return {hipObjSuccess, 0};
 }
