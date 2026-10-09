@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "ibv-core.h"
+#include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "malloc_ptr.h"
@@ -61,9 +62,9 @@ namespace {
     hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, struct ibv_mr *mr, size_t size)
     {
         hipObj::RdmaToken token{};
-        token.transport = hipObj::TRANSPORT_RC;
-        token.qpNum     = conn.qp->qp_num;
-        std::memcpy(token.gid, conn.localGid.raw, 16);
+        token.transport  = hipObj::TRANSPORT_RC;
+        token.qpNum      = conn.qp->qp_num;
+        token.gid        = hipObj::toGid(conn.localGid);
         token.rkey       = mr->rkey;
         token.remoteAddr = reinterpret_cast<uint64_t>(mr->addr);
         token.length     = size;

@@ -6,11 +6,11 @@
 
 #include "v2_handlers.h"
 
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
-#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -20,7 +20,9 @@
 
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "gid.h"
 #include "ibv-core.h"
+#include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "token.h"
 #include "v2-clock.h"
@@ -40,8 +42,6 @@ namespace v2 {
          * the first PREPARE. The shared handle carries the context,
          * protection domain, and local GID that per-session connections
          * and memory registrations both use. */
-        const uint8_t kZeroGid[16] = {0};
-
         hipObj::DeviceHandle *serverDevice()
         {
             /* Threaded PREPARE handlers race this lazy init; the once flag
@@ -425,12 +425,11 @@ namespace v2 {
                 if (!hipObj::decodeRdmaTokenHex(tokBase.c_str(), peerTok) ||
                     /* Semantic checks: this server pairs RC transports only,
                      * and a nonzero token must carry a real peer GID. */
-                    peerTok.transport != hipObj::TRANSPORT_RC ||
-                    std::memcmp(peerTok.gid, kZeroGid, sizeof(kZeroGid)) == 0) {
+                    peerTok.transport != hipObj::TRANSPORT_RC || peerTok.gid == hipObj::Gid{}) {
                     table_.ringUnreserve(slot);
                     return error(400);
                 }
-                std::memcpy(&s.peerGid, peerTok.gid, 16);
+                s.peerGid    = hipObj::toIbvGid(peerTok.gid);
                 s.hasPeerGid = true;
             }
             s.accessKey        = cred->accessKey;
@@ -610,8 +609,8 @@ namespace v2 {
                 replyDev = s.device != nullptr ? s.device : replyDev;
             });
             if (replyQpn != 0 && replyDev != nullptr) {
-                replyTok.qpNum = replyQpn;
-                std::memcpy(replyTok.gid, &replyDev->localGid, 16);
+                replyTok.qpNum                = replyQpn;
+                replyTok.gid                  = hipObj::toGid(replyDev->localGid);
                 replyTok.transport            = hipObj::TRANSPORT_RC;
                 replyTok.portNum              = replyDev->portNum;
                 r.headers["X-Amz-Rdma-Reply"] = "200:" + hipObj::encodeRdmaToken(replyTok);

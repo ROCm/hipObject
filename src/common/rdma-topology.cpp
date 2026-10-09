@@ -8,9 +8,9 @@
 #include "rdma-topology.h"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -23,6 +23,7 @@
 #include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
+#include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
@@ -31,21 +32,17 @@ namespace hipObj {
 
 namespace {
 
-    bool IsConfiguredGid(const uint8_t gid[16])
+    bool IsConfiguredGid(const Gid &gid)
     {
-        for (int i = 0; i < 16; ++i) {
-            if (gid[i] != 0)
-                return true;
-        }
-        return false;
+        return gid != Gid{};
     }
 
-    bool LinkLocalGid(const uint8_t gid[16])
+    bool LinkLocalGid(const Gid &gid)
     {
         return gid[0] == 0xfe && gid[1] == 0x80;
     }
 
-    bool IsIPv4MappedIPv6(const uint8_t gid[16])
+    bool IsIPv4MappedIPv6(const Gid &gid)
     {
         return gid[0] == 0 && gid[1] == 0 && gid[2] == 0 && gid[3] == 0 && gid[4] == 0 && gid[5] == 0 &&
                gid[6] == 0 && gid[7] == 0 && gid[8] == 0 && gid[9] == 0 && gid[10] == 0xff && gid[11] == 0xff;
@@ -69,7 +66,7 @@ namespace {
         return 0;
     }
 
-    GidPriority ClassifyGid(const uint8_t gid[16], int roce_ver)
+    GidPriority ClassifyGid(const Gid &gid, int roce_ver)
     {
         if (roce_ver == 2) {
             if (IsIPv4MappedIPv6(gid))
@@ -94,11 +91,11 @@ namespace {
             ibv_gid gid;
             if (ibv.query_gid(ctx, port_num, i, &gid) != 0)
                 continue;
-            if (!IsConfiguredGid(gid.raw))
-                continue;
             GidCandidate c;
             c.index = i;
-            std::memcpy(c.raw, gid.raw, sizeof(c.raw));
+            c.gid   = toGid(gid);
+            if (!IsConfiguredGid(c.gid))
+                continue;
             c.roceVersion = GetRoceVersionNumber(ctx->device->name, port_num, i);
             candidates.push_back(c);
         }
@@ -273,9 +270,9 @@ PickBestGid(const GidCandidate *candidates, size_t count)
     GidPriority best_prio = GID_UNKNOWN;
     for (size_t i = 0; i < count; ++i) {
         const GidCandidate &c = candidates[i];
-        if (!IsConfiguredGid(c.raw))
+        if (!IsConfiguredGid(c.gid))
             continue;
-        GidPriority prio = ClassifyGid(c.raw, c.roceVersion);
+        GidPriority prio = ClassifyGid(c.gid, c.roceVersion);
         if (prio != GID_UNKNOWN && (best_idx < 0 || prio > best_prio)) {
             best_idx  = c.index;
             best_prio = prio;

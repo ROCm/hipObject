@@ -60,8 +60,7 @@ TEST(RdmaToken, EncodeHexIsNulTerminatedAndMatchesString)
     hipObj::RdmaToken decoded;
     ASSERT_TRUE(hipObj::decodeRdmaTokenHex(hex.data(), decoded));
     EXPECT_EQ(decoded.qpNum, token.qpNum);
-    EXPECT_EQ(decoded.gid[0], token.gid[0]);
-    EXPECT_EQ(decoded.gid[15], token.gid[15]);
+    EXPECT_EQ(decoded.gid, token.gid);
     EXPECT_EQ(decoded.rkey, token.rkey);
     EXPECT_EQ(decoded.remoteAddr, token.remoteAddr);
     EXPECT_EQ(decoded.length, token.length);

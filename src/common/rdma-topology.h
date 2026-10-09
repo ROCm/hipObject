@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "gid.h"
+
 struct ibv_context;
 
 namespace hipObj {
@@ -24,13 +26,13 @@ enum GidPriority {
     ROCEV2_IPV4       = 5,
 };
 
-/* One GID table entry as read from the device: its index, raw GID, and
+/* One GID table entry as read from the device: its index, GID, and
  * RoCE version from sysfs gid_attrs/types (1, 2, or anything else for
  * unknown). */
 struct GidCandidate {
-    int     index;
-    uint8_t raw[16];
-    int     roceVersion;
+    int index;
+    Gid gid;
+    int roceVersion;
 };
 
 /* Pick the preferred GID: unconfigured (all-zero) and unknown-type

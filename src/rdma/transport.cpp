@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "ibv-core.h"
+#include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "rdma-topology.h"
@@ -211,9 +212,7 @@ connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
     if (!conn.qp || peerToken.transport != TRANSPORT_RC) {
         return -1;
     }
-    union ibv_gid peerGid;
-    std::memcpy(peerGid.raw, peerToken.gid, 16);
-    int ret = transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, peerGid);
+    int ret = transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, toIbvGid(peerToken.gid));
     if (ret != 0) {
         return ret;
     }

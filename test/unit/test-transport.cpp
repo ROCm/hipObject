@@ -21,6 +21,7 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
+#include "ibv-gid.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
@@ -70,7 +71,7 @@ protected:
     static void expectPeerGid(const struct ibv_qp_attr &attr)
     {
         const hipObj::RdmaToken token = peerToken();
-        EXPECT_EQ(std::memcmp(attr.ah_attr.grh.dgid.raw, token.gid, sizeof(token.gid)), 0);
+        EXPECT_EQ(hipObj::toGid(attr.ah_attr.grh.dgid), token.gid);
     }
 };
 
