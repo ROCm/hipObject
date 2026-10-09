@@ -274,7 +274,7 @@ protected:
            semantic checks accept it. */
         hipObj::RdmaToken peerTokEnc{};
         peerTokEnc.qpNum = 0x1234;
-        std::memset(peerTokEnc.gid, 0xab, sizeof(peerTokEnc.gid));
+        peerTokEnc.gid.fill(0xab);
         peerTokEnc.transport = hipObj::TRANSPORT_RC;
         peerTokEnc.portNum   = 1;
         req.token            = hipObj::encodeRdmaToken(peerTokEnc);

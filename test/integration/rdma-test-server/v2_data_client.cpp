@@ -8,6 +8,8 @@
  * and performs the actual RDMA transfer (WRITE_WITH_IMM for PUT,
  * READ pull for GET) so the server data phase runs for real. */
 
+#include <array>
+#include <bit>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -26,6 +28,7 @@
 #include <unistd.h>
 
 #include "../../../src/rdma/token.h"
+#include "gid.h"
 #include "malloc_ptr.h"
 #include "v2_sigv4.h"
 
@@ -288,10 +291,12 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     std::snprintf(qpnHex, sizeof(qpnHex), "%" PRIx32, verbs.qp->qp_num);
 
     /* Real peer token: this client's QPN and GID so the server
-     * pairs back through the token-carried endpoint. */
+     * pairs back through the token-carried endpoint. ibv-gid.h's
+     * conversions need the library's ibv-core.h, which conflicts with
+     * the real verbs.h this client uses, so convert with std::bit_cast. */
     hipObj::RdmaToken clientTok{};
-    clientTok.qpNum = verbs.qp->qp_num;
-    std::memcpy(clientTok.gid, &gid, sizeof(clientTok.gid));
+    clientTok.qpNum                = verbs.qp->qp_num;
+    clientTok.gid                  = std::bit_cast<hipObj::Gid>(gid);
     clientTok.transport            = hipObj::TRANSPORT_RC;
     clientTok.portNum              = 1;
     const std::string clientTokHex = hipObj::encodeRdmaToken(clientTok);
@@ -343,10 +348,9 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     std::string spsnS = headerValue(presp, "x-amz-rdma-psn");
     uint32_t    sqpn  = sqpnS.empty() ? 0 : static_cast<uint32_t>(std::strtoul(sqpnS.c_str(), nullptr, 16));
 
-    hipObj::RdmaToken    replyTok{};
-    union ibv_gid        serverGid      = {};
-    bool                 haveServerGid  = false;
-    static const uint8_t kZeroGid16[16] = {0};
+    hipObj::RdmaToken replyTok{};
+    union ibv_gid     serverGid     = {};
+    bool              haveServerGid = false;
     /* The reply token is mandatory: "200:" + exactly 88 hex that
      * decodes and carries the same server QPN as the dedicated
      * header. Its absence or any malformation fails the transfer. */
@@ -368,11 +372,11 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         }
         /* Route by the server GID the token carries; RC transport with
          * a real GID is mandatory. */
-        if (replyTok.transport != hipObj::TRANSPORT_RC || std::memcmp(replyTok.gid, kZeroGid16, 16) == 0) {
+        if (replyTok.transport != hipObj::TRANSPORT_RC || replyTok.gid == hipObj::Gid{}) {
             std::fprintf(stderr, "dp: reply token unusable endpoint\n");
             return 1;
         }
-        std::memcpy(&serverGid, replyTok.gid, 16);
+        serverGid     = std::bit_cast<union ibv_gid>(replyTok.gid);
         haveServerGid = true;
     }
     uint32_t spsn = spsnS.empty() ? 1 : static_cast<uint32_t>(std::strtoul(spsnS.c_str(), nullptr, 16));

@@ -26,10 +26,10 @@ linkLocal(int index, int roceVersion)
 {
     GidCandidate c{};
     c.index       = index;
-    c.raw[0]      = 0xfe;
-    c.raw[1]      = 0x80;
-    c.raw[8]      = 0x6e;
-    c.raw[15]     = 0x80;
+    c.gid[0]      = 0xfe;
+    c.gid[1]      = 0x80;
+    c.gid[8]      = 0x6e;
+    c.gid[15]     = 0x80;
     c.roceVersion = roceVersion;
     return c;
 }
@@ -39,12 +39,12 @@ ipv4Mapped(int index, int roceVersion)
 {
     GidCandidate c{};
     c.index       = index;
-    c.raw[10]     = 0xff;
-    c.raw[11]     = 0xff;
-    c.raw[12]     = 100;
-    c.raw[13]     = 68;
-    c.raw[14]     = 213;
-    c.raw[15]     = 79;
+    c.gid[10]     = 0xff;
+    c.gid[11]     = 0xff;
+    c.gid[12]     = 100;
+    c.gid[13]     = 68;
+    c.gid[14]     = 213;
+    c.gid[15]     = 79;
     c.roceVersion = roceVersion;
     return c;
 }
@@ -54,11 +54,11 @@ globalV6(int index, int roceVersion)
 {
     GidCandidate c{};
     c.index       = index;
-    c.raw[0]      = 0x20;
-    c.raw[1]      = 0x01;
-    c.raw[2]      = 0x0d;
-    c.raw[3]      = 0xb8;
-    c.raw[15]     = 0x01;
+    c.gid[0]      = 0x20;
+    c.gid[1]      = 0x01;
+    c.gid[2]      = 0x0d;
+    c.gid[3]      = 0xb8;
+    c.gid[15]     = 0x01;
     c.roceVersion = roceVersion;
     return c;
 }

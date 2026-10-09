@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <string>
 
+#include "gid.h"
+
 namespace hipObj {
 
 /* Hex digits in an encoded token: two for each of its 44 bytes */
@@ -27,7 +29,7 @@ enum TransportType : uint8_t {
 
 struct RdmaToken {
     uint32_t qpNum      = 0;
-    uint8_t  gid[16]    = {};
+    Gid      gid        = {};
     uint32_t rkey       = 0;
     uint64_t remoteAddr = 0;
     uint64_t length     = 0;

@@ -31,6 +31,7 @@
 #include "hipobj-private.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
+#include "ibv-gid.h"
 #include "ibv-wrapper.h"
 #include "no-destructor.h"
 #include "rdma-topology.h"
@@ -126,9 +127,9 @@ buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset, RdmaTo
     if (!rangeInRegistration(offset, size, buf.size)) {
         return false;
     }
-    token.transport = TRANSPORT_RC;
-    token.qpNum     = g_conn->qp->qp_num;
-    std::memcpy(token.gid, g_conn->localGid.raw, 16);
+    token.transport  = TRANSPORT_RC;
+    token.qpNum      = g_conn->qp->qp_num;
+    token.gid        = toGid(g_conn->localGid);
     token.rkey       = buf.mr->rkey;
     token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
     token.length     = size;

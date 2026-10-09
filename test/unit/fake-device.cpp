@@ -34,7 +34,7 @@ peerToken(uint8_t transport)
     hipObj::RdmaToken token{};
     token.transport = transport;
     token.qpNum     = 0x77;
-    for (size_t i = 0; i < sizeof(token.gid); ++i) {
+    for (size_t i = 0; i < token.gid.size(); ++i) {
         token.gid[i] = static_cast<uint8_t>(0xf0 + i);
     }
     token.rkey       = 0x4321;

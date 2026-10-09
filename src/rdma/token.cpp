@@ -23,7 +23,7 @@ namespace {
 
     constexpr std::string_view kHexDigits = "0123456789abcdef";
 
-    constexpr size_t kTokenBinaryLen = 1 + 4 + 16 + 4 + 8 + 8 + 1 + 2;
+    constexpr size_t kTokenBinaryLen = 1 + 4 + kGidLen + 4 + 8 + 8 + 1 + 2;
     static_assert(kRdmaTokenHexLen == kTokenBinaryLen * 2);
 
     bool isSuccessHttpCode(int code)
@@ -52,8 +52,8 @@ namespace {
         out.transport = buf[off++];
         std::memcpy(&out.qpNum, buf + off, 4);
         off += 4;
-        std::memcpy(out.gid, buf + off, 16);
-        off += 16;
+        std::memcpy(out.gid.data(), buf + off, out.gid.size());
+        off += out.gid.size();
         std::memcpy(&out.rkey, buf + off, 4);
         off += 4;
         std::memcpy(&out.remoteAddr, buf + off, 8);
@@ -130,8 +130,8 @@ encodeRdmaTokenHex(const RdmaToken &token)
     buf[off++] = token.transport;
     std::memcpy(buf + off, &token.qpNum, 4);
     off += 4;
-    std::memcpy(buf + off, token.gid, 16);
-    off += 16;
+    std::memcpy(buf + off, token.gid.data(), token.gid.size());
+    off += token.gid.size();
     std::memcpy(buf + off, &token.rkey, 4);
     off += 4;
     std::memcpy(buf + off, &token.remoteAddr, 8);

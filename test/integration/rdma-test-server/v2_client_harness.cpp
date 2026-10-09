@@ -114,7 +114,7 @@ harnessTokenHex()
      * semantic checks. */
     hipObj::RdmaToken t{};
     t.qpNum = 0x4321;
-    std::memset(t.gid, 0xcd, sizeof(t.gid));
+    t.gid.fill(0xcd);
     t.transport = hipObj::TRANSPORT_RC;
     t.portNum   = 1;
     return hipObj::encodeRdmaToken(t);
