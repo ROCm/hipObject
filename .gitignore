@@ -8,9 +8,7 @@ cmake-build-*/
 # IDE
 .vscode/
 .idea/
-# Cursor: commit shared agent config under .cursor/; ignore hook/plugin runtime
-# state (see Cursor hooks / continual-learning plugins).
-.cursor/hooks/state/
+.cursor/
 *.swp
 *.swo
 *~

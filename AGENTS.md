@@ -1,9 +1,8 @@
 # AGENTS.md
 
-Guidance for AI coding agents and Cursor Cloud agents working in the hipObject
-repository. hipObject is an RDMA-accelerated S3 object client for AMD GPUs; see
-[README.md](README.md) for scope and [docs/building.rst](docs/building.rst) for
-full CMake options.
+Guidance for AI coding agents working in the hipObject repository. hipObject is
+an RDMA-accelerated S3 object client for AMD GPUs; see [README.md](README.md)
+for scope and [docs/building.rst](docs/building.rst) for full CMake options.
 
 ## Project direction
 
@@ -77,8 +76,8 @@ cmake --build build -j"$(nproc)"
 Notes:
 
 - The build steps in [docs/building.rst](docs/building.rst) set `HIPOBJ_IONIC`
-  to **OFF** for local lab workflows; CI and Cursor Cloud use **ON** to compile
-  both RDMA backends—keep that difference in mind when debugging.
+  to **OFF** for local lab workflows; CI uses **ON** to compile both RDMA
+  backends—keep that difference in mind when debugging.
 - CI ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) builds this
   configuration in the `rocm/dev-ubuntu-24.04:10.0.0-full` image, along with
   variants that add `-DHIPOBJECT_V2_API=OFF`, `-DBUILD_SHARED_LIBS=OFF`,
@@ -88,8 +87,8 @@ Notes:
   `develop`, a job then publishes the result to the `badges` branch for the
   README's Coverage badge). It is the only workflow that builds these
   variants.
-- Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON` plus the dependencies
-  already installed in [`.cursor/Dockerfile`](.cursor/Dockerfile); see
+- Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON`, plus the system
+  packages listed in [docs/building.rst](docs/building.rst); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
 
 ## Tests
@@ -102,8 +101,7 @@ Notes:
     (`/dev/infiniband/uverbs*`) exists at configure time.
   - `hipobj-package-deb` and `hipobj-package-rpm` are skipped when the tools
     to build and read their packages (`dpkg`, or `rpmbuild` and `rpm`) aren't
-    installed. The Cursor Cloud image doesn't install `rpm`, so the RPM test
-    is skipped there.
+    installed.
   - `hipobj-thread-safety-tags` and `hipobj-thread-safety-tags-selftest` are
     only registered when CMake finds Python 3.10 or later. CI's Build
     workflow skips changes to only their Python files, and
@@ -522,67 +520,7 @@ Add the entry to the topmost (unreleased) version, under the matching heading:
 existing entries: say what changed, and what users have to do differently, if
 anything.
 
-## Cursor Cloud
-
-Cloud agents use [`.cursor/environment.json`](.cursor/environment.json):
-
-- **Image**: Built from [`.cursor/Dockerfile`](.cursor/Dockerfile), which
-  extends a **digest-pinned** `rocm/dev-ubuntu-24.04` image (see the
-  `# track: …` line for the logical Docker Hub tag) and installs extra packages
-  with **exact apt versions** for reproducibility.
-- **`install`**: Runs from the repo root and performs configure + compile only
-  (same CMake flags as CI). It does **not** run `ctest`, so cold starts stay
-  short; run it yourself after the build.
-- **Secrets** (S3 keys, lab endpoints): configure in the Cursor Cloud Agents
-  dashboard, not in committed files.
-
-### Maintaining the pinned toolchain
-
-#### What is pinned
-
-1. **Base OCI image**: `FROM …@sha256:…` in
-   [`.cursor/Dockerfile`](.cursor/Dockerfile), with
-   `# track: rocm/dev-ubuntu-24.04:<tag>` naming the Docker Hub tag used when
-   the digest was recorded.
-2. **APT packages**: `package=version` pins in the same Dockerfile, captured
-   for Ubuntu 24.04 (main + updates) so `apt-get install` stays stable across
-   mirror drift.
-
-#### Check whether the base digest is stale
-
-From any directory (the script resolves the repo root from its path):
-
-```bash
-bash .cursor/scripts/check-cursor-rocm-image-pin.sh
-```
-
-It prefers `docker buildx imagetools inspect`, then `skopeo`, then the Docker
-Hub HTTP API. Exit **0** when the pinned digest still matches the tracked tag;
-exit **1** when Docker Hub serves a different digest.
-
-#### Refresh pins after an update
-
-1. Pick the tag you want to follow (must match `# track:`), e.g.
-   `rocm/dev-ubuntu-24.04:7.2`.
-2. Resolve the digest, for example:
-
-   ```bash
-   docker buildx imagetools inspect rocm/dev-ubuntu-24.04:7.2 \
-     --format '{{.Manifest.Digest}}'
-   ```
-
-3. Update the `FROM …@sha256:…` line in
-   [`.cursor/Dockerfile`](.cursor/Dockerfile).
-4. Re-pin apt versions by running `apt-get update` and `apt-cache madison`
-   **inside** the new base image digest for the packages listed in the
-   Dockerfile, then update the `RUN apt-get install` line.
-
-Optional CI: schedule `bash .cursor/scripts/check-cursor-rocm-image-pin.sh`
-weekly with `continue-on-error: true` for notifications, or fail the job to
-force a deliberate pin bump.
-
-## Lab provisioning (not Cloud)
+## Lab provisioning
 
 For GPU hosts, ROCm, RDMA, and MinIO AIStor installs, use
-[ansible/README.md](ansible/README.md). That path is out of scope for the Cursor
-Cloud image.
+[ansible/README.md](ansible/README.md).
