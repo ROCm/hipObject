@@ -8,6 +8,7 @@
 
 #include "v2-wire.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cinttypes>
 #include <cstdio>
@@ -254,13 +255,7 @@ namespace v2 {
 
     bool isValidSessionHex(const std::string &s)
     {
-        if (s.size() != kSessionHexLen)
-            return false;
-        for (char c : s) {
-            if (!isHexDigit(c))
-                return false;
-        }
-        return true;
+        return s.size() == kSessionHexLen && std::ranges::all_of(s, isHexDigit);
     }
 
     bool parsePsn(const std::string &s, uint32_t &psn)

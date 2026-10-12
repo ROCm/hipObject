@@ -45,8 +45,8 @@ namespace v2 {
 
     void MemoryBackend::seed(const std::string &target, size_t size)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        std::vector<uint8_t>        data(size);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        std::vector<uint8_t>         data(size);
         for (size_t i = 0; i < size; ++i) {
             data[i] = patternByte(target, i);
         }
@@ -55,14 +55,14 @@ namespace v2 {
 
     bool MemoryBackend::has(const std::string &target) const
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        return objects_.count(target) != 0;
+        std::scoped_lock<std::mutex> guard(mtx_);
+        return objects_.contains(target);
     }
 
     bool MemoryBackend::read(const std::string &target, uint64_t offset, size_t len, void *dst)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = objects_.find(target);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = objects_.find(target);
         if (it == objects_.end() || offset > it->second.size() || len > it->second.size() - offset) {
             return false;
         }
@@ -72,16 +72,16 @@ namespace v2 {
 
     std::string MemoryBackend::write(const std::string &target, const void *data, size_t len)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        const auto                 *bytes = static_cast<const uint8_t *>(data);
-        std::string                 etag  = pseudoEtag(data, len);
-        objects_[target]                  = std::vector<uint8_t>(bytes, bytes + len);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        const auto                  *bytes = static_cast<const uint8_t *>(data);
+        std::string                  etag  = pseudoEtag(data, len);
+        objects_[target]                   = std::vector<uint8_t>(bytes, bytes + len);
         return etag;
     }
 
     size_t MemoryBackend::objectCount() const
     {
-        std::lock_guard<std::mutex> guard(mtx_);
+        std::scoped_lock<std::mutex> guard(mtx_);
         return objects_.size();
     }
 

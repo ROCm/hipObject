@@ -9,13 +9,14 @@
 
 #include <algorithm>
 #include <array>
-#include <climits>
-#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -50,10 +51,10 @@ namespace {
 
     int GetRoceVersionNumber(const char *dev_name, int port_num, int gid_idx)
     {
-        std::ostringstream path;
-        path << "/sys/class/infiniband/" << dev_name << "/ports/" << port_num << "/gid_attrs/types/"
-             << gid_idx;
-        std::ifstream f(path.str());
+        const std::filesystem::path path = std::filesystem::path("/sys/class/infiniband") / dev_name /
+                                           "ports" / std::to_string(port_num) / "gid_attrs/types" /
+                                           std::to_string(gid_idx);
+        std::ifstream f(path);
         if (!f)
             return -1;
         std::string line;
@@ -178,20 +179,16 @@ namespace {
                     info.dev_name = dev_name;
                     info.port_num = static_cast<int>(p);
 
-                    std::string device_path = "/sys/class/infiniband/";
-                    device_path += dev_name;
-                    device_path += "/device";
-                    char resolved[PATH_MAX];
-                    if (realpath(device_path.c_str(), resolved)) {
-                        std::string r(resolved);
-                        size_t      slash = r.rfind('/');
-                        if (slash != std::string::npos)
-                            info.pcie_bus_id = r.substr(slash + 1);
-                    }
+                    const std::filesystem::path device_path =
+                        std::filesystem::path("/sys/class/infiniband") / dev_name / "device";
+                    /* The device link resolves to the PCI device's directory,
+                     * which is named after its bus id */
+                    std::error_code             ec;
+                    const std::filesystem::path resolved = std::filesystem::canonical(device_path, ec);
+                    if (!ec)
+                        info.pcie_bus_id = resolved.filename().string();
 
-                    std::string numa_path = device_path;
-                    numa_path += "/numa_node";
-                    std::ifstream numa_file(numa_path);
+                    std::ifstream numa_file(device_path / "numa_node");
                     if (numa_file) {
                         numa_file >> info.numa_node;
                         if (info.numa_node < 0)
@@ -241,26 +238,22 @@ GetClosestNicToGpu(int gpuIndex, const char *hca_list, const char **dev_name)
     if (devices.empty())
         return -1;
 
-    int best_idx  = -1;
-    int best_dist = std::numeric_limits<int>::max();
+    auto distance = [&gpu_bus](const NicInfo &nic) { return GetBusIdDistance(nic.pcie_bus_id, gpu_bus); };
+    /* The first of the closest NICs */
+    auto best = std::ranges::min_element(devices, {}, distance);
+    /* No NIC has a known bus id */
+    if (distance(*best) == std::numeric_limits<int>::max())
+        return -1;
 
-    for (size_t i = 0; i < devices.size(); ++i) {
-        int dist = GetBusIdDistance(devices[i].pcie_bus_id, gpu_bus);
-        if (dist < best_dist) {
-            best_dist = dist;
-            best_idx  = static_cast<int>(i);
-        }
-    }
-
-    if (best_idx >= 0 && dev_name) {
+    if (dev_name) {
         /* Static so the pointer returned in *dev_name stays valid */
         HIPOBJ_WARN_NO_EXIT_DTOR_OFF
         static std::string s_dev_name;
         HIPOBJ_WARN_NO_EXIT_DTOR_ON
-        s_dev_name = devices[static_cast<size_t>(best_idx)].dev_name;
+        s_dev_name = best->dev_name;
         *dev_name  = s_dev_name.c_str();
     }
-    return best_idx;
+    return static_cast<int>(best - devices.begin());
 }
 
 int

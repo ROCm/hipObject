@@ -245,7 +245,7 @@ HttpServer::runThreaded()
          * registration. stop() waits on the live count (the join
          * barrier above guarantees no late registration follows). */
         {
-            std::lock_guard<std::mutex> guard(workersMtx_);
+            std::scoped_lock<std::mutex> guard(workersMtx_);
             if (stopping_.load()) {
                 ::close(client);
                 break;
@@ -257,7 +257,7 @@ HttpServer::runThreaded()
             std::thread([this, client] {
                 handleConnection(client, /*closeFd=*/false);
                 {
-                    std::lock_guard<std::mutex> guard(workersMtx_);
+                    std::scoped_lock<std::mutex> guard(workersMtx_);
                     activeFds_.erase(client);
                     liveWorkers_--;
                     workerDoneCv_.notify_all();
@@ -269,7 +269,7 @@ HttpServer::runThreaded()
             /* Thread creation failed: roll the registration back so
              * stop()'s live-count wait never blocks on a ghost. */
             {
-                std::lock_guard<std::mutex> guard(workersMtx_);
+                std::scoped_lock<std::mutex> guard(workersMtx_);
                 activeFds_.erase(client);
                 liveWorkers_--;
                 workerDoneCv_.notify_all();
@@ -293,7 +293,7 @@ HttpServer::stop()
      * a recycled fd. */
     std::vector<int> dups;
     {
-        std::lock_guard<std::mutex> guard(workersMtx_);
+        std::scoped_lock<std::mutex> guard(workersMtx_);
         for (int fd : activeFds_) {
             int d = dup(fd);
             if (d >= 0) {

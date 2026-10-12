@@ -5,6 +5,7 @@
 
 #include "buffer.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
@@ -109,7 +110,7 @@ int
 BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 {
     uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(), size) != 0) {
+    if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
@@ -164,7 +165,7 @@ int
 BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 {
     uintptr_t key = reinterpret_cast<uintptr_t>(hostPtr);
-    if (validateRegistration(entries_.find(key) != entries_.end(), entries_.size(), size) != 0) {
+    if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
@@ -252,12 +253,7 @@ BufferMap::mrRefCount(void *devPtr) const
 bool
 BufferMap::anyPinned() const
 {
-    for (const auto &[key, ent] : entries_) {
-        if (ent.refCount > 0) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(entries_, [](const auto &kv) { return kv.second.refCount > 0; });
 }
 #endif /* HIPOBJECT_V2_API */
 
