@@ -115,7 +115,9 @@ set(CMAKE_INSTALL_LIBDIR "lib"
   CACHE STRING
   "Directory name for installed ROCm libraries")
 
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+list(APPEND CMAKE_PREFIX_PATH
+  ${ROCM_PATH}/llvm
+  ${ROCM_PATH})
 
 # Use the rocm-cmake that comes with ROCm, or fetch it if there isn't
 # one. FetchContent_Declare's FIND_PACKAGE_ARGS would do this, but it

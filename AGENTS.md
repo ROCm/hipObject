@@ -180,7 +180,8 @@ with it:
 ## C++ code
 
 - **The library, tests, and tools are C++20**, without GNU extensions
-  (`HIPOBJ_CXX_STANDARD`, which also accepts 23).
+  (`HIPOBJ_CXX_STANDARD`, which also accepts 23, and 26 with CMake 3.30 or
+  later).
 - **Write modern C++.** hipObject is a C++ library with a C API, and only the
   public header has to look like C. Some existing code is C-style; don't copy
   it in new or changed code.
@@ -363,8 +364,9 @@ configuration files.
   examples, the MinIO bridge, `v2-client-harness`, and `v2-data-client`).
   Third-party code fetched with `FetchContent` is exempt; CMake
   already marks its headers `SYSTEM` and builds it with its warnings off.
-- **clang-tidy**: configure with `-DHIPOBJ_USE_CLANG_TIDY=ON` and build; it
-  must report nothing. CI doesn't run clang-tidy.
+- **clang-tidy**: configure with `-DHIPOBJ_USE_CLANG_TIDY=ON` and Clang as the
+  C++ compiler (configuring fails with GCC, whose flags clang-tidy rejects),
+  and build; it must report nothing. CI doesn't run clang-tidy.
 - **include-what-you-use (IWYU)**: configure with `-DHIPOBJ_USE_IWYU=ON` and
   build; IWYU prints the `#include` lines it suggests adding or removing for
   each file. Unlike the other checks, it doesn't have to report nothing, since

@@ -31,6 +31,12 @@
   LLVM code coverage instrumentation, and adds a `hipobj-coverage`
   target that reports the library's coverage after the tests run. It
   needs Clang and defaults to `OFF`.
+- The `HIPOBJ_CXX_STANDARD` CMake cache variable accepts `26`, which
+  builds hipObject as C++26. It needs CMake 3.30 or later, and
+  configuring fails with an earlier one.
+- With `CMAKE_EXPORT_COMPILE_COMMANDS` on, `compile_commands.json`
+  lists the compiler's implicit include directories, so tools that read
+  it, such as clangd, find the same system headers as the compiler.
 
 ### Changed
 
@@ -42,6 +48,9 @@
 - hipObject is now built as C++20 (without compiler extensions) instead of
   C++17, so a C++20-capable compiler is required. The
   `HIPOBJ_CXX_STANDARD` CMake cache variable now defaults to `20`.
+- The `HIPOBJ_USE_CLANG_TIDY` CMake option now requires Clang as the
+  C++ compiler, and configuring fails with another one. clang-tidy
+  rejected GCC's compiler flags, so it couldn't check a GCC build.
 - hipObject now requires ROCm 7.14 or later, and configuring fails if
   `ROCM_VERSION` is earlier. The documentation used to list ROCm 6.x as
   the minimum.

@@ -26,6 +26,9 @@ set(HIPOBJ_COVERAGE_DIR "${PROJECT_BINARY_DIR}/coverage")
 # Find the llvm-profdata and llvm-cov that match the compiler, since the
 # profile format changes between LLVM versions. Look next to the compiler
 # first, and for the versioned names that Linux distributions use.
+# CMAKE_PREFIX_PATH, as a CMake or environment variable, is skipped
+# because CMake searches it before HINTS, and it may have ROCm's LLVM in
+# it (HIPOBJUseROCmCMake.cmake adds it), which may not be the compiler's.
 function(hipobj_find_coverage_tools)
   string(REGEX MATCH "^[0-9]+" major "${CMAKE_CXX_COMPILER_VERSION}")
   get_filename_component(compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
@@ -38,6 +41,8 @@ function(hipobj_find_coverage_tools)
       NAMES llvm-${tool}-${major} llvm-${tool}
       NAMES_PER_DIR
       HINTS "${compiler_dir}" "${compiler_real_dir}"
+      NO_CMAKE_PATH
+      NO_CMAKE_ENVIRONMENT_PATH
       DOC "llvm-${tool} for the code coverage report")
     if(NOT HIPOBJ_LLVM_${tool_upper})
       message(FATAL_ERROR
