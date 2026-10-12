@@ -6,10 +6,12 @@
 
 #include "v2_backend.h"
 
-#include <cinttypes>
-#include <cstdio>
+#include <cstdint>
 #include <cstring>
+#include <string>
 #include <utility>
+
+#include "hipobj-format.h"
 
 namespace hipObj {
 namespace v2 {
@@ -36,9 +38,7 @@ namespace v2 {
                 a = (a * 31 + bytes[i] + i) ^ (b << 3);
                 b = b * 29 + bytes[i];
             }
-            char out[33];
-            std::snprintf(out, sizeof(out), "%016" PRIx64 "%016" PRIx64, a, b);
-            return out;
+            return hipObj::formatHex(a, 16) + hipObj::formatHex(b, 16);
         }
 
     } // namespace

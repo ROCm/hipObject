@@ -21,29 +21,30 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace hipObj {
 namespace v2 {
 
     /* Header and path names used by the control protocol. */
-    constexpr const char *kProtocolHeader    = "X-Amz-Rdma-Protocol";
-    constexpr const char *kProtocolValue     = "hipobj-rc-v2";
-    constexpr const char *kTokenHeader       = "X-Amz-Rdma-Token";
-    constexpr const char *kSessionHeader     = "X-Amz-Rdma-Session";
-    constexpr const char *kCookieHeader      = "X-Amz-Rdma-Cookie";
-    constexpr const char *kPsnHeader         = "X-Amz-Rdma-Psn";
-    constexpr const char *kOpHeader          = "X-Amz-Rdma-Op";
-    constexpr const char *kSizeHeader        = "X-Amz-Rdma-Size";
-    constexpr const char *kOffsetHeader      = "X-Amz-Rdma-Offset";
-    constexpr const char *kTargetHeader      = "X-Amz-Rdma-Target";
-    constexpr const char *kUnsupportedHeader = "X-Amz-Rdma-Protocol-Status";
-    constexpr const char *kUnsupportedValue  = "unsupported";
-    constexpr const char *kReplyHeader       = "X-Amz-Rdma-Reply";
-    constexpr const char *kBytesHeader       = "X-Amz-Rdma-Bytes-Transferred";
-    constexpr const char *kEtagHeader        = "X-Amz-Rdma-Etag";
-    constexpr const char *kVersionHeader     = "X-Amz-Rdma-Version-Id";
-    constexpr const char *kChecksumHeader    = "X-Amz-Rdma-Checksum";
-    constexpr const char *kControlPathPrefix = "/.hipobj-rc/";
+    inline constexpr std::string_view kProtocolHeader    = "X-Amz-Rdma-Protocol";
+    inline constexpr std::string_view kProtocolValue     = "hipobj-rc-v2";
+    inline constexpr std::string_view kTokenHeader       = "X-Amz-Rdma-Token";
+    inline constexpr std::string_view kSessionHeader     = "X-Amz-Rdma-Session";
+    inline constexpr std::string_view kCookieHeader      = "X-Amz-Rdma-Cookie";
+    inline constexpr std::string_view kPsnHeader         = "X-Amz-Rdma-Psn";
+    inline constexpr std::string_view kOpHeader          = "X-Amz-Rdma-Op";
+    inline constexpr std::string_view kSizeHeader        = "X-Amz-Rdma-Size";
+    inline constexpr std::string_view kOffsetHeader      = "X-Amz-Rdma-Offset";
+    inline constexpr std::string_view kTargetHeader      = "X-Amz-Rdma-Target";
+    inline constexpr std::string_view kUnsupportedHeader = "X-Amz-Rdma-Protocol-Status";
+    inline constexpr std::string_view kUnsupportedValue  = "unsupported";
+    inline constexpr std::string_view kReplyHeader       = "X-Amz-Rdma-Reply";
+    inline constexpr std::string_view kBytesHeader       = "X-Amz-Rdma-Bytes-Transferred";
+    inline constexpr std::string_view kEtagHeader        = "X-Amz-Rdma-Etag";
+    inline constexpr std::string_view kVersionHeader     = "X-Amz-Rdma-Version-Id";
+    inline constexpr std::string_view kChecksumHeader    = "X-Amz-Rdma-Checksum";
+    inline constexpr std::string_view kControlPathPrefix = "/.hipobj-rc/";
 
     /* Wire limits. */
     constexpr size_t   kSessionHexLen   = 32;         /* 128-bit session id */
@@ -75,42 +76,42 @@ namespace v2 {
 
     /* Parses a single "Name: value" header line (without CRLF) into name and
      * value with surrounding OWS trimmed. Returns false for lines without a
-     * colon. */
-    bool splitHeaderLine(const std::string &line, std::string &name, std::string &value);
+     * colon. name and value view the same characters line does, so they're
+     * only valid as long as those characters are. */
+    bool splitHeaderLine(std::string_view line, std::string_view &name, std::string_view &value);
 
     /* Parses the response to PREPARE. headers is the raw header block with
      * lines separated by \r\n (final empty line optional); httpStatus is the
      * status code from the status line. Returns false when the block is
      * malformed in a way that makes the fields unusable. */
-    bool parsePrepareReply(int httpStatus, const std::string &headers, PrepareReply &out);
+    bool parsePrepareReply(int httpStatus, std::string_view headers, PrepareReply &out);
 
     /* Parses the READY/FINAL response. Same conventions as parsePrepareReply.
      * The checksum field, when present, must be "CRC64NVME " followed by
      * exactly 12 canonical base64 characters (11 data + one trailing '=');
      * otherwise parsing fails. */
-    bool parseFinalReply(int httpStatus, const std::string &headers, FinalReply &out);
+    bool parseFinalReply(int httpStatus, std::string_view headers, FinalReply &out);
 
     /* Validates a canonical CRC64NVME checksum value: "CRC64NVME " prefix
      * plus 12 base64 chars where the last is '=' and the text round-trips
      * through strict decode/re-encode. Returns the 12-char text via out when
      * valid. */
-    bool validateChecksumText(const std::string &headerValue, std::string &out);
+    bool validateChecksumText(std::string_view headerValue, std::string &out);
 
     /* Validates a session id (32 lowercase/uppercase hex chars). */
-    bool isValidSessionHex(const std::string &s);
+    bool isValidSessionHex(std::string_view s);
 
     /* Validates a PSN value string: 6 hex chars, value in 1..0xffffff. */
-    bool parsePsn(const std::string &s, uint32_t &psn);
+    bool parsePsn(std::string_view s, uint32_t &psn);
 
-    /* Formats a cookie or PSN as 8/6 uppercase-zero-padded hex. */
+    /* Formats a cookie or PSN as 8/6 zero-padded lowercase hex digits. */
     std::string formatCookie(uint32_t cookie);
     std::string formatPsn(uint32_t psn);
 
     /* Builds the canonical rdma-target header value from bucket, key and an
      * optional canonical query string (already encoded and sorted, may be
      * empty). Percent-encodes the path per RFC 3986 unreserved rules. */
-    std::string buildTarget(const std::string &bucket, const std::string &key,
-                            const std::string &canonicalQuery);
+    std::string buildTarget(std::string_view bucket, std::string_view key, std::string_view canonicalQuery);
 
 } // namespace v2
 } // namespace hipObj

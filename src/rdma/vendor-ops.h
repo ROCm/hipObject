@@ -8,7 +8,7 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
+#include <string_view>
 
 #include "ibv-core.h"
 
@@ -38,7 +38,7 @@ provider_name(Provider p)
 }
 
 inline Provider
-provider_from_string(const std::string &s)
+provider_from_string(std::string_view s)
 {
     if (s == "bnxt" || s == "bnxt_re")
         return Provider::BNXT;

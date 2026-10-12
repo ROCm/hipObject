@@ -85,6 +85,9 @@ hipobj_add_test(test-rdma-token
 hipobj_add_test(test-parse-number
   test-parse-number.cpp)
 
+hipobj_add_test(test-format-hex
+  test-format-hex.cpp)
+
 # The MinIO bridge's header parsing doesn't need minio-cpp, so it's tested
 # in every build, not only with HIPOBJ_MINIO_CLIENT
 hipobj_add_test(test-minio-bytes-transferred

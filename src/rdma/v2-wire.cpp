@@ -10,10 +10,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cinttypes>
-#include <cstdio>
 #include <optional>
 
+#include "hipobj-format.h"
 #include "hipobj-parse.h"
 
 namespace hipObj {
@@ -50,7 +49,7 @@ namespace v2 {
 
         /* Minimal strict decode/re-encode used to verify canonical text. Only
          * the 12-char (8 byte) shape is accepted here. */
-        bool canonicalBase64_8Bytes(const std::string &text)
+        bool canonicalBase64_8Bytes(std::string_view text)
         {
             if (text.size() != kChecksumB64Len)
                 return false;
@@ -98,7 +97,7 @@ namespace v2 {
             return re == text;
         }
 
-        std::string trimOws(const std::string &s)
+        std::string_view trimOws(std::string_view s)
         {
             size_t b = 0, e = s.size();
             while (b < e && (s[b] == ' ' || s[b] == '\t'))
@@ -108,12 +107,21 @@ namespace v2 {
             return s.substr(b, e - b);
         }
 
+        /* Header names are case-insensitive */
+        bool headerNameIs(std::string_view name, std::string_view expected)
+        {
+            return std::ranges::equal(name, expected, [](char a, char b) {
+                return std::tolower(static_cast<unsigned char>(a)) ==
+                       std::tolower(static_cast<unsigned char>(b));
+            });
+        }
+
     } // namespace
 
-    bool splitHeaderLine(const std::string &line, std::string &name, std::string &value)
+    bool splitHeaderLine(std::string_view line, std::string_view &name, std::string_view &value)
     {
         size_t colon = line.find(':');
-        if (colon == std::string::npos || colon == 0)
+        if (colon == std::string_view::npos || colon == 0)
             return false;
         name  = trimOws(line.substr(0, colon));
         value = trimOws(line.substr(colon + 1));
@@ -122,47 +130,43 @@ namespace v2 {
         return true;
     }
 
-    bool parsePrepareReply(int httpStatus, const std::string &headers, PrepareReply &out)
+    bool parsePrepareReply(int httpStatus, std::string_view headers, PrepareReply &out)
     {
         out            = PrepareReply();
         out.httpStatus = httpStatus;
         size_t pos     = 0;
         while (pos < headers.size()) {
             size_t eol = headers.find("\r\n", pos);
-            if (eol == std::string::npos)
+            if (eol == std::string_view::npos)
                 eol = headers.size();
-            std::string line = headers.substr(pos, eol - pos);
-            pos              = (eol == headers.size()) ? headers.size() : eol + 2;
+            const std::string_view line = headers.substr(pos, eol - pos);
+            pos                         = (eol == headers.size()) ? headers.size() : eol + 2;
             if (line.empty())
                 continue;
-            std::string name, value;
+            std::string_view name, value;
             if (!splitHeaderLine(line, name, value))
                 return false;
-            for (auto &c : name) {
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            }
-            if (name == "x-amz-rdma-protocol" && value == kProtocolValue) {
+            if (headerNameIs(name, kProtocolHeader) && value == kProtocolValue) {
                 out.protocolEcho = true;
             }
-            else if (name == "x-amz-rdma-protocol-status" && value == kUnsupportedValue) {
+            else if (headerNameIs(name, kUnsupportedHeader) && value == kUnsupportedValue) {
                 out.unsupportedMarker = true;
             }
-            else if (name == "x-amz-rdma-reply") {
+            else if (headerNameIs(name, kReplyHeader)) {
                 /* Reply keeps the legacy "200:<88hex>" shape; the peer token is
                  * the payload after the prefix. */
-                size_t c = value.find(':');
-                if (c == std::string::npos)
+                constexpr std::string_view kReplyOkPrefix = "200:";
+                if (!value.starts_with(kReplyOkPrefix))
                     return false;
-                if (value.compare(0, c, "200") != 0)
+                const std::string_view token = value.substr(kReplyOkPrefix.size());
+                if (token.size() != kTokenHexLen)
                     return false;
-                out.serverToken = value.substr(c + 1);
-                if (out.serverToken.size() != kTokenHexLen)
-                    return false;
+                out.serverToken = token;
             }
-            else if (name == "x-amz-rdma-session") {
+            else if (headerNameIs(name, kSessionHeader)) {
                 out.session = value;
             }
-            else if (name == "x-amz-rdma-psn") {
+            else if (headerNameIs(name, kPsnHeader)) {
                 if (!parsePsn(value, out.serverPsn))
                     return false;
             }
@@ -180,7 +184,7 @@ namespace v2 {
         return true;
     }
 
-    bool parseFinalReply(int httpStatus, const std::string &headers, FinalReply &out)
+    bool parseFinalReply(int httpStatus, std::string_view headers, FinalReply &out)
     {
         out              = FinalReply();
         out.httpStatus   = httpStatus;
@@ -188,22 +192,19 @@ namespace v2 {
         size_t pos       = 0;
         while (pos < headers.size()) {
             size_t eol = headers.find("\r\n", pos);
-            if (eol == std::string::npos)
+            if (eol == std::string_view::npos)
                 eol = headers.size();
-            std::string line = headers.substr(pos, eol - pos);
-            pos              = (eol == headers.size()) ? headers.size() : eol + 2;
+            const std::string_view line = headers.substr(pos, eol - pos);
+            pos                         = (eol == headers.size()) ? headers.size() : eol + 2;
             if (line.empty())
                 continue;
-            std::string name, value;
+            std::string_view name, value;
             if (!splitHeaderLine(line, name, value))
                 return false;
-            for (auto &c : name) {
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            }
-            if (name == "x-amz-rdma-protocol" && value == kProtocolValue) {
+            if (headerNameIs(name, kProtocolHeader) && value == kProtocolValue) {
                 out.protocolEcho = true;
             }
-            else if (name == "x-amz-rdma-cookie") {
+            else if (headerNameIs(name, kCookieHeader)) {
                 if (value.size() != kCookieHexLen)
                     return false;
                 const auto cookie = parseNumber<uint32_t>(value, 16);
@@ -212,20 +213,20 @@ namespace v2 {
                 out.cookieEcho = *cookie;
                 sawCookie      = true;
             }
-            else if (name == "x-amz-rdma-bytes-transferred") {
+            else if (headerNameIs(name, kBytesHeader)) {
                 /* A count that doesn't fit is malformed, not wrapped */
                 const auto bytes = parseNumber<uint64_t>(value);
                 if (!bytes)
                     return false;
                 out.bytes = *bytes;
             }
-            else if (name == "x-amz-rdma-etag") {
+            else if (headerNameIs(name, kEtagHeader)) {
                 out.etag = value;
             }
-            else if (name == "x-amz-rdma-version-id") {
+            else if (headerNameIs(name, kVersionHeader)) {
                 out.versionId = value;
             }
-            else if (name == "x-amz-rdma-checksum") {
+            else if (headerNameIs(name, kChecksumHeader)) {
                 if (!validateChecksumText(value, out.checksumB64))
                     return false;
             }
@@ -240,25 +241,24 @@ namespace v2 {
         return true;
     }
 
-    bool validateChecksumText(const std::string &headerValue, std::string &out)
+    bool validateChecksumText(std::string_view headerValue, std::string &out)
     {
-        static const char kPrefix[] = "CRC64NVME ";
-        size_t            plen      = sizeof(kPrefix) - 1;
-        if (headerValue.compare(0, plen, kPrefix) != 0)
+        constexpr std::string_view kPrefix = "CRC64NVME ";
+        if (!headerValue.starts_with(kPrefix))
             return false;
-        std::string text = trimOws(headerValue.substr(plen));
+        const std::string_view text = trimOws(headerValue.substr(kPrefix.size()));
         if (!canonicalBase64_8Bytes(text))
             return false;
         out = text;
         return true;
     }
 
-    bool isValidSessionHex(const std::string &s)
+    bool isValidSessionHex(std::string_view s)
     {
         return s.size() == kSessionHexLen && std::ranges::all_of(s, isHexDigit);
     }
 
-    bool parsePsn(const std::string &s, uint32_t &psn)
+    bool parsePsn(std::string_view s, uint32_t &psn)
     {
         if (s.size() != kPsnHexLen)
             return false;
@@ -271,25 +271,20 @@ namespace v2 {
 
     std::string formatCookie(uint32_t cookie)
     {
-        char buf[kCookieHexLen + 1];
-        std::snprintf(buf, sizeof(buf), "%08" PRIx32, cookie);
-        return std::string(buf);
+        return formatHex(cookie, kCookieHexLen);
     }
 
     std::string formatPsn(uint32_t psn)
     {
-        char buf[kPsnHexLen + 1];
         /* PSNs are 24 bits; masking also bounds the output to 6 hex digits */
-        std::snprintf(buf, sizeof(buf), "%06" PRIx32, psn & 0xffffffU);
-        return std::string(buf);
+        return formatHex(psn & 0xffffffU, kPsnHexLen);
     }
 
-    std::string buildTarget(const std::string &bucket, const std::string &key,
-                            const std::string &canonicalQuery)
+    std::string buildTarget(std::string_view bucket, std::string_view key, std::string_view canonicalQuery)
     {
         static const char *hex = "0123456789ABCDEF";
         std::string        out = "/";
-        auto               enc = [&](const std::string &s, bool keepSlash) {
+        auto               enc = [&](std::string_view s, bool keepSlash) {
             for (char ch : s) {
                 /* Percent-encoding works on raw bytes, so view each char as
                  * its 0-255 byte value (well-defined for negative chars). */

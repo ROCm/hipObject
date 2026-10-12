@@ -12,6 +12,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <string_view>
 
 #include <gtest/gtest.h>
 
@@ -50,7 +51,7 @@ prepareOkHeaders(const char *session, const char *psn)
 
 TEST(V2Wire, SplitHeaderLine)
 {
-    std::string n, v;
+    std::string_view n, v;
     EXPECT_TRUE(splitHeaderLine("Name: value", n, v));
     EXPECT_EQ(n, "Name");
     EXPECT_EQ(v, "value");
@@ -145,6 +146,24 @@ TEST(V2Wire, FinalGetOk)
     EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
     EXPECT_EQ(r.bytes, 65536U);
     EXPECT_EQ(r.etag, "\"abc123\"");
+}
+
+TEST(V2Wire, FinalOkCaseInsensitiveHeaderNames)
+{
+    std::string h = "x-amz-rdma-PROTOCOL: hipobj-rc-v2\r\n";
+    h += "x-AMZ-rdma-cookie: 00c0ffee\r\n";
+    h += "X-AMZ-RDMA-BYTES-TRANSFERRED: 4096\r\n";
+    h += "x-amz-rdma-etag: \"abc123\"\r\n";
+    h += "X-amz-Rdma-Version-ID: v7\r\n";
+    h += "x-amz-rdma-checksum: CRC64NVME AAAAAAAAAAA=\r\n";
+    hipObj::v2::FinalReply r;
+    EXPECT_TRUE(parseFinalReply(200, h, r));
+    EXPECT_TRUE(r.protocolEcho);
+    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
+    EXPECT_EQ(r.bytes, 4096U);
+    EXPECT_EQ(r.etag, "\"abc123\"");
+    EXPECT_EQ(r.versionId, "v7");
+    EXPECT_EQ(r.checksumB64, "AAAAAAAAAAA=");
 }
 
 TEST(V2Wire, FinalPutOkWithChecksum)
@@ -272,7 +291,7 @@ withoutFinalCrlf(std::string headers)
 
 TEST(V2Wire, SplitHeaderLineRejectsEmptyName)
 {
-    std::string n, v;
+    std::string_view n, v;
     EXPECT_FALSE(splitHeaderLine("  : value", n, v));
     EXPECT_FALSE(splitHeaderLine("\t:value", n, v));
 }

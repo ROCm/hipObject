@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #include <hsa/hsa.h>
@@ -37,24 +39,22 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
 namespace {
 
     template <typename FuncPtr>
-    int dlsym_load(FuncPtr &out, void *handle, const char *prefix, const char *name)
+    int dlsym_load(FuncPtr &out, void *handle, std::string_view prefix, std::string_view name)
     {
-        char full_name[256];
-        snprintf(full_name, sizeof(full_name), "%s%s", prefix, name);
-        out = reinterpret_cast<FuncPtr>(dlsym(handle, full_name));
+        const std::string full_name = std::string(prefix).append(name);
+        out                         = reinterpret_cast<FuncPtr>(dlsym(handle, full_name.c_str()));
         if (!out) {
-            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", full_name, dlerror());
+            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", full_name.c_str(), dlerror());
             return -1;
         }
         return 0;
     }
 
     template <typename FuncPtr>
-    void dlsym_load_optional(FuncPtr &out, void *handle, const char *prefix, const char *name)
+    void dlsym_load_optional(FuncPtr &out, void *handle, std::string_view prefix, std::string_view name)
     {
-        char full_name[256];
-        snprintf(full_name, sizeof(full_name), "%s%s", prefix, name);
-        out = reinterpret_cast<FuncPtr>(dlsym(handle, full_name));
+        const std::string full_name = std::string(prefix).append(name);
+        out                         = reinterpret_cast<FuncPtr>(dlsym(handle, full_name.c_str()));
     }
 
 } // anonymous namespace

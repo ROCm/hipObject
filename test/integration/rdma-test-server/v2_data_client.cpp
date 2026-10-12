@@ -29,6 +29,7 @@
 
 #include "../../../src/rdma/token.h"
 #include "gid.h"
+#include "hipobj-format.h"
 #include "malloc_ptr.h"
 #include "v2_sigv4.h"
 
@@ -104,13 +105,12 @@ struct ClientVerbs {
 int
 connectTcp(const char *host, int port)
 {
-    char service[16];
-    std::snprintf(service, sizeof(service), "%d", port);
-    struct addrinfo hints = {};
-    hints.ai_family       = AF_INET;
-    hints.ai_socktype     = SOCK_STREAM;
-    struct addrinfo *res  = nullptr;
-    if (getaddrinfo(host, service, &hints, &res) != 0 || res == nullptr) {
+    const std::string service = std::to_string(port);
+    struct addrinfo   hints   = {};
+    hints.ai_family           = AF_INET;
+    hints.ai_socktype         = SOCK_STREAM;
+    struct addrinfo *res      = nullptr;
+    if (getaddrinfo(host, service.c_str(), &hints, &res) != 0 || res == nullptr) {
         return -1;
     }
     int fd = socket(res->ai_family, res->ai_socktype, 0);
@@ -268,16 +268,11 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     ibv_query_gid(verbs.ctx.get(), 1, 0, &gid);
 
     /* ---- PREPARE (control, over TCP) ---- */
-    char psnHex[8];
-    std::snprintf(psnHex, sizeof(psnHex), "%06x", 1U);
-    char cookieHex[12];
-    std::snprintf(cookieHex, sizeof(cookieHex), "%08" PRIx32, cookie);
-    char mrAddrHex[32];
-    std::snprintf(mrAddrHex, sizeof(mrAddrHex), "%" PRIxPTR, reinterpret_cast<uintptr_t>(buf));
-    char mrRkeyHex[12];
-    std::snprintf(mrRkeyHex, sizeof(mrRkeyHex), "%" PRIx32, verbs.mr->rkey);
-    char sizeDec[24];
-    std::snprintf(sizeDec, sizeof(sizeDec), "%" PRIu64, size);
+    const std::string psnHex    = hipObj::formatHex(1U, 6);
+    const std::string cookieHex = hipObj::formatHex(cookie, 8);
+    const std::string mrAddrHex = hipObj::formatHex(reinterpret_cast<uintptr_t>(buf));
+    const std::string mrRkeyHex = hipObj::formatHex(verbs.mr->rkey);
+    const std::string sizeDec   = std::to_string(size);
 
     hipObj::v2::BuiltinVerifier signer("hipobj-test-key", "hipobj-test-secret", "us-east-1");
     char                        amzDate[24];
@@ -287,8 +282,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         gmtime_r(&t, &tmv);
         std::strftime(amzDate, sizeof(amzDate), "%Y%m%dT%H%M%SZ", &tmv);
     }
-    char qpnHex[12];
-    std::snprintf(qpnHex, sizeof(qpnHex), "%" PRIx32, verbs.qp->qp_num);
+    const std::string qpnHex = hipObj::formatHex(verbs.qp->qp_num);
 
     /* Real peer token: this client's QPN and GID so the server
      * pairs back through the token-carried endpoint. ibv-gid.h's
