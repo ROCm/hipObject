@@ -7,6 +7,7 @@
 /* Unit tests for the hipobj-rc-v2 wire helpers (src/rdma/v2-wire.*).
  * These are pure parsing/formatting tests and need no RDMA hardware. */
 
+#include <clocale>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -287,6 +288,49 @@ withoutFinalCrlf(std::string headers)
 {
     headers.resize(headers.size() - 2);
     return headers;
+}
+
+TEST(V2Wire, FinalIgnoresNonAsciiHeaderNames)
+{
+    /* Header names are ASCII, so a non-ASCII letter that looks like or folds
+     * to 'i' isn't the version header: 0xDD is Turkish capital dotted I in
+     * ISO-8859-9, and 0xC4 0xB0 is the same letter in UTF-8 */
+    for (const char *name : {"X-Amz-Rdma-Vers\xDDon-Id", "X-Amz-Rdma-Vers\xC4\xB0on-Id"}) {
+        hipObj::v2::FinalReply r;
+        EXPECT_TRUE(parseFinalReply(200, finalOkHeaders() + name + ": v7\r\n", r));
+        EXPECT_EQ(r.versionId, "") << name;
+    }
+}
+
+TEST(V2Wire, HeaderNamesIgnoreLocale)
+{
+    /* The application, not the library, sets the locale. In Turkish ones,
+     * std::tolower('I') isn't 'i', and in ISO-8859-9, std::tolower(0xDD) is.
+     * Copy the current name first: the next setlocale() call can overwrite
+     * the string it points to. */
+    const std::string saved = std::setlocale(LC_ALL, nullptr);
+    const char       *found = nullptr;
+    for (const char *locale : {"tr_TR.ISO-8859-9", "tr_TR.UTF-8", "tr_TR"}) {
+        if (std::setlocale(LC_ALL, locale) != nullptr) {
+            found = locale;
+            break;
+        }
+    }
+    if (found == nullptr) {
+        GTEST_SKIP() << "needs a Turkish locale, such as tr_TR.UTF-8";
+    }
+
+    hipObj::v2::FinalReply upper;
+    const bool upperOk = parseFinalReply(200, finalOkHeaders() + "X-AMZ-RDMA-VERSION-ID: v7\r\n", upper);
+    hipObj::v2::FinalReply nonAscii;
+    const bool             nonAsciiOk =
+        parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Vers\xDDon-Id: v7\r\n", nonAscii);
+    std::setlocale(LC_ALL, saved.c_str());
+
+    EXPECT_TRUE(upperOk) << found;
+    EXPECT_EQ(upper.versionId, "v7") << found;
+    EXPECT_TRUE(nonAsciiOk) << found;
+    EXPECT_EQ(nonAscii.versionId, "") << found;
 }
 
 TEST(V2Wire, SplitHeaderLineRejectsEmptyName)
