@@ -15,13 +15,10 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <utility>
 
-#include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
 #include <dlfcn.h>
-#include <unistd.h>
 
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
@@ -57,10 +54,60 @@ namespace {
         out                         = reinterpret_cast<FuncPtr>(dlsym(handle, full_name.c_str()));
     }
 
+    /* The HSA dma-buf calls in the form IbvFuncs holds them, with
+     * HSA_STATUS_SUCCESS (0) or the failing status as an int */
+    int hsa_export_dmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset)
+    {
+        return static_cast<int>(hsa_amd_portable_export_dmabuf(ptr, size, fd, offset));
+    }
+
+    int hsa_close_dmabuf(int fd)
+    {
+        return static_cast<int>(hsa_amd_portable_close_dmabuf(fd));
+    }
+
+    /* Owns a dmabuf fd from hsa_amd_portable_export_dmabuf(), and closes
+     * it with the close function it's given, which is
+     * hsa_amd_portable_close_dmabuf() except in the unit tests.
+     * Only the registration needs it: ibv_reg_dmabuf_mr() takes its own
+     * reference to the dma-buf, which the MR keeps until it's
+     * deregistered, so the fd is closed as soon as the registration call
+     * returns, whether or not it succeeded. */
+    class DmabufFd {
+    public:
+        using CloseFn = decltype(IbvFuncs::close_dmabuf);
+
+        DmabufFd(int fd, CloseFn close) noexcept : fd_(fd), close_(close)
+        {
+        }
+        ~DmabufFd()
+        {
+            (void)close_(fd_);
+        }
+
+        DmabufFd(const DmabufFd &)            = delete;
+        DmabufFd &operator=(const DmabufFd &) = delete;
+        DmabufFd(DmabufFd &&)                 = delete;
+        DmabufFd &operator=(DmabufFd &&)      = delete;
+
+        int get() const noexcept
+        {
+            return fd_;
+        }
+
+    private:
+        int     fd_;
+        CloseFn close_;
+    };
+
 } // anonymous namespace
 
 IBVWrapper::IBVWrapper()
 {
+    funcs_.export_dmabuf = &hsa_export_dmabuf;
+    funcs_.close_dmabuf  = &hsa_close_dmabuf;
+    init_dmabuf_settings();
+
     ibv_handle_.reset(dlopen("libibverbs.so", RTLD_NOW));
     if (!ibv_handle_)
         ibv_handle_.reset(dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW));
@@ -74,12 +121,11 @@ IBVWrapper::IBVWrapper()
         return;
     }
 
-    init_dmabuf_support_flag();
     is_initialized = true;
 }
 
 void
-IBVWrapper::init_dmabuf_support_flag()
+IBVWrapper::init_dmabuf_settings()
 {
     const char *dbg = getenv("HIPOBJ_RDMA_DEBUG");
     dmabuf_debug_   = dbg && *dbg && dbg[0] != '0';
@@ -88,11 +134,11 @@ IBVWrapper::init_dmabuf_support_flag()
     if (env && (env[0] == '0' || env[0] == 'n' || env[0] == 'N')) {
         dmabuf_enabled_ = 0;
     }
-    if (!dmabuf_enabled_) {
-        dmabuf_is_supported_ = 0;
-        return;
-    }
+}
 
+bool
+IBVWrapper::is_dmabuf_supported()
+{
     /* The only gate that can be answered here. Whether a given GPU can export
      * a dmabuf and a given NIC can register it is answered by trying, in
      * reg_mr(): both calls report their own failure and fall through. This
@@ -102,13 +148,7 @@ IBVWrapper::init_dmabuf_support_flag()
      * the mainline builds the emulated-hardware CI lanes run on do exactly
      * that, and lost GPU-direct to a grep. A config file is a prediction; the
      * registration call is the fact. */
-    dmabuf_is_supported_ = funcs_.reg_dmabuf_mr ? 1 : 0;
-}
-
-bool
-IBVWrapper::is_dmabuf_supported()
-{
-    return dmabuf_is_supported_ != 0;
+    return dmabuf_enabled_ != 0 && funcs_.reg_dmabuf_mr != nullptr;
 }
 
 int
@@ -219,10 +259,10 @@ IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
 {
     if (is_dmabuf_supported()) {
         uint64_t offset = 0;
-        int      fd     = 0;
+        int      fd     = -1;
 
-        hsa_status_t status = hsa_amd_portable_export_dmabuf(addr, length, &fd, &offset);
-        if (status != HSA_STATUS_SUCCESS) {
+        const int status = funcs_.export_dmabuf(addr, length, &fd, &offset);
+        if (status != 0) {
             /* Not an error worth a line on stderr by default: this is also the
              * answer for a host pointer, and the host-buffer paths register far
              * more often than the device ones. The plain path below handles it. */
@@ -231,14 +271,13 @@ IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
             }
         }
         else {
-            struct ibv_mr *mr =
-                funcs_.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr), fd, access);
+            const DmabufFd dmabuf(fd, funcs_.close_dmabuf);
+            struct ibv_mr *mr = funcs_.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr),
+                                                     dmabuf.get(), access);
             if (mr) {
-                dmabuf_fd_map_[reinterpret_cast<uintptr_t>(mr)] = fd;
                 return mr;
             }
             fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n", strerror(errno));
-            close(fd);
         }
         // Fall through to the plain path: it fails too for device memory, but
         // the caller distinguishes "no MR" from "wrong MR" and we must not
@@ -265,13 +304,6 @@ IBVWrapper::reg_mr_host(struct ibv_pd *pd, void *addr, size_t length, int access
 int
 IBVWrapper::dereg_mr(struct ibv_mr *mr)
 {
-    if (is_dmabuf_supported()) {
-        auto it = dmabuf_fd_map_.find(reinterpret_cast<uintptr_t>(mr));
-        if (it != dmabuf_fd_map_.end()) {
-            close(it->second);
-            dmabuf_fd_map_.erase(it);
-        }
-    }
     return funcs_.dereg_mr(mr);
 }
 

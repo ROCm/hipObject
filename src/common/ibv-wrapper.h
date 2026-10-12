@@ -7,16 +7,16 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
 
 #include "dl-handle.h"
 #include "ibv-core.h"
 
 namespace hipObj {
 
-/* ibverbs function table. Public so the unit-test accessor can name
- * the type; production code goes through the wrapper methods and
- * never touches it directly. */
+/* The functions the wrapper calls: libibverbs', and the two HSA calls
+ * that reg_mr() makes to register a GPU buffer through a dma-buf.
+ * Public so the unit-test accessor can name the type; production code
+ * goes through the wrapper methods and never touches it directly. */
 struct IbvFuncs {
     struct ibv_device **(*get_device_list)(int *);
     void (*free_device_list)(struct ibv_device **);
@@ -40,6 +40,14 @@ struct IbvFuncs {
     int (*poll_cq)(struct ibv_cq *, int, struct ibv_wc *);
     int (*post_send)(struct ibv_qp *, struct ibv_send_wr *, struct ibv_send_wr **);
     int (*post_recv)(struct ibv_qp *, struct ibv_recv_wr *, struct ibv_recv_wr **);
+
+    /* HSA, not libibverbs: hsa_amd_portable_export_dmabuf() and
+     * hsa_amd_portable_close_dmabuf(). They return 0 or the failing
+     * hsa_status_t as an int, so this header doesn't need the HSA
+     * headers. They're here so tests can fake them, and are set whether
+     * or not libibverbs loads. */
+    int (*export_dmabuf)(const void *, size_t, int *, uint64_t *);
+    int (*close_dmabuf)(int);
 };
 
 class IBVWrapper {
@@ -81,15 +89,13 @@ public:
 
 private:
     bool is_dmabuf_supported();
-    void init_dmabuf_support_flag();
+    void init_dmabuf_settings();
     int  init_function_table();
 
-    DlHandle                 ibv_handle_;
-    IbvFuncs                 funcs_               = {};
-    int                      dmabuf_enabled_      = 1;
-    int                      dmabuf_is_supported_ = 0;
-    bool                     dmabuf_debug_        = false;
-    std::map<uintptr_t, int> dmabuf_fd_map_;
+    DlHandle ibv_handle_;
+    IbvFuncs funcs_          = {};
+    int      dmabuf_enabled_ = 1;
+    bool     dmabuf_debug_   = false;
 
 #ifdef HIPOBJ_UNIT_TESTS
 public:
