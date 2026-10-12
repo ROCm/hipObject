@@ -151,6 +151,32 @@ TEST_F(NicSeamTest, EmptyEnumerationFails)
     EXPECT_EQ(hipObj::GetClosestNicToGpu(0, nullptr, &dev_name), -1);
 }
 
+TEST_F(NicSeamTest, NoKnownBusIdFails)
+{
+    fake_.nics_ = {
+        {"mlx5_0", "", 0, 1},
+        {"mlx5_1", "", 1, 1},
+    };
+
+    const char *dev_name = nullptr;
+    EXPECT_EQ(hipObj::GetClosestNicToGpu(0, nullptr, &dev_name), -1);
+    EXPECT_EQ(dev_name, nullptr);
+}
+
+TEST_F(NicSeamTest, FirstOfClosestWins)
+{
+    fake_.nics_ = {
+        {"mlx5_0", "", 0, 1},
+        {"mlx5_1", "0000:43:00.0", 1, 1},
+        {"mlx5_2", "0000:43:00.1", 1, 1},
+    };
+
+    const char *dev_name = nullptr;
+    EXPECT_EQ(hipObj::GetClosestNicToGpu(0, nullptr, &dev_name), 1);
+    ASSERT_NE(dev_name, nullptr);
+    EXPECT_STREQ(dev_name, "mlx5_1");
+}
+
 TEST_F(NicSeamTest, HcaFilterIsForwarded)
 {
     fake_.nics_ = {{"mlx5_0", "0000:18:00.0", 0, 1}};

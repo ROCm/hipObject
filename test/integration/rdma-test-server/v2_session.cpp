@@ -26,7 +26,7 @@ namespace v2 {
 
     bool SessionTable::insert(V2Session &&session)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
+        std::scoped_lock<std::mutex> guard(mtx_);
         session.ioActive = 1; /* published together with the entry */
         auto [it, ok]    = entries_.emplace(session.id, std::move(session));
         if (ok) {
@@ -37,8 +37,8 @@ namespace v2 {
 
     bool SessionTable::beginPublishing(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end() || it->second.state != SessState::Prepared) {
             return false;
         }
@@ -51,8 +51,8 @@ namespace v2 {
 
     bool SessionTable::finishPublishing(const std::string &id, uint64_t tPrepMs)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end() || it->second.state != SessState::Publishing) {
             return false;
         }
@@ -68,8 +68,8 @@ namespace v2 {
 
     bool SessionTable::beginTransferring(const std::string &id, uint64_t tExecMs)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end() || it->second.state != SessState::Prepared) {
             return false;
         }
@@ -93,8 +93,8 @@ namespace v2 {
 
     bool SessionTable::beginCompleting(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it != entries_.end() && it->second.state == SessState::Transferring) {
             /* Fresh response bound for the FINAL transmission. */
             it->second.txDeadlineAt = clockSource().nowMs() + 5000;
@@ -115,8 +115,8 @@ namespace v2 {
 
     bool SessionTable::toReaping(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end() || it->second.state == SessState::Reaping) {
             return false;
         }
@@ -140,15 +140,15 @@ namespace v2 {
 
     SessState SessionTable::stateOf(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         return it == entries_.end() ? SessState::Reaping : it->second.state;
     }
 
     bool SessionTable::claimDestroy(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end()) {
             return false;
         }
@@ -166,8 +166,8 @@ namespace v2 {
 
     void SessionTable::commitDestroy(const std::string &id, bool qpOk, bool cqOk)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end() || !it->second.destroying) {
             return;
         }
@@ -193,8 +193,8 @@ namespace v2 {
 
     bool SessionTable::eraseSession(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end()) {
             return false;
         }
@@ -211,14 +211,14 @@ namespace v2 {
 
     size_t SessionTable::size() const
     {
-        std::lock_guard<std::mutex> guard(mtx_);
+        std::scoped_lock<std::mutex> guard(mtx_);
         return entries_.size();
     }
 
     std::vector<std::string> SessionTable::ids() const
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        std::vector<std::string>    out;
+        std::scoped_lock<std::mutex> guard(mtx_);
+        std::vector<std::string>     out;
         out.reserve(entries_.size());
         for (const auto &[id, s] : entries_) {
             out.push_back(id);
@@ -228,32 +228,32 @@ namespace v2 {
 
     uint64_t SessionTable::ringReserve()
     {
-        std::lock_guard<std::mutex> guard(mtx_);
+        std::scoped_lock<std::mutex> guard(mtx_);
         return ring_.reserve();
     }
 
     void SessionTable::ringUnreserve(uint64_t reservationId)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
+        std::scoped_lock<std::mutex> guard(mtx_);
         ring_.unreserve(reservationId);
     }
 
     void SessionTable::ringRecord(uint64_t reservationId, uint32_t qpn, uint32_t psn)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
+        std::scoped_lock<std::mutex> guard(mtx_);
         ring_.record(reservationId, qpn, psn);
     }
 
     void SessionTable::ringCollectExpired(uint64_t nowMs)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
+        std::scoped_lock<std::mutex> guard(mtx_);
         ring_.collectExpired(nowMs);
     }
 
     bool SessionTable::acquireIo(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end()) {
             return false;
         }
@@ -263,8 +263,8 @@ namespace v2 {
 
     int SessionTable::releaseIo(const std::string &id)
     {
-        std::lock_guard<std::mutex> guard(mtx_);
-        auto                        it = entries_.find(id);
+        std::scoped_lock<std::mutex> guard(mtx_);
+        auto                         it = entries_.find(id);
         if (it == entries_.end() || it->second.ioActive <= 0) {
             return -1;
         }

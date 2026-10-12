@@ -87,8 +87,8 @@ namespace {
 
         hipObjError_t EnsureInit(minio::s3::BaseUrl base_url)
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            std::string                 key = base_url.host + ":" + base_url.region;
+            std::scoped_lock<std::mutex> lock(mutex_);
+            std::string                  key = base_url.host + ":" + base_url.region;
             if (initialized_ && key == active_key_) {
                 return {hipObjSuccess, 0};
             }
@@ -117,7 +117,7 @@ namespace {
 
         bool IsReady() const
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::scoped_lock<std::mutex> lock(mutex_);
             return initialized_;
         }
 

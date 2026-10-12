@@ -160,9 +160,9 @@ main(int argc, char *argv[])
                     }
                 }
                 if (r.status == 200) {
-                    std::string sid = r.headers.count("X-Amz-Rdma-Session") ? r.headers["X-Amz-Rdma-Session"]
-                                                                            : std::string();
-                    resp.afterSend  = [&handlers, sid](bool ok) { handlers.finishPrepareSend(sid, ok); };
+                    auto        sidIt = r.headers.find("X-Amz-Rdma-Session");
+                    std::string sid   = sidIt != r.headers.end() ? sidIt->second : std::string();
+                    resp.afterSend    = [&handlers, sid](bool ok) { handlers.finishPrepareSend(sid, ok); };
                 }
                 return resp;
             }
@@ -254,15 +254,15 @@ main(int argc, char *argv[])
         // HTTP-only mode: RDMA token absent or RDMA not available.
         if (tokenIt == req.headers.end() || !rdma.isReady()) {
             if (req.method == "PUT") {
-                std::lock_guard<std::mutex> lk(objects_mu);
+                std::scoped_lock<std::mutex> lk(objects_mu);
                 objects[key]         = std::vector<uint8_t>(req.body.begin(), req.body.end());
                 resp.status          = 200;
                 resp.headers["etag"] = "\"test\"";
                 return resp;
             }
             if (req.method == "GET") {
-                std::lock_guard<std::mutex> lk(objects_mu);
-                auto                        it = objects.find(key);
+                std::scoped_lock<std::mutex> lk(objects_mu);
+                auto                         it = objects.find(key);
                 if (it == objects.end()) {
                     resp.status = 404;
                     resp.body   = "not found";
@@ -292,7 +292,7 @@ main(int argc, char *argv[])
                 return resp;
             }
             {
-                std::lock_guard<std::mutex> lk(objects_mu);
+                std::scoped_lock<std::mutex> lk(objects_mu);
                 objects[key] = std::move(payload);
             }
             resp.status                      = 200;
@@ -304,8 +304,8 @@ main(int argc, char *argv[])
         if (req.method == "GET") {
             std::vector<uint8_t> data;
             {
-                std::lock_guard<std::mutex> lk(objects_mu);
-                auto                        it = objects.find(key);
+                std::scoped_lock<std::mutex> lk(objects_mu);
+                auto                         it = objects.find(key);
                 if (it == objects.end()) {
                     resp.status = 404;
                     resp.body   = "not found";

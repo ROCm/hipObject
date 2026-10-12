@@ -135,8 +135,8 @@ namespace v2 {
         /* Snapshot look-up; fn must not mutate the table. */
         template <typename F> bool withSession(const std::string &id, F &&fn)
         {
-            std::lock_guard<std::mutex> guard(mtx_);
-            auto                        it = entries_.find(id);
+            std::scoped_lock<std::mutex> guard(mtx_);
+            auto                         it = entries_.find(id);
             if (it == entries_.end()) {
                 return false;
             }
