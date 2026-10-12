@@ -18,7 +18,7 @@
 #include <cctype>
 #include <cerrno>
 #include <charconv>
-#include <cinttypes>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -35,6 +35,7 @@
 #include <unistd.h>
 
 #include "../../../src/rdma/token.h"
+#include "hipobj-format.h"
 #include "v2_sigv4.h"
 
 namespace {
@@ -143,14 +144,6 @@ headerValue(const std::string &raw, const char *name)
         return std::string();
     }
     return v.substr(b, e - b + 1);
-}
-
-std::string
-hex32(uint32_t v)
-{
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%08" PRIx32, v);
-    return buf;
 }
 
 /* Current UTC time in SigV4 format. */
@@ -272,7 +265,7 @@ main(int argc, char *argv[])
         {"x-amz-rdma-protocol", "hipobj-rc-v2"},
         {"x-amz-rdma-token", harnessTokenHex()},
         {"x-amz-rdma-psn", "00a1b2c"},
-        {"x-amz-rdma-cookie", hex32(cookie)},
+        {"x-amz-rdma-cookie", hipObj::formatHex(cookie, 8)},
         {"x-amz-rdma-op", op},
         {"x-amz-rdma-target", target},
         {"x-amz-rdma-size", std::to_string(size)},
@@ -313,7 +306,7 @@ main(int argc, char *argv[])
         {"x-amz-date", amzDate},
         {"x-amz-rdma-protocol", "hipobj-rc-v2"},
         {"x-amz-rdma-session", session},
-        {"x-amz-rdma-cookie", hex32(overrideReadyCookie ? readyCookie : cookie)},
+        {"x-amz-rdma-cookie", hipObj::formatHex(overrideReadyCookie ? readyCookie : cookie, 8)},
         /* Null data-plane endpoint: this harness drives the control
          * plane only. A server with transport objects treats a null
          * MR address as an unwired GET/PUT and the session-side
@@ -344,7 +337,7 @@ main(int argc, char *argv[])
     /* Cookie echo must match on success. */
     if (expect == 200) {
         std::string echo = headerValue(resp, "x-amz-rdma-cookie");
-        if (echo != hex32(cookie)) {
+        if (echo != hipObj::formatHex(cookie, 8)) {
             fprintf(stderr, "harness: cookie echo mismatch (%s)\n", echo.c_str());
             return 1;
         }

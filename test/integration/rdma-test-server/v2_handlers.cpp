@@ -9,11 +9,12 @@
 #include <array>
 #include <cctype>
 #include <chrono>
-#include <cinttypes>
-#include <cstdio>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -21,6 +22,7 @@
 #include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/v2-transport.h"
 #include "gid.h"
+#include "hipobj-format.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -84,20 +86,6 @@ namespace v2 {
             return r;
         }
 
-        std::string hex32(uint32_t v)
-        {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%08" PRIx32, v);
-            return buf;
-        }
-
-        std::string hex24(uint32_t v)
-        {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%06" PRIx32, v);
-            return buf;
-        }
-
         /* The success replies are built by helpers that return a single
          * named result. A handler that returns its own named result after
          * returning error() elsewhere can't elide the copy (-Wnrvo). */
@@ -106,7 +94,7 @@ namespace v2 {
             HandlerResult r;
             r.status                                  = 200;
             r.headers["X-Amz-Rdma-Protocol"]          = "hipobj-rc-v2";
-            r.headers["X-Amz-Rdma-Cookie"]            = hex32(cookie);
+            r.headers["X-Amz-Rdma-Cookie"]            = hipObj::formatHex(cookie, 8);
             r.headers["X-Amz-Rdma-Bytes-Transferred"] = std::to_string(bytes);
             return r;
         }
@@ -169,7 +157,7 @@ namespace v2 {
                     /* Trim like the HTTP parser does: a leading-space name must
                      * not slip past the signed-header check. */
                     std::string name = trimName(line.substr(0, colon));
-                    if (name.rfind("x-amz-rdma-", 0) == 0 && !isSigned(name)) {
+                    if (name.starts_with("x-amz-rdma-") && !isSigned(name)) {
                         return false;
                     }
                 }
@@ -400,10 +388,10 @@ namespace v2 {
                 table_.ringUnreserve(slot);
                 return error(500);
             }
-            char buf[33];
-            std::snprintf(buf, sizeof(buf), "%08" PRIx32 "%08" PRIx32 "%08" PRIx32 "%08" PRIx32, w[0], w[1],
-                          w[2], w[3]);
-            id = buf;
+            id.clear();
+            for (const uint32_t word : w) {
+                id += hipObj::formatHex(word, 8);
+            }
             V2Session s;
             s.id        = id;
             s.op        = req.op;
@@ -621,13 +609,11 @@ namespace v2 {
             }
         }
         r.headers["X-Amz-Rdma-Session"] = id;
-        r.headers["X-Amz-Rdma-Psn"]     = hex24(serverPsn);
+        r.headers["X-Amz-Rdma-Psn"]     = hipObj::formatHex(serverPsn, 6);
         uint32_t exposedQpn             = 0;
         table_.withSession(id, [&](V2Session &s) { exposedQpn = s.serverQpn; });
         if (exposedQpn != 0) {
-            char qpnHex[12];
-            std::snprintf(qpnHex, sizeof(qpnHex), "%" PRIx32, exposedQpn);
-            r.headers["X-Amz-Rdma-Qpn"] = qpnHex;
+            r.headers["X-Amz-Rdma-Qpn"] = hipObj::formatHex(exposedQpn);
             /* Staging endpoint for the client's WRITE (PUT) or the READ
              * pull confirmation (GET). */
             uint64_t saddr = 0;
@@ -639,12 +625,8 @@ namespace v2 {
                 }
             });
             if (saddr != 0) {
-                char addrHex[32];
-                std::snprintf(addrHex, sizeof(addrHex), "%" PRIx64, saddr);
-                char rkeyHex[12];
-                std::snprintf(rkeyHex, sizeof(rkeyHex), "%" PRIx32, srkey);
-                r.headers["X-Amz-Rdma-Mr-Addr"] = addrHex;
-                r.headers["X-Amz-Rdma-Mr-Rkey"] = rkeyHex;
+                r.headers["X-Amz-Rdma-Mr-Addr"] = hipObj::formatHex(saddr);
+                r.headers["X-Amz-Rdma-Mr-Rkey"] = hipObj::formatHex(srkey);
             }
         }
         return r;

@@ -300,7 +300,7 @@ namespace v2 {
             }
             amzDate = it->second;
         }
-        if (date.size() != 8 || amzDate.size() < 8 || amzDate.compare(0, 8, date) != 0) {
+        if (date.size() != 8 || !amzDate.starts_with(date)) {
             return std::nullopt; /* malformed date / credential mismatch */
         }
         for (char c : date) {
