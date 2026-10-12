@@ -21,6 +21,15 @@ namespace {
 
 using hipObj::formatHex;
 
+template <typename T>
+concept Formattable = requires(T value) { formatHex(value); };
+
+static_assert(Formattable<uint8_t>);
+static_assert(Formattable<uint64_t>);
+/* std::to_chars() has no bool overload, so formatHex() mustn't accept one */
+static_assert(!Formattable<bool>);
+static_assert(!Formattable<int>);
+
 TEST(FormatHex, FormatsLowercaseWithoutPadding)
 {
     EXPECT_EQ(formatHex(0U), "0");

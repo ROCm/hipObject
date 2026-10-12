@@ -18,8 +18,11 @@ namespace hipObj {
 /* Formats value as lowercase hex, zero-padded on the left to at least width
  * digits, like printf()'s "%0*x". A value with more digits than width isn't
  * truncated, so a caller that needs exactly width digits masks the value
- * first. */
+ * first. bool counts as an unsigned integral type, but std::to_chars()
+ * rejects it, so it's excluded here to fail at the call rather than in the
+ * body. */
 template <std::unsigned_integral T>
+    requires(!std::same_as<T, bool>)
 std::string
 formatHex(T value, size_t width = 0)
 {
