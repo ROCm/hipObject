@@ -10,9 +10,22 @@ option(HIPOBJ_USE_CLANG_TIDY
   "Run clang-tidy during compilation" OFF)
 
 if(HIPOBJ_USE_CLANG_TIDY)
+  # clang-tidy parses each file with the compiler's flags, and rejects
+  # the GCC-only ones
+  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR
+      "HIPOBJ_USE_CLANG_TIDY requires Clang as the C++ compiler "
+      "(CMAKE_CXX_COMPILER)")
+  endif()
+
+  # Prefer the clang-tidy on PATH, and fall back to ROCm's. CMake
+  # searches CMAKE_PREFIX_PATH, as a CMake or environment variable,
+  # before PATH, and it may have ROCm's LLVM in it, so it's skipped.
   find_program(CLANG_TIDY_EXE
     NAMES clang-tidy
-    PATHS ${ROCM_PATH}/llvm/bin)
+    PATHS ${ROCM_PATH}/llvm/bin
+    NO_CMAKE_PATH
+    NO_CMAKE_ENVIRONMENT_PATH)
 
   if(CLANG_TIDY_EXE)
     message(STATUS

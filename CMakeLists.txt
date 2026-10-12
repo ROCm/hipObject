@@ -63,6 +63,37 @@ list(APPEND CMAKE_MODULE_PATH
 
 if(NOT HIPOBJ_DOCS_ONLY)
 
+set(HIPOBJ_CXX_STANDARD "20" CACHE STRING
+  "C++ standard to build with")
+set_property(CACHE HIPOBJ_CXX_STANDARD
+  PROPERTY STRINGS "20" "23" "26")
+
+# CMake knows how to ask Clang for C++26 from 3.27 on, and GCC from
+# 3.30, both newer than the version hipObject otherwise needs. This is
+# checked before ROCm is looked for, and rocm-cmake possibly
+# downloaded, so it's the first error reported.
+if(HIPOBJ_CXX_STANDARD STREQUAL "26"
+    AND CMAKE_VERSION VERSION_LESS 3.30)
+  message(FATAL_ERROR
+    "HIPOBJ_CXX_STANDARD=26 needs CMake 3.30 or later, but this is "
+    "CMake ${CMAKE_VERSION}")
+endif()
+
+# Put the compiler's implicit include directories in
+# compile_commands.json, so tools that read it, such as clangd and
+# clang-tidy, search the same system headers as the compiler instead
+# of guessing (for example, when the build uses GCC). They're appended,
+# to keep any that a toolchain file or parent project set. This has to
+# come before rocm-cmake is loaded (HIPOBJUseROCmCMake), which warns
+# about any change to these variables after that.
+if(CMAKE_EXPORT_COMPILE_COMMANDS)
+  foreach(lang IN ITEMS C CXX)
+    list(APPEND CMAKE_${lang}_STANDARD_INCLUDE_DIRECTORIES
+      ${CMAKE_${lang}_IMPLICIT_INCLUDE_DIRECTORIES})
+    list(REMOVE_DUPLICATES CMAKE_${lang}_STANDARD_INCLUDE_DIRECTORIES)
+  endforeach()
+endif()
+
 include(HIPOBJUseROCmCMake)
 include(HIPOBJSanitizers)
 include(HIPOBJCoverage)
@@ -71,11 +102,6 @@ include(HIPOBJIWYU)
 include(HIPOBJAddLibraries)
 include(HIPOBJAddExecutable)
 include(HIPOBJFetchCuObject)
-
-set(HIPOBJ_CXX_STANDARD "20" CACHE STRING
-  "C++ standard to build with")
-set_property(CACHE HIPOBJ_CXX_STANDARD
-  PROPERTY STRINGS "20" "23")
 
 option(BUILD_SHARED_LIBS
   "Build using shared libraries" ON)

@@ -46,6 +46,7 @@ CMake Options
 Option                           Default        Description
 ================================ ============== =============================
 ``CMAKE_BUILD_TYPE``             RelWithDebInfo Build type (see below)
+``HIPOBJ_CXX_STANDARD``          20             C++ standard (20, 23, 26)
 ``HIPOBJ_BNXT``                  ON             Build Thor-2 RDMA backend
 ``HIPOBJ_IONIC``                 ON             Build ionic RDMA backend
 ``BUILD_SHARED_LIBS``            ON             Build shared library
@@ -70,6 +71,11 @@ Clang or GCC 12 and later. Use ``Debug`` when
 developing hipObject or running it under a sanitizer. Multi-config
 generators, such as Ninja Multi-Config, ignore ``CMAKE_BUILD_TYPE``
 and pick the configuration at build time.
+
+``HIPOBJ_CXX_STANDARD`` selects the C++ standard that hipObject is
+built with, without compiler extensions. ``26`` needs CMake 3.30 or
+later, which is the first version that knows how to ask GCC
+(14 and later) and Clang for C++26.
 
 ``HIPOBJ_WERROR`` adds ``-Werror`` to hipObject's own targets
 (the library, tests, examples, and tools), but not to third-party
