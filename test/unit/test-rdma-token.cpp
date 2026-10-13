@@ -20,7 +20,7 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 TEST(RdmaToken, EncodeProducesHexString)
 {
     hipObj::RdmaToken token;
-    token.transport  = hipObj::TRANSPORT_RC;
+    token.transport  = hipObj::TransportType::RC;
     token.qpNum      = 42;
     token.rkey       = 0xDEADBEEF;
     token.remoteAddr = 0x7F0000001000ULL;
@@ -40,7 +40,7 @@ TEST(RdmaToken, EncodeProducesHexString)
 TEST(RdmaToken, EncodeHexIsNulTerminatedAndMatchesString)
 {
     hipObj::RdmaToken token;
-    token.transport  = hipObj::TRANSPORT_RC;
+    token.transport  = hipObj::TransportType::RC;
     token.qpNum      = 0x01020304;
     token.gid[0]     = 0xfe;
     token.gid[15]    = 0x80;
@@ -71,7 +71,7 @@ TEST(RdmaToken, EncodeHexIsNulTerminatedAndMatchesString)
 TEST(RdmaToken, EncodeReplyWithPeerToken)
 {
     hipObj::RdmaToken peer;
-    peer.transport = hipObj::TRANSPORT_RC;
+    peer.transport = hipObj::TransportType::RC;
     peer.qpNum     = 7;
 
     EXPECT_EQ(hipObj::encodeReplyWithPeerToken(200, peer), "200:" + hipObj::encodeRdmaToken(peer));
@@ -80,7 +80,7 @@ TEST(RdmaToken, EncodeReplyWithPeerToken)
 TEST(RdmaToken, EncodeRcTransportByte)
 {
     hipObj::RdmaToken token;
-    token.transport = hipObj::TRANSPORT_RC;
+    token.transport = hipObj::TransportType::RC;
 
     std::string enc = hipObj::encodeRdmaToken(token);
     EXPECT_GE(enc.size(), 2U);
@@ -90,7 +90,7 @@ TEST(RdmaToken, EncodeRcTransportByte)
 TEST(RdmaToken, EncodeDcTransportByte)
 {
     hipObj::RdmaToken token;
-    token.transport = hipObj::TRANSPORT_DC;
+    token.transport = hipObj::TransportType::DC;
 
     std::string enc = hipObj::encodeRdmaToken(token);
     EXPECT_GE(enc.size(), 2U);
@@ -171,7 +171,7 @@ TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue)
 TEST(RdmaReply, ParsePeerTokenFromReply)
 {
     hipObj::RdmaToken peer;
-    peer.transport          = hipObj::TRANSPORT_RC;
+    peer.transport          = hipObj::TransportType::RC;
     peer.qpNum              = 99;
     std::string       reply = hipObj::encodeReplyWithPeerToken(200, peer);
     hipObj::RdmaToken parsed;
@@ -179,7 +179,7 @@ TEST(RdmaReply, ParsePeerTokenFromReply)
     EXPECT_TRUE(hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
     EXPECT_EQ(code, 200);
     EXPECT_EQ(parsed.qpNum, 99U);
-    EXPECT_EQ(parsed.transport, hipObj::TRANSPORT_RC);
+    EXPECT_EQ(parsed.transport, hipObj::TransportType::RC);
 }
 
 TEST(RdmaReply, LegacyOkHasNoPeerToken)
@@ -192,7 +192,7 @@ TEST(RdmaReply, LegacyOkHasNoPeerToken)
 TEST(RdmaReply, ParsePeerTokenRejectsMalformedReply)
 {
     hipObj::RdmaToken peer;
-    peer.transport            = hipObj::TRANSPORT_RC;
+    peer.transport            = hipObj::TransportType::RC;
     const std::string token   = hipObj::encodeRdmaToken(peer);
     const std::string cases[] = {
         "200",
@@ -220,8 +220,10 @@ TEST(RdmaReply, ParsePeerTokenRejectsMalformedReply)
 TEST(RdmaToken, DecodeRejectsUnknownTransport)
 {
     hipObj::RdmaToken token;
-    token.transport     = 0x02;
+    token.transport     = hipObj::TransportType::RC;
     std::string encoded = hipObj::encodeRdmaToken(token);
+    /* The transport is the token's first byte */
+    encoded.replace(0, 2, "02");
 
     hipObj::RdmaToken parsed;
     EXPECT_FALSE(hipObj::decodeRdmaTokenHex(encoded.c_str(), parsed));
@@ -230,7 +232,7 @@ TEST(RdmaToken, DecodeRejectsUnknownTransport)
 TEST(RdmaToken, DecodeAcceptsUppercaseHex)
 {
     hipObj::RdmaToken token;
-    token.transport = hipObj::TRANSPORT_RC;
+    token.transport = hipObj::TransportType::RC;
     /* A made-up address with every hex letter in it. gitleaks's
      * generic-api-key rule mistakes a random-looking value assigned to a
      * "token" for a credential. */
@@ -248,7 +250,7 @@ TEST(RdmaToken, DecodeAcceptsUppercaseHex)
 TEST(RdmaToken, DecodeRejectsBytesThatArentTwoHexDigits)
 {
     hipObj::RdmaToken token;
-    token.transport              = hipObj::TRANSPORT_RC;
+    token.transport              = hipObj::TransportType::RC;
     const std::string encoded    = hipObj::encodeRdmaToken(token);
     const char *const badBytes[] = {"+1", "-1", " 1", "1 ", "0x", "g0", "0g"};
     for (const char *bad : badBytes) {
@@ -274,7 +276,7 @@ TEST(RdmaReply, ParseRejectsStatusThatIsntThreeDigits)
 TEST(RdmaToken, ParseClientNicFromGid)
 {
     hipObj::RdmaToken token;
-    token.transport = hipObj::TRANSPORT_RC;
+    token.transport = hipObj::TransportType::RC;
     token.gid[10]   = 0xff;
     token.gid[11]   = 0xff;
     token.gid[12]   = 192;

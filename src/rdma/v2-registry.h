@@ -82,7 +82,6 @@ namespace v2 {
         DeviceHandle *device         = nullptr;
         uint64_t      reservationId  = 0; /* retired-ring slot for this QP */
         uint32_t      clientPsn      = 0; /* client PSN (recorded on destroy) */
-        uint8_t       phase          = 0; /* v2::Phase, opaque here */
         bool          poisoned       = false;
         bool          destroyClaimed = false;
         bool          destroying     = false;

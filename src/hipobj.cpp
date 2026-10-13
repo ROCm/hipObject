@@ -127,7 +127,7 @@ buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset, RdmaTo
     if (!rangeInRegistration(offset, size, buf.size)) {
         return false;
     }
-    token.transport  = TRANSPORT_RC;
+    token.transport  = TransportType::RC;
     token.qpNum      = g_conn->qp->qp_num;
     token.gid        = toGid(g_conn->localGid);
     token.rkey       = buf.mr->rkey;

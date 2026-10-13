@@ -209,7 +209,7 @@ transitionQpToRts(RcConnection &conn)
 int
 connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
 {
-    if (!conn.qp || peerToken.transport != TRANSPORT_RC) {
+    if (!conn.qp || peerToken.transport != TransportType::RC) {
         return -1;
     }
     int ret = transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, toIbvGid(peerToken.gid));

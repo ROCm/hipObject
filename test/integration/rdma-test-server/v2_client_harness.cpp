@@ -116,7 +116,7 @@ harnessTokenHex()
     hipObj::RdmaToken t{};
     t.qpNum = 0x4321;
     t.gid.fill(0xcd);
-    t.transport = hipObj::TRANSPORT_RC;
+    t.transport = hipObj::TransportType::RC;
     t.portNum   = 1;
     return hipObj::encodeRdmaToken(t);
 }

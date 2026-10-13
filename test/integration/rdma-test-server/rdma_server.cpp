@@ -62,7 +62,7 @@ namespace {
     hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, struct ibv_mr *mr, size_t size)
     {
         hipObj::RdmaToken token{};
-        token.transport  = hipObj::TRANSPORT_RC;
+        token.transport  = hipObj::TransportType::RC;
         token.qpNum      = conn.qp->qp_num;
         token.gid        = hipObj::toGid(conn.localGid);
         token.rkey       = mr->rkey;

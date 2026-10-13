@@ -17,13 +17,13 @@ struct ibv_context;
 namespace hipObj {
 
 /* Higher value = more preferred. */
-enum GidPriority {
-    GID_UNKNOWN       = -1,
-    ROCEV1_LINK_LOCAL = 0,
-    ROCEV1_GLOBAL     = 1,
-    ROCEV2_LINK_LOCAL = 2,
-    ROCEV2_GLOBAL     = 3,
-    ROCEV2_IPV4       = 5,
+enum class GidPriority {
+    Unknown         = -1,
+    RoceV1LinkLocal = 0,
+    RoceV1Global    = 1,
+    RoceV2LinkLocal = 2,
+    RoceV2Global    = 3,
+    RoceV2Ipv4      = 5,
 };
 
 /* One GID table entry as read from the device: its index, GID, and

@@ -71,14 +71,14 @@ namespace {
     {
         if (roce_ver == 2) {
             if (IsIPv4MappedIPv6(gid))
-                return ROCEV2_IPV4;
+                return GidPriority::RoceV2Ipv4;
             if (LinkLocalGid(gid))
-                return ROCEV2_LINK_LOCAL;
-            return ROCEV2_GLOBAL;
+                return GidPriority::RoceV2LinkLocal;
+            return GidPriority::RoceV2Global;
         }
         if (roce_ver == 1)
-            return LinkLocalGid(gid) ? ROCEV1_LINK_LOCAL : ROCEV1_GLOBAL;
-        return GID_UNKNOWN;
+            return LinkLocalGid(gid) ? GidPriority::RoceV1LinkLocal : GidPriority::RoceV1Global;
+        return GidPriority::Unknown;
     }
 
     int AutoSelectGidIndex(ibv_context *ctx, uint8_t port_num)
@@ -260,13 +260,13 @@ int
 PickBestGid(const GidCandidate *candidates, size_t count)
 {
     int         best_idx  = -1;
-    GidPriority best_prio = GID_UNKNOWN;
+    GidPriority best_prio = GidPriority::Unknown;
     for (size_t i = 0; i < count; ++i) {
         const GidCandidate &c = candidates[i];
         if (!IsConfiguredGid(c.gid))
             continue;
         GidPriority prio = ClassifyGid(c.gid, c.roceVersion);
-        if (prio != GID_UNKNOWN && (best_idx < 0 || prio > best_prio)) {
+        if (prio != GidPriority::Unknown && (best_idx < 0 || prio > best_prio)) {
             best_idx  = c.index;
             best_prio = prio;
         }

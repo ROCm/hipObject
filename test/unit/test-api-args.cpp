@@ -573,7 +573,7 @@ TEST(ApiArgsToken, PutTokenRejectsNull)
 // ---- hipObjParseRdmaReply ----------------------------------------
 
 std::string
-validTokenHex(uint8_t transport = hipObj::TRANSPORT_RC)
+validTokenHex(hipObj::TransportType transport = hipObj::TransportType::RC)
 {
     hipObj::RdmaToken token;
     token.transport = transport;
@@ -610,7 +610,7 @@ TEST(ApiArgsParseReply, AcceptsDocumentedForms)
         {"100", 100},
         {"599", 599},
         {"200:" + validTokenHex(), 200},
-        {"200:" + validTokenHex(hipObj::TRANSPORT_DC), 200},
+        {"200:" + validTokenHex(hipObj::TransportType::DC), 200},
         /* Hex is case-insensitive */
         {"200:" + std::string(88, 'A').replace(0, 2, "01"), 200},
         /* Trailing line endings and NULs are ignored */
@@ -664,9 +664,9 @@ TEST(ApiArgsParseReply, RejectsMalformedReplies)
         "200:" + token + ":1:2",
         "200: " + token.substr(1),
         "200:" + std::string(88, 'g'),
-        /* Unknown transport byte */
-        "200:" + validTokenHex(0x02),
-        "200:" + validTokenHex(0xff),
+        /* Unknown transport byte, which is the token's first */
+        "200:" + std::string(token).replace(0, 2, "02"),
+        "200:" + std::string(token).replace(0, 2, "ff"),
         /* Only a 200 reply carries a token */
         "206:" + token,
         "404:" + token,
@@ -686,7 +686,7 @@ std::string
 tokenWithIpv4()
 {
     hipObj::RdmaToken token;
-    token.transport = hipObj::TRANSPORT_RC;
+    token.transport = hipObj::TransportType::RC;
     token.gid[10]   = 0xff;
     token.gid[11]   = 0xff;
     token.gid[12]   = 192;
