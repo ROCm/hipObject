@@ -98,6 +98,51 @@ namespace v2 {
         static constexpr size_t               kCapacity = 4096;
         static constexpr std::chrono::seconds kExpiry{60};
 
+        /* Owns one Reserved slot, and unreserves it when it goes out of
+         * scope unless record() or release() passed it on. Move-only,
+         * like std::unique_ptr, and an empty one owns nothing. The ring
+         * must outlive it. */
+        class Reservation {
+        public:
+            Reservation() noexcept = default;
+
+            /* Reserves a slot in ring; empty when the ring is full */
+            explicit Reservation(RetiredRing &ring);
+
+            /* Takes ownership of reservationId, already Reserved in ring.
+             * 0 gives an empty one. */
+            static Reservation adopt(RetiredRing &ring, uint64_t reservationId) noexcept;
+
+            ~Reservation();
+
+            Reservation(const Reservation &)            = delete;
+            Reservation &operator=(const Reservation &) = delete;
+            Reservation(Reservation &&other) noexcept;
+            Reservation &operator=(Reservation &&other) noexcept;
+
+            explicit operator bool() const noexcept
+            {
+                return id_ != 0;
+            }
+
+            /* Records (qpn, psn) in the slot, which then belongs to the
+             * ring until it expires. Does nothing when empty. */
+            void record(uint32_t qpn, uint32_t psn);
+
+            /* Gives up ownership without unreserving, and returns the
+             * reservation id (0 when empty) */
+            [[nodiscard]] uint64_t release() noexcept;
+
+        private:
+            Reservation(RetiredRing *ring, uint64_t reservationId) noexcept;
+
+            /* Unreserves the slot, if any, and leaves this empty */
+            void reset() noexcept;
+
+            RetiredRing *ring_ = nullptr;
+            uint64_t     id_   = 0;
+        };
+
         /* Collects expired Recorded slots; returns slots collected. */
         size_t collectExpired(TimePoint now);
 
@@ -105,7 +150,7 @@ namespace v2 {
         uint64_t reserve();
 
         /* Releases a Reserved reservation (never recorded). */
-        void unreserve(uint64_t reservationId);
+        void unreserve(uint64_t reservationId) noexcept;
 
         /* Reserved -> Recorded with (qpn, psn) and a fresh expiry.
          * Precondition: reservationId is Reserved and owned by the caller
@@ -164,8 +209,8 @@ namespace v2 {
         /* Destroying -> Poisoned|Destroyed, reflecting destroyed objects. */
         void commitDestroy(ConnId id, bool qpGone, bool cqGone);
 
-        /* Destroyed -> removed; releases capacity and the MR ref the entry
-         * held. Returns false when the id is unknown or not Destroyed. */
+        /* Destroyed -> removed. Returns false when the id is unknown or
+         * still holds a qp or cq. */
         bool eraseDestroyed(ConnId id);
 
         bool   isPoisoned(ConnId id) const;

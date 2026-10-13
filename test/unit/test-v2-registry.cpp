@@ -609,6 +609,96 @@ TEST_F(V2RegistryTest, ReservationOwnership)
     EXPECT_EQ(ring.used(), 1U);
 }
 
+/* A Reservation gives its slot back when it goes out of scope, unless
+ * it recorded the slot or released it. */
+TEST_F(V2RegistryTest, ReservationGuard)
+{
+    using Reservation = hipObj::v2::RetiredRing::Reservation;
+    auto &ring        = hipObj::v2::registry().retired();
+    {
+        const Reservation res(ring);
+        EXPECT_TRUE(res);
+        EXPECT_EQ(ring.reservedCount(), 1U);
+    }
+    EXPECT_EQ(ring.used(), 0U);
+
+    {
+        Reservation res(ring);
+        res.record(3, 4);
+        EXPECT_FALSE(res);
+        res.record(5, 6); /* empty: nothing to record */
+    }
+    EXPECT_TRUE(ring.contains(3, 4));
+    EXPECT_FALSE(ring.contains(5, 6));
+    EXPECT_EQ(ring.reservedCount(), 0U);
+    EXPECT_EQ(ring.recordedCount(), 1U);
+
+    uint64_t released = 0;
+    {
+        Reservation res(ring);
+        released = res.release();
+        EXPECT_NE(released, 0U);
+        EXPECT_FALSE(res);
+        EXPECT_EQ(res.release(), 0U);
+    }
+    EXPECT_EQ(ring.reservedCount(), 1U);
+
+    /* adopt() takes the released slot back, and 0 gives an empty one */
+    {
+        const Reservation adopted = Reservation::adopt(ring, released);
+        EXPECT_TRUE(adopted);
+        EXPECT_FALSE(Reservation::adopt(ring, 0));
+        EXPECT_FALSE(Reservation());
+    }
+    EXPECT_EQ(ring.reservedCount(), 0U);
+}
+
+/* Moving a Reservation moves the slot, and assigning over one gives its
+ * old slot back. */
+TEST_F(V2RegistryTest, ReservationMoves)
+{
+    using Reservation = hipObj::v2::RetiredRing::Reservation;
+    auto &ring        = hipObj::v2::registry().retired();
+    {
+        Reservation a(ring);
+        Reservation b(std::move(a));
+        EXPECT_TRUE(b);
+        EXPECT_EQ(ring.reservedCount(), 1U);
+
+        Reservation c(ring);
+        EXPECT_EQ(ring.reservedCount(), 2U);
+        c = std::move(b);
+        EXPECT_TRUE(c);
+        EXPECT_EQ(ring.reservedCount(), 1U);
+
+        /* Self-assignment keeps the slot */
+        Reservation &self = c;
+        c                 = std::move(self);
+        EXPECT_TRUE(c);
+        EXPECT_EQ(ring.reservedCount(), 1U);
+    }
+    EXPECT_EQ(ring.used(), 0U);
+}
+
+/* A full ring gives an empty Reservation. */
+TEST_F(V2RegistryTest, ReservationFromFullRing)
+{
+    auto                 &ring = hipObj::v2::registry().retired();
+    std::vector<uint64_t> rids;
+    for (size_t i = 0; i < ring.kCapacity; ++i) {
+        rids.push_back(ring.reserve());
+    }
+    {
+        const hipObj::v2::RetiredRing::Reservation res(ring);
+        EXPECT_FALSE(res);
+    }
+    EXPECT_EQ(ring.used(), ring.kCapacity);
+    for (auto r : rids) {
+        ring.unreserve(r);
+    }
+    EXPECT_EQ(ring.used(), 0U);
+}
+
 /* Conflict-discard accounting is exercised in commit 3 with the
  * full loop; here the ring primitive is covered. */
 

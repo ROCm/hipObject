@@ -47,7 +47,7 @@ namespace v2 {
         return 0;
     }
 
-    void RetiredRing::unreserve(uint64_t reservationId)
+    void RetiredRing::unreserve(uint64_t reservationId) noexcept
     {
         if (reservationId == 0) {
             return;
@@ -77,6 +77,63 @@ namespace v2 {
                 --reserved_;
                 return;
             }
+        }
+    }
+
+    // ---- RetiredRing::Reservation ---------------------------------------
+
+    RetiredRing::Reservation::Reservation(RetiredRing &ring) : ring_(&ring), id_(ring.reserve())
+    {
+    }
+
+    RetiredRing::Reservation::Reservation(RetiredRing *ring, uint64_t reservationId) noexcept
+        : ring_(ring), id_(reservationId)
+    {
+    }
+
+    RetiredRing::Reservation RetiredRing::Reservation::adopt(RetiredRing &ring,
+                                                             uint64_t     reservationId) noexcept
+    {
+        return Reservation(&ring, reservationId);
+    }
+
+    RetiredRing::Reservation::~Reservation()
+    {
+        reset();
+    }
+
+    RetiredRing::Reservation::Reservation(Reservation &&other) noexcept
+        : ring_(other.ring_), id_(std::exchange(other.id_, 0))
+    {
+    }
+
+    RetiredRing::Reservation &RetiredRing::Reservation::operator=(Reservation &&other) noexcept
+    {
+        if (this != &other) {
+            reset();
+            ring_ = other.ring_;
+            id_   = std::exchange(other.id_, 0);
+        }
+        return *this;
+    }
+
+    void RetiredRing::Reservation::record(uint32_t qpn, uint32_t psn)
+    {
+        if (id_ != 0) {
+            ring_->record(id_, qpn, psn);
+            id_ = 0;
+        }
+    }
+
+    uint64_t RetiredRing::Reservation::release() noexcept
+    {
+        return std::exchange(id_, 0);
+    }
+
+    void RetiredRing::Reservation::reset() noexcept
+    {
+        if (id_ != 0) {
+            ring_->unreserve(std::exchange(id_, 0));
         }
     }
 

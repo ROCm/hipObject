@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -80,6 +81,18 @@ namespace {
         }
         return headers.GetFront(name);
     }
+
+    // Releases a token from hipObjGetRdmaToken(). Owning the token this way
+    // releases it on every path, including when building or sending the
+    // request throws.
+    struct RdmaTokenDeleter {
+        void operator()(char *token) const noexcept
+        {
+            (void)hipObjPutRdmaToken(token);
+        }
+    };
+
+    using RdmaTokenPtr = std::unique_ptr<char, RdmaTokenDeleter>;
 
     // ---------------------------------------------------------------------------
     // v2 callback context — carries the per-transfer minio credentials and
@@ -259,14 +272,15 @@ namespace {
 
     RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        char         *token = nullptr;
-        hipObjError_t terr  = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &token);
+        char               *rawToken = nullptr;
+        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
+        const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
             RDMA_TRACE("v2 put: token: %s", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
 
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
+        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
         hipObjOpsV2_t ops{};
         ops.sendPrepare = v2SendPrepare;
         ops.sendReady   = v2SendReady;
@@ -276,7 +290,6 @@ namespace {
         if (!sctx->uploadId.empty()) {
             if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
                 RDMA_TRACE("v2 put: part number %u out of range", sctx->partNumber);
-                hipObjPutRdmaToken(token);
                 return {RdmaStatus::Failed};
             }
             // hipObjPutV2() takes a canonical query: percent-encoded, with
@@ -290,7 +303,6 @@ namespace {
 
         hipObjError_t err = hipObjPutV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0,
                                         query.empty() ? nullptr : query.c_str(), &ops, &cbctx);
-        hipObjPutRdmaToken(token);
 
         if (err.opError == hipObjNotSupported) {
             RDMA_TRACE("v2 put: unsupported (client v2 is a stub); falling back to v1");
@@ -310,14 +322,15 @@ namespace {
 
     RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        char         *token = nullptr;
-        hipObjError_t terr  = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &token);
+        char               *rawToken = nullptr;
+        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
+        const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
             RDMA_TRACE("v2 get: token: %s", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
 
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token)};
+        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
         hipObjOpsV2_t ops{};
         ops.sendPrepare = v2SendPrepare;
         ops.sendReady   = v2SendReady;
@@ -325,7 +338,6 @@ namespace {
 
         hipObjError_t err =
             hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0, nullptr, &ops, &cbctx);
-        hipObjPutRdmaToken(token);
 
         if (err.opError == hipObjNotSupported) {
             RDMA_TRACE("v2 get: unsupported (client v2 is a stub); falling back to v1");
@@ -521,9 +533,10 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 #endif /* HIPOBJECT_V2_API */
     RdmaResult ret{RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
-        char         *token = nullptr;
-        hipObjError_t terr  = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &token);
-        if (terr.opError != hipObjSuccess || token == nullptr) {
+        char               *rawToken = nullptr;
+        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
+        const RdmaTokenPtr  token(rawToken);
+        if (terr.opError != hipObjSuccess || !token) {
             RDMA_TRACE("v1 put: token: %s", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
@@ -533,11 +546,9 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
             RDMA_TRACE("v1 put: stage to host: %s", hipObjGetErrorString(serr.opError));
-            hipObjPutRdmaToken(token);
             return {RdmaStatus::Failed};
         }
-        ret = rdmaPut(ctx, token, size);
-        hipObjPutRdmaToken(token);
+        ret = rdmaPut(ctx, token.get(), size);
         if ((ret.status == RdmaStatus::Ok && ret.bytes > 0) || ret.status == RdmaStatus::NotSupported) {
             return ret;
         }
@@ -556,14 +567,14 @@ rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 #endif /* HIPOBJECT_V2_API */
     RdmaResult ret{RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
-        char         *token = nullptr;
-        hipObjError_t terr  = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &token);
-        if (terr.opError != hipObjSuccess || token == nullptr) {
+        char               *rawToken = nullptr;
+        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
+        const RdmaTokenPtr  token(rawToken);
+        if (terr.opError != hipObjSuccess || !token) {
             RDMA_TRACE("v1 get: token: %s", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
-        ret = rdmaGet(ctx, token, size);
-        hipObjPutRdmaToken(token);
+        ret = rdmaGet(ctx, token.get(), size);
         if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
             hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
             if (serr.opError != hipObjSuccess) {

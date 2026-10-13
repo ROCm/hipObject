@@ -186,24 +186,29 @@ TEST_F(V2ConflictTest, DiscardAndRecreate)
 
     ASSERT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::ReleaseResult::Ok);
 
+    uint32_t newQpn = 0;
     reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) {
         EXPECT_NE(e.conn.qp, nullptr);
         EXPECT_NE(e.conn.qpNum, oldQpn);
         EXPECT_EQ(e.conn.cq.get(), cqBefore); /* cq survives */
-        EXPECT_NE(e.reservationId, 0U);
-        EXPECT_NE(e.reservationId, 0U);
+        EXPECT_EQ(e.reservationId, ridBefore);
+        newQpn = e.conn.qpNum;
     });
     EXPECT_EQ(g_state.destroyedQpns.size(), 1U);
     EXPECT_EQ(g_state.destroyedQpns[0], oldQpn);
     /* Old tuple recorded against the peer PSN. */
     EXPECT_TRUE(reg.retired().contains(oldQpn, 0x42));
     EXPECT_EQ(reg.retired().recordedCount(), recordedBefore + 1);
-    /* Ring accounting: one recorded slot per discard. */
-    EXPECT_EQ(reg.retired().reservedCount(), 0U);
+    /* Ring accounting: one recorded slot per discard, and the entry's
+     * reservation still guards the new qp. */
+    EXPECT_EQ(reg.retired().reservedCount(), 1U);
 
-    /* Clean teardown still works afterwards. */
+    /* Clean teardown still works afterwards, and retires the new qp's
+     * tuple through the reservation the entry kept. */
     EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(reg.size(), 0U);
+    EXPECT_TRUE(reg.retired().contains(newQpn, 0x42));
+    EXPECT_EQ(reg.retired().reservedCount(), 0U);
 }
 
 /* Ring exhausted: busy, entry untouched. */
