@@ -374,7 +374,6 @@ FakeDeviceTest::SetUp()
     funcs.query_gid        = &fakeQueryGid;
     funcs.alloc_pd         = &fakeAllocPd;
     funcs.dealloc_pd       = &fakeDeallocPd;
-    funcs.reg_mr           = &fakeRegisterMr;
     funcs.reg_mr_iova2     = &fakeRegisterMrIova2;
     funcs.dereg_mr         = &fakeDeregisterMr;
     funcs.create_cq        = &fakeCreateCq;

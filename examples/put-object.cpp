@@ -10,6 +10,7 @@
  *   put-object <size-bytes> --live URL   # libcurl + test server
  */
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -34,10 +35,8 @@ struct HipFreeDeleter {
 };
 
 static int
-stubSendRequest(void *ctx, const char *token, size_t tokenLen)
+stubSendRequest(void *, const char *, size_t tokenLen)
 {
-    (void)ctx;
-    (void)token;
     fprintf(stderr,
             "[put-object] would send RDMA token "
             "(%zu bytes) via S3 PUT x-amz-rdma-token\n",
@@ -46,9 +45,8 @@ stubSendRequest(void *ctx, const char *token, size_t tokenLen)
 }
 
 static int
-stubRecvReply(void *ctx, char *reply, size_t *replyLen)
+stubRecvReply(void *, char *reply, size_t *replyLen)
 {
-    (void)ctx;
     // No real server is contacted in stub mode; reply "501" (not
     // implemented) so the transfer is reported as unsupported rather
     // than silently succeeding.
@@ -62,6 +60,25 @@ stubRecvReply(void *ctx, char *reply, size_t *replyLen)
     return 0;
 }
 
+// Parses a decimal byte count, and returns 0 when the argument isn't one
+// or doesn't fit in a size_t
+static size_t
+parseSize(const char *arg)
+{
+    // strtoull() would skip leading whitespace and accept a sign, and it
+    // negates a negative value rather than rejecting it
+    if (arg[0] < '0' || arg[0] > '9') {
+        return 0;
+    }
+    errno                        = 0;
+    char                    *end = nullptr;
+    const unsigned long long n   = std::strtoull(arg, &end, 10);
+    if (errno != 0 || *end != '\0' || static_cast<size_t>(n) != n) {
+        return 0;
+    }
+    return static_cast<size_t>(n);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -70,7 +87,7 @@ main(int argc, char *argv[])
         return 1;
     }
 
-    size_t objSize = static_cast<size_t>(atol(argv[1]));
+    size_t objSize = parseSize(argv[1]);
     if (objSize == 0) {
         fprintf(stderr, "Invalid object size: %s\n", argv[1]);
         return 1;

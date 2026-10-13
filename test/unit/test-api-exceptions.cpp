@@ -67,12 +67,6 @@ throwingMemcpy(void *, const void *, size_t, hipMemcpyKind)
 }
 
 struct ibv_mr *
-throwingRegisterMr(struct ibv_pd *, void *, size_t, int)
-{
-    throwIt();
-}
-
-struct ibv_mr *
 throwingRegisterMrIova2(struct ibv_pd *, void *, size_t, uintptr_t, int)
 {
     throwIt();
@@ -101,7 +95,6 @@ protected:
     static void throwFromRegisterMr()
     {
         auto &funcs        = hipObj::ibv.funcsForTest();
-        funcs.reg_mr       = &throwingRegisterMr;
         funcs.reg_mr_iova2 = &throwingRegisterMrIova2;
     }
 };

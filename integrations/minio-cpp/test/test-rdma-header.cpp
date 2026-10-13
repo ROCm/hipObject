@@ -12,19 +12,6 @@
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
-TEST(HipObjMinioHeader, FormatRdmaHeaderValue)
-{
-    hipObj::RdmaToken token;
-    token.transport     = hipObj::TransportType::RC;
-    token.qpNum         = 42;
-    token.remoteAddr    = 0x7f0000001000ULL;
-    token.length        = 4096;
-    std::string encoded = hipObj::encodeRdmaToken(token);
-    void       *buf     = reinterpret_cast<void *>(0x7f0000001000ULL);
-    std::string header  = hipObj::formatRdmaHeaderValue(encoded.c_str(), buf, 4096);
-    EXPECT_EQ(header, encoded);
-}
-
 TEST(HipObjMinioHeader, ParseRdmaReply200)
 {
     int code = 0;

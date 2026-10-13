@@ -293,7 +293,6 @@ protected:
         funcs.query_gid        = &fakeQueryGid;
         funcs.alloc_pd         = &fakeAllocPd;
         funcs.dealloc_pd       = &fakeDeallocPd;
-        funcs.reg_mr           = &fakeRegMr;
         funcs.reg_mr_iova2     = &fakeRegMrIova2;
         funcs.dereg_mr         = &fakeDeregMr;
         funcs.create_cq        = &fakeCreateCq;

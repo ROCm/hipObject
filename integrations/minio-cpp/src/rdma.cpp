@@ -348,14 +348,13 @@ namespace {
 } // namespace
 
 RdmaResult
-rdmaPut(S3RdmaContext *sctx, const char *token, const void *buf, size_t size)
+rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
 {
     // The header carries one fixed-width token and nothing else; a
     // ":<addr>:<len>" suffix would override the address the token already
     // advertises, and on the staging path the caller's pointer is not that
     // address. See docs/interop.rst.
     const std::string rdma_token(token ? token : "");
-    (void)buf;
 
     minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
     minio::creds::Credentials creds = sctx->provider->Fetch();
@@ -440,14 +439,13 @@ rdmaPut(S3RdmaContext *sctx, const char *token, const void *buf, size_t size)
 }
 
 RdmaResult
-rdmaGet(S3RdmaContext *sctx, const char *token, const void *buf, size_t size)
+rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
 {
     // The header carries one fixed-width token and nothing else; a
     // ":<addr>:<len>" suffix would override the address the token already
     // advertises, and on the staging path the caller's pointer is not that
     // address. See docs/interop.rst.
     const std::string rdma_token(token ? token : "");
-    (void)buf;
 
     minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
     minio::creds::Credentials creds = sctx->provider->Fetch();
@@ -538,7 +536,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
             hipObjPutRdmaToken(token);
             return {RdmaStatus::Failed};
         }
-        ret = rdmaPut(ctx, token, buf, size);
+        ret = rdmaPut(ctx, token, size);
         hipObjPutRdmaToken(token);
         if ((ret.status == RdmaStatus::Ok && ret.bytes > 0) || ret.status == RdmaStatus::NotSupported) {
             return ret;
@@ -564,7 +562,7 @@ rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
             RDMA_TRACE("v1 get: token: %s", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
-        ret = rdmaGet(ctx, token, buf, size);
+        ret = rdmaGet(ctx, token, size);
         hipObjPutRdmaToken(token);
         if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
             hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);

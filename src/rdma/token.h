@@ -67,8 +67,6 @@ std::optional<int> parseRdmaReplyHttpCode(std::string_view reply);
 
 bool parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen);
 
-std::string formatRdmaHeaderValue(const char *tokenHex, const void *buf, size_t size);
-
 /* The peer token in a "200:" reply, or std::nullopt when the reply is
  * malformed or doesn't carry one. Only a 200 reply carries a token. */
 std::optional<RdmaToken> parsePeerTokenFromReply(std::string_view reply);

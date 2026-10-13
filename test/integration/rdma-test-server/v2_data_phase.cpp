@@ -130,17 +130,16 @@ namespace v2 {
 
     namespace {
 
-        /* Polls the CQ for one completion matching `expectWr`, bounded by
-         * an absolute deadline on the steady clock. */
-        enum class PollOutcome { Ok, Timeout, Error, Mismatch };
-        PollOutcome pollCqUntil(struct ibv_cq *cq, TimePoint deadline, uint64_t expectWr, struct ibv_wc *out)
+        /* Polls the CQ for one completion, bounded by an absolute deadline
+         * on the steady clock. The caller checks that it's the completion
+         * it expected: providers may rewrite the wr_id on emulated paths,
+         * so the opcode + immediate + length identify it. */
+        enum class PollOutcome { Ok, Timeout, Error };
+        PollOutcome pollCqUntil(struct ibv_cq *cq, TimePoint deadline, struct ibv_wc *out)
         {
             for (;;) {
                 int n = ibv.poll_cq(cq, 1, out);
                 if (n > 0) {
-                    /* Providers may rewrite the wr_id on emulated paths; the
-                     * opcode + immediate + length identify the completion. */
-                    (void)expectWr;
                     return PollOutcome::Ok;
                 }
                 if (n < 0) {
@@ -179,7 +178,7 @@ namespace v2 {
             if (!postRecvForImm(s.qp, s.stagingMr, s.size)) {
                 return DataPhaseResult::WireFail;
             }
-            po = pollCqUntil(s.cq, deadline, kWrRecv, &wc);
+            po = pollCqUntil(s.cq, deadline, &wc);
             if (po == PollOutcome::Timeout) {
                 return DataPhaseResult::Timeout;
             }
@@ -201,7 +200,7 @@ namespace v2 {
         if (!postWriteWithImm(s.qp, s.stagingMr, s.clientMrAddr, s.clientMrRkey, s.size, s.cookie)) {
             return DataPhaseResult::WireFail;
         }
-        po = pollCqUntil(s.cq, deadline, kWrWrite, &wc);
+        po = pollCqUntil(s.cq, deadline, &wc);
         if (po == PollOutcome::Timeout) {
             return DataPhaseResult::Timeout;
         }

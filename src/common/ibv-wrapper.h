@@ -28,7 +28,6 @@ struct IbvFuncs {
     int (*query_gid)(struct ibv_context *, uint8_t, int, union ibv_gid *);
     struct ibv_pd *(*alloc_pd)(struct ibv_context *);
     int (*dealloc_pd)(struct ibv_pd *);
-    struct ibv_mr *(*reg_mr)(struct ibv_pd *, void *, size_t, int);
     struct ibv_mr *(*reg_dmabuf_mr)(struct ibv_pd *, uint64_t, size_t, uint64_t, int, int);
     struct ibv_mr *(*reg_mr_iova2)(struct ibv_pd *, void *, size_t, uintptr_t, int);
     int (*dereg_mr)(struct ibv_mr *);
@@ -90,11 +89,11 @@ public:
 private:
     bool is_dmabuf_supported();
     void init_dmabuf_settings();
-    int  init_function_table();
+    bool init_function_table();
 
     DlHandle ibv_handle_;
     IbvFuncs funcs_          = {};
-    int      dmabuf_enabled_ = 1;
+    bool     dmabuf_enabled_ = true;
     bool     dmabuf_debug_   = false;
 
 #ifdef HIPOBJ_UNIT_TESTS

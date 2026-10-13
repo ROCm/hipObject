@@ -119,12 +119,6 @@ fakeRegMrIova2(struct ibv_pd *, void *addr, size_t length, uintptr_t, int)
     return mr;
 }
 
-struct ibv_mr *
-fakeRegMr(struct ibv_pd *pd, void *addr, size_t length, int access)
-{
-    return fakeRegMrIova2(pd, addr, length, reinterpret_cast<uintptr_t>(addr), access);
-}
-
 int
 fakeDeregMr(struct ibv_mr *mr)
 {
@@ -253,7 +247,6 @@ protected:
         f.query_device     = fakeQueryDevice;
         f.close_device     = fakeCloseDevice;
         f.query_gid        = fakeQueryGid;
-        f.reg_mr           = fakeRegMr;
         f.reg_mr_iova2     = fakeRegMrIova2;
         f.dereg_mr         = fakeDeregMr;
         g_fault            = FaultCtl{};

@@ -694,13 +694,13 @@ catch (...) {
 }
 
 hipObjError_t
-hipObjGet(hipObjHandle_t handle, void *devPtr, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
+hipObjGet([[maybe_unused]] hipObjHandle_t handle, void *devPtr, size_t size, off_t offset, hipObjOps_t *ops,
+          void *ctx)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    (void)handle;
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
@@ -724,13 +724,13 @@ catch (...) {
 }
 
 hipObjError_t
-hipObjPut(hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
+hipObjPut([[maybe_unused]] hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset,
+          hipObjOps_t *ops, void *ctx)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    (void)handle;
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
         return {hipObjNotInitialized, 0};
@@ -881,13 +881,12 @@ catch (...) {
 // to fall back to the v1 RDMA path.
 hipObjError_t
 hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, void *ctx)
+            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    (void)ctx;
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {
         return err;
@@ -900,13 +899,12 @@ catch (...) {
 
 hipObjError_t
 hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, void *ctx)
+            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    (void)ctx;
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {
         return err;

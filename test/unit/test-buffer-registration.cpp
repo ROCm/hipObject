@@ -94,7 +94,6 @@ protected:
     {
         auto &funcs        = hipObj::ibv.funcsForTest();
         savedFuncs_        = funcs;
-        funcs.reg_mr       = &fakeRegisterMr;
         funcs.reg_mr_iova2 = &fakeRegisterMrIova2;
         funcs.dereg_mr     = &fakeDeregisterMr;
 

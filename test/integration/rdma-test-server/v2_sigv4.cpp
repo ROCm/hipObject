@@ -228,7 +228,6 @@ namespace v2 {
             canonicalHeaders += '\n';
         }
         std::string payloadHash = sha256Hex(body);
-        std::string amzDateKey  = "x-amz-date";
         std::string date        = amzDate;
         if (date.size() >= 8) {
             date = date.substr(0, 8);
@@ -244,7 +243,6 @@ namespace v2 {
         std::string kSigning = hmacSha256(kService, "aws4_request");
         std::string signature =
             hex(reinterpret_cast<const unsigned char *>(hmacSha256(kSigning, toSign).data()), 32);
-        (void)amzDateKey;
         return "AWS4-HMAC-SHA256 Credential=" + accessKey_ + "/" + scope + ", SignedHeaders=" + signedList +
                ", Signature=" + signature;
     }

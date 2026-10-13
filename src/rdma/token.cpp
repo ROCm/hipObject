@@ -200,14 +200,6 @@ parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen)
     return true;
 }
 
-std::string
-formatRdmaHeaderValue(const char *tokenHex, const void *buf, size_t size)
-{
-    (void)buf;
-    (void)size;
-    return tokenHex ? std::string(tokenHex) : std::string();
-}
-
 std::optional<RdmaToken>
 parsePeerTokenFromReply(std::string_view reply)
 {
