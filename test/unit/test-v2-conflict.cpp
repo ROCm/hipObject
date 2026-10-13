@@ -109,7 +109,7 @@ class IbvFakeInstall {
 public:
     IbvFakeInstall()
     {
-        auto &funcs        = hipObj::ibv.funcsForTest();
+        auto &funcs        = hipObj::ibv().funcsForTest();
         saved_             = funcs;
         funcs.create_cq    = fakeCreateCq;
         funcs.destroy_cq   = fakeDestroyCq;
@@ -121,7 +121,7 @@ public:
     }
     ~IbvFakeInstall()
     {
-        hipObj::ibv.funcsForTest() = saved_;
+        hipObj::ibv().funcsForTest() = saved_;
     }
 
     IbvFakeInstall(const IbvFakeInstall &)            = delete;
@@ -366,7 +366,7 @@ protected:
     {
         V2ConflictTest::SetUp();
         g_transport        = TransportFakes{};
-        auto &funcs        = hipObj::ibv.funcsForTest();
+        auto &funcs        = hipObj::ibv().funcsForTest();
         funcs.create_cq    = fakeCreateCqOrFail;
         funcs.modify_qp    = fakeRecordingModifyQp;
         funcs.query_port   = fakeQueryPort;

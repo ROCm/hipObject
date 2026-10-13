@@ -98,7 +98,7 @@ namespace {
         wr.wr.rdma.rkey        = clientToken.rkey;
 
         ibv_send_wr *bad = nullptr;
-        if (hipObj::ibv.post_send(conn.qp.get(), &wr, &bad) != 0) {
+        if (hipObj::ibv().post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
         return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, std::chrono::seconds(10));
@@ -122,7 +122,7 @@ namespace {
         wr.wr.rdma.rkey        = clientToken.rkey;
 
         ibv_send_wr *bad = nullptr;
-        if (hipObj::ibv.post_send(conn.qp.get(), &wr, &bad) != 0) {
+        if (hipObj::ibv().post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
         return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::seconds(10));
@@ -170,7 +170,7 @@ struct RdmaTestServer::Impl {
 
 RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
 {
-    if (!hipObj::ibv.is_initialized) {
+    if (!hipObj::ibv().is_initialized) {
         return;
     }
     if (hipObj::openRdmaDevice(0, impl_->conn) != 0) {
@@ -182,8 +182,8 @@ RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
         return;
     }
     impl_->stagingMr.reset(
-        hipObj::ibv.reg_mr_host(impl_->conn.pd.get(), impl_->stagingBuf.get(), impl_->stagingSize,
-                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+        hipObj::ibv().reg_mr_host(impl_->conn.pd.get(), impl_->stagingBuf.get(), impl_->stagingSize,
+                                  IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!impl_->stagingMr) {
         impl_->release();
         return;

@@ -200,7 +200,7 @@ _rocm_build() {
           fi
           export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt && \
           apt-get update -qq && \
-          apt-get install -y -qq git cmake ninja-build libibverbs-dev libnuma-dev \
+          apt-get install -y -qq git cmake ninja-build libibverbs-dev \
             libcurl4-openssl-dev libssl-dev && \
           cmake -B /hipobject-build -G Ninja -S /hipobject \
             -DCMAKE_BUILD_TYPE=Release \

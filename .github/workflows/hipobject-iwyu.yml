@@ -77,7 +77,6 @@ jobs:
             iwyu \
             libcurl4-openssl-dev \
             libibverbs-dev \
-            libnuma-dev \
             libssl-dev \
             ninja-build
 

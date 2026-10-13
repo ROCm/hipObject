@@ -114,7 +114,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr(ibv.reg_mr(pd, devPtr, size, access));
+    IbvMrPtr mr(ibv().reg_mr(pd, devPtr, size, access));
     if (mr) {
         BufEntry &entry  = entries_[key];
         entry.mr         = std::move(mr);
@@ -147,7 +147,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     HostBufPtr hostBuf(rawHostBuf);
-    mr.reset(ibv.reg_mr_host(pd, hostBuf.get(), size, access));
+    mr.reset(ibv().reg_mr_host(pd, hostBuf.get(), size, access));
     if (!mr) {
         return -1;
     }
@@ -169,7 +169,7 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr(ibv.reg_mr_host(pd, hostPtr, size, access));
+    IbvMrPtr mr(ibv().reg_mr_host(pd, hostPtr, size, access));
     if (!mr) {
         return -1;
     }

@@ -120,7 +120,6 @@ jobs:
             git \
             libcurl4-openssl-dev \
             libibverbs-dev \
-            libnuma-dev \
             libssl-dev
 
       # The image sets ROCM_PATH to /opt/rocm, which in the ROCm 7.11+

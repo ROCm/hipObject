@@ -54,7 +54,7 @@ public:
     IBVWrapper();
     ~IBVWrapper() = default;
 
-    /* There is one instance, the global ibv. A moved-from wrapper would
+    /* There is one instance, the one ibv() returns. A moved-from wrapper would
      * keep its function table without keeping libibverbs loaded. */
     IBVWrapper(const IBVWrapper &)            = delete;
     IBVWrapper &operator=(const IBVWrapper &) = delete;
@@ -110,6 +110,7 @@ private:
 #endif
 };
 
-extern IBVWrapper ibv;
+/* Returns the wrapper, loading libibverbs on the first call */
+IBVWrapper &ibv();
 
 } // namespace hipObj

@@ -52,15 +52,15 @@ namespace v2 {
             static std::once_flag        once;
             std::call_once(once, [] {
                 int                      n = 0;
-                hipObj::IbvDeviceListPtr devs(hipObj::ibv.get_device_list(&n));
+                hipObj::IbvDeviceListPtr devs(hipObj::ibv().get_device_list(&n));
                 if (devs != nullptr && n > 0) {
-                    hipObj::IbvContextPtr ctx(hipObj::ibv.open_device(devs[0]));
+                    hipObj::IbvContextPtr ctx(hipObj::ibv().open_device(devs[0]));
                     if (ctx != nullptr) {
                         auto opened = std::make_unique<hipObj::DeviceHandle>();
-                        opened->pd.reset(hipObj::ibv.alloc_pd(ctx.get()));
+                        opened->pd.reset(hipObj::ibv().alloc_pd(ctx.get()));
                         opened->portNum  = 1;
                         opened->gidIndex = 0;
-                        hipObj::ibv.query_gid(ctx.get(), 1, 0, &opened->localGid);
+                        hipObj::ibv().query_gid(ctx.get(), 1, 0, &opened->localGid);
                         opened->ctx = std::move(ctx);
                         /* Intentionally never freed: the device stays open
                          * for the life of the server. */

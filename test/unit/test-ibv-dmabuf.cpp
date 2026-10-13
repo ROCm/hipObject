@@ -6,9 +6,10 @@
  * the libibverbs registration faked, so no GPU or NIC is needed.
  *
  * The DmabufDisabledTest tests need HIPOBJ_DMABUF=0, which hipObject reads
- * once, when it loads, so they skip unless it's set. CMakeLists.txt runs
- * this program a second time, with it set, for just those tests. The
- * DmabufTest tests skip when HIPOBJ_DMABUF turns dma-buf registration off.
+ * once, when it loads libibverbs, so they skip unless it's set.
+ * CMakeLists.txt runs this program a second time, with it set, for just
+ * those tests. The DmabufTest tests skip when HIPOBJ_DMABUF turns dma-buf
+ * registration off.
  */
 
 #include <cerrno>
@@ -152,7 +153,7 @@ class FakeDmabufTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        auto &funcs         = hipObj::ibv.funcsForTest();
+        auto &funcs         = hipObj::ibv().funcsForTest();
         saved_              = funcs;
         funcs.export_dmabuf = &fakeExportDmabuf;
         funcs.close_dmabuf  = &fakeCloseDmabuf;
@@ -165,12 +166,12 @@ protected:
 
     void TearDown() override
     {
-        hipObj::ibv.funcsForTest() = saved_;
+        hipObj::ibv().funcsForTest() = saved_;
     }
 
     static hipObj::IbvMrPtr registerFakeBuffer()
     {
-        return hipObj::IbvMrPtr(hipObj::ibv.reg_mr(fakePd(), fakeDevBuf(), kBufSize, kAccess));
+        return hipObj::IbvMrPtr(hipObj::ibv().reg_mr(fakePd(), fakeDevBuf(), kBufSize, kAccess));
     }
 
     hipObj::IbvFuncs saved_ = {};
@@ -205,7 +206,7 @@ TEST_F(DmabufTest, RegistrationClosesFdBeforeReturning)
     EXPECT_EQ(g_log.closeCalls, 1);
     EXPECT_EQ(g_log.closedFd, kFakeFd);
 
-    EXPECT_EQ(hipObj::ibv.dereg_mr(mr.release()), 0);
+    EXPECT_EQ(hipObj::ibv().dereg_mr(mr.release()), 0);
     EXPECT_EQ(g_log.deregisterCalls, 1);
     EXPECT_EQ(g_log.closeCalls, 1);
 }
@@ -224,7 +225,7 @@ TEST_F(DmabufTest, FailedRegistrationClosesFdAndFallsBack)
     EXPECT_EQ(g_log.closeCalls, 1);
     EXPECT_EQ(g_log.closedFd, kFakeFd);
 
-    EXPECT_EQ(hipObj::ibv.dereg_mr(mr.release()), 0);
+    EXPECT_EQ(hipObj::ibv().dereg_mr(mr.release()), 0);
     EXPECT_EQ(g_log.deregisterCalls, 1);
     EXPECT_EQ(g_log.closeCalls, 1);
 }
@@ -245,7 +246,7 @@ TEST_F(DmabufTest, FailedExportClosesNothing)
 /* libibverbs older than rdma-core 34 has no ibv_reg_dmabuf_mr() */
 TEST_F(DmabufTest, NoDmabufVerbSkipsExport)
 {
-    hipObj::ibv.funcsForTest().reg_dmabuf_mr = nullptr;
+    hipObj::ibv().funcsForTest().reg_dmabuf_mr = nullptr;
 
     hipObj::IbvMrPtr mr = registerFakeBuffer();
     ASSERT_NE(mr, nullptr);
