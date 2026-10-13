@@ -20,10 +20,7 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     -Wextra
 
     # Avoid non-standard C/C++ behavior
-    # Can't use -pedantic with nvcc at this time, as nvcc
-    # generates code with non-standard #line styles, leading
-    # to a LOT of warnings
-    #-pedantic
+    -pedantic
 
     # Check for ABI warnings
     # Most of this is noise, but probably useful to turn
@@ -48,58 +45,93 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
                         # minimized
     -Walloca
     -Walloc-zero
-    -Warray-bounds=2 # TODO: Consider making =3 in newer g++
+    -Warray-bounds=2 # The highest level
+    -Wattribute-alias=2
+    # Plain -Wcast-align only warns on targets that require aligned
+    # access, so it does nothing on x86-64. =strict warns everywhere.
     -Wcast-align
+    #-Wcast-align=strict # TODO: Fix issues
     -Wcast-qual
+    -Wcatch-value=3
+    #-Wconditionally-supported # TODO: Fix issues
     -Wconversion
+    -Wctor-dtor-privacy
     -Wdate-time
+    -Wdeprecated-copy-dtor
     -Wdouble-promotion
     -Wduplicated-branches
     -Wduplicated-cond
+    #-Weffc++ # TODO: Fix issues
+    -Wextra-semi
     -Wfloat-equal
+    # Includes -Wformat-nonliteral, -Wformat-security, and -Wformat-y2k
     -Wformat=2
-    -Wformat-nonliteral
     -Wformat-overflow=2
-    -Wformat-security
     -Wformat-signedness
     -Wformat-truncation=2
-    -Wformat-y2k
+    -Wimplicit-fallthrough=5
     -Winvalid-pch
     # This is a warning for when using <C++11
     #-Wlong-long
     -Wlogical-op
+    #-Wmissing-braces # TODO: Fix issues
     -Wmissing-declarations
+    -Wmissing-include-dirs
+    #-Wnoexcept # TODO: Fix issues
+    -Wnon-virtual-dtor
     -Wnormalized
     -Wnull-dereference
+    -Wold-style-cast
+    -Woverlength-strings
     -Wpacked
     #-Wpadded # Probably should be a developer warning
+    -Wplacement-new=2
     -Wpointer-arith
     -Wredundant-decls
-    -Wshadow
-    -Wshadow-local
+    -Wshadow # Includes -Wshadow=local
     -Wshift-overflow=2
+    # In C++, -Wconversion doesn't include this
+    -Wsign-conversion
+    #-Wsign-promo # TODO: Fix issues
+    # Warn about functions the stack protector doesn't cover
+    -Wstack-protector
     -Wno-strict-overflow
+    -Wstrict-null-sentinel
+    -Wstringop-overflow=4
+    -Wsuggest-final-methods
+    -Wsuggest-final-types
+    -Wsuggest-override
     -Wswitch-default
     -Wswitch-enum
     -Wtrampolines
     -Wundef
-    -Wuninitialized
-    -Wunknown-pragmas
-    -Wunsafe-loop-optimizations
-    -Wunused
+    -Wunused-const-variable=1
     -Wunused-macros
     -Wuseless-cast
+    -Wvariadic-macros
     -Wvla
     -Wzero-as-null-pointer-constant
 
     # TODO: Add size warnings when we pick a limit
   )
 
+  if(compiler_version VERSION_GREATER_EQUAL 10)
+    set(flags
+      # Misc warnings
+      -Warith-conversion
+      -Wmismatched-tags
+      #-Wredundant-tags # TODO: Fix issues
+      ${flags}
+    )
+  endif()
+
   if(compiler_version VERSION_GREATER_EQUAL 11)
     set(flags
       # Zero the registers a function used when it returns, so their
       # contents don't outlive the call or serve as ROP gadgets
       -fzero-call-used-regs=used-gpr
+      # Misc warnings
+      -Wctad-maybe-unsupported
       ${flags}
     )
   endif()
@@ -110,6 +142,7 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
       -Wbidi-chars=any
       -Winterference-size
       -Wtrivial-auto-var-init
+      -Wuse-after-free=3
       ${flags}
     )
 
@@ -127,6 +160,9 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
       -fstrict-flex-arrays=3
       # Misc warnings
       -Winvalid-utf8
+      -Woverloaded-virtual=2
+      # Needs -fstrict-flex-arrays
+      -Wstrict-flex-arrays
       ${flags}
     )
   endif()
@@ -156,6 +192,16 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
       ${flags}
     )
   endif()
+
+  # TODO: Turn these on when they can be tested with g++ 16
+  #if(compiler_version VERSION_GREATER_EQUAL 16)
+  #  set(flags
+  #    # Misc warnings
+  #    -Wkeyword-macro
+  #    -Wsfinae-incomplete=2
+  #    ${flags}
+  #  )
+  #endif()
 
   # Control-flow protection (Intel CET) only exists on x86
   check_cxx_compiler_flag(-fcf-protection=full
