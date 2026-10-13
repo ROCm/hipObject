@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <ctime>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -43,23 +45,26 @@ namespace v2 {
             return s.substr(b, e - b);
         }
 
-        std::string hex(const unsigned char *data, size_t len)
+        /* Lowercase hex of the bytes in data */
+        std::string hex(std::string_view data)
         {
-            static const char kDigits[] = "0123456789abcdef";
-            std::string       out;
-            out.reserve(len * 2);
-            for (size_t i = 0; i < len; ++i) {
-                out.push_back(kDigits[data[i] >> 4]);
-                out.push_back(kDigits[data[i] & 0xf]);
+            constexpr std::string_view kDigits = "0123456789abcdef";
+            std::string                out;
+            out.reserve(data.size() * 2);
+            for (const char c : data) {
+                const auto byte = static_cast<unsigned char>(c);
+                out.push_back(kDigits[byte >> 4]);
+                out.push_back(kDigits[byte & 0xfU]);
             }
             return out;
         }
 
         std::string sha256Hex(const std::string &data)
         {
-            unsigned char digest[SHA256_DIGEST_LENGTH];
-            SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), digest);
-            return hex(digest, sizeof(digest));
+            std::string digest(SHA256_DIGEST_LENGTH, '\0');
+            SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(),
+                   reinterpret_cast<unsigned char *>(digest.data()));
+            return hex(digest);
         }
 
         std::string hmacSha256(const std::string &key, const std::string &msg)
@@ -237,12 +242,11 @@ namespace v2 {
                                        canonicalHeaders + "\n" + signedList + "\n" + payloadHash;
         std::string toSign =
             "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + sha256Hex(canonicalRequest);
-        std::string kDate    = hmacSha256("AWS4" + secretKey_, date.substr(0, 8));
-        std::string kRegion  = hmacSha256(kDate, region_);
-        std::string kService = hmacSha256(kRegion, "hipobj");
-        std::string kSigning = hmacSha256(kService, "aws4_request");
-        std::string signature =
-            hex(reinterpret_cast<const unsigned char *>(hmacSha256(kSigning, toSign).data()), 32);
+        std::string kDate     = hmacSha256("AWS4" + secretKey_, date.substr(0, 8));
+        std::string kRegion   = hmacSha256(kDate, region_);
+        std::string kService  = hmacSha256(kRegion, "hipobj");
+        std::string kSigning  = hmacSha256(kService, "aws4_request");
+        std::string signature = hex(hmacSha256(kSigning, toSign));
         return "AWS4-HMAC-SHA256 Credential=" + accessKey_ + "/" + scope + ", SignedHeaders=" + signedList +
                ", Signature=" + signature;
     }
@@ -329,12 +333,11 @@ namespace v2 {
                                        canonicalHeaderLines + "\n" + signedList + "\n" + payloadHash;
         std::string toSign =
             "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + sha256Hex(canonicalRequest);
-        std::string kDate    = hmacSha256("AWS4" + secretKey_, date.substr(0, 8));
-        std::string kRegion  = hmacSha256(kDate, region_);
-        std::string kService = hmacSha256(kRegion, "hipobj");
-        std::string kSigning = hmacSha256(kService, "aws4_request");
-        std::string signature =
-            hex(reinterpret_cast<const unsigned char *>(hmacSha256(kSigning, toSign).data()), 32);
+        std::string kDate     = hmacSha256("AWS4" + secretKey_, date.substr(0, 8));
+        std::string kRegion   = hmacSha256(kDate, region_);
+        std::string kService  = hmacSha256(kRegion, "hipobj");
+        std::string kSigning  = hmacSha256(kService, "aws4_request");
+        std::string signature = hex(hmacSha256(kSigning, toSign));
         if (signature != providedSig) {
             return std::nullopt;
         }

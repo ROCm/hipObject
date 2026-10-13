@@ -233,7 +233,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wunguarded-availability
     -Wunnamed-type-template-args
     -Wunreachable-code-aggressive
-    #-Wunsafe-buffer-usage # TODO: Fix issues
+    -Wunsafe-buffer-usage
     -Wunused-exception-parameter
     -Wunused-macros
     -Wunused-member-function

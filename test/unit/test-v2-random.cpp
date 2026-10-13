@@ -8,7 +8,6 @@
  * plumbing. */
 
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -18,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include "fake-ibv.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -114,7 +114,7 @@ protected:
             return 0;
         };
         funcs.query_port = [](struct ibv_context *, uint8_t, struct ibv_port_attr *a) -> int {
-            std::memset(a, 0, sizeof(*a));
+            hipObj::zeroObject(*a);
             a->active_mtu = IBV_MTU_4096;
             return 0;
         };
@@ -147,7 +147,7 @@ TEST_F(V2PsnDeliveryTest, PsnsReachQpAttrs)
     hipObj::RcConnV2 conn;
     conn.qp.reset(reinterpret_cast<struct ibv_qp *>(0x1));
     union ibv_gid gid;
-    std::memset(&gid, 0, sizeof(gid));
+    hipObj::zeroObject(gid);
     ASSERT_EQ(hipObj::v2::transitionQpToRtrV2(dh, conn, 77, gid, 0x334455), 0);
     ASSERT_EQ(hipObj::v2::transitionQpToRtsV2(conn, dh, 0x667788), 0);
     ASSERT_EQ(g_rqPsn.size(), 1U);

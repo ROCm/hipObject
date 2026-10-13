@@ -13,7 +13,8 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
+#include <string>
+#include <system_error>
 
 #include <hsa/hsa_ext_amd.h>
 
@@ -76,7 +77,11 @@ namespace {
     {
         dlsym_load_optional(out, handle, name);
         if (!out) {
-            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", name, dlerror());
+            /* dlerror() returns NULL when the symbol's value is NULL */
+            const char       *err      = dlerror();
+            const std::string symbol   = name;
+            const std::string errorStr = err ? err : "symbol is NULL";
+            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", symbol.c_str(), errorStr.c_str());
             return false;
         }
         return true;
@@ -311,7 +316,8 @@ IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
             if (mr) {
                 return mr;
             }
-            fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n", strerror(errno));
+            const std::string reason = std::generic_category().message(errno);
+            fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n", reason.c_str());
         }
         // Fall through to the plain path: it fails too for device memory, but
         // the caller distinguishes "no MR" from "wrong MR" and we must not

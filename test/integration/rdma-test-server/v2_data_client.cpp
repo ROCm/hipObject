@@ -14,15 +14,17 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <limits>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
@@ -34,6 +36,7 @@
 #include "gid.h"
 #include "hipobj-format.h"
 #include "hipobj-parse.h"
+#include "hipobj-span.h"
 #include "http_status.h"
 #include "malloc_ptr.h"
 #include "unique-fd.h"
@@ -130,7 +133,7 @@ using AddrInfoPtr = std::unique_ptr<struct addrinfo, AddrInfoDeleter>;
 /* Returns a connected socket, or an empty UniqueFd on failure. Every
  * path returns fd, so the copy can be elided (-Wnrvo). */
 hipObj::UniqueFd
-connectTcp(const char *host, int port)
+connectTcp(const std::string &host, int port)
 {
     hipObj::UniqueFd  fd;
     const std::string service = std::to_string(port);
@@ -139,7 +142,7 @@ connectTcp(const char *host, int port)
     hints.ai_socktype       = SOCK_STREAM;
     struct addrinfo *rawRes = nullptr;
     /* getaddrinfo() leaves rawRes unspecified when it fails */
-    if (getaddrinfo(host, service.c_str(), &hints, &rawRes) != 0) {
+    if (getaddrinfo(host.c_str(), service.c_str(), &hints, &rawRes) != 0) {
         return fd;
     }
     const AddrInfoPtr res(rawRes);
@@ -157,7 +160,8 @@ sendAll(int fd, const std::string &s)
 {
     size_t off = 0;
     while (off < s.size()) {
-        ssize_t n = send(fd, s.data() + off, s.size() - off, MSG_NOSIGNAL);
+        const std::string_view rest = std::string_view(s).substr(off);
+        ssize_t                n    = send(fd, rest.data(), rest.size(), MSG_NOSIGNAL);
         if (n <= 0) {
             return false;
         }
@@ -231,7 +235,8 @@ headerValue(const std::string &resp, const std::string &name)
  * control exchange runs over TCP; the data phase uses verbs with
  * whatever device the host has. */
 int
-runTransfer(const char *host, int port, const char *op, const char *target, uint64_t size, uint32_t cookie)
+runTransfer(const std::string &host, int port, const std::string &op, const std::string &target,
+            uint64_t size, uint32_t cookie)
 {
     /* ---- verbs setup (client side) ---- */
     ClientVerbs verbs;
@@ -263,20 +268,20 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
      * divide the length, which a stack buffer crossing a page
      * boundary triggers. */
     verbs.buf.reset(std::aligned_alloc(kBufBytes, kBufBytes));
-    char *buf = static_cast<char *>(verbs.buf.get());
-    if (buf == nullptr) {
+    if (verbs.buf == nullptr) {
         std::fprintf(stderr, "dp: alloc failed\n");
         return 2;
     }
-    verbs.mr.reset(ibv_reg_mr(verbs.pd.get(), buf, kBufBytes,
+    const std::span<char> buf = hipObj::spanFromPointer(static_cast<char *>(verbs.buf.get()), kBufBytes);
+    verbs.mr.reset(ibv_reg_mr(verbs.pd.get(), buf.data(), buf.size(),
                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!verbs.mr) {
         std::fprintf(stderr, "dp: reg_mr failed\n");
         return 2;
     }
-    std::memset(buf, 0, kBufBytes);
-    if (std::strcmp(op, "PUT") == 0) {
-        std::memcpy(buf, "dp-put-payload", 14);
+    std::ranges::fill(buf, '\0');
+    if (op == "PUT") {
+        std::ranges::copy(std::string_view("dp-put-payload"), buf.begin());
     }
 
     ibv_qp_attr attr{};
@@ -299,7 +304,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     /* ---- PREPARE (control, over TCP) ---- */
     const std::string psnHex    = hipObj::formatHex(1U, 6);
     const std::string cookieHex = hipObj::formatHex(cookie, 8);
-    const std::string mrAddrHex = hipObj::formatHex(reinterpret_cast<uintptr_t>(buf));
+    const std::string mrAddrHex = hipObj::formatHex(reinterpret_cast<uintptr_t>(buf.data()));
     const std::string mrRkeyHex = hipObj::formatHex(verbs.mr->rkey);
     const std::string sizeDec   = std::to_string(size);
 
@@ -325,7 +330,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     const std::string clientTokHex = hipObj::encodeRdmaToken(clientTok);
 
     std::map<std::string, std::string> phdrs = {
-        {"host", std::string(host)},
+        {"host", host},
         {"x-amz-date", amzDate},
         {"x-amz-rdma-protocol", "hipobj-rc-v2"},
         {"x-amz-rdma-token", clientTokHex},
@@ -456,7 +461,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
 
     /* ---- READY ---- */
     std::map<std::string, std::string> rhdrs = {
-        {"host", std::string(host)},
+        {"host", host},
         {"x-amz-date", amzDate},
         {"x-amz-rdma-protocol", "hipobj-rc-v2"},
         {"x-amz-rdma-session", session},
@@ -479,9 +484,9 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     }
 
     /* ---- data plane while the server processes READY ---- */
-    if (std::strcmp(op, "GET") == 0) {
+    if (op == "GET") {
         ibv_sge rsge{};
-        rsge.addr   = reinterpret_cast<uintptr_t>(buf);
+        rsge.addr   = reinterpret_cast<uintptr_t>(buf.data());
         rsge.length = static_cast<uint32_t>(std::min<uint64_t>(size, kBufBytes));
         rsge.lkey   = verbs.mr->lkey;
         ibv_recv_wr rwr{};
@@ -499,10 +504,10 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
      * write must go out before waiting for the response. A short
      * grace keeps it clear of the receive-post race. */
     int rc = 0;
-    if (std::strcmp(op, "PUT") == 0) {
+    if (op == "PUT") {
         usleep(100 * 1000);
         ibv_sge sge{};
-        sge.addr   = reinterpret_cast<uintptr_t>(buf);
+        sge.addr   = reinterpret_cast<uintptr_t>(buf.data());
         sge.length = static_cast<uint32_t>(std::min<uint64_t>(size, kBufBytes));
         sge.lkey   = verbs.mr->lkey;
         ibv_send_wr wr{};
@@ -556,7 +561,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     if (rst != 200) {
         return 1;
     }
-    if (std::strcmp(op, "GET") == 0) {
+    if (op == "GET") {
         ibv_wc wc{};
         for (int i = 0; i < 2000; ++i) {
             if (ibv_poll_cq(verbs.cq.get(), 1, &wc) > 0) {
@@ -568,12 +573,14 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
             (wc.wc_flags & IBV_WC_WITH_IMM) != 0 && ntohl(wc.imm_data) == cookie) {
             /* The GET must return the object bytes, not just a
              * completion: verify the seeded marker arrived. */
-            const char expect[9] = "dp-put-p";
-            if (std::memcmp(buf, expect, 8) == 0) {
+            const std::string expect = "dp-put-p";
+            const std::string got(hipObj::asStringView(buf.first(expect.size())));
+            if (got == expect) {
                 std::printf("dp: GET ok cookie echoed, payload verified\n");
             }
             else {
-                std::fprintf(stderr, "dp: GET payload mismatch: got %.8s want %s\n", buf, expect);
+                std::fprintf(stderr, "dp: GET payload mismatch: got %s want %s\n", got.c_str(),
+                             expect.c_str());
                 rc = 1;
             }
         }
@@ -594,28 +601,31 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
 int
 main(int argc, char *argv[])
 {
-    if (argc < 6) {
-        std::fprintf(stderr, "usage: %s HOST PORT OP TARGET SIZE [COOKIE-HEX]\n", argv[0]);
+    const std::span<char *>        argvSpan = hipObj::argSpan(argc, argv);
+    const std::vector<std::string> args(argvSpan.begin(), argvSpan.end());
+    if (args.size() < 6) {
+        const std::string prog = args.empty() ? "v2-data-client" : args[0];
+        std::fprintf(stderr, "usage: %s HOST PORT OP TARGET SIZE [COOKIE-HEX]\n", prog.c_str());
         return 2;
     }
-    const std::optional<uint16_t> port = hipObj::parseNumber<uint16_t>(argv[2]);
+    const std::optional<uint16_t> port = hipObj::parseNumber<uint16_t>(args[2]);
     if (!port || *port == 0) {
-        std::fprintf(stderr, "invalid port %s\n", argv[2]);
+        std::fprintf(stderr, "invalid port %s\n", args[2].c_str());
         return 2;
     }
-    const std::optional<uint64_t> size = hipObj::parseNumber<uint64_t>(argv[5]);
+    const std::optional<uint64_t> size = hipObj::parseNumber<uint64_t>(args[5]);
     if (!size || *size == 0) {
-        std::fprintf(stderr, "invalid size %s\n", argv[5]);
+        std::fprintf(stderr, "invalid size %s\n", args[5].c_str());
         return 2;
     }
     uint32_t cookie = 0x1a2b3c4d;
-    if (argc > 6) {
-        const std::optional<uint32_t> parsed = hipObj::parseNumber<uint32_t>(argv[6], 16);
+    if (args.size() > 6) {
+        const std::optional<uint32_t> parsed = hipObj::parseNumber<uint32_t>(args[6], 16);
         if (!parsed) {
-            std::fprintf(stderr, "invalid cookie %s\n", argv[6]);
+            std::fprintf(stderr, "invalid cookie %s\n", args[6].c_str());
             return 2;
         }
         cookie = *parsed;
     }
-    return runTransfer(argv[1], *port, argv[3], argv[4], *size, cookie);
+    return runTransfer(args[1], *port, args[3], args[4], *size, cookie);
 }

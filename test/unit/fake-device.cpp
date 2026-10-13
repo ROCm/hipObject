@@ -5,10 +5,12 @@
 
 #include "fake-device.h"
 
+#include <algorithm>
 #include <cstdlib>
-#include <cstring>
+#include <span>
 #include <string>
 
+#include "hipobj-span.h"
 #include "ibv-wrapper.h"
 
 namespace hipObjTest {
@@ -25,7 +27,7 @@ setReply(std::string_view reply)
 {
     FakeDevice &f = fake();
     ASSERT_LT(reply.size(), f.reply.size());
-    std::memcpy(f.reply.data(), reply.data(), reply.size());
+    std::ranges::copy(reply, f.reply.begin());
     f.reply[reply.size()] = '\0';
     f.replyLen            = reply.size() + 1;
 }
@@ -56,8 +58,9 @@ setReplyWithPeerToken(const hipObj::RdmaToken &token)
 std::vector<ModifyQpCall>
 modifyQpCalls()
 {
-    const FakeDevice &f = fake();
-    return {f.modifyQp.begin(), f.modifyQp.begin() + static_cast<std::ptrdiff_t>(f.modifyQpCount)};
+    const FakeDevice                   &f     = fake();
+    const std::span<const ModifyQpCall> calls = std::span(f.modifyQp).first(f.modifyQpCount);
+    return {calls.begin(), calls.end()};
 }
 
 namespace {
@@ -106,7 +109,7 @@ namespace {
         if (fake().fail.queryDevice) {
             return -1;
         }
-        std::memset(attr, 0, sizeof(*attr));
+        hipObj::zeroObject(*attr);
         attr->vendor_id = fake().vendorId;
         return 0;
     }
@@ -118,7 +121,7 @@ namespace {
             return -1;
         }
         if (attr) {
-            std::memset(attr, 0, sizeof(*attr));
+            hipObj::zeroObject(*attr);
         }
         return 0;
     }
@@ -129,7 +132,7 @@ namespace {
             return -1;
         }
         if (gid) {
-            std::memset(gid, 0, sizeof(*gid));
+            hipObj::zeroObject(*gid);
         }
         return 0;
     }
@@ -226,7 +229,7 @@ namespace {
         if (f.pollResult <= 0) {
             return f.pollResult;
         }
-        std::memset(wc, 0, sizeof(*wc));
+        hipObj::zeroObject(*wc);
         wc->status = f.pollStatus;
         wc->opcode = f.pollOpcode;
         return 1;
@@ -318,7 +321,8 @@ fakeRecvReply(void *, char *reply, size_t *replyLen)
     if (!replyLen || *replyLen < f.replyLen) {
         return -1;
     }
-    std::memcpy(reply, f.reply.data(), f.replyLen);
+    std::ranges::copy(std::span(f.reply).first(f.replyLen),
+                      hipObj::spanFromPointer(reply, *replyLen).begin());
     *replyLen = f.replyLen;
     return 0;
 }

@@ -5,13 +5,14 @@
 
 #include "hipobj.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cinttypes>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -30,6 +31,7 @@
 #include "hip-seam.h"
 #include "hipobj-parse.h"
 #include "hipobj-private.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
@@ -253,12 +255,13 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
             /* The copy may still signal the event, so it's leaked rather
              * than destroyed */
             dropOwnership(done);
-            const int64_t timeoutMs = timeout.count();
+            const int64_t     timeoutMs = timeout.count();
+            const std::string direction = toDevice ? "host-to-device" : "device-to-host";
             fprintf(stderr,
                     "hipObj: staging %s copy of %zu bytes did not complete within "
                     "%" PRId64 " ms; abandoning it. The GPU never signalled completion -- "
                     "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
-                    toDevice ? "host-to-device" : "device-to-host", size, timeoutMs);
+                    direction.c_str(), size, timeoutMs);
             return {hipObjInternalError, 0};
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -274,9 +277,12 @@ stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t off
     if (!rangeInRegistration(offset, size, buf.size)) {
         return {hipObjInvalidValue, 0};
     }
-    void *host = static_cast<char *>(buf.hostBuf.get()) + offset;
-    void *dev  = static_cast<char *>(devPtr) + offset;
-    return stageCopyWithDeadline(dev, host, size, toDevice);
+    /* The device memory is only viewed for its bounds, never read here */
+    const std::span<std::byte> host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
+    const std::span<std::byte> dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
+    const auto                 start = static_cast<size_t>(offset);
+    return stageCopyWithDeadline(dev.subspan(start, size).data(), host.subspan(start, size).data(), size,
+                                 toDevice);
 }
 
 static hipObjError_t
@@ -287,7 +293,7 @@ runRdmaTransfer(const BufferMap::BufEntry &buf, size_t size, off_t offset, hipOb
         return {hipObjRdmaError, 0};
     }
     const RdmaTokenHex encoded = encodeRdmaTokenHex(*token);
-    if (injectRdmaToken(ops, ctx, std::string_view(encoded.data(), kRdmaTokenHexLen)) != 0) {
+    if (injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>())) != 0) {
         return {hipObjS3Error, 0};
     }
     std::array<char, 512> replyBuf;
@@ -315,7 +321,7 @@ isValidNameV2(const char *name, size_t maxLen)
     if (!name) {
         return false;
     }
-    size_t len = strnlen(name, maxLen + 1);
+    const size_t len = cStringView(name, maxLen + 1).size();
     return len > 0 && len <= maxLen;
 }
 
@@ -808,7 +814,7 @@ try {
     if (!copy) {
         return {hipObjInternalError, 0};
     }
-    std::memcpy(copy, encoded.data(), encoded.size());
+    std::ranges::copy(encoded, hipObj::spanFromPointer(copy, encoded.size()).begin());
     *outToken = copy;
     return {hipObjSuccess, 0};
 }
@@ -835,7 +841,8 @@ try {
     if (!reply || !httpCode) {
         return {hipObjInvalidValue, 0};
     }
-    const auto code = hipObj::parseRdmaReplyHttpCode(std::string_view(reply, replyLen));
+    const auto code =
+        hipObj::parseRdmaReplyHttpCode(hipObj::asStringView(hipObj::spanFromPointer(reply, replyLen)));
     if (!code) {
         return {hipObjInvalidValue, 0};
     }

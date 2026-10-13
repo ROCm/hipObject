@@ -5,17 +5,17 @@
 
 /* AMD port of minio-cpp GetPutRDMA: PUT + GET over hipObject RDMA */
 
-#include <charconv>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
-#include <system_error>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -23,6 +23,8 @@
 #include <miniocpp/client.h>
 #include <unistd.h>
 
+#include "hipobj-parse.h"
+#include "hipobj-span.h"
 #include "hipobj_minio/client.h"
 
 namespace {
@@ -47,24 +49,24 @@ PatternByte(size_t offset, uint32_t seed)
 }
 
 void
-FillPattern(char *buf, size_t size, uint32_t seed)
+FillPattern(std::span<char> buf, uint32_t seed)
 {
-    for (size_t i = 0; i < size; ++i) {
+    for (size_t i = 0; i < buf.size(); ++i) {
         buf[i] = static_cast<char>(PatternByte(i, seed));
     }
 }
 
-/* Returns the offset of the first mismatch, or size if the blob read back
- * matches the blob written byte for byte. */
+/* Returns the offset of the first mismatch, or buf.size() if the blob read
+ * back matches the blob written byte for byte. */
 size_t
-FirstMismatch(const char *buf, size_t size, uint32_t seed)
+FirstMismatch(std::span<const char> buf, uint32_t seed)
 {
-    for (size_t i = 0; i < size; ++i) {
+    for (size_t i = 0; i < buf.size(); ++i) {
         if (static_cast<uint8_t>(buf[i]) != PatternByte(i, seed)) {
             return i;
         }
     }
-    return size;
+    return buf.size();
 }
 
 /* Frees the transfer buffer with the allocator that made it */
@@ -87,32 +89,32 @@ struct BufferDeleter {
 int
 main(int argc, char *argv[])
 {
-    if (argc < 4) {
-        std::cerr << "usage: " << argv[0] << " <host> <access_key> <secret_key> [size_bytes] [gpu]\n";
+    const std::span<char *>        argv_span = hipObj::argSpan(argc, argv);
+    const std::vector<std::string> args(argv_span.begin(), argv_span.end());
+    if (args.size() < 4) {
+        std::cerr << "usage: " << (args.empty() ? "minio-getput-rdma" : args[0])
+                  << " <host> <access_key> <secret_key> [size_bytes] [gpu]\n";
         return 1;
     }
 
-    const std::string host        = argv[1];
-    const std::string access_key  = argv[2];
-    const std::string secret_key  = argv[3];
-    size_t            bufsize     = 10 * 1024 * 1024UL;
-    bool              gpu_enabled = true;
+    const std::string &host        = args[1];
+    const std::string &access_key  = args[2];
+    const std::string &secret_key  = args[3];
+    size_t             bufsize     = 10 * 1024 * 1024UL;
+    bool               gpu_enabled = true;
 
-    if (argc >= 5) {
-        /* from_chars rejects signs, trailing junk, and values that don't
+    if (args.size() >= 5) {
+        /* parseNumber() rejects signs, trailing junk, and values that don't
          * fit in size_t, all of which atol() would quietly accept. */
-        const char *first = argv[4];
-        const char *last  = first + std::strlen(first);
-        size_t      parsed{};
-        auto [ptr, ec] = std::from_chars(first, last, parsed);
-        if (ec != std::errc() || ptr != last) {
-            std::cerr << "invalid size_bytes: " << first << "\n";
+        const std::optional<size_t> parsed = hipObj::parseNumber<size_t>(args[4]);
+        if (!parsed) {
+            std::cerr << "invalid size_bytes: " << args[4] << "\n";
             return 1;
         }
-        bufsize = parsed;
+        bufsize = *parsed;
     }
-    if (argc >= 6) {
-        gpu_enabled = std::string(argv[5]) == "gpu";
+    if (args.size() >= 6) {
+        gpu_enabled = args[5] == "gpu";
     }
 
     /* Seeded per run, and printed, so a stale object left in the store by an
@@ -121,7 +123,7 @@ main(int argc, char *argv[])
     std::cout << "Pattern seed " << seed << "\n";
 
     std::vector<char> expected(bufsize);
-    FillPattern(expected.data(), bufsize, seed);
+    FillPattern(expected, seed);
 
     minio::s3::BaseUrl           base_url(host, false, "us-east-1");
     minio::creds::StaticProvider provider(access_key, secret_key);
@@ -129,6 +131,8 @@ main(int argc, char *argv[])
 
     char *bufptr  = nullptr;
     void *dev_ptr = nullptr;
+    /* bufptr's bytes, on the host path */
+    std::span<char> host_buf;
     /* Owns bufptr (which is dev_ptr on the GPU path) */
     std::unique_ptr<char, BufferDeleter> buffer(nullptr, BufferDeleter{gpu_enabled});
 
@@ -160,7 +164,8 @@ main(int argc, char *argv[])
             return 1;
         }
         buffer.reset(bufptr);
-        std::memcpy(bufptr, expected.data(), bufsize);
+        host_buf = hipObj::spanFromPointer(bufptr, bufsize);
+        std::ranges::copy(expected, host_buf.begin());
         std::cout << "Host buffer " << bufsize << " bytes\n";
     }
 
@@ -185,7 +190,7 @@ main(int argc, char *argv[])
         (void)hipDeviceSynchronize();
     }
     else {
-        std::memset(bufptr, 0x55, bufsize);
+        std::ranges::fill(host_buf, 0x55);
     }
 
     minio::s3::GetObjectArgs gargs;
@@ -202,17 +207,16 @@ main(int argc, char *argv[])
     std::cout << "GET ok\n";
 
     std::vector<char> hostbuf(bufsize);
-    char             *hostptr = hostbuf.data();
 
     if (gpu_enabled) {
-        hipError_t err = hipMemcpy(hostptr, dev_ptr, bufsize, hipMemcpyDeviceToHost);
+        hipError_t err = hipMemcpy(hostbuf.data(), dev_ptr, bufsize, hipMemcpyDeviceToHost);
         if (err != hipSuccess) {
             std::cerr << "hipMemcpy failed: " << err << std::endl;
             return 1;
         }
     }
     else {
-        std::memcpy(hostptr, bufptr, bufsize);
+        std::ranges::copy(host_buf, hostbuf.begin());
     }
 
     std::ofstream out("output.bin", std::ios::binary);
@@ -220,11 +224,11 @@ main(int argc, char *argv[])
         std::cerr << "failed to open output.bin\n";
         return 1;
     }
-    out.write(hostptr, static_cast<std::streamsize>(bufsize));
+    out.write(hostbuf.data(), static_cast<std::streamsize>(bufsize));
     out.close();
     std::cout << "Wrote output.bin (" << bufsize << " bytes)\n";
 
-    size_t bad = FirstMismatch(hostptr, bufsize, seed);
+    size_t bad = FirstMismatch(hostbuf, seed);
     bool   ok  = bad == bufsize;
     if (ok) {
         std::cout << "Data integrity check passed (" << bufsize << " bytes, seed " << seed << ")\n";
@@ -232,7 +236,7 @@ main(int argc, char *argv[])
     else {
         std::cout << "Data integrity check FAILED at offset " << bad << ": expected 0x" << std::hex
                   << static_cast<int>(PatternByte(bad, seed)) << " got 0x"
-                  << static_cast<int>(static_cast<uint8_t>(hostptr[bad])) << std::dec << "\n";
+                  << static_cast<int>(static_cast<uint8_t>(hostbuf[bad])) << std::dec << "\n";
     }
 
     /* Whether the transfers actually used RDMA. The client falls back to

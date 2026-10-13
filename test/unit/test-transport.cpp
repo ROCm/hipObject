@@ -7,14 +7,14 @@
  * against the fake device in fake-device.h.
  */
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <initializer_list>
 #include <optional>
+#include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -22,6 +22,7 @@
 #include <sys/types.h>
 
 #include "fake-device.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -460,7 +461,7 @@ recordSendRequest(void *ctx, const char *token, size_t tokenLen)
     auto *sent = static_cast<SentToken *>(ctx);
     sent->len  = tokenLen;
     if (tokenLen < sent->bytes.size()) {
-        std::memcpy(sent->bytes.data(), token, tokenLen + 1);
+        std::ranges::copy(hipObj::spanFromPointer(token, tokenLen + 1), sent->bytes.begin());
     }
     return 0;
 }
@@ -566,7 +567,8 @@ TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
         ASSERT_EQ(sent.len, hipObj::kRdmaTokenHexLen);
         EXPECT_EQ(sent.bytes[hipObj::kRdmaTokenHexLen], '\0');
 
-        const auto token = hipObj::decodeRdmaTokenHex(std::string_view(sent.bytes.data(), sent.len));
+        const auto token =
+            hipObj::decodeRdmaTokenHex(hipObj::asStringView(std::span(sent.bytes).first(sent.len)));
         ASSERT_TRUE(token);
         EXPECT_EQ(token->transport, hipObj::TransportType::RC);
         EXPECT_EQ(token->rkey, 0x1234U);

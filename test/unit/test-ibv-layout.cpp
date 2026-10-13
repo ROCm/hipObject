@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-layout.h"
@@ -60,7 +61,7 @@ TEST(IbvLayout, MatchesLibibverbs)
 {
     size_t                         count  = 0;
     const int64_t                 *values = hipobj_ibv_layout_real(&count);
-    const std::span<const int64_t> real(values, count);
+    const std::span<const int64_t> real   = hipObj::spanFromPointer(values, count);
 
     ASSERT_EQ(real.size(), kCoreLayout.size());
     for (size_t i = 0; i < real.size(); i++) {

@@ -130,10 +130,21 @@ int         fakeRecvReply(void *ctx, char *reply, size_t *replyLen);
 hipObjOps_t makeOps();
 
 /* A fake device address. reg_mr is faked, so nothing reads or writes it. */
+constexpr uintptr_t kFakeDevBufAddr = 0x10000;
+
 inline void *
 fakeDevBuf()
 {
-    return reinterpret_cast<void *>(0x10000);
+    return reinterpret_cast<void *>(kFakeDevBufAddr);
+}
+
+/* A fake address one byte into fakeDevBuf(). It's computed as an integer,
+ * since there's no object at the fake address to do pointer arithmetic
+ * in. */
+inline void *
+fakeDevBufPlusOne()
+{
+    return reinterpret_cast<void *>(kFakeDevBufAddr + 1);
 }
 
 constexpr size_t kFakeBufSize = 64;

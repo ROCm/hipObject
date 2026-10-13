@@ -88,7 +88,8 @@ protected:
         }
         size_t sent = 0;
         while (sent < request.size()) {
-            const ssize_t n = send(fd.get(), request.data() + sent, request.size() - sent, MSG_NOSIGNAL);
+            const std::string_view rest = std::string_view(request).substr(sent);
+            const ssize_t          n    = send(fd.get(), rest.data(), rest.size(), MSG_NOSIGNAL);
             if (n <= 0) {
                 return std::nullopt;
             }

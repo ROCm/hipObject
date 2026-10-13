@@ -8,11 +8,14 @@
  * fake-device.h.
  */
 
+#include <algorithm>
+#include <bit>
 #include <cstdint>
-#include <cstring>
 #include <initializer_list>
 #include <limits>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -21,6 +24,7 @@
 
 #include "fake-device.h"
 #include "hip-seam.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "state.h"
@@ -76,13 +80,12 @@ TEST(ApiArgsErrorString, EveryCodeHasItsOwnString)
 
 TEST(ApiArgsErrorString, UnknownCode)
 {
-    /* A C caller can pass any int. Copy one in the way C would see it,
+    /* A C caller can pass any int. Copy its bits in the way C would see it,
      * rather than casting a value no enumerator has. 15 stays within the
      * 4 bits the enumerators need, which keeps it a valid value in C++. */
     static_assert(sizeof(hipObjOpError_t) == sizeof(int));
-    const int       raw = 15;
-    hipObjOpError_t code;
-    std::memcpy(&code, &raw, sizeof(code));
+    const int  raw  = 15;
+    const auto code = std::bit_cast<hipObjOpError_t>(raw);
     EXPECT_STREQ(hipObjGetErrorString(code), "Unknown error");
 }
 
@@ -347,7 +350,7 @@ TEST_F(ApiArgsTest, DeregisterRejectsUnregisteredBuffer)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     /* A pointer into a registration isn't the registration */
-    EXPECT_EQ(hipObjBufDeregister(static_cast<char *>(kDevBuf) + 1).opError, hipObjBufNotRegistered);
+    EXPECT_EQ(hipObjBufDeregister(hipObjTest::fakeDevBufPlusOne()).opError, hipObjBufNotRegistered);
 
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjSuccess);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
@@ -423,7 +426,7 @@ TEST_P(TransferArgsTest, RejectsUnregisteredBuffer)
     hipObjOps_t ops = makeOps();
     expectRejected(reinterpret_cast<void *>(0x20000), kBufSize, 0, &ops, hipObjBufNotRegistered);
     /* A pointer into a registration isn't the registration */
-    expectRejected(static_cast<char *>(kDevBuf) + 1, 1, 0, &ops, hipObjBufNotRegistered);
+    expectRejected(hipObjTest::fakeDevBufPlusOne(), 1, 0, &ops, hipObjBufNotRegistered);
 }
 
 TEST_P(TransferArgsTest, RejectsRangeOutsideBuffer)
@@ -475,7 +478,8 @@ TEST_P(TransferArgsTest, ChecksStagedBuffersBeforeCopying)
 int
 overlongRecvReply(void *, char *reply, size_t *replyLen)
 {
-    std::memcpy(reply, "200", 3);
+    constexpr std::string_view kReply = "200";
+    std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).first(kReply.size()).begin());
     *replyLen += 1;
     return 0;
 }
@@ -511,7 +515,7 @@ TEST_F(ApiArgsTest, SyncRejectsBadBufferArguments)
         EXPECT_EQ(hipObjBufSync(nullptr, kBufSize, 0, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, 0, 0, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, 1, -1, direction).opError, hipObjInvalidValue);
-        EXPECT_EQ(hipObjBufSync(static_cast<char *>(kDevBuf) + 1, 1, 0, direction).opError,
+        EXPECT_EQ(hipObjBufSync(hipObjTest::fakeDevBufPlusOne(), 1, 0, direction).opError,
                   hipObjBufNotRegistered);
     }
 }
@@ -563,7 +567,7 @@ TEST_F(ApiArgsTest, GetTokenRejectsBadArguments)
         EXPECT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, op, &token).opError, hipObjInvalidValue)
             << "op " << op;
     }
-    EXPECT_EQ(hipObjGetRdmaToken(static_cast<char *>(kDevBuf) + 1, 1, HIPOBJ_RDMA_OP_PUT, &token).opError,
+    EXPECT_EQ(hipObjGetRdmaToken(hipObjTest::fakeDevBufPlusOne(), 1, HIPOBJ_RDMA_OP_PUT, &token).opError,
               hipObjBufNotRegistered);
     EXPECT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize + 1, HIPOBJ_RDMA_OP_PUT, &token).opError,
               hipObjInvalidValue);
@@ -577,7 +581,7 @@ TEST_F(ApiArgsTest, GetTokenAcceptsWholeBuffer)
         char *token = nullptr;
         ASSERT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, op, &token).opError, hipObjSuccess);
         ASSERT_NE(token, nullptr);
-        EXPECT_EQ(std::strlen(token), 88U);
+        EXPECT_EQ(hipObj::cStringView(token, hipObj::kRdmaTokenHexLen + 1).size(), hipObj::kRdmaTokenHexLen);
         EXPECT_EQ(hipObjPutRdmaToken(token).opError, hipObjSuccess);
     }
 }

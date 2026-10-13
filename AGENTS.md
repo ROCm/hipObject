@@ -149,7 +149,8 @@ Notes:
 - **The examples in [`examples/`](examples/) show how consumers use the header,
   and are written to C++11.** The build compiles them as C++20 like everything
   else, so nothing catches newer constructs in them; keep them to C++11 by
-  hand.
+  hand. They're also built without Clang's `-Wunsafe-buffer-usage` (see
+  [C++ code](#c-code)), which C++11 code can't satisfy.
 
 ## Thread safety
 
@@ -206,6 +207,22 @@ with it:
   - Don't let exceptions cross the C API. The public functions in
     `src/hipobj.cpp` catch everything and return an error code; keep it that
     way.
+- **Don't do arithmetic on raw pointers.** Clang's `-Wunsafe-buffer-usage` is
+  on, and flags pointer arithmetic, indexing through a raw pointer, the C
+  library's memory and string functions (`memcpy()`, `memset()`, `strlen()`,
+  `strcmp()`, and the rest), and building a `std::span` or `std::string_view`
+  from a pointer and a separate length. Work with containers and views, which
+  check their bounds when `_GLIBCXX_ASSERTIONS` is on, and with the standard
+  algorithms (`std::ranges::copy()`, `std::ranges::fill()`). Memory that comes
+  through a C interface as a pointer and a length (the public API, libibverbs,
+  `main()`'s `argv`) is turned into a view once, where it comes in, with
+  `spanFromPointer()`, `cStringView()`, or `argSpan()` from
+  [`shared/hipobj-span.h`](shared/hipobj-span.h). That header holds the only
+  suppressions of the warning, so don't add others. The warning also flags a
+  `printf()` `"%s"` argument that isn't a string literal or
+  `std::string::c_str()`, so copy other strings into a `std::string` to print
+  them. GCC doesn't have the warning, so build with Clang to check (see
+  [C and C++](#c-and-c)).
 - **Don't convert numbers with the C library's functions**: the `ato*`
   family (`atoi()`, `atol()`, `atoll()`, `atof()`), the `strto*` family
   (`strtol()`, `strtoul()`, `strtoll()`, `strtoull()`, `strtod()`, and the
@@ -255,10 +272,11 @@ takes priority over speed and convenience.
 - **Fully initialize anything that touches the wire.** That covers tokens, HTTP
   headers and bodies, V2 control messages, and every verbs structure handed to
   libibverbs (work requests, scatter/gather entries, QP attributes). Initialize
-  each one completely before filling it in (`T x{}`, or `std::memset` for C
-  structs, as the existing code does). Serialize field by field; never copy a
-  struct's raw bytes onto the wire, since its padding can carry stale memory,
-  and `{}` doesn't guarantee that padding is zeroed.
+  each one completely before filling it in (`T x{}`, or `hipObj::zeroObject()`
+  from [`shared/hipobj-span.h`](shared/hipobj-span.h) for C structs, as the
+  existing code does). Serialize field by field; never copy a struct's raw
+  bytes onto the wire, since its padding can carry stale memory, and `{}`
+  doesn't guarantee that padding is zeroed.
 - **Treat everything from the network as untrusted.** That includes S3
   responses, `x-amz-rdma-reply` values, peer tokens, V2 reply headers, and
   completions. Check lengths, character sets (hex, base64), and ranges before
@@ -376,9 +394,11 @@ configuration files.
   `StatementMacros` in [`.clang-format`](.clang-format), wrap the smallest
   region you can, and comment why the warning can't be fixed. `shared/` is
   already on the include path of the library, the MinIO bridge, the unit
-  tests, `hipobj-rdma-test-server`, `v2-client-harness`, and
-  `v2-data-client`; add it only to a target that lacks it (the examples and
-  `minio-getput-rdma`).
+  tests, `hipobj-rdma-test-server`, `v2-client-harness`, `v2-data-client`,
+  and `minio-getput-rdma`; add it only to a target that lacks it (the
+  examples). The examples are built with `-Wno-unsafe-buffer-usage`, the one
+  exception to these rules, since they're C++11 (see
+  [Public API](#public-api)).
   Third-party code fetched with `FetchContent` is exempt; CMake
   already marks its headers `SYSTEM` and builds it with its warnings off.
 - **clang-tidy**: configure with `-DHIPOBJ_USE_CLANG_TIDY=ON` and Clang as the

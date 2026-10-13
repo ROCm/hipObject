@@ -10,6 +10,7 @@
 #include <span>
 #include <string_view>
 
+#include "hipobj-span.h"
 #include "token.h"
 
 namespace hipObj {
@@ -36,8 +37,8 @@ receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf)
     if (replyLen > replyBuf.size()) {
         return std::nullopt;
     }
-    const std::string_view received(replyBuf.data(), replyLen);
-    const auto             status = decodeRdmaReply(received);
+    const std::string_view received = asStringView(replyBuf.first(replyLen));
+    const auto             status   = decodeRdmaReply(received);
     if (!status) {
         return std::nullopt;
     }

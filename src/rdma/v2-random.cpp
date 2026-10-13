@@ -6,10 +6,12 @@
 
 #include "v2-random.h"
 
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 #include <sys/random.h>
 #include <sys/types.h>
@@ -24,10 +26,11 @@ namespace v2 {
             std::optional<uint32_t> next32() override
             {
                 /* Loop over short reads and EINTR; fail closed on hard errors. */
-                size_t        filled = 0;
-                unsigned char buf[sizeof(uint32_t)];
-                while (filled < sizeof(buf)) {
-                    ssize_t n = ::getrandom(buf + filled, sizeof(buf) - filled, 0);
+                size_t                                      filled = 0;
+                std::array<unsigned char, sizeof(uint32_t)> buf{};
+                while (filled < buf.size()) {
+                    const std::span<unsigned char> rest = std::span(buf).subspan(filled);
+                    ssize_t                        n    = ::getrandom(rest.data(), rest.size(), 0);
                     if (n < 0) {
                         if (errno == EINTR) {
                             continue;
@@ -40,8 +43,8 @@ namespace v2 {
                     filled += static_cast<size_t>(n);
                 }
                 uint32_t value = 0;
-                for (size_t i = 0; i < sizeof(buf); ++i) {
-                    value = (value << 8) | buf[i];
+                for (const unsigned char byte : buf) {
+                    value = (value << 8) | byte;
                 }
                 return value;
             }

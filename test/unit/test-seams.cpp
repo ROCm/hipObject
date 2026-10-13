@@ -8,11 +8,13 @@
  * substituting fakes through the seam accessors.
  */
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -21,6 +23,7 @@
 
 #include "fake-ibv.h"
 #include "hip-seam.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -47,7 +50,8 @@ fakeGetDevice(int *device)
 hipError_t
 fakeDeviceGetPCIBusId(char *bus_id, int len, int)
 {
-    snprintf(bus_id, static_cast<size_t>(len), "0000:42:00.0");
+    const std::span<char> out = hipObj::spanFromPointer(bus_id, static_cast<size_t>(len));
+    std::snprintf(out.data(), out.size(), "0000:42:00.0");
     return hipSuccess;
 }
 
@@ -396,7 +400,7 @@ namespace {
          * initialize the struct, so gid_tbl_len would otherwise be stack
          * garbage and drive the GID scan for billions of iterations. */
         if (attr) {
-            std::memset(attr, 0, sizeof(*attr));
+            hipObj::zeroObject(*attr);
         }
         return 0;
     }
@@ -404,7 +408,7 @@ namespace {
     int fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *gid)
     {
         if (gid) {
-            std::memset(gid, 0, sizeof(*gid));
+            hipObj::zeroObject(*gid);
         }
         return 0;
     }
@@ -458,7 +462,7 @@ namespace {
     int fakePollCq(struct ibv_cq *, int, struct ibv_wc *wc)
     {
         if (wc) {
-            std::memset(wc, 0, sizeof(*wc));
+            hipObj::zeroObject(*wc);
             wc->status = IBV_WC_SUCCESS;
         }
         return 1;
@@ -490,13 +494,13 @@ namespace {
 
     int fakeRecvReply(void *, char *reply, size_t *replyLen)
     {
-        static constexpr char kReply[] = "200";
+        static constexpr auto kReply = std::to_array("200");
         ++g_apiTransferLog.recvReplyCalls;
-        if (!replyLen || *replyLen < sizeof(kReply)) {
+        if (!replyLen || *replyLen < kReply.size()) {
             return -1;
         }
-        std::memcpy(reply, kReply, sizeof(kReply));
-        *replyLen = sizeof(kReply);
+        std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).begin());
+        *replyLen = kReply.size();
         return 0;
     }
 

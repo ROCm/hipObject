@@ -9,7 +9,6 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -20,6 +19,7 @@
 #include <gtest/gtest.h>
 
 #include "fake-ibv.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -69,7 +69,7 @@ fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
         return nullptr;
     }
     auto *qp = new struct ibv_qp();
-    std::memset(qp, 0, sizeof(*qp));
+    hipObj::zeroObject(*qp);
     qp->qp_num = static_cast<uint32_t>(++g_state.nextQpn);
     return qp;
 }
@@ -323,7 +323,7 @@ fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
     if (g_transport.queryPortFails) {
         return -1;
     }
-    std::memset(attr, 0, sizeof(*attr));
+    hipObj::zeroObject(*attr);
     attr->active_mtu = g_transport.activeMtu;
     return 0;
 }
@@ -334,7 +334,7 @@ fakeVendorQueryDevice(struct ibv_context *, struct ibv_device_attr *attr)
     if (g_transport.queryDeviceFails) {
         return -1;
     }
-    std::memset(attr, 0, sizeof(*attr));
+    hipObj::zeroObject(*attr);
     attr->vendor_id = g_transport.vendorId;
     return 0;
 }

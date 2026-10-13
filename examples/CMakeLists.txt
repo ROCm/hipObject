@@ -6,6 +6,13 @@ function(hipobj_add_example name)
   hipobj_add_executable(
     NAME ${name}
     SRCS ${ARGN})
+  # Clang's -Wunsafe-buffer-usage wants std::span and the like in place of
+  # pointer arithmetic, indexing argv, and C library calls such as
+  # std::strtoull(). The examples are written to C++11, which has no
+  # std::span, so they can't comply.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(${name} PRIVATE -Wno-unsafe-buffer-usage)
+  endif()
   target_include_directories(${name} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/src

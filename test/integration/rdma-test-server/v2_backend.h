@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -24,12 +25,12 @@ namespace v2 {
         void seed(const std::string &target, size_t size);
         bool has(const std::string &target) const;
 
-        /* Copies object bytes into the caller buffer (GET staging).
+        /* Fills dst with the object's bytes from offset on (GET staging).
          * Returns false when the object is absent or too small. */
-        bool read(const std::string &target, uint64_t offset, size_t len, void *dst);
+        bool read(const std::string &target, uint64_t offset, std::span<uint8_t> dst);
 
         /* Stores PUT data; produces a 32-hex pseudo etag. */
-        std::string write(const std::string &target, const void *data, size_t len);
+        std::string write(const std::string &target, std::span<const uint8_t> data);
 
         size_t objectCount() const;
 

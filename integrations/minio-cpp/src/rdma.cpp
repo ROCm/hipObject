@@ -8,9 +8,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 
 #include <hipobj.h>
@@ -20,6 +20,7 @@
 #include <miniocpp/utils.h>
 
 #include "bytes-transferred.h"
+#include "hipobj-span.h"
 
 namespace hipobj::minio {
 
@@ -45,6 +46,13 @@ namespace {
             std::fputc('\n', stderr);                                                                        \
         }                                                                                                    \
     } while (0)
+
+    // The error's description, as a std::string, since RDMA_TRACE()'s "%s"
+    // only takes string literals and std::string::c_str()
+    std::string errorName(hipObjOpError_t err)
+    {
+        return hipObjGetErrorString(err);
+    }
 
     // The HTTP status in an x-amz-rdma-reply value, or std::nullopt if it's
     // malformed. A server that doesn't support RDMA leaves the header out,
@@ -100,6 +108,12 @@ namespace {
     // ---------------------------------------------------------------------------
 
 #ifdef HIPOBJECT_V2_API
+
+    // Copies src into the C string buffer dst, cut to fit
+    void copyCString(std::span<char> dst, const std::string &src)
+    {
+        std::snprintf(dst.data(), dst.size(), "%s", src.c_str());
+    }
 
     struct V2CallbackCtx {
         S3RdmaContext *sctx;
@@ -186,18 +200,18 @@ namespace {
             return -1;
         }
 
-        std::memset(out, 0, sizeof(*out));
+        hipObj::zeroObject(*out);
         out->httpStatus        = res.status_code;
         out->protocolEcho      = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
         out->unsupportedMarker = (res.status_code == kRdmaReplyNotImplemented) ? 1 : 0;
 
         std::string srv_token = res.headers.GetFront(kAmzRdmaToken);
         if (!srv_token.empty()) {
-            std::snprintf(out->serverToken, sizeof(out->serverToken), "%s", srv_token.c_str());
+            copyCString(out->serverToken, srv_token);
         }
         std::string session = res.headers.GetFront(kAmzRdmaSession);
         if (!session.empty()) {
-            std::snprintf(out->session, sizeof(out->session), "%s", session.c_str());
+            copyCString(out->session, session);
         }
         return 0;
     }
@@ -222,13 +236,13 @@ namespace {
             return -1;
         }
 
-        std::memset(out, 0, sizeof(*out));
+        hipObj::zeroObject(*out);
         out->httpStatus   = res.status_code;
         out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
 
         const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), 0);
         if (!bytes) {
-            RDMA_TRACE("v2 ready: malformed %s header", kAmzRdmaBytesTransferred);
+            RDMA_TRACE("v2 ready: malformed %s header", std::string(kAmzRdmaBytesTransferred).c_str());
             return -1;
         }
         out->bytes = *bytes;
@@ -236,12 +250,12 @@ namespace {
         std::string etag = res.headers.GetFront("etag");
         if (!etag.empty()) {
             std::string trimmed = minio::utils::Trim(etag, '"');
-            std::snprintf(out->etag, sizeof(out->etag), "%s", trimmed.c_str());
+            copyCString(out->etag, trimmed);
         }
 
         std::string csum = res.headers.GetFront("x-amz-checksum-crc64nvme");
         if (!csum.empty()) {
-            std::snprintf(out->checksumB64, sizeof(out->checksumB64), "%s", csum.c_str());
+            copyCString(out->checksumB64, csum);
             c->sctx->checksum = csum;
         }
 
@@ -276,7 +290,7 @@ namespace {
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            RDMA_TRACE("v2 put: token: %s", hipObjGetErrorString(terr.opError));
+            RDMA_TRACE("v2 put: token: %s", errorName(terr.opError).c_str());
             return {RdmaStatus::Failed};
         }
 
@@ -314,7 +328,7 @@ namespace {
             return {RdmaStatus::NotSupported};
         }
         if (err.opError != hipObjSuccess) {
-            RDMA_TRACE("v2 put: hipObjPutV2: %s", hipObjGetErrorString(err.opError));
+            RDMA_TRACE("v2 put: hipObjPutV2: %s", errorName(err.opError).c_str());
             return {RdmaStatus::Failed};
         }
         return {RdmaStatus::Ok, size};
@@ -326,7 +340,7 @@ namespace {
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            RDMA_TRACE("v2 get: token: %s", hipObjGetErrorString(terr.opError));
+            RDMA_TRACE("v2 get: token: %s", errorName(terr.opError).c_str());
             return {RdmaStatus::Failed};
         }
 
@@ -349,7 +363,7 @@ namespace {
             return {RdmaStatus::NotSupported};
         }
         if (err.opError != hipObjSuccess) {
-            RDMA_TRACE("v2 get: hipObjGetV2: %s", hipObjGetErrorString(err.opError));
+            RDMA_TRACE("v2 get: hipObjGetV2: %s", errorName(err.opError).c_str());
             return {RdmaStatus::Failed};
         }
         return {RdmaStatus::Ok, size};
@@ -514,7 +528,8 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     // have transferred more than that.
     const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), size);
     if (!bytes || *bytes > size) {
-        RDMA_TRACE("v1 get: malformed or out-of-range %s header", kAmzRdmaBytesTransferred);
+        RDMA_TRACE("v1 get: malformed or out-of-range %s header",
+                   std::string(kAmzRdmaBytesTransferred).c_str());
         return {RdmaStatus::Failed};
     }
     return {RdmaStatus::Ok, static_cast<size_t>(*bytes)};
@@ -537,7 +552,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            RDMA_TRACE("v1 put: token: %s", hipObjGetErrorString(terr.opError));
+            RDMA_TRACE("v1 put: token: %s", errorName(terr.opError).c_str());
             return {RdmaStatus::Failed};
         }
         // A buffer the NIC cannot reach directly is registered as a host
@@ -545,7 +560,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         // reads it.
         hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
-            RDMA_TRACE("v1 put: stage to host: %s", hipObjGetErrorString(serr.opError));
+            RDMA_TRACE("v1 put: stage to host: %s", errorName(serr.opError).c_str());
             return {RdmaStatus::Failed};
         }
         ret = rdmaPut(ctx, token.get(), size);
@@ -571,14 +586,14 @@ rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            RDMA_TRACE("v1 get: token: %s", hipObjGetErrorString(terr.opError));
+            RDMA_TRACE("v1 get: token: %s", errorName(terr.opError).c_str());
             return {RdmaStatus::Failed};
         }
         ret = rdmaGet(ctx, token.get(), size);
         if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
             hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
             if (serr.opError != hipObjSuccess) {
-                RDMA_TRACE("v1 get: stage to device: %s", hipObjGetErrorString(serr.opError));
+                RDMA_TRACE("v1 get: stage to device: %s", errorName(serr.opError).c_str());
                 return {RdmaStatus::Failed};
             }
             return ret;

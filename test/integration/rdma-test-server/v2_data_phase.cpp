@@ -9,7 +9,6 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
@@ -19,6 +18,7 @@
 
 #include "../../../src/common/ibv-core.h"
 #include "../../../src/common/ibv-wrapper.h"
+#include "hipobj-span.h"
 #include "ibv-ptr.h"
 #include "malloc_ptr.h"
 #include "v2_session.h"
@@ -87,13 +87,13 @@ namespace v2 {
     bool postRecvForImm(struct ibv_qp *qp, struct ibv_mr *mr, size_t len)
     {
         struct ibv_sge sge;
-        std::memset(&sge, 0, sizeof(sge));
+        zeroObject(sge);
         sge.addr   = reinterpret_cast<uintptr_t>(mr->addr);
         sge.length = static_cast<uint32_t>(len);
         sge.lkey   = mr->lkey;
 
         struct ibv_recv_wr wr;
-        std::memset(&wr, 0, sizeof(wr));
+        zeroObject(wr);
         wr.wr_id   = kWrRecv;
         wr.sg_list = &sge;
         wr.num_sge = 1;
@@ -108,13 +108,13 @@ namespace v2 {
         /* GET delivery: server pushes the object into the client MR
          * with the session cookie as the immediate. */
         struct ibv_sge sge;
-        std::memset(&sge, 0, sizeof(sge));
+        zeroObject(sge);
         sge.addr   = reinterpret_cast<uintptr_t>(src->addr);
         sge.length = static_cast<uint32_t>(len);
         sge.lkey   = src->lkey;
 
         struct ibv_send_wr wr;
-        std::memset(&wr, 0, sizeof(wr));
+        zeroObject(wr);
         wr.wr_id               = kWrWrite;
         wr.opcode              = IBV_WR_RDMA_WRITE_WITH_IMM;
         wr.send_flags          = IBV_SEND_SIGNALED;
