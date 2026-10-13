@@ -32,7 +32,7 @@ FetchContent_Declare(
 )
 # minio-cpp is only a build dependency of hipobj_minio, so don't
 # generate its install rules. Its install(EXPORT) can't be generated
-# here anyway: the curlpp and inih targets it links to are built in
+# here anyway: the curlpp and inih targets it links to are defined in
 # this tree (see HIPOBJMinioCppDeps.cmake) and aren't in any export
 # set. CMake checks CMAKE_SKIP_INSTALL_RULES per directory, and
 # EXCLUDE_FROM_ALL keeps our install script from including the
@@ -123,6 +123,6 @@ if(pugixml_FOUND)
 endif()
 if(TARGET unofficial-curlpp AND CURLPP_LIBRARY MATCHES "\\.so")
   hipobj_add_runtime_library_dependency(
-    SONAMES libcurlpp.so.0
+    SONAMES libcurlpp.so.1
     DEB "libcurlpp0t64 | libcurlpp0")
 endif()

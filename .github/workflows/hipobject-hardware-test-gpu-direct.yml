@@ -202,9 +202,10 @@ jobs:
         run: |
           # Stage what the binary loads at run time in rocm-libs, which
           # travels to the guest VM with it: the ROCm libraries, pugixml,
-          # and the shared libhipobj. In this container the binary's
-          # build-tree run path still finds libhipobj in
-          # /hipobject-build/src, so the check treats that as unstaged.
+          # curlpp when it's the system's, and the shared libhipobj. In
+          # this container the binary's build-tree run path still finds
+          # libhipobj in /hipobject-build/src, so the check treats that as
+          # unstaged.
           docker run --rm --user root \
             -v "${{ github.workspace }}:/hipobject:ro" \
             -v "${{ github.workspace }}/ernic-build-gpu:/hipobject-build" \
@@ -230,7 +231,7 @@ jobs:
               export LD_LIBRARY_PATH=/opt/rocm/lib && \
               ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
                 | awk '/=> \//{print \$3}' \
-                | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so|/libhipobj\.so' \
+                | grep -E '^/opt/(rocm|amdgpu)|/libpugixml\.so|/libcurlpp\.so|/libhipobj\.so' \
                 | xargs -r -I{} cp -L {} /hipobject-build/rocm-libs/ && \
               if LD_LIBRARY_PATH=/hipobject-build/rocm-libs \
                    ldd /hipobject-build/integrations/minio-cpp/minio-getput-rdma \
