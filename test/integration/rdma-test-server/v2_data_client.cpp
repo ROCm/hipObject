@@ -291,7 +291,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     hipObj::RdmaToken clientTok{};
     clientTok.qpNum                = verbs.qp->qp_num;
     clientTok.gid                  = std::bit_cast<hipObj::Gid>(gid);
-    clientTok.transport            = hipObj::TRANSPORT_RC;
+    clientTok.transport            = hipObj::TransportType::RC;
     clientTok.portNum              = 1;
     const std::string clientTokHex = hipObj::encodeRdmaToken(clientTok);
 
@@ -366,7 +366,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         }
         /* Route by the server GID the token carries; RC transport with
          * a real GID is mandatory. */
-        if (replyTok.transport != hipObj::TRANSPORT_RC || replyTok.gid == hipObj::Gid{}) {
+        if (replyTok.transport != hipObj::TransportType::RC || replyTok.gid == hipObj::Gid{}) {
             std::fprintf(stderr, "dp: reply token unusable endpoint\n");
             return 1;
         }

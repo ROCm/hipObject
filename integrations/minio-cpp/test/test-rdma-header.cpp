@@ -15,7 +15,7 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 TEST(HipObjMinioHeader, FormatRdmaHeaderValue)
 {
     hipObj::RdmaToken token;
-    token.transport     = hipObj::TRANSPORT_RC;
+    token.transport     = hipObj::TransportType::RC;
     token.qpNum         = 42;
     token.remoteAddr    = 0x7f0000001000ULL;
     token.length        = 4096;
@@ -48,7 +48,7 @@ TEST(HipObjMinioHeader, ParseRdmaReplyInvalid)
 TEST(HipObjMinioHeader, TokenClientNicFromGid)
 {
     hipObj::RdmaToken token;
-    token.transport = hipObj::TRANSPORT_RC;
+    token.transport = hipObj::TransportType::RC;
     token.gid[10]   = 0xff;
     token.gid[11]   = 0xff;
     token.gid[12]   = 10;

@@ -221,7 +221,7 @@ TEST_F(TransportTest, ConnectRejectsPeerThatIsNotRc)
 {
     hipObj::RcConnection conn;
     ASSERT_NO_FATAL_FAILURE(open(conn));
-    EXPECT_EQ(hipObj::connectRcPeer(conn, peerToken(hipObj::TRANSPORT_DC)), -1);
+    EXPECT_EQ(hipObj::connectRcPeer(conn, peerToken(hipObj::TransportType::DC)), -1);
     EXPECT_EQ(fake().modifyQpCount, 0U);
 }
 
@@ -496,7 +496,7 @@ TEST_P(TransportTransferTest, DoesNotConnectWithoutPeerToken)
 TEST_P(TransportTransferTest, RejectsPeerTokenThatIsNotRc)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
-    setReplyWithPeerToken(peerToken(hipObj::TRANSPORT_DC));
+    setReplyWithPeerToken(peerToken(hipObj::TransportType::DC));
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
     EXPECT_EQ(fake().modifyQpCount, 1U);
 }
@@ -564,7 +564,7 @@ TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
 
         hipObj::RdmaToken token;
         ASSERT_TRUE(hipObj::decodeRdmaTokenHex(sent.bytes.data(), token));
-        EXPECT_EQ(token.transport, hipObj::TRANSPORT_RC);
+        EXPECT_EQ(token.transport, hipObj::TransportType::RC);
         EXPECT_EQ(token.rkey, 0x1234U);
         EXPECT_EQ(token.remoteAddr, reinterpret_cast<uint64_t>(kDevBuf) + kOffset);
         EXPECT_EQ(token.length, kSize);

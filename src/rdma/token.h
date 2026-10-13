@@ -22,20 +22,21 @@ inline constexpr size_t kRdmaTokenHexLen = 88;
 /* An encoded token: kRdmaTokenHexLen hex digits and a terminating NUL */
 using RdmaTokenHex = std::array<char, kRdmaTokenHexLen + 1>;
 
-enum TransportType : uint8_t {
-    TRANSPORT_DC = 0x00,
-    TRANSPORT_RC = 0x01,
+/* The token's transport byte on the wire */
+enum class TransportType : uint8_t {
+    DC = 0x00,
+    RC = 0x01,
 };
 
 struct RdmaToken {
-    uint32_t qpNum      = 0;
-    Gid      gid        = {};
-    uint32_t rkey       = 0;
-    uint64_t remoteAddr = 0;
-    uint64_t length     = 0;
-    uint8_t  transport  = 0;
-    uint8_t  portNum    = 0;
-    uint16_t lid        = 0;
+    uint32_t      qpNum      = 0;
+    Gid           gid        = {};
+    uint32_t      rkey       = 0;
+    uint64_t      remoteAddr = 0;
+    uint64_t      length     = 0;
+    TransportType transport  = TransportType::DC;
+    uint8_t       portNum    = 0;
+    uint16_t      lid        = 0;
 };
 
 /* Doesn't allocate, so it's the one the transfer path uses */

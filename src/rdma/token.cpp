@@ -45,11 +45,14 @@ namespace {
                 return false;
             buf[i] = *byte;
         }
-        if (buf[0] != TRANSPORT_DC && buf[0] != TRANSPORT_RC)
+        /* Any uint8_t is a valid TransportType value, so the cast is
+         * defined even for a byte that names no enumerator */
+        const auto transport = static_cast<TransportType>(buf[0]);
+        if (transport != TransportType::DC && transport != TransportType::RC)
             return false;
 
-        size_t off    = 0;
-        out.transport = buf[off++];
+        size_t off    = 1;
+        out.transport = transport;
         std::memcpy(&out.qpNum, buf + off, 4);
         off += 4;
         std::memcpy(out.gid.data(), buf + off, out.gid.size());
@@ -127,7 +130,7 @@ encodeRdmaTokenHex(const RdmaToken &token)
     uint8_t buf[kTokenBinaryLen];
     size_t  off = 0;
 
-    buf[off++] = token.transport;
+    buf[off++] = static_cast<uint8_t>(token.transport);
     std::memcpy(buf + off, &token.qpNum, 4);
     off += 4;
     std::memcpy(buf + off, token.gid.data(), token.gid.size());

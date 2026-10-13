@@ -275,7 +275,7 @@ protected:
         hipObj::RdmaToken peerTokEnc{};
         peerTokEnc.qpNum = 0x1234;
         peerTokEnc.gid.fill(0xab);
-        peerTokEnc.transport = hipObj::TRANSPORT_RC;
+        peerTokEnc.transport = hipObj::TransportType::RC;
         peerTokEnc.portNum   = 1;
         req.token            = hipObj::encodeRdmaToken(peerTokEnc);
         req.clientPsn        = 0x0a1b2c;

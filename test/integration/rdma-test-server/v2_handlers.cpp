@@ -413,7 +413,7 @@ namespace v2 {
                 if (!hipObj::decodeRdmaTokenHex(tokBase.c_str(), peerTok) ||
                     /* Semantic checks: this server pairs RC transports only,
                      * and a nonzero token must carry a real peer GID. */
-                    peerTok.transport != hipObj::TRANSPORT_RC || peerTok.gid == hipObj::Gid{}) {
+                    peerTok.transport != hipObj::TransportType::RC || peerTok.gid == hipObj::Gid{}) {
                     table_.ringUnreserve(slot);
                     return error(400);
                 }
@@ -599,7 +599,7 @@ namespace v2 {
             if (replyQpn != 0 && replyDev != nullptr) {
                 replyTok.qpNum                = replyQpn;
                 replyTok.gid                  = hipObj::toGid(replyDev->localGid);
-                replyTok.transport            = hipObj::TRANSPORT_RC;
+                replyTok.transport            = hipObj::TransportType::RC;
                 replyTok.portNum              = replyDev->portNum;
                 r.headers["X-Amz-Rdma-Reply"] = "200:" + hipObj::encodeRdmaToken(replyTok);
             }

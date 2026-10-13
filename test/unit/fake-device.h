@@ -114,7 +114,7 @@ void setReply(std::string_view reply);
 
 /* A reply that carries a peer token, which makes the transfer connect the
  * QP to the peer */
-hipObj::RdmaToken peerToken(uint8_t transport = hipObj::TRANSPORT_RC);
+hipObj::RdmaToken peerToken(hipObj::TransportType transport = hipObj::TransportType::RC);
 void              setReplyWithPeerToken(const hipObj::RdmaToken &token);
 
 /* The modify_qp() calls so far */

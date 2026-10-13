@@ -29,7 +29,7 @@ setReply(std::string_view reply)
 }
 
 hipObj::RdmaToken
-peerToken(uint8_t transport)
+peerToken(hipObj::TransportType transport)
 {
     hipObj::RdmaToken token{};
     token.transport = transport;
