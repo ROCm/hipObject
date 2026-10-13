@@ -6,19 +6,18 @@
 
 /* HIP runtime seam.
  *
- * The library calls a small set of HIP functions on its public paths.
- * Wrapping them in a table lets unit tests substitute fake
- * implementations (no GPU required) while production builds keep the
- * direct calls. The seam is intentionally minimal: only the functions
- * the library itself invokes are listed.
- *
- * Production behavior is unchanged: the default table forwards to the
- * real HIP entry points.
+ * The library calls the HIP runtime, and the two HSA calls that export a
+ * GPU buffer as a dma-buf, through HipRuntime, so unit tests can
+ * substitute a fake (no GPU required). SystemHip, the production
+ * implementation, forwards each call to the real entry point. The seam is
+ * intentionally minimal: only the functions the library itself invokes
+ * are listed.
  */
 
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 
@@ -26,60 +25,84 @@
 
 namespace hipObj {
 
-using HipGetDeviceFn            = hipError_t (*)(int *);
-using HipGetDeviceCountFn       = hipError_t (*)(int *);
-using HipDeviceGetPCIBusIdFn    = hipError_t (*)(char *, int, int);
-using HipHostMallocFn           = hipError_t (*)(void **, size_t, unsigned int);
-using HipHostFreeFn             = hipError_t (*)(void *);
-using HipFreeFn                 = hipError_t (*)(void *);
-using HipDeviceSynchronizeFn    = hipError_t (*)();
-using HipMemcpyFn               = hipError_t (*)(void *, const void *, size_t, hipMemcpyKind);
-using HipMemcpyAsyncFn          = hipError_t (*)(void *, const void *, size_t, hipMemcpyKind, hipStream_t);
-using HipEventCreateFn          = hipError_t (*)(hipEvent_t *);
-using HipEventRecordFn          = hipError_t (*)(hipEvent_t, hipStream_t);
-using HipEventQueryFn           = hipError_t (*)(hipEvent_t);
-using HipEventDestroyFn         = hipError_t (*)(hipEvent_t);
-using HipPointerGetAttributesFn = hipError_t (*)(hipPointerAttribute_t *, const void *);
-using HipMemGetAddressRangeFn   = hipError_t (*)(hipDeviceptr_t *, size_t *, hipDeviceptr_t);
+/* The methods are const, so one runtime can be shared by everything that
+ * uses it. A fake that records its calls keeps what it records outside
+ * the object, behind a pointer. */
+class HipRuntime {
+public:
+    HipRuntime()          = default;
+    virtual ~HipRuntime() = default;
 
-struct HipOps {
-    HipGetDeviceFn            hipGetDevice            = nullptr;
-    HipGetDeviceCountFn       hipGetDeviceCount       = nullptr;
-    HipDeviceGetPCIBusIdFn    hipDeviceGetPCIBusId    = nullptr;
-    HipHostMallocFn           hipHostMalloc           = nullptr;
-    HipHostFreeFn             hipHostFree             = nullptr;
-    HipFreeFn                 hipFree                 = nullptr;
-    HipDeviceSynchronizeFn    hipDeviceSynchronize    = nullptr;
-    HipMemcpyFn               hipMemcpy               = nullptr;
-    HipMemcpyAsyncFn          hipMemcpyAsync          = nullptr;
-    HipEventCreateFn          hipEventCreate          = nullptr;
-    HipEventRecordFn          hipEventRecord          = nullptr;
-    HipEventQueryFn           hipEventQuery           = nullptr;
-    HipEventDestroyFn         hipEventDestroy         = nullptr;
-    HipPointerGetAttributesFn hipPointerGetAttributes = nullptr;
-    HipMemGetAddressRangeFn   hipMemGetAddressRange   = nullptr;
+    /* Copying through a reference to the base would slice */
+    HipRuntime(const HipRuntime &)            = delete;
+    HipRuntime &operator=(const HipRuntime &) = delete;
+    HipRuntime(HipRuntime &&)                 = delete;
+    HipRuntime &operator=(HipRuntime &&)      = delete;
+
+    virtual hipError_t getDevice(int *device) const                                                     = 0;
+    virtual hipError_t getDeviceCount(int *count) const                                                 = 0;
+    virtual hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const                     = 0;
+    virtual hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const                    = 0;
+    virtual hipError_t hostFree(void *ptr) const                                                        = 0;
+    virtual hipError_t deviceSynchronize() const                                                        = 0;
+    virtual hipError_t memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+                                   hipStream_t stream) const                                            = 0;
+    virtual hipError_t eventCreate(hipEvent_t *event) const                                             = 0;
+    virtual hipError_t eventRecord(hipEvent_t event, hipStream_t stream) const                          = 0;
+    virtual hipError_t eventQuery(hipEvent_t event) const                                               = 0;
+    virtual hipError_t eventDestroy(hipEvent_t event) const                                             = 0;
+    virtual hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr) const   = 0;
+    virtual hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr) const = 0;
+
+    /* HSA, not HIP: hsa_amd_portable_export_dmabuf() and
+     * hsa_amd_portable_close_dmabuf(). They return 0 or the failing
+     * hsa_status_t as an int, so this header doesn't need the HSA
+     * headers. */
+    virtual int exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const = 0;
+    virtual int closeDmabuf(int fd) const                                                   = 0;
 };
 
-/* Destroys a HIP event with the hipEventDestroy entry the caller had when
- * it created the event, which it has already checked isn't null */
-struct HipEventDeleter {
-    HipEventDestroyFn destroy = nullptr;
+/* The real HIP runtime */
+class SystemHip final : public HipRuntime {
+public:
+    hipError_t getDevice(int *device) const override;
+    hipError_t getDeviceCount(int *count) const override;
+    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
+    hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
+    hipError_t hostFree(void *ptr) const override;
+    hipError_t deviceSynchronize() const override;
+    hipError_t memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+                           hipStream_t stream) const override;
+    hipError_t eventCreate(hipEvent_t *event) const override;
+    hipError_t eventRecord(hipEvent_t event, hipStream_t stream) const override;
+    hipError_t eventQuery(hipEvent_t event) const override;
+    hipError_t eventDestroy(hipEvent_t event) const override;
+    hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr) const override;
+    hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr) const override;
+    int        exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const override;
+    int        closeDmabuf(int fd) const override;
+};
 
+/* Returns the HIP runtime the library calls: the one installed with
+ * setHipForTest(), or otherwise a SystemHip */
+const HipRuntime &hip();
+
+/* Installs a runtime for hip() to return, and returns the previously
+ * installed one (nullptr when the SystemHip was active). Passing nullptr
+ * restores the SystemHip. Unit tests only; production never calls it.
+ * Not synchronized, so call it only while no other thread can be calling
+ * hip(). */
+const HipRuntime *setHipForTest(const HipRuntime *runtime);
+
+/* Destroys a HIP event through hip() */
+struct HipEventDeleter {
     void operator()(hipEvent_t event) const noexcept
     {
-        (void)destroy(event);
+        (void)hip().eventDestroy(event);
     }
 };
 
 /* hipEvent_t is itself a pointer, to an opaque struct */
 using HipEventPtr = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, HipEventDeleter>;
-
-/* Populates a table with the real HIP entry points. Called once for the
- * global table; tests that swap pointers capture and restore the
- * original table around each case. */
-void hipOpsDefaults(HipOps &ops);
-
-/* Global table used by the library. */
-HipOps &hipOps();
 
 } // namespace hipObj

@@ -16,10 +16,9 @@
 #include <string>
 #include <system_error>
 
-#include <hsa/hsa_ext_amd.h>
-
 #include <dlfcn.h>
 
+#include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
@@ -99,35 +98,20 @@ namespace {
         return handle;
     }
 
-    /* The HSA dma-buf calls in the form IbvFuncs holds them, with
-     * HSA_STATUS_SUCCESS (0) or the failing status as an int */
-    int hsa_export_dmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset)
-    {
-        return static_cast<int>(hsa_amd_portable_export_dmabuf(ptr, size, fd, offset));
-    }
-
-    int hsa_close_dmabuf(int fd)
-    {
-        return static_cast<int>(hsa_amd_portable_close_dmabuf(fd));
-    }
-
-    /* Owns a dmabuf fd from hsa_amd_portable_export_dmabuf(), and closes
-     * it with the close function it's given, which is
-     * hsa_amd_portable_close_dmabuf() except in the unit tests.
-     * Only the registration needs it: ibv_reg_dmabuf_mr() takes its own
-     * reference to the dma-buf, which the MR keeps until it's
-     * deregistered, so the fd is closed as soon as the registration call
-     * returns, whether or not it succeeded. */
+    /* Owns a dmabuf fd from HipRuntime::exportDmabuf(), and closes it
+     * with the same runtime's closeDmabuf(). Only the registration needs
+     * it: ibv_reg_dmabuf_mr() takes its own reference to the dma-buf,
+     * which the MR keeps until it's deregistered, so the fd is closed as
+     * soon as the registration call returns, whether or not it
+     * succeeded. */
     class DmabufFd {
     public:
-        using CloseFn = decltype(IbvFuncs::close_dmabuf);
-
-        DmabufFd(int fd, CloseFn close) noexcept : fd_(fd), close_(close)
+        DmabufFd(int fd, const HipRuntime &runtime) noexcept : fd_(fd), runtime_(&runtime)
         {
         }
         ~DmabufFd()
         {
-            (void)close_(fd_);
+            (void)runtime_->closeDmabuf(fd_);
         }
 
         DmabufFd(const DmabufFd &)            = delete;
@@ -141,16 +125,14 @@ namespace {
         }
 
     private:
-        int     fd_;
-        CloseFn close_;
+        int               fd_;
+        const HipRuntime *runtime_;
     };
 
 } // anonymous namespace
 
 IBVWrapper::IBVWrapper() : ibv_handle_(open_libibverbs())
 {
-    funcs_.export_dmabuf = &hsa_export_dmabuf;
-    funcs_.close_dmabuf  = &hsa_close_dmabuf;
     init_dmabuf_settings();
 
     if (!ibv_handle_) {
@@ -297,10 +279,11 @@ struct ibv_mr *
 IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
 {
     if (is_dmabuf_supported()) {
-        uint64_t offset = 0;
-        int      fd     = -1;
+        const HipRuntime &runtime = hip();
+        uint64_t          offset  = 0;
+        int               fd      = -1;
 
-        const int status = funcs_.export_dmabuf(addr, length, &fd, &offset);
+        const int status = runtime.exportDmabuf(addr, length, &fd, &offset);
         if (status != 0) {
             /* Not an error worth a line on stderr by default: this is also the
              * answer for a host pointer, and the host-buffer paths register far
@@ -310,7 +293,7 @@ IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
             }
         }
         else {
-            const DmabufFd dmabuf(fd, funcs_.close_dmabuf);
+            const DmabufFd dmabuf(fd, runtime);
             struct ibv_mr *mr = funcs_.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr),
                                                      dmabuf.get(), access);
             if (mr) {

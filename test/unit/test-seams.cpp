@@ -11,16 +11,18 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <hsa/hsa_ext_amd.h>
 
+#include "fake-device.h"
 #include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj-span.h"
@@ -40,62 +42,105 @@ namespace {
 
 // ---- HIP seam ----------------------------------------------------
 
-hipError_t
-fakeGetDevice(int *device)
+/* The GPU's bus ID in the NIC topology tests */
+constexpr std::string_view kGpuBusId = "0000:42:00.0";
+
+TEST(HipSeamTest, OverrideRedirectsHip)
 {
-    *device = 7;
-    return hipSuccess;
+    hipObjTest::FakeDevice    device{};
+    const hipObjTest::FakeHip fake(device);
+
+    const hipObj::HipRuntime *previous = hipObj::setHipForTest(&fake);
+    EXPECT_EQ(previous, nullptr);
+    EXPECT_EQ(&hipObj::hip(), &fake);
+
+    device.getDeviceErr = hipSuccess;
+    device.device       = 7;
+    int current         = -1;
+    EXPECT_EQ(hipObj::hip().getDevice(&current), hipSuccess);
+    EXPECT_EQ(current, 7);
+
+    device.gpuBusId = kGpuBusId;
+    std::array<char, 32> busId{};
+    EXPECT_EQ(hipObj::hip().deviceGetPCIBusId(busId.data(), static_cast<int>(busId.size()), 0), hipSuccess);
+    EXPECT_EQ(std::string_view(busId.data()), kGpuBusId);
+
+    EXPECT_EQ(hipObj::setHipForTest(previous), &fake);
+    EXPECT_NE(&hipObj::hip(), &fake);
 }
 
-hipError_t
-fakeDeviceGetPCIBusId(char *bus_id, int len, int)
+/* SystemHip passes each call straight to HIP or HSA, so it gets the same
+ * answer as calling them directly, whether or not there's a GPU */
+TEST(HipSeamTest, SystemHipForwardsEachCall)
 {
-    const std::span<char> out = hipObj::spanFromPointer(bus_id, static_cast<size_t>(len));
-    std::snprintf(out.data(), out.size(), "0000:42:00.0");
-    return hipSuccess;
-}
+    const hipObj::SystemHip system;
 
-hipError_t
-fakeDeviceSynchronize()
-{
-    return hipSuccess;
-}
+    int viaSystem = -1;
+    int direct    = -1;
+    EXPECT_EQ(system.getDeviceCount(&viaSystem), hipGetDeviceCount(&direct));
+    EXPECT_EQ(viaSystem, direct);
+    viaSystem = -1;
+    direct    = -1;
+    EXPECT_EQ(system.getDevice(&viaSystem), hipGetDevice(&direct));
+    EXPECT_EQ(viaSystem, direct);
 
-hipError_t
-fakeGetDeviceNoDevice(int *)
-{
-    return hipErrorNoDevice;
-}
+    std::array<char, 32> busIdViaSystem{};
+    std::array<char, 32> busIdDirect{};
+    EXPECT_EQ(system.deviceGetPCIBusId(busIdViaSystem.data(), static_cast<int>(busIdViaSystem.size()), 0),
+              hipDeviceGetPCIBusId(busIdDirect.data(), static_cast<int>(busIdDirect.size()), 0));
+    EXPECT_EQ(busIdViaSystem, busIdDirect);
 
-class HipSeamTest : public ::testing::Test {
-protected:
-    void SetUp() override
-    {
-        saved_ = hipObj::hipOps();
-        hipObj::HipOps ops;
-        ops.hipGetDevice         = &fakeGetDevice;
-        ops.hipDeviceGetPCIBusId = &fakeDeviceGetPCIBusId;
-        ops.hipDeviceSynchronize = &fakeDeviceSynchronize;
-        hipObj::hipOps()         = ops;
-    }
+    void *hostViaSystem = nullptr;
+    void *hostDirect    = nullptr;
+    EXPECT_EQ(system.hostMalloc(&hostViaSystem, 64, hipHostMallocDefault),
+              hipHostMalloc(&hostDirect, 64, hipHostMallocDefault));
+    EXPECT_EQ(hostViaSystem == nullptr, hostDirect == nullptr);
+    EXPECT_EQ(system.hostFree(hostViaSystem), hipHostFree(hostDirect));
 
-    void TearDown() override
-    {
-        hipObj::hipOps() = saved_;
-    }
+    /* A host-to-host copy, which the device synchronization below waits
+     * for, so it's done before the arrays are destroyed */
+    std::array<char, 8> source = {{'h', 'i', 'p', 'O', 'b', 'j', '\0', '\0'}};
+    std::array<char, 8> copyViaSystem{};
+    std::array<char, 8> copyDirect{};
+    EXPECT_EQ(
+        system.memcpyAsync(copyViaSystem.data(), source.data(), source.size(), hipMemcpyHostToHost, nullptr),
+        hipMemcpyAsync(copyDirect.data(), source.data(), source.size(), hipMemcpyHostToHost, nullptr));
+    EXPECT_EQ(system.deviceSynchronize(), hipDeviceSynchronize());
+    EXPECT_EQ(copyViaSystem, copyDirect);
 
-    hipObj::HipOps saved_{};
-};
+    hipEvent_t eventViaSystem = nullptr;
+    hipEvent_t eventDirect    = nullptr;
+    EXPECT_EQ(system.eventCreate(&eventViaSystem), hipEventCreate(&eventDirect));
+    EXPECT_EQ(system.eventRecord(eventViaSystem, nullptr), hipEventRecord(eventDirect, nullptr));
+    (void)hipEventSynchronize(eventViaSystem);
+    (void)hipEventSynchronize(eventDirect);
+    EXPECT_EQ(system.eventQuery(eventViaSystem), hipEventQuery(eventDirect));
+    EXPECT_EQ(system.eventDestroy(eventViaSystem), hipEventDestroy(eventDirect));
 
-TEST_F(HipSeamTest, SubstitutedFunctionsAreCalled)
-{
-    int device = -1;
-    EXPECT_EQ(hipObj::hipOps().hipGetDevice(&device), hipSuccess);
-    EXPECT_EQ(device, 7);
+    /* Host memory on the stack */
+    hipPointerAttribute_t attributesViaSystem{};
+    hipPointerAttribute_t attributesDirect{};
+    EXPECT_EQ(system.pointerGetAttributes(&attributesViaSystem, source.data()),
+              hipPointerGetAttributes(&attributesDirect, source.data()));
+    EXPECT_EQ(attributesViaSystem.type, attributesDirect.type);
 
-    char bus_id[32] = {0};
-    EXPECT_EQ(hipObj::hipOps().hipDeviceGetPCIBusId(bus_id, sizeof(bus_id), 0), hipSuccess);
-    EXPECT_STREQ(bus_id, "0000:42:00.0");
+    hipDeviceptr_t baseViaSystem = nullptr;
+    hipDeviceptr_t baseDirect    = nullptr;
+    size_t         sizeViaSystem = 0;
+    size_t         sizeDirect    = 0;
+    EXPECT_EQ(system.memGetAddressRange(&baseViaSystem, &sizeViaSystem, source.data()),
+              hipMemGetAddressRange(&baseDirect, &sizeDirect, source.data()));
+    EXPECT_EQ(baseViaSystem, baseDirect);
+    EXPECT_EQ(sizeViaSystem, sizeDirect);
+
+    int      fdViaSystem     = -1;
+    int      fdDirect        = -1;
+    uint64_t offsetViaSystem = 0;
+    uint64_t offsetDirect    = 0;
+    EXPECT_EQ(system.exportDmabuf(source.data(), source.size(), &fdViaSystem, &offsetViaSystem),
+              static_cast<int>(
+                  hsa_amd_portable_export_dmabuf(source.data(), source.size(), &fdDirect, &offsetDirect)));
+    EXPECT_EQ(system.closeDmabuf(fdViaSystem), static_cast<int>(hsa_amd_portable_close_dmabuf(fdDirect)));
 }
 
 // ---- NIC topology seam -------------------------------------------
@@ -116,22 +161,22 @@ class NicSeamTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        previous_                = hipObj::setNicEnumerator(&fake_);
-        saved_hip_               = hipObj::hipOps();
-        hipObj::HipOps ops       = saved_hip_;
-        ops.hipDeviceGetPCIBusId = &fakeDeviceGetPCIBusId;
-        hipObj::hipOps()         = ops;
+        previous_        = hipObj::setNicEnumerator(&fake_);
+        device_.gpuBusId = kGpuBusId;
+        fakeHip_.emplace(hip_);
     }
 
     void TearDown() override
     {
+        fakeHip_.reset();
         hipObj::setNicEnumerator(previous_);
-        hipObj::hipOps() = saved_hip_;
     }
 
-    FakeNicEnumerator      fake_{};
-    hipObj::NicEnumerator *previous_ = nullptr;
-    hipObj::HipOps         saved_hip_{};
+    FakeNicEnumerator                        fake_{};
+    hipObj::NicEnumerator                   *previous_ = nullptr;
+    hipObjTest::FakeDevice                   device_{};
+    hipObjTest::FakeHip                      hip_{device_};
+    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
 };
 
 TEST_F(NicSeamTest, ClosestBusIdWins)
@@ -365,7 +410,6 @@ namespace {
     struct ApiTransferLog {
         int sendRequestCalls = 0;
         int recvReplyCalls   = 0;
-        int synchronizeCalls = 0;
     };
 
     ApiTransferLog g_apiTransferLog;
@@ -474,18 +518,6 @@ namespace {
         return 0;
     }
 
-    hipError_t fakeSynchronizeNoDevice()
-    {
-        ++g_apiTransferLog.synchronizeCalls;
-        return hipErrorNoDevice;
-    }
-
-    hipError_t fakeSynchronizeSuccess()
-    {
-        ++g_apiTransferLog.synchronizeCalls;
-        return hipSuccess;
-    }
-
     int fakeSendRequest(void *, const char *, size_t)
     {
         ++g_apiTransferLog.sendRequestCalls;
@@ -512,12 +544,8 @@ namespace {
             savedEnumerator_ = hipObj::setNicEnumerator(&enumerator_);
             enumerator_.nics_.clear();
 
-            savedHipOps_             = hipObj::hipOps();
-            hipObj::HipOps ops       = savedHipOps_;
-            ops.hipGetDevice         = &fakeGetDeviceNoDevice;
-            ops.hipDeviceGetPCIBusId = &fakeDeviceGetPCIBusId;
-            ops.hipDeviceSynchronize = &fakeSynchronizeNoDevice;
-            hipObj::hipOps()         = ops;
+            hipDevice_.deviceSyncErr = hipErrorNoDevice;
+            fakeHip_.emplace(hip_);
 
             hipObj::IbvFuncs funcs{};
             funcs.get_device_list  = &fakeGetDeviceList;
@@ -547,7 +575,7 @@ namespace {
         {
             (void)hipObjShutdown();
             fakeIbv_.reset();
-            hipObj::hipOps() = savedHipOps_;
+            fakeHip_.reset();
             hipObj::setNicEnumerator(savedEnumerator_);
             hipObj::setStateForTest(savedState_);
         }
@@ -565,7 +593,9 @@ namespace {
         FakeNicEnumerator                        enumerator_{};
         hipObj::NicEnumerator                   *savedEnumerator_ = nullptr;
         std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-        hipObj::HipOps                           savedHipOps_{};
+        hipObjTest::FakeDevice                   hipDevice_{};
+        hipObjTest::FakeHip                      hip_{hipDevice_};
+        std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
     };
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)
@@ -597,7 +627,7 @@ namespace {
         EXPECT_EQ(err.opError, hipObjSuccess);
         EXPECT_EQ(g_apiTransferLog.sendRequestCalls, 1);
         EXPECT_EQ(g_apiTransferLog.recvReplyCalls, 1);
-        EXPECT_EQ(g_apiTransferLog.synchronizeCalls, 0);
+        EXPECT_EQ(hipDevice_.log.deviceSynchronize, 0);
     }
 
     TEST_F(InitAndTransferTest, GpuRegisteredTransfersStillSynchronize)
@@ -605,9 +635,7 @@ namespace {
         hipObjConfig_t config = makeConfig();
         ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
 
-        hipObj::HipOps opsTable       = hipObj::hipOps();
-        opsTable.hipDeviceSynchronize = &fakeSynchronizeSuccess;
-        hipObj::hipOps()              = opsTable;
+        hipDevice_.deviceSyncErr = hipSuccess;
 
         void *gpuBuf = reinterpret_cast<void *>(0x1000);
         ASSERT_EQ(hipObjBufRegister(gpuBuf, 64).opError, hipObjSuccess);
@@ -619,7 +647,7 @@ namespace {
         hipObjError_t err = hipObjPut(nullptr, gpuBuf, 64, 0, &ops, nullptr);
 
         EXPECT_EQ(err.opError, hipObjSuccess);
-        EXPECT_EQ(g_apiTransferLog.synchronizeCalls, 1);
+        EXPECT_EQ(hipDevice_.log.deviceSynchronize, 1);
     }
 
 } // namespace

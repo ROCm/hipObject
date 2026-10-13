@@ -23,7 +23,6 @@
 
 #include "fake-device.h"
 #include "fake-ibv.h"
-#include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -56,17 +55,22 @@ throwIt()
     throw 42;
 }
 
-hipError_t
-throwingGetDevice(int *)
-{
-    throwIt();
-}
+/* The fake HIP runtime, with the calls that start hipObjInit() and a
+ * staging copy throwing */
+class ThrowingHip : public hipObjTest::FakeHip {
+public:
+    using FakeHip::FakeHip;
 
-hipError_t
-throwingMemcpy(void *, const void *, size_t, hipMemcpyKind)
-{
-    throwIt();
-}
+    hipError_t getDevice(int *) const override
+    {
+        throwIt();
+    }
+
+    hipError_t memcpyAsync(void *, const void *, size_t, hipMemcpyKind, hipStream_t) const override
+    {
+        throwIt();
+    }
+};
 
 struct ibv_qp *
 throwingCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
@@ -110,8 +114,9 @@ protected:
 
 TEST_P(ApiExceptionTest, Init)
 {
-    hipObj::hipOps().hipGetDevice = &throwingGetDevice;
-    hipObjConfig_t config         = makeConfig();
+    const ThrowingHip               throwing(fake());
+    const hipObjTest::ScopedFakeHip installed(throwing);
+    hipObjConfig_t                  config = makeConfig();
     EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
     EXPECT_FALSE(state_.initialized);
 }
@@ -181,7 +186,8 @@ TEST_P(ApiExceptionTest, BufSync)
     /* Registered through a staging buffer, so a sync copies */
     fake().fail.registerAddr = kDevBuf;
     ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);
-    hipObj::hipOps().hipMemcpy = &throwingMemcpy;
+    const ThrowingHip               throwing(fake());
+    const hipObjTest::ScopedFakeHip installed(throwing);
     EXPECT_EQ(hipObjBufSync(kDevBuf, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufSync(kDevBuf, kBufSize, 0, HIPOBJ_SYNC_TO_DEVICE).opError, hipObjInternalError);
 }

@@ -26,7 +26,6 @@
 #include <hip/hip_runtime_api.h>
 
 #include "fake-device.h"
-#include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -37,8 +36,6 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 namespace {
 
 using hipObjTest::fake;
-using hipObjTest::fakeMemGetAddressRange;
-using hipObjTest::fakePointerGetAttributes;
 using hipObjTest::makeOps;
 
 constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
@@ -47,92 +44,14 @@ constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
  * buffer */
 void *const kStagedBuf = reinterpret_cast<void *>(0x30000);
 
-/* hipEventQuery() reports hipErrorNotReady this many times, then
- * queryResult; with neverComplete, it reports hipErrorNotReady forever */
-struct AsyncCopy {
-    hipError_t    createErr      = hipSuccess;
-    hipError_t    copyErr        = hipSuccess;
-    hipError_t    recordErr      = hipSuccess;
-    hipError_t    queryResult    = hipSuccess;
-    hipError_t    blockingErr    = hipSuccess;
-    int           notReadyCount  = 0;
-    bool          neverComplete  = false;
-    int           copies         = 0;
-    int           blockingCopies = 0;
-    int           records        = 0;
-    int           queries        = 0;
-    int           destroys       = 0;
-    hipMemcpyKind lastKind       = hipMemcpyDefault;
-};
-
-AsyncCopy g_async;
-
-hipEvent_t const kEvent = reinterpret_cast<hipEvent_t>(0x99);
-
-hipError_t
-fakeEventCreate(hipEvent_t *event)
-{
-    if (g_async.createErr != hipSuccess) {
-        return g_async.createErr;
-    }
-    *event = kEvent;
-    return hipSuccess;
-}
-
-hipError_t
-fakeMemcpyAsync(void *, const void *, size_t, hipMemcpyKind kind, hipStream_t)
-{
-    ++g_async.copies;
-    g_async.lastKind = kind;
-    return g_async.copyErr;
-}
-
-hipError_t
-fakeEventRecord(hipEvent_t event, hipStream_t)
-{
-    EXPECT_EQ(event, kEvent);
-    ++g_async.records;
-    return g_async.recordErr;
-}
-
-hipError_t
-fakeEventQuery(hipEvent_t event)
-{
-    EXPECT_EQ(event, kEvent);
-    ++g_async.queries;
-    if (g_async.neverComplete || g_async.queries <= g_async.notReadyCount) {
-        return hipErrorNotReady;
-    }
-    return g_async.queryResult;
-}
-
-hipError_t
-fakeEventDestroy(hipEvent_t event)
-{
-    EXPECT_EQ(event, kEvent);
-    ++g_async.destroys;
-    return hipSuccess;
-}
-
-hipError_t
-fakeBlockingMemcpy(void *, const void *, size_t, hipMemcpyKind kind)
-{
-    ++g_async.blockingCopies;
-    g_async.lastKind = kind;
-    return g_async.blockingErr;
-}
-
 /* The HIP runtime reports every pointer as device memory in one allocation,
  * which holds every buffer these tests register */
 void
 fakeDeviceMemory()
 {
-    hipObj::HipOps &ops         = hipObj::hipOps();
-    ops.hipPointerGetAttributes = &fakePointerGetAttributes;
-    ops.hipMemGetAddressRange   = &fakeMemGetAddressRange;
-    fake().memoryType           = hipMemoryTypeDevice;
-    fake().allocBase            = 0;
-    fake().allocSize            = std::numeric_limits<size_t>::max();
+    fake().memoryType = hipMemoryTypeDevice;
+    fake().allocBase  = 0;
+    fake().allocSize  = std::numeric_limits<size_t>::max();
 }
 
 // ---- Registration through a staging buffer -----------------------
@@ -212,19 +131,6 @@ TEST_F(RegistrationTest, LimitsNumberOfRegistrations)
 
 class StagingTest : public hipObjTest::FakeDeviceTest {
 protected:
-    void SetUp() override
-    {
-        FakeDeviceTest::SetUp();
-        hipObj::HipOps &ops = hipObj::hipOps();
-        ops.hipMemcpy       = &fakeBlockingMemcpy;
-        ops.hipMemcpyAsync  = &fakeMemcpyAsync;
-        ops.hipEventCreate  = &fakeEventCreate;
-        ops.hipEventRecord  = &fakeEventRecord;
-        ops.hipEventQuery   = &fakeEventQuery;
-        ops.hipEventDestroy = &fakeEventDestroy;
-        g_async             = {};
-    }
-
     /* Initializes and registers kBufSize bytes at kStagedBuf through a
      * staging buffer */
     static void initAndRegisterStaged()
@@ -243,89 +149,68 @@ protected:
 TEST_F(StagingTest, WaitsForCopyToComplete)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    g_async.notReadyCount = 2;
+    fake().eventNotReadyCount = 2;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.copies, 1);
-    EXPECT_EQ(g_async.records, 1);
-    EXPECT_EQ(g_async.queries, 3);
-    EXPECT_EQ(g_async.destroys, 1);
-    EXPECT_EQ(g_async.blockingCopies, 0);
+    const hipObjTest::CallLog &log = fake().log;
+    EXPECT_EQ(log.memcpy, 1);
+    EXPECT_EQ(log.eventRecord, 1);
+    EXPECT_EQ(log.eventQuery, 3);
+    EXPECT_EQ(log.eventDestroy, 1);
+
+    /* Each copy waits for its own event */
+    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
+    EXPECT_EQ(log.eventQuery, 6);
+    EXPECT_EQ(log.eventDestroy, 2);
 }
 
 TEST_F(StagingTest, CopiesInTheRequestedDirection)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
     ASSERT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.lastKind, hipMemcpyDeviceToHost);
+    EXPECT_EQ(fake().lastMemcpyKind, hipMemcpyDeviceToHost);
     ASSERT_EQ(sync(HIPOBJ_SYNC_TO_DEVICE).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.lastKind, hipMemcpyHostToDevice);
+    EXPECT_EQ(fake().lastMemcpyKind, hipMemcpyHostToDevice);
 
     /* A GET copies the data it received to the device; a PUT copies the data
      * it sends from the device */
     hipObjOps_t ops = makeOps();
     ASSERT_EQ(hipObjGet(nullptr, kStagedBuf, kBufSize, 0, &ops, nullptr).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.lastKind, hipMemcpyHostToDevice);
+    EXPECT_EQ(fake().lastMemcpyKind, hipMemcpyHostToDevice);
     ASSERT_EQ(hipObjPut(nullptr, kStagedBuf, kBufSize, 0, &ops, nullptr).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.lastKind, hipMemcpyDeviceToHost);
+    EXPECT_EQ(fake().lastMemcpyKind, hipMemcpyDeviceToHost);
 }
 
-TEST_F(StagingTest, FallsBackToBlockingCopyWithoutEvent)
+TEST_F(StagingTest, FailsWithoutEvent)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    g_async.createErr = hipErrorOutOfMemory;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.blockingCopies, 1);
-    EXPECT_EQ(g_async.copies, 0);
-}
-
-TEST_F(StagingTest, FallsBackToBlockingCopyWithoutAsyncFunctions)
-{
-    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    hipObj::hipOps().hipEventQuery = nullptr;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_DEVICE).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.blockingCopies, 1);
-    EXPECT_EQ(g_async.lastKind, hipMemcpyHostToDevice);
-    EXPECT_EQ(g_async.copies, 0);
-}
-
-TEST_F(StagingTest, FailsWhenBlockingCopyFails)
-{
-    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    g_async.createErr   = hipErrorOutOfMemory;
-    g_async.blockingErr = hipErrorInvalidValue;
+    fake().eventCreateErr = hipErrorOutOfMemory;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
-}
-
-TEST_F(StagingTest, FailsWithoutAnyCopyFunction)
-{
-    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    hipObj::hipOps().hipMemcpyAsync = nullptr;
-    hipObj::hipOps().hipMemcpy      = nullptr;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+    EXPECT_EQ(fake().log.memcpy, 0);
+    EXPECT_EQ(fake().log.eventDestroy, 0);
 }
 
 TEST_F(StagingTest, ReleasesEventWhenCopyCannotStart)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    g_async.copyErr = hipErrorInvalidValue;
+    fake().memcpyErr = hipErrorInvalidValue;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
-    EXPECT_EQ(g_async.records, 0);
-    EXPECT_EQ(g_async.destroys, 1);
+    EXPECT_EQ(fake().log.eventRecord, 0);
+    EXPECT_EQ(fake().log.eventDestroy, 1);
 
-    g_async           = {};
-    g_async.recordErr = hipErrorInvalidValue;
+    fake().memcpyErr      = hipSuccess;
+    fake().eventRecordErr = hipErrorInvalidValue;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
-    EXPECT_EQ(g_async.queries, 0);
-    EXPECT_EQ(g_async.destroys, 1);
+    EXPECT_EQ(fake().log.eventQuery, 0);
+    EXPECT_EQ(fake().log.eventDestroy, 2);
 }
 
 TEST_F(StagingTest, FailsAndReleasesEventWhenCopyFails)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    g_async.notReadyCount = 1;
-    g_async.queryResult   = hipErrorLaunchFailure;
+    fake().eventNotReadyCount = 1;
+    fake().eventQueryResult   = hipErrorLaunchFailure;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
-    EXPECT_EQ(g_async.destroys, 1);
+    EXPECT_EQ(fake().log.eventDestroy, 1);
 }
 
 // ---- Settings read from the environment --------------------------
@@ -350,14 +235,14 @@ TEST_F(StagingEnvTest, AbandonsCopyThatMissesDeadline)
     ASSERT_EQ(std::from_chars(env.data(), std::to_address(env.end()), timeoutMs).ec, std::errc{});
     ASSERT_GT(timeoutMs, 0);
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    g_async.neverComplete = true;
+    fake().eventNeverCompletes = true;
 
     const auto start = std::chrono::steady_clock::now();
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
     EXPECT_GE(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(timeoutMs));
 
     /* The copy may still land, so the event that tracks it isn't destroyed */
-    EXPECT_EQ(g_async.destroys, 0);
+    EXPECT_EQ(fake().log.eventDestroy, 0);
 }
 
 TEST_F(StagingEnvTest, RequiringGpuDirectRefusesStaging)
@@ -393,9 +278,9 @@ TEST_F(StagingBadEnvTest, IgnoresMalformedTimeout)
     /* At least 100 ms, since hipObject sleeps 1 ms between polls. That's
      * well under the default timeout, and over the 20 ms that "+20" would
      * mean if it weren't ignored. */
-    g_async.notReadyCount = 100;
+    fake().eventNotReadyCount = 100;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
-    EXPECT_EQ(g_async.destroys, 1);
+    EXPECT_EQ(fake().log.eventDestroy, 1);
 }
 
 } // namespace

@@ -39,7 +39,6 @@ struct CallLog {
     int recvReply   = 0;
     int registerMr  = 0;
     int mrAccess    = 0; /* the access flags of the last reg_mr */
-    int memcpy      = 0;
     int openDevice  = 0;
     int closeDevice = 0;
     int allocPd     = 0;
@@ -48,6 +47,18 @@ struct CallLog {
     int destroyCq   = 0;
     int createQp    = 0;
     int destroyQp   = 0;
+
+    /* HIP and HSA */
+    int memcpy            = 0; /* memcpyAsync() */
+    int eventCreate       = 0;
+    int eventRecord       = 0;
+    int eventQuery        = 0;
+    int eventDestroy      = 0;
+    int hostMalloc        = 0;
+    int hostFree          = 0;
+    int deviceSynchronize = 0;
+    int exportDmabuf      = 0;
+    int closeDmabuf       = 0;
 };
 
 /* Which fakes fail */
@@ -66,8 +77,9 @@ struct Faults {
      * host staging buffer */
     void *registerAddr = nullptr;
     /* reg_mr fails for every address, the staging buffer's too */
-    bool registerAll = false;
-    bool hostMalloc  = false;
+    bool registerAll  = false;
+    bool hostMalloc   = false;
+    bool exportDmabuf = false;
 };
 
 /* One modify_qp() call */
@@ -83,15 +95,41 @@ struct FakeDevice {
     Faults  fail{};
 
     /* HIP: the GPUs, and what the runtime reports for every pointer (its
-     * memory type and the allocation it's in) */
-    int           deviceCount       = 1;
-    hipError_t    deviceCountErr    = hipSuccess;
-    hipError_t    deviceSyncErr     = hipSuccess;
-    hipMemoryType memoryType        = hipMemoryTypeDevice;
-    uintptr_t     allocBase         = 0;
-    size_t        allocSize         = 0;
-    hipError_t    addressRangeErr   = hipSuccess;
-    int           addressRangeCalls = 0;
+     * memory type and the allocation it's in). There's no current device,
+     * and no GPU's bus ID is known, so hipObjInit() opens the hinted NIC.
+     * Every pointer is host memory, so registration doesn't look for the
+     * allocation. */
+    hipError_t       getDeviceErr      = hipErrorNoDevice;
+    int              device            = 0;
+    int              deviceCount       = 1;
+    hipError_t       deviceCountErr    = hipSuccess;
+    std::string_view gpuBusId          = {};
+    hipError_t       deviceSyncErr     = hipSuccess;
+    hipMemoryType    memoryType        = hipMemoryTypeHost;
+    uintptr_t        allocBase         = 0;
+    size_t           allocSize         = 0;
+    hipError_t       addressRangeErr   = hipSuccess;
+    int              addressRangeCalls = 0;
+    void            *lastHostMalloc    = nullptr;
+    void            *lastHostFree      = nullptr;
+
+    /* HIP staging copies: memcpyAsync() and the event that tracks it.
+     * eventQuery() reports hipErrorNotReady for the first
+     * eventNotReadyCount queries of each event, and then
+     * eventQueryResult; with eventNeverCompletes, it reports
+     * hipErrorNotReady forever. */
+    hipError_t    memcpyErr            = hipSuccess;
+    hipMemcpyKind lastMemcpyKind       = hipMemcpyDefault;
+    hipError_t    eventCreateErr       = hipSuccess;
+    hipError_t    eventRecordErr       = hipSuccess;
+    hipError_t    eventQueryResult     = hipSuccess;
+    int           eventNotReadyCount   = 0;
+    bool          eventNeverCompletes  = false;
+    int           eventQueriesAtCreate = 0; /* log.eventQuery when the last event was created */
+
+    /* HSA: the dma-buf exportDmabuf() returns, and the fd closeDmabuf()
+     * was last given */
+    int closedDmabufFd = -1;
 
     /* ibverbs: the vendor query_device() reports, what poll_cq() returns,
      * and the QP transitions */
@@ -121,8 +159,78 @@ void              setReplyWithPeerToken(const hipObj::RdmaToken &token);
 /* The modify_qp() calls so far */
 std::vector<ModifyQpCall> modifyQpCalls();
 
-hipError_t fakePointerGetAttributes(hipPointerAttribute_t *attr, const void *ptr);
-hipError_t fakeMemGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr);
+/* The event FakeHip creates, and the dma-buf it exports */
+inline hipEvent_t
+fakeEvent()
+{
+    return reinterpret_cast<hipEvent_t>(0x99);
+}
+
+constexpr int      kFakeDmabufFd     = 1234;
+constexpr uint64_t kFakeDmabufOffset = 0x200;
+
+/* A HIP runtime that answers from a FakeDevice and records its calls there.
+ * hostMalloc() and hostFree() allocate and free real memory. A test can
+ * derive from it to change one method. */
+class FakeHip : public hipObj::HipRuntime {
+public:
+    explicit FakeHip(FakeDevice &device) noexcept : device_(&device)
+    {
+    }
+    ~FakeHip() override = default;
+
+    FakeHip(const FakeHip &)            = delete;
+    FakeHip &operator=(const FakeHip &) = delete;
+    FakeHip(FakeHip &&)                 = delete;
+    FakeHip &operator=(FakeHip &&)      = delete;
+
+    hipError_t getDevice(int *device) const override;
+    hipError_t getDeviceCount(int *count) const override;
+    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
+    hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
+    hipError_t hostFree(void *ptr) const override;
+    hipError_t deviceSynchronize() const override;
+    hipError_t memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+                           hipStream_t stream) const override;
+    hipError_t eventCreate(hipEvent_t *event) const override;
+    hipError_t eventRecord(hipEvent_t event, hipStream_t stream) const override;
+    hipError_t eventQuery(hipEvent_t event) const override;
+    hipError_t eventDestroy(hipEvent_t event) const override;
+    hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr) const override;
+    hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr) const override;
+    int        exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const override;
+    int        closeDmabuf(int fd) const override;
+
+private:
+    /* A pointer, so the const methods can change what it points to */
+    FakeDevice *device_;
+};
+
+/* Makes hip() return runtime for as long as it lives, and puts the
+ * previous runtime back when it's destroyed. runtime has to outlive it.
+ * Create and destroy it only while no other thread is calling hip(). */
+class ScopedFakeHip {
+public:
+    explicit ScopedFakeHip(const hipObj::HipRuntime &runtime)
+        : runtime_(&runtime), previous_(hipObj::setHipForTest(&runtime))
+    {
+    }
+
+    ~ScopedFakeHip()
+    {
+        /* Restored in the reverse order they were installed */
+        EXPECT_EQ(hipObj::setHipForTest(previous_), runtime_);
+    }
+
+    ScopedFakeHip(const ScopedFakeHip &)            = delete;
+    ScopedFakeHip &operator=(const ScopedFakeHip &) = delete;
+    ScopedFakeHip(ScopedFakeHip &&)                 = delete;
+    ScopedFakeHip &operator=(ScopedFakeHip &&)      = delete;
+
+private:
+    const hipObj::HipRuntime *runtime_;
+    const hipObj::HipRuntime *previous_;
+};
 
 /* hipObjOps_t callbacks for the fake S3 server */
 int         fakeSendRequest(void *ctx, const char *token, size_t tokenLen);
@@ -173,7 +281,8 @@ protected:
     EmptyNicEnumerator           enumerator_{};
     hipObj::NicEnumerator       *savedEnumerator_ = nullptr;
     std::optional<ScopedFakeIbv> fakeIbv_{};
-    hipObj::HipOps               savedHipOps_{};
+    FakeHip                      hip_{fake()};
+    std::optional<ScopedFakeHip> fakeHip_{};
 };
 
 } // namespace hipObjTest
