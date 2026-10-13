@@ -173,6 +173,16 @@ hipobj_add_test(test-gid-select
 hipobj_add_test(test-buffer-registration
   test-buffer-registration.cpp)
 
+hipobj_add_test(test-ibv-dmabuf
+  test-ibv-dmabuf.cpp)
+# hipObject reads HIPOBJ_DMABUF once, when it loads, so the tests of
+# turning dma-buf registration off run in a process of their own (see
+# test-ibv-dmabuf.cpp)
+add_test(NAME test-ibv-dmabuf-disabled
+  COMMAND test-ibv-dmabuf --gtest_filter=DmabufDisabledTest.*)
+set_tests_properties(test-ibv-dmabuf-disabled PROPERTIES
+  ENVIRONMENT "HIPOBJ_DMABUF=0")
+
 hipobj_add_fake_device_test(test-api-args
   test-api-args.cpp)
 

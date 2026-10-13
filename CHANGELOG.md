@@ -178,6 +178,12 @@
 - Optimized Clang builds against glibc 2.40 or later warned about every
   call to `fprintf()`, `snprintf()`, and similar functions, and failed
   with `HIPOBJ_WERROR=ON`.
+- `hipObjBufRegister()` kept a dmabuf file descriptor open for each GPU
+  buffer it registered through dmabuf, until the buffer was deregistered.
+  It now closes the descriptor once the registration is done. If
+  allocating memory failed just after a successful registration, the
+  buffer also stayed registered for remote access, and its descriptor
+  leaked.
 
 ### Known issues
 
