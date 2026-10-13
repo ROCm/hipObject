@@ -13,6 +13,8 @@
 
 namespace hipobj::test {
 
+struct TokenHeader;
+
 class RdmaTestServer {
 public:
     RdmaTestServer();
@@ -25,10 +27,10 @@ public:
 
     bool isReady() const;
 
-    int rdmaWriteToClient(const std::string &tokenHeader, const std::vector<uint8_t> &data,
+    int rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vector<uint8_t> &data,
                           std::string &replyHeader);
 
-    int rdmaReadFromClient(const std::string &tokenHeader, size_t size, std::vector<uint8_t> &data,
+    int rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size, std::vector<uint8_t> &data,
                            std::string &replyHeader);
 
 private:

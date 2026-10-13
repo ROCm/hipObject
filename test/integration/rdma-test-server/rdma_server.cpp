@@ -9,9 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <optional>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include "ibv-core.h"
@@ -21,6 +19,7 @@
 #include "malloc_ptr.h"
 #include "scope-guard.h"
 #include "token.h"
+#include "token_header.h"
 #include "transport.h"
 
 namespace hipobj::test {
@@ -35,37 +34,6 @@ namespace {
     {
         fprintf(stderr, "hipobj-rdma-test-server: %s failed: %s\n", op, why);
         return -1;
-    }
-
-    bool parseTokenHeader(const std::string &header, hipObj::RdmaToken &token, uint64_t &remoteAddr,
-                          size_t &size)
-    {
-        /* The token, optionally followed by ":<addr>:<len>" */
-        const size_t c1      = header.find(':');
-        const auto   decoded = hipObj::decodeRdmaTokenHex(std::string_view(header).substr(0, c1));
-        if (!decoded) {
-            return false;
-        }
-        if (c1 == std::string::npos) {
-            token      = *decoded;
-            remoteAddr = 0;
-            size       = 0;
-            return true;
-        }
-        size_t c2 = header.find(':', c1 + 1);
-        if (c2 == std::string::npos) {
-            return false;
-        }
-        token      = *decoded;
-        remoteAddr = std::strtoull(header.substr(c1 + 1, c2 - c1 - 1).c_str(), nullptr, 16);
-        size       = static_cast<size_t>(std::strtoull(header.substr(c2 + 1).c_str(), nullptr, 16));
-        if (remoteAddr != 0) {
-            token.remoteAddr = remoteAddr;
-        }
-        if (size != 0) {
-            token.length = size;
-        }
-        return true;
     }
 
     hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, struct ibv_mr *mr, size_t size)
@@ -202,18 +170,14 @@ RdmaTestServer::isReady() const
 }
 
 int
-RdmaTestServer::rdmaWriteToClient(const std::string &tokenHeader, const std::vector<uint8_t> &data,
+RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vector<uint8_t> &data,
                                   std::string &replyHeader)
 {
     if (!isReady()) {
         return rdmaFail("GET", "server RDMA not initialised");
     }
-    hipObj::RdmaToken clientToken{};
-    uint64_t          remoteAddr = 0;
-    size_t            xferSize   = 0;
-    if (!parseTokenHeader(tokenHeader, clientToken, remoteAddr, xferSize)) {
-        return rdmaFail("GET", "x-amz-rdma-token did not parse");
-    }
+    const hipObj::RdmaToken &clientToken = tokenHeader.token;
+    size_t                   xferSize    = tokenHeader.length;
     if (xferSize == 0) {
         xferSize = data.size();
     }
@@ -240,18 +204,14 @@ RdmaTestServer::rdmaWriteToClient(const std::string &tokenHeader, const std::vec
 }
 
 int
-RdmaTestServer::rdmaReadFromClient(const std::string &tokenHeader, size_t size, std::vector<uint8_t> &data,
+RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size, std::vector<uint8_t> &data,
                                    std::string &replyHeader)
 {
     if (!isReady()) {
         return rdmaFail("PUT", "server RDMA not initialised");
     }
-    hipObj::RdmaToken clientToken{};
-    uint64_t          remoteAddr = 0;
-    size_t            xferSize   = 0;
-    if (!parseTokenHeader(tokenHeader, clientToken, remoteAddr, xferSize)) {
-        return rdmaFail("PUT", "x-amz-rdma-token did not parse");
-    }
+    const hipObj::RdmaToken &clientToken = tokenHeader.token;
+    size_t                   xferSize    = tokenHeader.length;
     if (size != 0) {
         xferSize = size;
     }

@@ -206,6 +206,22 @@ with it:
   - Don't let exceptions cross the C API. The public functions in
     `src/hipobj.cpp` catch everything and return an error code; keep it that
     way.
+- **Don't convert numbers with the C library's functions**: the `ato*`
+  family (`atoi()`, `atol()`, `atoll()`, `atof()`), the `strto*` family
+  (`strtol()`, `strtoul()`, `strtoll()`, `strtoull()`, `strtod()`, and the
+  rest), or `sscanf()`. The `ato*` functions can't report an error.
+  `sscanf()` reports only how many conversions matched, not whether they
+  consumed all the text, and like the `ato*` functions, it has undefined
+  behavior when a value doesn't fit. The `strto*` functions report errors
+  only through `errno` and an end pointer that are easy to get wrong or
+  skip, and they skip leading whitespace and accept a sign, even for
+  unsigned types. Use `hipObj::parseNumber()` from
+  [`shared/hipobj-parse.h`](shared/hipobj-parse.h), which rejects empty text,
+  trailing characters, and out-of-range values, or `std::from_chars`, and
+  check the result. With `std::from_chars`, check both the error code and
+  that it consumed all the text. The C++11 examples are the one exception,
+  since they can't use either: they use `std::strtoull()`, and check `errno`,
+  the end pointer, and the first character.
 
 ## Portability
 
@@ -217,10 +233,10 @@ so don't add assumptions that only hold on Linux's data model.
   `size_t` for sizes, `ptrdiff_t` for pointer differences, and the fixed-width
   types from `<cstdint>` (`int64_t`, `uint64_t`, `uint32_t`) for everything
   with a defined width, especially values that go on the wire.
-- **Watch the APIs that are tied to `long`**: `strtol`/`strtoul` (use
-  `std::from_chars`, or `strtoll`/`strtoull`), `%ld`/`%lu` format specifiers
+- **Watch the APIs that are tied to `long`**: `%ld`/`%lu` format specifiers
   (use the `<cinttypes>` macros such as `PRIu64`, or `%zu` for `size_t`), and
-  integer literal suffixes (`L`, `UL`).
+  integer literal suffixes (`L`, `UL`). `strtol()` and `strtoul()` are too,
+  but they're banned anyway (see [C++ code](#c-code)).
 - **`off_t` is a known exception.** The public header uses it for offsets, and
   that will be fixed when hipObject moves to rocm-systems. Until then, don't
   change it, and don't spread it into new internal code; use a fixed-width
@@ -359,9 +375,10 @@ configuration files.
   empty for compilers that don't have it, like the existing pairs), add both to
   `StatementMacros` in [`.clang-format`](.clang-format), wrap the smallest
   region you can, and comment why the warning can't be fixed. `shared/` is
-  already on the include path of the library, the unit tests, and
-  `hipobj-rdma-test-server`; add it only to a target that lacks it (the
-  examples, the MinIO bridge, `v2-client-harness`, and `v2-data-client`).
+  already on the include path of the library, the MinIO bridge, the unit
+  tests, `hipobj-rdma-test-server`, `v2-client-harness`, and
+  `v2-data-client`; add it only to a target that lacks it (the examples and
+  `minio-getput-rdma`).
   Third-party code fetched with `FetchContent` is exempt; CMake
   already marks its headers `SYSTEM` and builds it with its warnings off.
 - **clang-tidy**: configure with `-DHIPOBJ_USE_CLANG_TIDY=ON` and Clang as the
