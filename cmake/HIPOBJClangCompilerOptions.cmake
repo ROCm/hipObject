@@ -118,6 +118,9 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     # Anything commented out with no comment isn't supported w/ clang
     # versions in common use. We'll want to update this scheme with
     # one that better respects versions in the future.
+    -Wabstract-vbase-init
+    -Walloca
+    -Wanon-enum-enum-conversion
     -Warc-repeated-use-of-weak
     -Warray-bounds-pointer-arithmetic
     -Wassign-enum
@@ -128,7 +131,9 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wcast-align
     -Wcast-function-type
     -Wcast-qual
+    -Wclass-varargs
     -Wcomma
+    -Wcompound-token-split-by-space
     -Wconditional-uninitialized
     -Wconsumed
     -Wconversion
@@ -138,6 +143,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wdate-time
     -Wdirect-ivar-access
     -Wdisabled-macro-expansion
+    #-Wdocumentation-pedantic # TODO: Fix issues
     -Wdouble-promotion
     -Wdtor-name
     -Wduplicate-enum
@@ -223,6 +229,11 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wunguarded-availability
     -Wunnamed-type-template-args
     -Wunreachable-code-aggressive
+    #-Wunsafe-buffer-usage # TODO: Fix issues
+    -Wunused-exception-parameter
+    -Wunused-macros
+    -Wunused-member-function
+    -Wunused-template
     -Wused-but-marked-unused
     -Wvariadic-macros
     -Wvector-conversion
@@ -274,6 +285,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
 
       # Misc warnings
       -Wignored-base-class-qualifiers
+      #-Wnrvo # TODO: Fix issues
       -Wshift-bool
       -Wunique-object-duplication
       ${flags}
@@ -283,8 +295,6 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
   if(compiler_version VERSION_GREATER_EQUAL 22.1)
     set(flags
       # Misc warnings
-      -Walloc-size
-      -Wenum-compare-typo
       -Wshadow-header
       ${flags}
     )
@@ -296,8 +306,10 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
       # corrupted bool can't steer the optimized code
       -fno-strict-bool
 
+      # Use-after-free, use-after-scope, and dangling reference checks
+      #-Wlifetime-safety # TODO: Fix issues
+
       # Misc warnings
-      -Wattribute-alias
       -Wnonportable-include-path-separator
       ${flags}
     )
