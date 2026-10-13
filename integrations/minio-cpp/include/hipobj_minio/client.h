@@ -57,6 +57,13 @@ class Client {
 public:
     Client(::minio::s3::BaseUrl base_url, ::minio::creds::Provider *provider);
 
+    /* minio-cpp's client can't be copied or moved, so neither can this */
+    Client(const Client &)            = delete;
+    Client &operator=(const Client &) = delete;
+    Client(Client &&)                 = delete;
+    Client &operator=(Client &&)      = delete;
+    ~Client()                         = default;
+
     ::minio::s3::PutObjectResponse PutObject(::minio::s3::PutObjectArgs args);
     ::minio::s3::GetObjectResponse GetObject(::minio::s3::GetObjectArgs args);
 

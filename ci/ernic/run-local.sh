@@ -201,7 +201,8 @@ _rocm_build() {
           export GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt && \
           apt-get update -qq && \
           apt-get install -y -qq git cmake ninja-build libibverbs-dev \
-            libcurl4-openssl-dev libssl-dev && \
+            libcurl4-openssl-dev libssl-dev \
+            nlohmann-json3-dev libpugixml-dev && \
           cmake -B /hipobject-build -G Ninja -S /hipobject \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
@@ -210,8 +211,7 @@ _rocm_build() {
             -DHIPOBJ_BNXT=OFF \
             -DHIPOBJ_INTEGRATION_TESTS=ON \
             -DHIPOBJ_MINIO_CLIENT=${MINIO_ON} \
-            -DHIPOBJ_BUILD_DOCS=OFF \
-            $([ "${MINIO_ON}" = "ON" ] && echo "-DCMAKE_SKIP_INSTALL_RULES=ON") && \
+            -DHIPOBJ_BUILD_DOCS=OFF && \
           cmake --build /hipobject-build --parallel \$(nproc) \
             --target ${TARGETS} && \
           mkdir -p /hipobject-build/rocm-libs && \

@@ -2,7 +2,8 @@ name: hipObject - clang-tidy
 
 # Builds with HIPOBJ_USE_CLANG_TIDY, which runs clang-tidy on each C++
 # file as it's compiled, with the checks in .clang-tidy. Every finding is
-# an error, so the job fails if clang-tidy reports anything.
+# an error, so the job fails if clang-tidy reports anything. It also
+# builds with HIPOBJ_WERROR, so a compiler warning fails it too.
 #
 # This uses upstream clang-tidy rather than ROCm's, which is built
 # without the clang-analyzer-* checks, as hipFile's clang-tidy workflow
@@ -74,7 +75,9 @@ jobs:
 
       # Ninja keeps each command's output together, so clang-tidy's
       # output for one file isn't interleaved with another's in the
-      # build log
+      # build log. The MinIO bridge needs nlohmann-json3-dev and
+      # libpugixml-dev, and libcurlpp-dev saves downloading and building
+      # curlpp.
       - name: Install dependencies
         run: |
           apt-get update
@@ -85,9 +88,12 @@ jobs:
             git \
             gnupg \
             libcurl4-openssl-dev \
+            libcurlpp-dev \
             libibverbs-dev \
+            libpugixml-dev \
             libssl-dev \
-            ninja-build
+            ninja-build \
+            nlohmann-json3-dev
 
       # apt only trusts the key with the known fingerprint, and only for
       # this repository. Exporting the key by its fingerprint from a
@@ -119,8 +125,9 @@ jobs:
       # CLANG_TIDY_EXE is the variable HIPOBJClangTidy.cmake searches
       # for clang-tidy with, so setting it skips the search.
       #
-      # HIPOBJ_WERROR is off: the Build workflow checks for warnings, and
-      # this job is only about clang-tidy.
+      # This builds the MinIO bridge, which the Build workflow's Clang
+      # job (code coverage) doesn't, so HIPOBJ_WERROR is on to make this
+      # the job that fails on Clang's warnings in the bridge.
       - name: Configure
         env:
           CC: /opt/rocm/llvm/bin/amdclang
@@ -129,8 +136,10 @@ jobs:
           cmake -B build -G Ninja \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DBUILD_TESTING=ON \
+            -DHIPOBJ_WERROR=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON \
+            -DHIPOBJ_MINIO_CLIENT=ON \
             -DHIPOBJ_USE_CLANG_TIDY=ON \
             -DCLANG_TIDY_EXE="/usr/bin/clang-tidy-${LLVM_VERSION}"
 
@@ -155,12 +164,12 @@ jobs:
           {
             echo '# clang-tidy findings'
             echo
-            echo 'Findings by check:'
+            echo 'Findings by check or compiler warning:'
             echo '```'
             grep -E ': (warning|error): .*\[[^][]+\]$' \
               build/clang-tidy.log \
               | sort -u \
-              | sed -E 's/.*\[([^][]+)\]$/\1/; s/,-warnings-as-errors$//' \
+              | sed -E 's/.*\[([^][]+)\]$/\1/; s/,-warnings-as-errors$//; s/^-Werror,//' \
               | sort | uniq -c | sort -rn
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"

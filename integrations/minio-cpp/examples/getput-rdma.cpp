@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
@@ -20,7 +19,11 @@
 
 #include <hip/hip_runtime_api.h>
 
-#include <miniocpp/client.h>
+#include <miniocpp/args.h>
+#include <miniocpp/error.h>
+#include <miniocpp/providers.h>
+#include <miniocpp/request.h>
+#include <miniocpp/response.h>
 #include <unistd.h>
 
 #include "hipobj-parse.h"
@@ -139,13 +142,13 @@ main(int argc, char *argv[])
     if (gpu_enabled) {
         hipError_t err = hipMalloc(&dev_ptr, bufsize);
         if (err != hipSuccess) {
-            std::cerr << "hipMalloc failed: " << err << std::endl;
+            std::cerr << "hipMalloc failed: " << hipGetErrorString(err) << "\n";
             return 1;
         }
         buffer.reset(static_cast<char *>(dev_ptr));
         err = hipMemcpy(dev_ptr, expected.data(), bufsize, hipMemcpyHostToDevice);
         if (err != hipSuccess) {
-            std::cerr << "hipMemcpy H2D failed: " << err << std::endl;
+            std::cerr << "hipMemcpy H2D failed: " << hipGetErrorString(err) << "\n";
             return 1;
         }
         (void)hipDeviceSynchronize();
@@ -177,10 +180,12 @@ main(int argc, char *argv[])
 
     minio::s3::PutObjectResponse presp = client.PutObject(pargs);
     if (!presp) {
-        std::cerr << "PUT failed: " << presp.Error().String() << std::endl;
+        std::cerr << "PUT failed: " << presp.Error().String() << "\n";
         return 1;
     }
-    std::cout << "PUT ok etag=" << presp.etag << std::endl;
+    /* Flushed, so the line reaches the log even if the GET hangs and the
+     * process is killed */
+    std::cout << "PUT ok etag=" << presp.etag << "\n" << std::flush;
 
     /* Clobber the buffer before the GET. Without this the readback could be
      * satisfied by whatever the PUT left behind, and a GET that transferred
@@ -201,7 +206,7 @@ main(int argc, char *argv[])
 
     minio::s3::GetObjectResponse gresp = client.GetObject(gargs);
     if (!gresp) {
-        std::cerr << "GET failed: " << gresp.Error().String() << std::endl;
+        std::cerr << "GET failed: " << gresp.Error().String() << "\n";
         return 1;
     }
     std::cout << "GET ok\n";
@@ -211,7 +216,7 @@ main(int argc, char *argv[])
     if (gpu_enabled) {
         hipError_t err = hipMemcpy(hostbuf.data(), dev_ptr, bufsize, hipMemcpyDeviceToHost);
         if (err != hipSuccess) {
-            std::cerr << "hipMemcpy failed: " << err << std::endl;
+            std::cerr << "hipMemcpy failed: " << hipGetErrorString(err) << "\n";
             return 1;
         }
     }

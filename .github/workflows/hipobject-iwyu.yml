@@ -68,7 +68,9 @@ jobs:
           persist-credentials: false
 
       # Ninja keeps each command's output together, so IWYU's output for
-      # one file isn't interleaved with another's in the build log
+      # one file isn't interleaved with another's in the build log. The
+      # MinIO bridge needs nlohmann-json3-dev and libpugixml-dev, and
+      # libcurlpp-dev saves downloading and building curlpp.
       - name: Install dependencies
         run: |
           apt-get update
@@ -77,9 +79,12 @@ jobs:
             git \
             iwyu \
             libcurl4-openssl-dev \
+            libcurlpp-dev \
             libibverbs-dev \
+            libpugixml-dev \
             libssl-dev \
-            ninja-build
+            ninja-build \
+            nlohmann-json3-dev
 
       # CMake hides IWYU's failures (see ci/iwyu/iwyu-wrapper.sh), so it
       # runs IWYU through a wrapper that records every run for the check
@@ -100,6 +105,7 @@ jobs:
             -DBUILD_TESTING=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON \
+            -DHIPOBJ_MINIO_CLIENT=ON \
             -DHIPOBJ_USE_IWYU=ON \
             -DHIPOBJ_IWYU_EXE="$PWD/ci/iwyu/iwyu-wrapper.sh"
 

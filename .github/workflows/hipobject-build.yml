@@ -109,7 +109,10 @@ jobs:
           persist-credentials: false
 
       # rpm provides rpmbuild, so hipObject can build RPM packages here
-      # as well as DEB packages, and the RPM package test runs
+      # as well as DEB packages, and the RPM package test runs.
+      #
+      # The MinIO bridge needs nlohmann-json3-dev and libpugixml-dev.
+      # libcurlpp-dev saves downloading and building curlpp.
       - name: Install dependencies
         run: |
           apt-get update
@@ -117,12 +120,20 @@ jobs:
             cmake \
             git \
             libcurl4-openssl-dev \
+            libcurlpp-dev \
             libibverbs-dev \
+            libpugixml-dev \
             libssl-dev \
+            nlohmann-json3-dev \
             rpm
 
       # HIPOBJ_WERROR makes a new warning fail the build. It only
       # covers hipObject's own targets, not the code FetchContent pulls in.
+      #
+      # Every job but the coverage job builds the MinIO bridge, so it's
+      # compiled with GCC's warnings in each configuration and ctest's
+      # install and package tests include it. The coverage report only
+      # measures src/, so the bridge would only slow that job down.
       #
       # CMake picks the compilers up from CC and CXX, and ignores them when
       # they're empty, as they are for the jobs that don't set cc and cxx.
@@ -137,6 +148,7 @@ jobs:
             -DHIPOBJ_WERROR=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON \
+            -DHIPOBJ_MINIO_CLIENT=${{ matrix.coverage == 'ON' && 'OFF' || 'ON' }} \
             -DHIPOBJECT_V2_API=${{ matrix.v2_api }} \
             -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }} \
             -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizers }} \
