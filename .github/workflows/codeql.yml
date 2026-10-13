@@ -64,6 +64,16 @@ jobs:
         # see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning.
         # If you are analyzing a compiled language, you can modify the 'build-mode' for that language to customize how
         # your codebase is analyzed, see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
+    # With build-mode: none, the C/C++ extractor parses every file as C++17,
+    # so C++20 library types such as std::span don't exist, most files only
+    # partially extract, and the parse errors turn into false alerts (bit-fields
+    # named <error>, comparisons that look constant). This makes the extractor
+    # parse as C++20. Only the C/C++ extractor reads it. It also applies to the
+    # .c files, which fail to extract in C++ mode, so the three test programs
+    # written in C (test/header, test/install/consumer, and ibv-layout-real.c)
+    # aren't scanned.
+    env:
+      CODEQL_EXTRACTOR_CPP_OPTION_FRONTEND_OPTIONS: --c++20
     steps:
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
