@@ -9,6 +9,7 @@
 #include <array>
 #include <cerrno>
 #include <cstdlib>
+#include <memory>
 #include <span>
 #include <string>
 
@@ -21,6 +22,15 @@ fake()
 {
     static FakeDevice device;
     return device;
+}
+
+void
+resetFake()
+{
+    /* Its atomics can't be assigned, so it's rebuilt in place */
+    FakeDevice &f = fake();
+    std::destroy_at(&f);
+    std::construct_at(&f);
 }
 
 void
@@ -59,8 +69,9 @@ setReplyWithPeerToken(const hipObj::RdmaToken &token)
 std::vector<ModifyQpCall>
 modifyQpCalls()
 {
-    const FakeDevice                   &f     = fake();
-    const std::span<const ModifyQpCall> calls = std::span(f.modifyQp).first(f.modifyQpCount);
+    const FakeDevice                   &f = fake();
+    const std::span<const ModifyQpCall> calls =
+        std::span(f.modifyQp).first(std::min(f.modifyQpCount.load(), f.modifyQp.size()));
     return {calls.begin(), calls.end()};
 }
 
@@ -208,14 +219,18 @@ FakeVerbs::create_cq(struct ibv_context *, int, void *, struct ibv_comp_channel 
     if (device_->fail.createCq) {
         return nullptr;
     }
-    ++device_->log.createCq;
-    return reinterpret_cast<struct ibv_cq *>(0x4);
+    auto *cq = static_cast<struct ibv_cq *>(std::calloc(1, sizeof(struct ibv_cq)));
+    if (cq) {
+        ++device_->log.createCq;
+    }
+    return cq;
 }
 
 int
-FakeVerbs::destroy_cq(struct ibv_cq *) const
+FakeVerbs::destroy_cq(struct ibv_cq *cq) const
 {
     ++device_->log.destroyCq;
+    std::free(cq);
     return 0;
 }
 
@@ -228,7 +243,7 @@ FakeVerbs::create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const
     auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
     if (qp) {
         ++device_->log.createQp;
-        qp->qp_num = 0x55;
+        qp->qp_num = device_->nextQpNum++;
     }
     return qp;
 }
@@ -236,8 +251,10 @@ FakeVerbs::create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const
 int
 FakeVerbs::modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask) const
 {
-    if (device_->modifyQpCount < device_->modifyQp.size()) {
-        device_->modifyQp[device_->modifyQpCount++] = {*attr, mask};
+    /* Each call records into its own element */
+    const size_t call = device_->modifyQpCount++;
+    if (call < device_->modifyQp.size()) {
+        device_->modifyQp[call] = {*attr, mask};
     }
     return static_cast<int>(attr->qp_state) == device_->fail.modifyQpToState ? -1 : 0;
 }
@@ -354,7 +371,7 @@ FakeHip::eventCreate(hipEvent_t *event) const
         return device_->eventCreateErr;
     }
     ++device_->log.eventCreate;
-    device_->eventQueriesAtCreate = device_->log.eventQuery;
+    device_->eventQueriesAtCreate = device_->log.eventQuery.load();
     *event                        = fakeEvent();
     return hipSuccess;
 }
@@ -462,9 +479,15 @@ makeOps()
 }
 
 std::vector<hipObj::NicInfo>
-EmptyNicEnumerator::Enumerate(const char *)
+EmptyNicTopology::enumerate(const char *) const
 {
     return {};
+}
+
+int
+EmptyNicTopology::roceVersion(const char *, uint8_t, int) const
+{
+    return -1;
 }
 
 // ---- Fixture ---------------------------------------------------------
@@ -472,13 +495,13 @@ EmptyNicEnumerator::Enumerate(const char *)
 void
 FakeDeviceTest::SetUp()
 {
-    savedState_      = hipObj::setStateForTest(&state_);
-    savedEnumerator_ = hipObj::setNicEnumerator(&enumerator_);
+    savedState_ = hipObj::setStateForTest(&state_);
 
+    fakeTopology_.emplace(topology_);
     fakeHip_.emplace(hip_);
     fakeIbv_.emplace(verbs_);
 
-    fake() = FakeDevice{};
+    resetFake();
 }
 
 void
@@ -487,7 +510,7 @@ FakeDeviceTest::TearDown()
     (void)hipObjShutdown();
     fakeIbv_.reset();
     fakeHip_.reset();
-    hipObj::setNicEnumerator(savedEnumerator_);
+    fakeTopology_.reset();
     hipObj::setStateForTest(savedState_);
 }
 

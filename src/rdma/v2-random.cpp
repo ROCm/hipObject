@@ -23,7 +23,7 @@ namespace v2 {
 
         class GetrandomSource : public RandomSource {
         public:
-            std::optional<uint32_t> next32() override
+            std::optional<uint32_t> next32() const override
             {
                 /* Loop over short reads and EINTR; fail closed on hard errors. */
                 size_t                                      filled = 0;
@@ -50,20 +50,20 @@ namespace v2 {
             }
         };
 
-        GetrandomSource g_defaultSource;
-        RandomSource   *g_override = nullptr;
+        const GetrandomSource g_defaultSource;
+        const RandomSource   *g_override = nullptr;
 
     } // namespace
 
-    RandomSource &randomSource()
+    const RandomSource &randomSource()
     {
-        return g_override ? *g_override : static_cast<RandomSource &>(g_defaultSource);
+        return g_override ? *g_override : static_cast<const RandomSource &>(g_defaultSource);
     }
 
-    RandomSource *setRandomSourceForTest(RandomSource *source)
+    const RandomSource *setRandomSourceForTest(const RandomSource *source)
     {
-        RandomSource *previous = g_override;
-        g_override             = source;
+        const RandomSource *previous = g_override;
+        g_override                   = source;
         return previous;
     }
 

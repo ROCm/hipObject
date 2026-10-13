@@ -38,6 +38,7 @@ using hipObjTest::fake;
 using hipObjTest::fakeDevBuf;
 using hipObjTest::kFakeDmabufFd;
 using hipObjTest::kFakeDmabufOffset;
+using hipObjTest::resetFake;
 
 constexpr size_t kBufSize = 64;
 constexpr int    kAccess  = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
@@ -110,8 +111,8 @@ protected:
         fakeIbv_.emplace(verbs_);
         fakeHip_.emplace(hip_);
 
-        g_log  = {};
-        fake() = hipObjTest::FakeDevice{};
+        g_log = {};
+        resetFake();
     }
 
     void TearDown() override

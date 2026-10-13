@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <initializer_list>
@@ -41,6 +42,7 @@ using hipObjTest::fake;
 using hipObjTest::makeOps;
 using hipObjTest::modifyQpCalls;
 using hipObjTest::peerToken;
+using hipObjTest::resetFake;
 using hipObjTest::setReply;
 using hipObjTest::setReplyWithPeerToken;
 
@@ -123,7 +125,7 @@ TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
 {
     for (bool hipObjTest::Faults::*fault : {&hipObjTest::Faults::openDevice, &hipObjTest::Faults::allocPd,
                                             &hipObjTest::Faults::queryPort, &hipObjTest::Faults::queryGid}) {
-        fake()             = {};
+        resetFake();
         fake().fail.*fault = true;
         {
             hipObj::RcConnection conn;
@@ -385,7 +387,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
          {&hipObjTest::Faults::getDeviceList, &hipObjTest::Faults::openDevice, &hipObjTest::Faults::allocPd,
           &hipObjTest::Faults::queryPort, &hipObjTest::Faults::queryGid, &hipObjTest::Faults::createCq,
           &hipObjTest::Faults::createQp}) {
-        fake()                = {};
+        resetFake();
         fake().fail.*fault    = true;
         hipObjConfig_t config = makeConfig();
         EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);

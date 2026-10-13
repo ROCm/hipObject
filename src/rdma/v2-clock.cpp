@@ -15,26 +15,26 @@ namespace v2 {
 
         class SteadyClock : public ClockSource {
         public:
-            TimePoint now() override
+            TimePoint now() const override
             {
                 return std::chrono::steady_clock::now();
             }
         };
 
-        SteadyClock  g_defaultClock;
-        ClockSource *g_override = nullptr;
+        const SteadyClock  g_defaultClock;
+        const ClockSource *g_override = nullptr;
 
     } // namespace
 
-    ClockSource &clockSource()
+    const ClockSource &clockSource()
     {
-        return g_override ? *g_override : static_cast<ClockSource &>(g_defaultClock);
+        return g_override ? *g_override : static_cast<const ClockSource &>(g_defaultClock);
     }
 
-    ClockSource *setClockSourceForTest(ClockSource *source)
+    const ClockSource *setClockSourceForTest(const ClockSource *source)
     {
-        ClockSource *previous = g_override;
-        g_override            = source;
+        const ClockSource *previous = g_override;
+        g_override                  = source;
         return previous;
     }
 
