@@ -27,7 +27,7 @@
 #     and that the packages don't own ROCm's directories
 
 # A script has no policy settings otherwise, and IN_LIST needs CMP0057
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25.2)
 
 if(NOT SETTINGS)
   message(FATAL_ERROR "run-package-test: SETTINGS is not set")

@@ -120,8 +120,13 @@ list(APPEND CMAKE_PREFIX_PATH
   ${ROCM_PATH})
 
 # Use the rocm-cmake that comes with ROCm, or fetch it if there isn't
-# one. FetchContent_Declare's FIND_PACKAGE_ARGS would do this, but it
-# needs CMake 3.24.
+# one. FetchContent_Declare's FIND_PACKAGE_ARGS can't do this. The
+# package has to be found as ROCmCMakeBuildTools, the name a
+# superproject such as TheRock provides it under, so that has to be the
+# content name too. When it's fetched, FetchContent_MakeAvailable()
+# then writes a stub ROCmCMakeBuildToolsConfig.cmake to
+# CMAKE_FIND_PACKAGE_REDIRECTS_DIR, which every later find_package()
+# for it loads instead of the fetched one.
 find_package(ROCmCMakeBuildTools CONFIG QUIET)
 if(NOT ROCmCMakeBuildTools_FOUND)
   # rocm-cmake is only a collection of CMake modules, so it's

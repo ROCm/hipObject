@@ -7,7 +7,7 @@ Prerequisites
 Required
 ^^^^^^^^
 
-- CMake 3.21 or later
+- CMake 3.25.2 or later
 - ROCm 7.14 or later (provides HIP, HSA runtime)
 - C++20 capable compiler (e.g., g++ or amdclang++ from ROCm)
 
@@ -159,7 +159,7 @@ DEB packages of the ``develop`` branch are built every night
 that it changes, and published as the `nightly prerelease
 <https://github.com/ROCm/hipObject/releases/tag/nightly>`_,
 which each new build replaces. There are packages for Ubuntu
-22.04 and 24.04, each built for ROCm 10.1.0 and 7.14.1. They
+24.04, built for ROCm 10.1.0 and 7.14.1. They
 install into ``/opt/rocm/core-<major>.<minor>``, and their
 release is ``0.<commit time>.g<commit>~<Ubuntu release>``, so
 a newer nightly upgrades an older one. The nightly packages

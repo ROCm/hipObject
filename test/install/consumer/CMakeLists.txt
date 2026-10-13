@@ -7,7 +7,7 @@
 # hipObject dependency itself, so the package has to provide everything.
 # Configured and run by ../run-install-test.cmake.
 
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25.2)
 
 project(hipobj_install_consumer LANGUAGES C)
 

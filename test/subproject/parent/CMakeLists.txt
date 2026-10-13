@@ -8,7 +8,7 @@
 # hipObject finds its files relative to the parent's tree instead of
 # its own. Configured and built by ../run-subproject-test.cmake.
 
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25.2)
 
 project(hipobj_subproject_parent LANGUAGES C CXX)
 
