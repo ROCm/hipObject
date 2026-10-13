@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -12,14 +13,21 @@
 
 namespace hipObj {
 
+enum class RdmaReplyStatus; /* in token.h */
+
+/* A reply received through recvReply */
+struct RdmaReply {
+    std::string_view text;   /* the part of the reply buffer the callback filled */
+    RdmaReplyStatus  status; /* decoded from text */
+};
+
 /* Passes token to sendRequest as is. The library passes an RdmaTokenHex,
  * which keeps a NUL after the digits for callbacks that expect one. */
 int injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token);
 
 /* Receives the reply into replyBuf through recvReply and decodes its RDMA
- * status. On success, reply is the part of replyBuf the callback filled. A
- * callback that reports more than replyBuf holds is an error. */
-int receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf, std::string_view &reply,
-                        int &rdmaStatus);
+ * status. Returns std::nullopt when the callback fails or reports more than
+ * replyBuf holds, or the reply is malformed. */
+std::optional<RdmaReply> receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf);
 
 } // namespace hipObj

@@ -17,8 +17,6 @@
 #include <sstream>
 #include <utility>
 
-#include <sys/types.h>
-
 #include <hip/hip_runtime_api.h>
 
 #include <hipobj.h>
@@ -76,6 +74,18 @@ namespace {
             return false;
         }
         return attr.type == hipMemoryTypeDevice;
+    }
+
+    // Why an RDMA transfer didn't move the data, for messages
+    const char *DescribeFailure(const RdmaResult &result)
+    {
+        if (result.status == RdmaStatus::NotSupported) {
+            return "not supported";
+        }
+        if (result.status == RdmaStatus::Failed) {
+            return "error";
+        }
+        return "no bytes transferred";
     }
 
     class HipObjRuntime {
@@ -307,9 +317,9 @@ Client::PutObject(minio::s3::PutObjectArgs args)
         .region   = region,
     };
 
-    ssize_t ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
-    if (ret > 0) {
-        CountRdmaPut(static_cast<size_t>(ret));
+    const RdmaResult ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
+    if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
+        CountRdmaPut(ret.bytes);
         return RdmaResponse<minio::s3::PutObjectResponse>(std::move(put_ctx.etag));
     }
 
@@ -318,10 +328,11 @@ Client::PutObject(minio::s3::PutObjectArgs args)
     // ordinary one. A caller that handed us a device pointer asked for RDMA.
     if (IsDevicePointer(args.buf)) {
         return minio::s3::PutObjectResponse(
-            minio::error::Error("RDMA PUT failed (" + std::to_string(ret) +
+            minio::error::Error("RDMA PUT failed (" + std::string(DescribeFailure(ret)) +
                                 ") and the payload is device memory; no HTTP fallback is possible"));
     }
-    std::cerr << "hipobj: RDMA PUT failed (" << ret << "); falling back to HTTP" << std::endl;
+    std::cerr << "hipobj: RDMA PUT failed (" << DescribeFailure(ret) << "); falling back to HTTP"
+              << std::endl;
 
     minio::s3::PutObjectArgs http_args = args;
     std::stringstream        ss(std::ios_base::in | std::ios_base::out | std::ios_base::binary);
@@ -383,19 +394,20 @@ Client::GetObject(minio::s3::GetObjectArgs args)
         .region   = region,
     };
 
-    ssize_t ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
-    if (ret > 0) {
-        CountRdmaGet(static_cast<size_t>(ret));
+    const RdmaResult ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
+    if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
+        CountRdmaGet(ret.bytes);
         return RdmaResponse<minio::s3::GetObjectResponse>(std::move(get_ctx.etag));
     }
 
     // As in PutObject: the fallback memcpys into args.buf from the host.
     if (IsDevicePointer(args.buf)) {
         return minio::s3::GetObjectResponse(
-            minio::error::Error("RDMA GET failed (" + std::to_string(ret) +
+            minio::error::Error("RDMA GET failed (" + std::string(DescribeFailure(ret)) +
                                 ") and the destination is device memory; no HTTP fallback is possible"));
     }
-    std::cerr << "hipobj: RDMA GET failed (" << ret << "); falling back to HTTP" << std::endl;
+    std::cerr << "hipobj: RDMA GET failed (" << DescribeFailure(ret) << "); falling back to HTTP"
+              << std::endl;
 
     minio::s3::GetObjectArgs http_args = args;
     char                    *dst       = args.buf;

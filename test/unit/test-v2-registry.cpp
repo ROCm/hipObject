@@ -212,8 +212,7 @@ protected:
         uint64_t                      rid = reg.retired().reserve();
         hipObj::v2::ConnectionEntryV2 entry;
         hipObj::RcConnV2              conn;
-        bool                          rollbackFailed = false;
-        if (hipObj::v2::createRcConnV2(dh, conn, &rollbackFailed) != 0) {
+        if (hipObj::v2::createRcConnV2(dh, conn) != 0) {
             reg.unreserveSlot();
             if (rid) {
                 reg.retired().unreserve(rid);
@@ -252,7 +251,7 @@ TEST_F(V2RegistryTest, RegistryCrudAndLimits)
     EXPECT_EQ(g_fake.createCqCalls, static_cast<int>(reg.kMaxConnections));
     /* Release all. */
     for (auto id : ids) {
-        EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+        EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     }
     EXPECT_EQ(reg.size(), 0U);
 }
@@ -291,7 +290,7 @@ TEST_F(V2RegistryTest, ConnectionOnlyTeardown)
     auto id = makeConn(dh_);
     ASSERT_NE(id, 0U);
     g_fake.deallocPdCalls = 0;
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(g_fake.destroyQpCalls, 1);
     EXPECT_EQ(g_fake.destroyCqCalls, 1);
     EXPECT_EQ(g_fake.deallocPdCalls, 0);
@@ -327,13 +326,13 @@ TEST_F(V2RegistryTest, DestroyQpFailurePoisons)
     auto id = makeConn(dh_);
     ASSERT_NE(id, 0U);
     g_fake.destroyQpFails = 1;
-    EXPECT_NE(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_NE(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_TRUE(hipObj::v2::registry().isPoisoned(id));
     EXPECT_EQ(hipObj::v2::registry().size(), 1U);
     /* The cq was destroyed on the first attempt; the retry only has
      * the failed qp left. */
     EXPECT_EQ(g_fake.destroyCqCalls, 1);
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(hipObj::v2::registry().size(), 0U);
     EXPECT_EQ(g_fake.destroyQpCalls, 2);
 }
@@ -344,11 +343,11 @@ TEST_F(V2RegistryTest, DestroyCqFailurePoisons)
     auto id = makeConn(dh_);
     ASSERT_NE(id, 0U);
     g_fake.destroyCqFails = 1;
-    EXPECT_NE(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_NE(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_TRUE(hipObj::v2::registry().isPoisoned(id));
     int qpDestroys = g_fake.destroyQpCalls;
     /* Retry: qp pointer already nulled; only cq retried. */
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(g_fake.destroyQpCalls, qpDestroys);
     EXPECT_EQ(g_fake.destroyCqCalls, 2);
     EXPECT_EQ(hipObj::v2::registry().size(), 0U);
@@ -357,7 +356,7 @@ TEST_F(V2RegistryTest, DestroyCqFailurePoisons)
 /* Releasing an unknown ConnId is a no-op. */
 TEST_F(V2RegistryTest, UnknownConnIdIsNoOp)
 {
-    EXPECT_EQ(hipObj::v2::releaseConnection(9999), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(9999), hipObj::v2::ReleaseResult::Ok);
     EXPECT_FALSE(hipObj::v2::registry().isPoisoned(9999));
 }
 
@@ -405,8 +404,8 @@ TEST_F(V2RegistryTest, DoubleReleaseClaimsOnce)
 {
     auto id = makeConn(dh_);
     ASSERT_NE(id, 0U);
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0); /* idempotent */
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok); /* idempotent */
     EXPECT_EQ(g_fake.destroyQpCalls, 1);
     EXPECT_EQ(g_fake.destroyCqCalls, 1);
 }
@@ -418,7 +417,7 @@ TEST_F(V2RegistryTest, EraseReleasesCapacity)
     auto  id  = makeConn(dh_);
     ASSERT_NE(id, 0U);
     EXPECT_EQ(reg.size(), 1U);
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(reg.size(), 0U);
     /* Capacity is fully returned: 64 more fit. */
     std::vector<hipObj::v2::ConnId> ids;
@@ -428,7 +427,7 @@ TEST_F(V2RegistryTest, EraseReleasesCapacity)
         ids.push_back(nid);
     }
     for (auto nid : ids) {
-        EXPECT_EQ(hipObj::v2::releaseConnection(nid), 0);
+        EXPECT_EQ(hipObj::v2::releaseConnection(nid), hipObj::v2::ReleaseResult::Ok);
     }
 }
 
@@ -446,7 +445,7 @@ TEST_F(V2RegistryTest, RegistryFullSuppressesCreation)
     EXPECT_EQ(makeConn(dh_), 0U);
     EXPECT_EQ(g_fake.createCqCalls, cqBefore); /* nothing created */
     for (auto id : ids) {
-        EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+        EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     }
 }
 
@@ -461,9 +460,8 @@ TEST_F(V2RegistryTest, PartialRollbackFailureTombstone)
     g_fake.createQpFails  = 1;
     g_fake.destroyCqFails = 1; /* rollback fails too */
     hipObj::RcConnV2 conn;
-    bool             rollbackFailed = false;
-    EXPECT_NE(hipObj::v2::createRcConnV2(dh_, conn, &rollbackFailed), 0);
-    EXPECT_TRUE(rollbackFailed);
+    EXPECT_NE(hipObj::v2::createRcConnV2(dh_, conn), 0);
+    EXPECT_NE(conn.cq, nullptr);
     /* Tombstone: no qp, dangling cq under verb failure, rid held. */
     hipObj::v2::ConnectionEntryV2 entry;
     entry.conn   = std::move(conn); /* cq non-null (destroy failed) */
@@ -476,7 +474,7 @@ TEST_F(V2RegistryTest, PartialRollbackFailureTombstone)
     /* The leftover cq is unreachable until the verb recovers; retry
      * destroys it and finishes. */
     g_fake.destroyCqFails = 0;
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(reg.size(), 0U);
 }
 
@@ -489,9 +487,7 @@ TEST_F(V2RegistryTest, QpCreateFailureCleanRollback)
     uint64_t rid         = reg.retired().reserve();
     g_fake.createQpFails = 1;
     hipObj::RcConnV2 conn;
-    bool             rollbackFailed = false;
-    EXPECT_NE(hipObj::v2::createRcConnV2(dh_, conn, &rollbackFailed), 0);
-    EXPECT_FALSE(rollbackFailed);
+    EXPECT_NE(hipObj::v2::createRcConnV2(dh_, conn), 0);
     EXPECT_EQ(conn.cq, nullptr);
     EXPECT_EQ(conn.qp, nullptr);
     reg.retired().unreserve(rid);
@@ -521,7 +517,7 @@ TEST_F(V2RegistryTest, DefensiveBusyPath)
         ASSERT_NE(r, 0U);
         rids.push_back(r);
     }
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::kReleaseBusy);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Busy);
     /* Entry stayed, not destroyed. */
     EXPECT_EQ(reg.size(), 1U);
     EXPECT_TRUE(reg.withEntry(id, [](hipObj::v2::ConnectionEntryV2 &e) { EXPECT_NE(e.conn.qp, nullptr); }));
@@ -529,7 +525,7 @@ TEST_F(V2RegistryTest, DefensiveBusyPath)
     for (auto r : rids) {
         reg.retired().unreserve(r);
     }
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(reg.size(), 0U);
 }
 
@@ -550,8 +546,7 @@ TEST_F(V2RegistryTest, TopologyFieldsReachQpAttrs)
     EXPECT_EQ(g_fake.qpAttrRqPsn.back()[0], 0xAABBCCU);
     ASSERT_FALSE(g_fake.qpAttrSqPsn.empty());
     EXPECT_EQ(g_fake.qpAttrSqPsn.back()[0], 0x112233U);
-    bool qpOk = true, cqOk = true;
-    hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
+    const auto [qpOk, cqOk] = hipObj::v2::destroyRcConnV2(conn);
     EXPECT_TRUE(qpOk);
     EXPECT_TRUE(cqOk);
 }
@@ -573,8 +568,7 @@ TEST_F(V2RegistryTest, OutOfRangeGidIndexRejected)
     dh_.gidIndex = 255;
     EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(dh_, conn, 42, gid, 0xAABBCC), 0);
     EXPECT_EQ(g_fake.qpAttrRqPsn.size(), 1U);
-    bool qpOk = true, cqOk = true;
-    hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
+    const auto [qpOk, cqOk] = hipObj::v2::destroyRcConnV2(conn);
     EXPECT_TRUE(qpOk);
     EXPECT_TRUE(cqOk);
 }

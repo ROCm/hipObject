@@ -6,6 +6,7 @@
 #include "control.h"
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -22,27 +23,25 @@ injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token)
     return ops->sendRequest(ctx, token.data(), token.size());
 }
 
-int
-receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf, std::string_view &reply,
-                    int &rdmaStatus)
+std::optional<RdmaReply>
+receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf)
 {
     if (!ops || !ops->recvReply || replyBuf.empty()) {
-        return -1;
+        return std::nullopt;
     }
     size_t replyLen = replyBuf.size();
-    int    ret      = ops->recvReply(ctx, replyBuf.data(), &replyLen);
-    if (ret != 0) {
-        return ret;
+    if (ops->recvReply(ctx, replyBuf.data(), &replyLen) != 0) {
+        return std::nullopt;
     }
     if (replyLen > replyBuf.size()) {
-        return -1;
+        return std::nullopt;
     }
     const std::string_view received(replyBuf.data(), replyLen);
-    if (!decodeRdmaReply(received, rdmaStatus)) {
-        return -1;
+    const auto             status = decodeRdmaReply(received);
+    if (!status) {
+        return std::nullopt;
     }
-    reply = received;
-    return 0;
+    return RdmaReply{received, *status};
 }
 
 } // namespace hipObj

@@ -17,6 +17,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 #include "ibv-core.h"
 #include "ibv-ptr.h"
@@ -39,14 +41,21 @@ namespace v2 {
 
     /* Creates the qp/cq pair on dh. On success conn holds both objects,
      * conn.qpNum is captured, and dh.connRefs was incremented. On
-     * failure every partially created object was rolled back (rollback
-     * failures are reported via *rollbackFailed so the caller can raise
-     * a poisoned tombstone). */
-    int createRcConnV2(DeviceHandle &dh, RcConnV2 &conn, bool *rollbackFailed = nullptr);
+     * failure every partially created object was rolled back, except
+     * that a cq the rollback couldn't destroy stays in conn.cq, so the
+     * caller can raise a poisoned tombstone. */
+    int createRcConnV2(DeviceHandle &dh, RcConnV2 &conn);
 
-    /* Destroys conn's qp and cq. Reflects per-object success through
-     * the out flags; the caller feeds them to commitDestroy(). */
-    void destroyRcConnV2(RcConnV2 &conn, bool *qpOk, bool *cqOk);
+    /* Whether destroyRcConnV2() destroyed each object. The caller feeds
+     * them to commitDestroy(). */
+    struct DestroyResult {
+        bool qpOk;
+        bool cqOk;
+    };
+
+    /* Destroys conn's qp and cq. An object that fails to destroy stays in
+     * conn for a retry. */
+    DestroyResult destroyRcConnV2(RcConnV2 &conn);
 
     /* QP state transitions taking the device topology from dh. The v1
      * signatures (RcConnection&) remain unchanged. */
@@ -61,10 +70,12 @@ namespace v2 {
 
     /* Retires a live qp whose (qpn, psn) was already used by a peer:
      * reserves a fresh ring slot, destroys the old qp, records the
-     * tuple, and recreates the qp on the existing cq. On any failure
-     * the entry keeps its live qp and reservation (callers surface the
-     * error); the busy return means the retired ring is exhausted. */
-    int discardAndRecreateQp(ConnId id);
+     * tuple, and recreates the qp on the existing cq. Busy means the
+     * retired ring is full. Leftover means there was nothing to discard
+     * or the old qp wouldn't destroy, which leaves the entry unchanged,
+     * or that the new qp couldn't be created, which releases the entry
+     * (poisoned, if its cq wouldn't destroy either). */
+    ReleaseResult discardAndRecreateQp(ConnId id);
 
     /* Decrements dh.connRefs after a successful releaseRcConnV2 and
      * closes ctx/pd when no MR and no connection remain. */
@@ -72,9 +83,10 @@ namespace v2 {
 
     /* Full v2 release procedure for one registry entry: claim, reserve
      * a retired slot for a live qp, destroy, commit, record, erase.
-     * Returns a hipObj error code (0 = success, busy = deferred,
-     * rdma = leftover/poison). */
-    int releaseConnection(ConnId id);
+     * Releasing an entry that's gone, or that another caller has
+     * claimed, is Ok. Leftover means an object survived its destroy, so
+     * the entry stays, poisoned, for a retry. */
+    ReleaseResult releaseConnection(ConnId id);
 
     /* Posts the zero-SGE receive work request (wr_id = kRecvImm). */
     constexpr uint64_t kRecvImm = 0x5245435632494d4dULL; /* "RECV2IMM" */
@@ -93,9 +105,10 @@ namespace v2 {
         uint32_t cookie; /* expected immediate value (the cookie) */
     };
 
-    /* Validates one work completion against the expectation; returns
-     * false and fills *reason on mismatch. */
-    bool validateDataCompletion(const struct ibv_wc &wc, const WcExpectation &expect, const char **reason);
+    /* Checks one work completion against the expectation. Returns why it
+     * doesn't match, or std::nullopt when it does. */
+    std::optional<std::string_view> dataCompletionMismatch(const struct ibv_wc &wc,
+                                                           const WcExpectation &expect);
 
 } // namespace v2
 } // namespace hipObj

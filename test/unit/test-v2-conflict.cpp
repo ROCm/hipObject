@@ -12,6 +12,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -195,7 +196,7 @@ TEST_F(V2ConflictTest, DiscardAndRecreate)
     });
     size_t recordedBefore = reg.retired().recordedCount();
 
-    ASSERT_EQ(hipObj::v2::discardAndRecreateQp(id), 0);
+    ASSERT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::ReleaseResult::Ok);
 
     reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) {
         EXPECT_NE(e.conn.qp, nullptr);
@@ -213,7 +214,7 @@ TEST_F(V2ConflictTest, DiscardAndRecreate)
     EXPECT_EQ(reg.retired().reservedCount(), 0U);
 
     /* Clean teardown still works afterwards. */
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(reg.size(), 0U);
 }
 
@@ -230,14 +231,14 @@ TEST_F(V2ConflictTest, DiscardRingFullIsBusy)
         ASSERT_NE(r, 0U);
         fills.push_back(r);
     }
-    EXPECT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::kReleaseBusy);
+    EXPECT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::ReleaseResult::Busy);
     void *qp = nullptr;
     reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp.get(); });
     EXPECT_NE(qp, nullptr); /* untouched */
     for (auto r : fills) {
         reg.retired().unreserve(r);
     }
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
 }
 
 /* destroy_qp failure keeps the live qp; nothing recorded. */
@@ -248,12 +249,12 @@ TEST_F(V2ConflictTest, DiscardDestroyFailureKeepsQp)
     ASSERT_NE(id, 0U);
     g_state.destroyQpFails = 1;
     size_t recordedBefore  = reg.retired().recordedCount();
-    EXPECT_NE(hipObj::v2::discardAndRecreateQp(id), 0);
+    EXPECT_NE(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::ReleaseResult::Ok);
     void *qp = nullptr;
     reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp.get(); });
     EXPECT_NE(qp, nullptr);
     EXPECT_EQ(reg.retired().recordedCount(), recordedBefore);
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
 }
 
 /* Recreate failure releases the whole entry: the cq is destroyed
@@ -264,7 +265,7 @@ TEST_F(V2ConflictTest, DiscardRecreateFailureReleases)
     auto  id  = makeEntry();
     ASSERT_NE(id, 0U);
     g_state.createQpFails = 1;
-    EXPECT_NE(hipObj::v2::discardAndRecreateQp(id), 0);
+    EXPECT_NE(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::ReleaseResult::Ok);
     EXPECT_EQ(reg.size(), 0U); /* entry gone */
     EXPECT_EQ(reg.retired().reservedCount(), 0U);
     EXPECT_EQ(reg.pendingReserves(), 0U);
@@ -279,13 +280,13 @@ TEST_F(V2ConflictTest, DiscardWithoutDeviceKeepsQp)
     ASSERT_NE(id, 0U);
     reg.withEntry(id, [](hipObj::v2::ConnectionEntryV2 &e) { e.device = nullptr; });
     size_t reservedBefore = reg.retired().reservedCount();
-    EXPECT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::kReleaseLeftover);
+    EXPECT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::ReleaseResult::Leftover);
     void *qp = nullptr;
     reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp.get(); });
     EXPECT_NE(qp, nullptr);
     EXPECT_TRUE(g_state.destroyedQpns.empty());
     EXPECT_EQ(reg.retired().reservedCount(), reservedBefore);
-    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), hipObj::v2::ReleaseResult::Ok);
 }
 
 /* ---- qp setup and teardown -------------------------------------- */
@@ -459,9 +460,8 @@ TEST_F(V2TransportTest, CreateFailsWithoutCq)
 {
     g_transport.createCqFails = true;
     hipObj::RcConnV2 conn;
-    bool             rollbackFailed = true;
-    EXPECT_EQ(hipObj::v2::createRcConnV2(dh_, conn, &rollbackFailed), -1);
-    EXPECT_FALSE(rollbackFailed);
+    EXPECT_EQ(hipObj::v2::createRcConnV2(dh_, conn), -1);
+    EXPECT_EQ(conn.cq, nullptr);
     EXPECT_EQ(dh_.connRefs.load(), 0U);
     EXPECT_EQ(g_state.createQpCalls, 0);
 }
@@ -515,8 +515,7 @@ TEST_F(WcTestData, GetCompletion)
 {
     auto                      wc = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
     hipObj::v2::WcExpectation exp{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm, 0x1a2b3c4d};
-    const char               *reason = nullptr;
-    EXPECT_TRUE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc, exp), std::nullopt);
 }
 
 /* PUT data phase: RECV plus the immediate cookie. */
@@ -524,30 +523,28 @@ TEST_F(WcTestData, PutCompletion)
 {
     auto                      wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 0x1a2b3c4d);
     hipObj::v2::WcExpectation exp{hipObj::v2::WcKind::kPut, hipObj::v2::kRecvImm, 0x1a2b3c4d};
-    const char               *reason = nullptr;
-    EXPECT_TRUE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc, exp), std::nullopt);
 
     /* Missing immediate flag fails. */
     wc.wc_flags = 0;
-    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc, exp), "immediate flag missing");
 }
 
 /* Wrong opcode and cookie mismatches are rejected. */
 TEST_F(WcTestData, Mismatches)
 {
-    const char               *reason = nullptr;
-    auto                      wc     = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 0x1a2b3c4d);
+    auto                      wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 0x1a2b3c4d);
     hipObj::v2::WcExpectation get{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm, 0x1a2b3c4d};
-    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, get, &reason));
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc, get), "expected RECV_RDMA_WITH_IMM");
 
     auto                      wc2 = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
     hipObj::v2::WcExpectation bad{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm, 0xdeadbeef};
-    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc2, bad, &reason));
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc2, bad), "immediate cookie mismatch");
 
     auto wc3   = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
     wc3.status = IBV_WC_WR_FLUSH_ERR;
     hipObj::v2::WcExpectation ok{hipObj::v2::WcKind::kGet, hipObj::v2::kRecvImm, 0x1a2b3c4d};
-    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc3, ok, &reason));
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc3, ok), "completion status is not success");
 }
 
 /* A completion for some other work request is rejected, for either kind */
@@ -558,9 +555,7 @@ TEST_F(WcTestData, WrongWorkRequest)
         auto wc  = makeWc(op, IBV_WC_WITH_IMM, 0x1a2b3c4d);
         wc.wr_id = hipObj::v2::kRecvImm + 1;
         hipObj::v2::WcExpectation exp{kind, hipObj::v2::kRecvImm, 0x1a2b3c4d};
-        const char               *reason = nullptr;
-        EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, exp, &reason));
-        EXPECT_STREQ(reason, "unexpected wr_id");
+        EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc, exp), "unexpected wr_id");
     }
 }
 
@@ -568,14 +563,12 @@ TEST_F(WcTestData, WrongWorkRequest)
 TEST_F(WcTestData, PutMismatches)
 {
     hipObj::v2::WcExpectation put{hipObj::v2::WcKind::kPut, hipObj::v2::kRecvImm, 0x1a2b3c4d};
-    const char               *reason = nullptr;
 
     auto wc = makeWc(IBV_WC_RECV_RDMA_WITH_IMM, IBV_WC_WITH_IMM, 0x1a2b3c4d);
-    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, put, &reason));
-    EXPECT_STREQ(reason, "expected RECV");
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc, put), "expected RECV");
 
     wc = makeWc(IBV_WC_RECV, IBV_WC_WITH_IMM, 0xdeadbeef);
-    EXPECT_FALSE(hipObj::v2::validateDataCompletion(wc, put, &reason));
+    EXPECT_EQ(hipObj::v2::dataCompletionMismatch(wc, put), "immediate cookie mismatch");
 }
 
 } // namespace

@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -40,22 +41,37 @@ struct RdmaToken {
     uint16_t      lid        = 0;
 };
 
+/* What an x-amz-rdma-reply value says about the transfer */
+enum class RdmaReplyStatus {
+    Success,      /* "ok", or a 200, 204, or 206 status */
+    Failed,       /* "err", or any other status */
+    NotSupported, /* a 501 status: the server doesn't support RDMA */
+};
+
 /* Doesn't allocate, so it's the one the transfer path uses */
 RdmaTokenHex encodeRdmaTokenHex(const RdmaToken &token);
 
 std::string encodeRdmaToken(const RdmaToken &token);
 
-bool decodeRdmaTokenHex(const char *tokenHex, RdmaToken &out);
+/* Decodes exactly kRdmaTokenHexLen hex digits. Returns std::nullopt for
+ * anything else, or for a transport byte that isn't a TransportType. */
+std::optional<RdmaToken> decodeRdmaTokenHex(std::string_view tokenHex);
 
-bool decodeRdmaReply(std::string_view reply, int &status);
+/* The status of an x-amz-rdma-reply value, or std::nullopt when it's
+ * malformed */
+std::optional<RdmaReplyStatus> decodeRdmaReply(std::string_view reply);
 
-bool parseRdmaReplyHttpCode(std::string_view reply, int &httpCode);
+/* The HTTP status in an x-amz-rdma-reply value (200 for "ok", -1 for
+ * "err"), or std::nullopt when it's malformed */
+std::optional<int> parseRdmaReplyHttpCode(std::string_view reply);
 
 bool parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen);
 
 std::string formatRdmaHeaderValue(const char *tokenHex, const void *buf, size_t size);
 
-bool parsePeerTokenFromReply(std::string_view reply, RdmaToken &peerToken, int &httpCode);
+/* The peer token in a "200:" reply, or std::nullopt when the reply is
+ * malformed or doesn't carry one. Only a 200 reply carries a token. */
+std::optional<RdmaToken> parsePeerTokenFromReply(std::string_view reply);
 
 std::string encodeReplyWithPeerToken(int httpCode, const RdmaToken &peerToken);
 

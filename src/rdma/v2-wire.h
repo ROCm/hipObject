@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -74,35 +75,43 @@ namespace v2 {
         std::string checksumB64; /* 12-char canonical base64 text */
     };
 
-    /* Parses a single "Name: value" header line (without CRLF) into name and
-     * value with surrounding OWS trimmed. Returns false for lines without a
-     * colon. name and value view the same characters line does, so they're
-     * only valid as long as those characters are. */
-    bool splitHeaderLine(std::string_view line, std::string_view &name, std::string_view &value);
+    /* A "Name: value" header line, with the OWS around each part trimmed */
+    struct HeaderLine {
+        std::string_view name;
+        std::string_view value;
+    };
+
+    /* Splits a single "Name: value" header line (without CRLF). Returns
+     * std::nullopt for a line without a colon or with an empty name. name
+     * and value view the same characters line does, so they're only valid
+     * as long as those characters are. */
+    std::optional<HeaderLine> splitHeaderLine(std::string_view line);
 
     /* Parses the response to PREPARE. headers is the raw header block with
      * lines separated by \r\n (final empty line optional); httpStatus is the
-     * status code from the status line. Returns false when the block is
-     * malformed in a way that makes the fields unusable. */
-    bool parsePrepareReply(int httpStatus, std::string_view headers, PrepareReply &out);
+     * status code from the status line. Returns std::nullopt when the block
+     * is malformed in a way that makes the fields unusable. */
+    std::optional<PrepareReply> parsePrepareReply(int httpStatus, std::string_view headers);
 
     /* Parses the READY/FINAL response. Same conventions as parsePrepareReply.
      * The checksum field, when present, must be "CRC64NVME " followed by
      * exactly 12 canonical base64 characters (11 data + one trailing '=');
      * otherwise parsing fails. */
-    bool parseFinalReply(int httpStatus, std::string_view headers, FinalReply &out);
+    std::optional<FinalReply> parseFinalReply(int httpStatus, std::string_view headers);
 
     /* Validates a canonical CRC64NVME checksum value: "CRC64NVME " prefix
      * plus 12 base64 chars where the last is '=' and the text round-trips
-     * through strict decode/re-encode. Returns the 12-char text via out when
-     * valid. */
-    bool validateChecksumText(std::string_view headerValue, std::string &out);
+     * through strict decode/re-encode. Returns the 12-char text, which views
+     * the same characters headerValue does, or std::nullopt when the value
+     * isn't valid. */
+    std::optional<std::string_view> validateChecksumText(std::string_view headerValue);
 
     /* Validates a session id (32 lowercase/uppercase hex chars). */
     bool isValidSessionHex(std::string_view s);
 
-    /* Validates a PSN value string: 6 hex chars, value in 1..0xffffff. */
-    bool parsePsn(std::string_view s, uint32_t &psn);
+    /* Parses a PSN value string: 6 hex chars, value in 1..0xffffff.
+     * Returns std::nullopt for anything else. */
+    std::optional<uint32_t> parsePsn(std::string_view s);
 
     /* Formats a cookie or PSN as 8/6 zero-padded lowercase hex digits. */
     std::string formatCookie(uint32_t cookie);

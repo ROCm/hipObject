@@ -137,18 +137,16 @@ TEST_F(NicSeamTest, ClosestBusIdWins)
         {"mlx5_2", "0000:11:00.0", 0, 1},
     };
 
-    const char *dev_name = nullptr;
-    int         idx      = hipObj::GetClosestNicToGpu(0, nullptr, &dev_name);
+    const auto nic = hipObj::GetClosestNicToGpu(0, nullptr);
     // GPU bus 0000:42:00.0: distance 1 for 43, larger for the others.
-    EXPECT_EQ(idx, 1);
-    ASSERT_NE(dev_name, nullptr);
-    EXPECT_STREQ(dev_name, "mlx5_1");
+    ASSERT_TRUE(nic);
+    EXPECT_EQ(nic->index, 1);
+    EXPECT_EQ(nic->name, "mlx5_1");
 }
 
 TEST_F(NicSeamTest, EmptyEnumerationFails)
 {
-    const char *dev_name = nullptr;
-    EXPECT_EQ(hipObj::GetClosestNicToGpu(0, nullptr, &dev_name), -1);
+    EXPECT_FALSE(hipObj::GetClosestNicToGpu(0, nullptr));
 }
 
 TEST_F(NicSeamTest, NoKnownBusIdFails)
@@ -158,9 +156,7 @@ TEST_F(NicSeamTest, NoKnownBusIdFails)
         {"mlx5_1", "", 1, 1},
     };
 
-    const char *dev_name = nullptr;
-    EXPECT_EQ(hipObj::GetClosestNicToGpu(0, nullptr, &dev_name), -1);
-    EXPECT_EQ(dev_name, nullptr);
+    EXPECT_FALSE(hipObj::GetClosestNicToGpu(0, nullptr));
 }
 
 TEST_F(NicSeamTest, FirstOfClosestWins)
@@ -171,16 +167,16 @@ TEST_F(NicSeamTest, FirstOfClosestWins)
         {"mlx5_2", "0000:43:00.1", 1, 1},
     };
 
-    const char *dev_name = nullptr;
-    EXPECT_EQ(hipObj::GetClosestNicToGpu(0, nullptr, &dev_name), 1);
-    ASSERT_NE(dev_name, nullptr);
-    EXPECT_STREQ(dev_name, "mlx5_1");
+    const auto nic = hipObj::GetClosestNicToGpu(0, nullptr);
+    ASSERT_TRUE(nic);
+    EXPECT_EQ(nic->index, 1);
+    EXPECT_EQ(nic->name, "mlx5_1");
 }
 
 TEST_F(NicSeamTest, HcaFilterIsForwarded)
 {
     fake_.nics_ = {{"mlx5_0", "0000:18:00.0", 0, 1}};
-    hipObj::GetClosestNicToGpu(0, "mlx5_0,mlx5_1", nullptr);
+    hipObj::GetClosestNicToGpu(0, "mlx5_0,mlx5_1");
     EXPECT_EQ(fake_.last_hca_list_, "mlx5_0,mlx5_1");
 }
 

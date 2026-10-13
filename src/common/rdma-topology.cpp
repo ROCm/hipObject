@@ -15,15 +15,16 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
-#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -226,35 +227,27 @@ setNicEnumerator(NicEnumerator *enumerator)
     return previous;
 }
 
-int
-GetClosestNicToGpu(int gpuIndex, const char *hca_list, const char **dev_name)
+std::optional<RdmaNic>
+GetClosestNicToGpu(int gpuIndex, const char *hca_list)
 {
     char       gpu_bus_id[32];
     hipError_t err = hipObj::hipOps().hipDeviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id), gpuIndex);
     if (err != hipSuccess)
-        return -1;
+        return std::nullopt;
 
     std::string gpu_bus(gpu_bus_id);
     auto        devices = nicEnumerator().Enumerate(hca_list);
     if (devices.empty())
-        return -1;
+        return std::nullopt;
 
     auto distance = [&gpu_bus](const NicInfo &nic) { return GetBusIdDistance(nic.pcie_bus_id, gpu_bus); };
     /* The first of the closest NICs */
     auto best = std::ranges::min_element(devices, {}, distance);
     /* No NIC has a known bus id */
     if (distance(*best) == std::numeric_limits<int>::max())
-        return -1;
+        return std::nullopt;
 
-    if (dev_name) {
-        /* Static so the pointer returned in *dev_name stays valid */
-        HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-        static std::string s_dev_name;
-        HIPOBJ_WARN_NO_EXIT_DTOR_ON
-        s_dev_name = best->dev_name;
-        *dev_name  = s_dev_name.c_str();
-    }
-    return static_cast<int>(best - devices.begin());
+    return RdmaNic{static_cast<int>(best - devices.begin()), std::move(best->dev_name)};
 }
 
 int
