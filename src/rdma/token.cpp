@@ -31,90 +31,47 @@ namespace {
         return code == 200 || code == 204 || code == 206;
     }
 
-    /* Decodes exactly kRdmaTokenHexLen hex characters. The transport byte
-     * must be one of the TransportType values. */
-    bool decodeTokenHex(std::string_view tokenHex, RdmaToken &out)
-    {
-        if (tokenHex.size() != kRdmaTokenHexLen)
-            return false;
-
-        uint8_t buf[kTokenBinaryLen];
-        for (size_t i = 0; i < kTokenBinaryLen; ++i) {
-            const auto byte = parseNumber<uint8_t>(tokenHex.substr(i * 2, 2), 16);
-            if (!byte)
-                return false;
-            buf[i] = *byte;
-        }
-        /* Any uint8_t is a valid TransportType value, so the cast is
-         * defined even for a byte that names no enumerator */
-        const auto transport = static_cast<TransportType>(buf[0]);
-        if (transport != TransportType::DC && transport != TransportType::RC)
-            return false;
-
-        size_t off    = 1;
-        out.transport = transport;
-        std::memcpy(&out.qpNum, buf + off, 4);
-        off += 4;
-        std::memcpy(out.gid.data(), buf + off, out.gid.size());
-        off += out.gid.size();
-        std::memcpy(&out.rkey, buf + off, 4);
-        off += 4;
-        std::memcpy(&out.remoteAddr, buf + off, 8);
-        off += 8;
-        std::memcpy(&out.length, buf + off, 8);
-        off += 8;
-        out.portNum = buf[off++];
-        std::memcpy(&out.lid, buf + off, 2);
-        return true;
-    }
+    /* An x-amz-rdma-reply value: its HTTP status (200 for "ok", -1 for
+     * "err"), and the peer token if it carries one */
+    struct ParsedReply {
+        int                      httpCode = 0;
+        std::optional<RdmaToken> peerToken;
+    };
 
     /* Parses an x-amz-rdma-reply value in one of the forms docs/interop.rst
      * lists: "ok", "err", a three-digit HTTP status, or "200:" followed by
      * an 88-hex peer token. Trailing NUL, CR, and LF characters are
-     * ignored; anything else that doesn't match is rejected. The outputs are
-     * only written on success, and hasPeerToken says whether peerToken was. */
-    bool parseReply(std::string_view reply, int &httpCode, RdmaToken &peerToken, bool &hasPeerToken)
+     * ignored; anything else that doesn't match is rejected. */
+    std::optional<ParsedReply> parseReply(std::string_view reply)
     {
         std::string_view value = reply;
         while (!value.empty() && (value.back() == '\0' || value.back() == '\n' || value.back() == '\r')) {
             value.remove_suffix(1);
         }
 
-        if (value == "ok") {
-            httpCode     = 200;
-            hasPeerToken = false;
-            return true;
-        }
-        if (value == "err") {
-            httpCode     = -1;
-            hasPeerToken = false;
-            return true;
-        }
+        if (value == "ok")
+            return ParsedReply{200, std::nullopt};
+        if (value == "err")
+            return ParsedReply{-1, std::nullopt};
 
         const std::string_view status = value.substr(0, value.find(':'));
         if (status.size() != 3)
-            return false;
+            return std::nullopt;
         /* Unsigned, so a '-' sign is rejected too */
         const auto parsed = parseNumber<unsigned>(status);
         if (!parsed || *parsed < 100 || *parsed > 599)
-            return false;
+            return std::nullopt;
         const int code = static_cast<int>(*parsed);
 
-        if (status.size() == value.size()) {
-            httpCode     = code;
-            hasPeerToken = false;
-            return true;
-        }
+        if (status.size() == value.size())
+            return ParsedReply{code, std::nullopt};
         /* Only a successful reply carries a peer token */
         if (code != 200)
-            return false;
-        RdmaToken token;
-        if (!decodeTokenHex(value.substr(status.size() + 1), token))
-            return false;
-        httpCode     = code;
-        peerToken    = token;
-        hasPeerToken = true;
-        return true;
+            return std::nullopt;
+        auto token = decodeRdmaTokenHex(value.substr(status.size() + 1));
+        if (!token)
+            return std::nullopt;
+        return ParsedReply{code, token};
     }
 
 } // namespace
@@ -154,43 +111,63 @@ encodeRdmaToken(const RdmaToken &token)
     return {hex.data(), kRdmaTokenHexLen};
 }
 
-bool
-decodeRdmaTokenHex(const char *tokenHex, RdmaToken &out)
+std::optional<RdmaToken>
+decodeRdmaTokenHex(std::string_view tokenHex)
 {
-    if (!tokenHex)
-        return false;
-    /* Bound the scan: anything longer than a token is rejected anyway */
-    return decodeTokenHex(std::string_view(tokenHex, strnlen(tokenHex, kRdmaTokenHexLen + 1)), out);
+    if (tokenHex.size() != kRdmaTokenHexLen)
+        return std::nullopt;
+
+    uint8_t buf[kTokenBinaryLen];
+    for (size_t i = 0; i < kTokenBinaryLen; ++i) {
+        const auto byte = parseNumber<uint8_t>(tokenHex.substr(i * 2, 2), 16);
+        if (!byte)
+            return std::nullopt;
+        buf[i] = *byte;
+    }
+    /* Any uint8_t is a valid TransportType value, so the cast is
+     * defined even for a byte that names no enumerator */
+    const auto transport = static_cast<TransportType>(buf[0]);
+    if (transport != TransportType::DC && transport != TransportType::RC)
+        return std::nullopt;
+
+    RdmaToken token;
+    size_t    off   = 1;
+    token.transport = transport;
+    std::memcpy(&token.qpNum, buf + off, 4);
+    off += 4;
+    std::memcpy(token.gid.data(), buf + off, token.gid.size());
+    off += token.gid.size();
+    std::memcpy(&token.rkey, buf + off, 4);
+    off += 4;
+    std::memcpy(&token.remoteAddr, buf + off, 8);
+    off += 8;
+    std::memcpy(&token.length, buf + off, 8);
+    off += 8;
+    token.portNum = buf[off++];
+    std::memcpy(&token.lid, buf + off, 2);
+    return token;
 }
 
-bool
-parseRdmaReplyHttpCode(std::string_view reply, int &httpCode)
+std::optional<int>
+parseRdmaReplyHttpCode(std::string_view reply)
 {
-    RdmaToken peerToken;
-    bool      hasPeerToken = false;
-    return parseReply(reply, httpCode, peerToken, hasPeerToken);
+    const auto parsed = parseReply(reply);
+    if (!parsed)
+        return std::nullopt;
+    return parsed->httpCode;
 }
 
-bool
-decodeRdmaReply(std::string_view reply, int &status)
+std::optional<RdmaReplyStatus>
+decodeRdmaReply(std::string_view reply)
 {
-    int httpCode = 0;
-    if (!parseRdmaReplyHttpCode(reply, httpCode))
-        return false;
-    if (httpCode == 501) {
-        status = -2;
-        return true;
-    }
-    if (httpCode < 0) {
-        status = -1;
-        return true;
-    }
-    if (isSuccessHttpCode(httpCode)) {
-        status = 0;
-        return true;
-    }
-    status = -1;
-    return true;
+    const auto httpCode = parseRdmaReplyHttpCode(reply);
+    if (!httpCode)
+        return std::nullopt;
+    if (*httpCode == 501)
+        return RdmaReplyStatus::NotSupported;
+    if (isSuccessHttpCode(*httpCode))
+        return RdmaReplyStatus::Success;
+    return RdmaReplyStatus::Failed;
 }
 
 bool
@@ -202,19 +179,21 @@ parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen)
     if (!tokenHex)
         return false;
 
-    RdmaToken token;
-    if (!decodeRdmaTokenHex(tokenHex, token))
+    /* Bound the scan: anything longer than a token is rejected anyway */
+    const auto token =
+        decodeRdmaTokenHex(std::string_view(tokenHex, strnlen(tokenHex, kRdmaTokenHexLen + 1)));
+    if (!token)
         return false;
 
-    if (token.gid[10] != 0xff || token.gid[11] != 0xff)
+    if (token->gid[10] != 0xff || token->gid[11] != 0xff)
         return true;
 
     /* Format into a fixed-size buffer first so the snprintf output is
      * bounded; nicIpLen is caller-supplied. */
     char buf[INET_ADDRSTRLEN];
-    int  n = std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u", static_cast<unsigned>(token.gid[12]),
-                           static_cast<unsigned>(token.gid[13]), static_cast<unsigned>(token.gid[14]),
-                           static_cast<unsigned>(token.gid[15]));
+    int  n = std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u", static_cast<unsigned>(token->gid[12]),
+                           static_cast<unsigned>(token->gid[13]), static_cast<unsigned>(token->gid[14]),
+                           static_cast<unsigned>(token->gid[15]));
     if (n < 0 || static_cast<size_t>(n) >= nicIpLen)
         return false;
     std::memcpy(nicIp, buf, static_cast<size_t>(n) + 1);
@@ -229,17 +208,13 @@ formatRdmaHeaderValue(const char *tokenHex, const void *buf, size_t size)
     return tokenHex ? std::string(tokenHex) : std::string();
 }
 
-bool
-parsePeerTokenFromReply(std::string_view reply, RdmaToken &peerToken, int &httpCode)
+std::optional<RdmaToken>
+parsePeerTokenFromReply(std::string_view reply)
 {
-    int       code = 0;
-    RdmaToken token;
-    bool      hasPeerToken = false;
-    if (!parseReply(reply, code, token, hasPeerToken) || !hasPeerToken)
-        return false;
-    peerToken = token;
-    httpCode  = code;
-    return true;
+    const auto parsed = parseReply(reply);
+    if (!parsed)
+        return std::nullopt;
+    return parsed->peerToken;
 }
 
 std::string

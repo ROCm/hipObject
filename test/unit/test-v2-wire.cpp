@@ -13,7 +13,6 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
-#include <string_view>
 
 #include <gtest/gtest.h>
 
@@ -52,26 +51,28 @@ prepareOkHeaders(const char *session, const char *psn)
 
 TEST(V2Wire, SplitHeaderLine)
 {
-    std::string_view n, v;
-    EXPECT_TRUE(splitHeaderLine("Name: value", n, v));
-    EXPECT_EQ(n, "Name");
-    EXPECT_EQ(v, "value");
-    EXPECT_TRUE(splitHeaderLine("  Padded  :  v  ", n, v));
-    EXPECT_EQ(n, "Padded");
-    EXPECT_EQ(v, "v");
-    EXPECT_FALSE(splitHeaderLine("NoColon", n, v));
-    EXPECT_FALSE(splitHeaderLine(": novalue", n, v));
+    auto header = splitHeaderLine("Name: value");
+    ASSERT_TRUE(header);
+    EXPECT_EQ(header->name, "Name");
+    EXPECT_EQ(header->value, "value");
+    header = splitHeaderLine("  Padded  :  v  ");
+    ASSERT_TRUE(header);
+    EXPECT_EQ(header->name, "Padded");
+    EXPECT_EQ(header->value, "v");
+    EXPECT_FALSE(splitHeaderLine("NoColon"));
+    EXPECT_FALSE(splitHeaderLine(": novalue"));
 }
 
 TEST(V2Wire, PrepareOk)
 {
-    hipObj::v2::PrepareReply r;
-    EXPECT_TRUE(parsePrepareReply(200, prepareOkHeaders(kGoodSession, "01ab01"), r));
-    EXPECT_TRUE(r.protocolEcho);
-    EXPECT_FALSE(r.unsupportedMarker);
-    EXPECT_EQ(r.serverToken, std::string(kGoodToken));
-    EXPECT_EQ(r.session, std::string(kGoodSession));
-    EXPECT_EQ(r.serverPsn, 0x01ab01U);
+    const auto r = parsePrepareReply(200, prepareOkHeaders(kGoodSession, "01ab01"));
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->httpStatus, 200);
+    EXPECT_TRUE(r->protocolEcho);
+    EXPECT_FALSE(r->unsupportedMarker);
+    EXPECT_EQ(r->serverToken, std::string(kGoodToken));
+    EXPECT_EQ(r->session, std::string(kGoodSession));
+    EXPECT_EQ(r->serverPsn, 0x01ab01U);
 }
 
 TEST(V2Wire, PrepareOkCaseInsensitiveHeaderNames)
@@ -80,49 +81,47 @@ TEST(V2Wire, PrepareOkCaseInsensitiveHeaderNames)
     h += std::string("x-amz-rdma-reply: 200:") + kGoodToken + "\r\n";
     h += std::string("X-AMZ-RDMA-SESSION: ") + kGoodSession + "\r\n";
     h += "x-amz-rdma-psn: ffffff\r\n";
-    hipObj::v2::PrepareReply r;
-    EXPECT_TRUE(parsePrepareReply(200, h, r));
-    EXPECT_TRUE(r.protocolEcho);
-    EXPECT_EQ(r.serverPsn, 0xffffffU);
+    const auto r = parsePrepareReply(200, h);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(r->protocolEcho);
+    EXPECT_EQ(r->serverPsn, 0xffffffU);
 }
 
 TEST(V2Wire, PrepareUnsupported)
 {
-    std::string              h = "X-Amz-Rdma-Protocol-Status: unsupported\r\n";
-    hipObj::v2::PrepareReply r;
-    EXPECT_TRUE(parsePrepareReply(501, h, r));
-    EXPECT_FALSE(r.protocolEcho);
-    EXPECT_TRUE(r.unsupportedMarker);
+    std::string h = "X-Amz-Rdma-Protocol-Status: unsupported\r\n";
+    const auto  r = parsePrepareReply(501, h);
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->httpStatus, 501);
+    EXPECT_FALSE(r->protocolEcho);
+    EXPECT_TRUE(r->unsupportedMarker);
 }
 
 TEST(V2Wire, PrepareBare501Rejected)
 {
     /* An unmarked 501 (proxy error etc.) must not look like support
      * negotiation; the marker is what makes 501 protocol-specific. */
-    hipObj::v2::PrepareReply r;
-    EXPECT_TRUE(parsePrepareReply(501, "", r));
-    EXPECT_TRUE(!r.unsupportedMarker);
+    const auto r = parsePrepareReply(501, "");
+    ASSERT_TRUE(r);
+    EXPECT_FALSE(r->unsupportedMarker);
 }
 
 TEST(V2Wire, PrepareMissingEchoIsError)
 {
     std::string h = std::string("X-Amz-Rdma-Reply: 200:") + kGoodToken + "\r\n" +
                     std::string("X-Amz-Rdma-Session: ") + kGoodSession + "\r\nX-Amz-Rdma-Psn: 000001\r\n";
-    hipObj::v2::PrepareReply r;
-    EXPECT_FALSE(parsePrepareReply(200, h, r));
+    EXPECT_FALSE(parsePrepareReply(200, h));
 }
 
 TEST(V2Wire, PrepareZeroPsnIsError)
 {
-    hipObj::v2::PrepareReply r;
-    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders(kGoodSession, "000000"), r));
+    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders(kGoodSession, "000000")));
 }
 
 TEST(V2Wire, PrepareBadSessionRejected)
 {
-    hipObj::v2::PrepareReply r;
-    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders("0123", "000001"), r));
-    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "000001"), r));
+    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders("0123", "000001")));
+    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "000001")));
 }
 
 TEST(V2Wire, PrepareBadTokenRejected)
@@ -131,8 +130,7 @@ TEST(V2Wire, PrepareBadTokenRejected)
     h += "X-Amz-Rdma-Reply: 200:tooshort\r\n";
     h += std::string("X-Amz-Rdma-Session: ") + kGoodSession + "\r\n";
     h += "X-Amz-Rdma-Psn: 000001\r\n";
-    hipObj::v2::PrepareReply r;
-    EXPECT_FALSE(parsePrepareReply(200, h, r));
+    EXPECT_FALSE(parsePrepareReply(200, h));
 }
 
 TEST(V2Wire, FinalGetOk)
@@ -141,12 +139,14 @@ TEST(V2Wire, FinalGetOk)
     h += "X-Amz-Rdma-Cookie: 00c0ffee\r\n";
     h += "X-Amz-Rdma-Bytes-Transferred: 65536\r\n";
     h += "X-Amz-Rdma-Etag: \"abc123\"\r\n";
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(parseFinalReply(200, h, r));
-    EXPECT_TRUE(r.protocolEcho);
-    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
-    EXPECT_EQ(r.bytes, 65536U);
-    EXPECT_EQ(r.etag, "\"abc123\"");
+    const auto r = parseFinalReply(200, h);
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->httpStatus, 200);
+    EXPECT_TRUE(r->protocolEcho);
+    EXPECT_EQ(r->cookieEcho, 0x00c0ffeeU);
+    EXPECT_TRUE(r->cookiePresent);
+    EXPECT_EQ(r->bytes, 65536U);
+    EXPECT_EQ(r->etag, "\"abc123\"");
 }
 
 TEST(V2Wire, FinalOkCaseInsensitiveHeaderNames)
@@ -157,14 +157,14 @@ TEST(V2Wire, FinalOkCaseInsensitiveHeaderNames)
     h += "x-amz-rdma-etag: \"abc123\"\r\n";
     h += "X-amz-Rdma-Version-ID: v7\r\n";
     h += "x-amz-rdma-checksum: CRC64NVME AAAAAAAAAAA=\r\n";
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(parseFinalReply(200, h, r));
-    EXPECT_TRUE(r.protocolEcho);
-    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
-    EXPECT_EQ(r.bytes, 4096U);
-    EXPECT_EQ(r.etag, "\"abc123\"");
-    EXPECT_EQ(r.versionId, "v7");
-    EXPECT_EQ(r.checksumB64, "AAAAAAAAAAA=");
+    const auto r = parseFinalReply(200, h);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(r->protocolEcho);
+    EXPECT_EQ(r->cookieEcho, 0x00c0ffeeU);
+    EXPECT_EQ(r->bytes, 4096U);
+    EXPECT_EQ(r->etag, "\"abc123\"");
+    EXPECT_EQ(r->versionId, "v7");
+    EXPECT_EQ(r->checksumB64, "AAAAAAAAAAA=");
 }
 
 TEST(V2Wire, FinalPutOkWithChecksum)
@@ -176,9 +176,9 @@ TEST(V2Wire, FinalPutOkWithChecksum)
     h += "X-Amz-Rdma-Cookie: deadbeef\r\n";
     h += "X-Amz-Rdma-Bytes-Transferred: 1024\r\n";
     h += "X-Amz-Rdma-Checksum: CRC64NVME AAAAAAAAAAA=\r\n";
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(parseFinalReply(204, h, r));
-    EXPECT_EQ(r.checksumB64, "AAAAAAAAAAA=");
+    const auto r = parseFinalReply(204, h);
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->checksumB64, "AAAAAAAAAAA=");
 }
 
 TEST(V2Wire, FinalChecksumNonCanonicalRejected)
@@ -188,8 +188,7 @@ TEST(V2Wire, FinalChecksumNonCanonicalRejected)
     h += "X-Amz-Rdma-Cookie: deadbeef\r\n";
     h += "X-Amz-Rdma-Bytes-Transferred: 1024\r\n";
     h += "X-Amz-Rdma-Checksum: CRC64NVME AAAAAAAAAAB=\r\n";
-    hipObj::v2::FinalReply r;
-    EXPECT_FALSE(parseFinalReply(204, h, r));
+    EXPECT_FALSE(parseFinalReply(204, h));
 }
 
 TEST(V2Wire, FinalChecksumBadLengthRejected)
@@ -197,35 +196,32 @@ TEST(V2Wire, FinalChecksumBadLengthRejected)
     std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
     h += "X-Amz-Rdma-Cookie: deadbeef\r\n";
     h += "X-Amz-Rdma-Checksum: CRC64NVME AAAA=\r\n";
-    hipObj::v2::FinalReply r;
-    EXPECT_FALSE(parseFinalReply(204, h, r));
+    EXPECT_FALSE(parseFinalReply(204, h));
 }
 
 TEST(V2Wire, FinalMissingCookieRejected)
 {
     std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
     h += "X-Amz-Rdma-Bytes-Transferred: 1\r\n";
-    hipObj::v2::FinalReply r;
-    EXPECT_FALSE(parseFinalReply(200, h, r));
+    EXPECT_FALSE(parseFinalReply(200, h));
 }
 
 TEST(V2Wire, FinalErrHasNoMandatoryCookie)
 {
-    std::string            h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(parseFinalReply(500, h, r));
-    EXPECT_FALSE(r.protocolEcho == false);
+    std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
+    const auto  r = parseFinalReply(500, h);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(r->protocolEcho);
+    EXPECT_FALSE(r->cookiePresent);
 }
 
 TEST(V2Wire, ChecksumTextValidation)
 {
-    std::string out;
-    EXPECT_TRUE(validateChecksumText("CRC64NVME AAAAAAAAAAA=", out));
-    EXPECT_EQ(out, "AAAAAAAAAAA=");
-    EXPECT_FALSE(validateChecksumText("CRC64NV AAAAAAAAAAA=", out));
-    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAAAAAAAA", out));
-    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAAAAAAA==", out));
-    EXPECT_FALSE(validateChecksumText("CRC64NVME =AAAAAAAAAA=", out));
+    EXPECT_EQ(validateChecksumText("CRC64NVME AAAAAAAAAAA="), "AAAAAAAAAAA=");
+    EXPECT_FALSE(validateChecksumText("CRC64NV AAAAAAAAAAA="));
+    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAAAAAAAA"));
+    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAAAAAAA=="));
+    EXPECT_FALSE(validateChecksumText("CRC64NVME =AAAAAAAAAA="));
 }
 
 TEST(V2Wire, SessionHex)
@@ -238,20 +234,14 @@ TEST(V2Wire, SessionHex)
 
 TEST(V2Wire, Psn)
 {
-    uint32_t v = 0;
-    EXPECT_TRUE(parsePsn("000001", v));
-    EXPECT_EQ(v, 1U);
-    EXPECT_TRUE(parsePsn("ffffff", v));
-    EXPECT_EQ(v, 0xffffffU);
-    EXPECT_TRUE(parsePsn("ABCDEF", v));
-    EXPECT_EQ(v, 0xabcdefU);
-    EXPECT_FALSE(parsePsn("000000", v));
-    EXPECT_FALSE(parsePsn("1000000", v));
-    EXPECT_FALSE(parsePsn("zzzzzz", v));
+    EXPECT_EQ(parsePsn("000001"), 1U);
+    EXPECT_EQ(parsePsn("ffffff"), 0xffffffU);
+    EXPECT_EQ(parsePsn("ABCDEF"), 0xabcdefU);
+    EXPECT_FALSE(parsePsn("000000"));
+    EXPECT_FALSE(parsePsn("1000000"));
+    EXPECT_FALSE(parsePsn("zzzzzz"));
     for (const char *psn : {"+00001", "-00001", "0x0001", "00 001", " 00001", "00001 "}) {
-        v = 1234;
-        EXPECT_FALSE(parsePsn(psn, v)) << "psn \"" << psn << "\"";
-        EXPECT_EQ(v, 1234U);
+        EXPECT_FALSE(parsePsn(psn)) << "psn \"" << psn << "\"";
     }
 }
 
@@ -296,9 +286,9 @@ TEST(V2Wire, FinalIgnoresNonAsciiHeaderNames)
      * to 'i' isn't the version header: 0xDD is Turkish capital dotted I in
      * ISO-8859-9, and 0xC4 0xB0 is the same letter in UTF-8 */
     for (const char *name : {"X-Amz-Rdma-Vers\xDDon-Id", "X-Amz-Rdma-Vers\xC4\xB0on-Id"}) {
-        hipObj::v2::FinalReply r;
-        EXPECT_TRUE(parseFinalReply(200, finalOkHeaders() + name + ": v7\r\n", r));
-        EXPECT_EQ(r.versionId, "") << name;
+        const auto r = parseFinalReply(200, finalOkHeaders() + name + ": v7\r\n");
+        ASSERT_TRUE(r) << name;
+        EXPECT_EQ(r->versionId, "") << name;
     }
 }
 
@@ -320,40 +310,35 @@ TEST(V2Wire, HeaderNamesIgnoreLocale)
         GTEST_SKIP() << "needs a Turkish locale, such as tr_TR.UTF-8";
     }
 
-    hipObj::v2::FinalReply upper;
-    const bool upperOk = parseFinalReply(200, finalOkHeaders() + "X-AMZ-RDMA-VERSION-ID: v7\r\n", upper);
-    hipObj::v2::FinalReply nonAscii;
-    const bool             nonAsciiOk =
-        parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Vers\xDDon-Id: v7\r\n", nonAscii);
+    const auto upper    = parseFinalReply(200, finalOkHeaders() + "X-AMZ-RDMA-VERSION-ID: v7\r\n");
+    const auto nonAscii = parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Vers\xDDon-Id: v7\r\n");
     std::setlocale(LC_ALL, saved.c_str());
 
-    EXPECT_TRUE(upperOk) << found;
-    EXPECT_EQ(upper.versionId, "v7") << found;
-    EXPECT_TRUE(nonAsciiOk) << found;
-    EXPECT_EQ(nonAscii.versionId, "") << found;
+    ASSERT_TRUE(upper) << found;
+    EXPECT_EQ(upper->versionId, "v7") << found;
+    ASSERT_TRUE(nonAscii) << found;
+    EXPECT_EQ(nonAscii->versionId, "") << found;
 }
 
 TEST(V2Wire, SplitHeaderLineRejectsEmptyName)
 {
-    std::string_view n, v;
-    EXPECT_FALSE(splitHeaderLine("  : value", n, v));
-    EXPECT_FALSE(splitHeaderLine("\t:value", n, v));
+    EXPECT_FALSE(splitHeaderLine("  : value"));
+    EXPECT_FALSE(splitHeaderLine("\t:value"));
 }
 
 TEST(V2Wire, PrepareToleratesBlankLinesAndMissingFinalCrlf)
 {
-    hipObj::v2::PrepareReply r;
-    std::string              h = "\r\n" + prepareOkHeaders(kGoodSession, "000001") + "\r\n";
-    EXPECT_TRUE(parsePrepareReply(200, h, r));
-    EXPECT_TRUE(parsePrepareReply(200, withoutFinalCrlf(prepareOkHeaders(kGoodSession, "000002")), r));
-    EXPECT_EQ(r.serverPsn, 2U);
+    std::string h = "\r\n" + prepareOkHeaders(kGoodSession, "000001") + "\r\n";
+    EXPECT_TRUE(parsePrepareReply(200, h));
+    const auto r = parsePrepareReply(200, withoutFinalCrlf(prepareOkHeaders(kGoodSession, "000002")));
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->serverPsn, 2U);
 }
 
 TEST(V2Wire, PrepareRejectsMalformedLine)
 {
-    hipObj::v2::PrepareReply r;
-    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders(kGoodSession, "000001") + "NoColon\r\n", r));
-    EXPECT_FALSE(parsePrepareReply(501, "NoColon", r));
+    EXPECT_FALSE(parsePrepareReply(200, prepareOkHeaders(kGoodSession, "000001") + "NoColon\r\n"));
+    EXPECT_FALSE(parsePrepareReply(501, "NoColon"));
 }
 
 TEST(V2Wire, PrepareRejectsMalformedReplyHeader)
@@ -366,8 +351,7 @@ TEST(V2Wire, PrepareRejectsMalformedReplyHeader)
         h += "X-Amz-Rdma-Reply: " + reply + "\r\n";
         h += std::string("X-Amz-Rdma-Session: ") + kGoodSession + "\r\n";
         h += "X-Amz-Rdma-Psn: 000001\r\n";
-        hipObj::v2::PrepareReply r;
-        EXPECT_FALSE(parsePrepareReply(200, h, r)) << "reply " << reply;
+        EXPECT_FALSE(parsePrepareReply(200, h)) << "reply " << reply;
     }
 }
 
@@ -378,24 +362,22 @@ TEST(V2Wire, PrepareSuccessNeedsTokenAndPsn)
     std::string withPsn   = h + "X-Amz-Rdma-Psn: 000001\r\n";
     std::string withToken = h + "X-Amz-Rdma-Reply: 200:" + kGoodToken + "\r\n";
 
-    hipObj::v2::PrepareReply r;
-    EXPECT_FALSE(parsePrepareReply(200, withPsn, r));
-    EXPECT_FALSE(parsePrepareReply(200, withToken, r));
-    EXPECT_FALSE(parsePrepareReply(200, withToken + "X-Amz-Rdma-Psn: zzzzzz\r\n", r));
+    EXPECT_FALSE(parsePrepareReply(200, withPsn));
+    EXPECT_FALSE(parsePrepareReply(200, withToken));
+    EXPECT_FALSE(parsePrepareReply(200, withToken + "X-Amz-Rdma-Psn: zzzzzz\r\n"));
 }
 
 TEST(V2Wire, FinalToleratesBlankLinesAndMissingFinalCrlf)
 {
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(parseFinalReply(200, "\r\n" + finalOkHeaders() + "\r\n", r));
-    EXPECT_TRUE(parseFinalReply(200, withoutFinalCrlf(finalOkHeaders()), r));
-    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
+    EXPECT_TRUE(parseFinalReply(200, "\r\n" + finalOkHeaders() + "\r\n"));
+    const auto r = parseFinalReply(200, withoutFinalCrlf(finalOkHeaders()));
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->cookieEcho, 0x00c0ffeeU);
 }
 
 TEST(V2Wire, FinalRejectsMalformedLine)
 {
-    hipObj::v2::FinalReply r;
-    EXPECT_FALSE(parseFinalReply(200, finalOkHeaders() + "NoColon\r\n", r));
+    EXPECT_FALSE(parseFinalReply(200, finalOkHeaders() + "NoColon\r\n"));
 }
 
 TEST(V2Wire, FinalRejectsMalformedCookie)
@@ -404,38 +386,35 @@ TEST(V2Wire, FinalRejectsMalformedCookie)
                                "-0c0ffee", "00 c0ffe"}) {
         std::string h = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n";
         h += std::string("X-Amz-Rdma-Cookie: ") + cookie + "\r\n";
-        hipObj::v2::FinalReply r;
-        EXPECT_FALSE(parseFinalReply(200, h, r)) << "cookie \"" << cookie << "\"";
+        EXPECT_FALSE(parseFinalReply(200, h)) << "cookie \"" << cookie << "\"";
     }
 
     /* Hex digits in either case are fine */
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(
-        parseFinalReply(200, "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\nX-Amz-Rdma-Cookie: 00C0FFEE\r\n", r));
-    EXPECT_EQ(r.cookieEcho, 0x00c0ffeeU);
+    const auto r =
+        parseFinalReply(200, "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\nX-Amz-Rdma-Cookie: 00C0FFEE\r\n");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->cookieEcho, 0x00c0ffeeU);
 }
 
 TEST(V2Wire, FinalRejectsMalformedBytesTransferred)
 {
     for (const char *bytes : {"", "12a", "-1", "+1", "1 2", "0x10"}) {
-        std::string            h = finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: " + bytes + "\r\n";
-        hipObj::v2::FinalReply r;
-        EXPECT_FALSE(parseFinalReply(200, h, r)) << "bytes \"" << bytes << "\"";
+        std::string h = finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: " + bytes + "\r\n";
+        EXPECT_FALSE(parseFinalReply(200, h)) << "bytes \"" << bytes << "\"";
     }
 }
 
 TEST(V2Wire, FinalReadsVersionId)
 {
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Version-Id: v42\r\n", r));
-    EXPECT_EQ(r.versionId, "v42");
+    const auto r = parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Version-Id: v42\r\n");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->versionId, "v42");
 }
 
 TEST(V2Wire, FinalSuccessNeedsProtocolEcho)
 {
     for (int status : {200, 204}) {
-        hipObj::v2::FinalReply r;
-        EXPECT_FALSE(parseFinalReply(status, "X-Amz-Rdma-Cookie: 00c0ffee\r\n", r)) << "status " << status;
+        EXPECT_FALSE(parseFinalReply(status, "X-Amz-Rdma-Cookie: 00c0ffee\r\n")) << "status " << status;
     }
 }
 
@@ -457,15 +436,12 @@ constexpr const char *kChecksumVectors[] = {
 TEST(V2Wire, ChecksumAcceptsCanonicalBase64)
 {
     for (const char *checksum : kChecksumVectors) {
-        std::string out;
-        EXPECT_TRUE(validateChecksumText(std::string("CRC64NVME ") + checksum, out)) << checksum;
-        EXPECT_EQ(out, checksum);
+        const std::string value = std::string("CRC64NVME ") + checksum;
+        EXPECT_EQ(validateChecksumText(value), checksum);
 
-        hipObj::v2::FinalReply r;
-        EXPECT_TRUE(
-            parseFinalReply(204, finalOkHeaders() + "X-Amz-Rdma-Checksum: CRC64NVME " + checksum + "\r\n", r))
-            << checksum;
-        EXPECT_EQ(r.checksumB64, checksum);
+        const auto r = parseFinalReply(204, finalOkHeaders() + "X-Amz-Rdma-Checksum: " + value + "\r\n");
+        ASSERT_TRUE(r) << checksum;
+        EXPECT_EQ(r->checksumB64, checksum);
     }
 }
 
@@ -481,40 +457,39 @@ TEST(V2Wire, ChecksumRejectsPaddingBits)
             size_t      v    = alphabet.find(text[10]);
             ASSERT_NE(v, std::string::npos);
             text[10] = alphabet[v | padding];
-            std::string out;
-            EXPECT_FALSE(validateChecksumText("CRC64NVME " + text, out)) << text;
+            EXPECT_FALSE(validateChecksumText("CRC64NVME " + text)) << text;
         }
     }
 }
 
 TEST(V2Wire, FinalRejectsBytesTransferredThatOverflows)
 {
-    hipObj::v2::FinalReply r;
-    EXPECT_TRUE(
-        parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: 18446744073709551615\r\n", r));
-    EXPECT_EQ(r.bytes, std::numeric_limits<uint64_t>::max());
+    auto r =
+        parseFinalReply(200, finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: 18446744073709551615\r\n");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->bytes, std::numeric_limits<uint64_t>::max());
 
     /* UINT64_MAX + 1, which overflows in the addition; and a value that
      * overflows in the multiplication. Neither may wrap to a small count. */
     for (const char *bytes : {"18446744073709551616", "18446744073709551620", "99999999999999999999",
                               "100000000000000000000", "184467440737095516150"}) {
         std::string h = finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: " + bytes + "\r\n";
-        EXPECT_FALSE(parseFinalReply(200, h, r)) << "bytes " << bytes;
+        EXPECT_FALSE(parseFinalReply(200, h)) << "bytes " << bytes;
     }
 
     /* Leading zeros don't overflow */
-    EXPECT_TRUE(parseFinalReply(
-        200, finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: 0000000000000000000000042\r\n", r));
-    EXPECT_EQ(r.bytes, 42U);
+    r = parseFinalReply(200,
+                        finalOkHeaders() + "X-Amz-Rdma-Bytes-Transferred: 0000000000000000000000042\r\n");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->bytes, 42U);
 }
 
 TEST(V2Wire, ChecksumRejectsMalformedText)
 {
-    std::string out;
     /* 12 characters, but no padding */
-    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAAAAAAAAA", out));
+    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAAAAAAAAA"));
     /* Not base64 */
-    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAA-AAAAA=", out));
+    EXPECT_FALSE(validateChecksumText("CRC64NVME AAAAA-AAAAA="));
 }
 
 TEST(V2Wire, EnumAbiCompat)

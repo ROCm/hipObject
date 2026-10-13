@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <string_view>
 
 #include "ibv-core.h"
 #include "ibv-gid.h"
@@ -34,20 +36,23 @@ namespace {
     bool parseTokenHeader(const std::string &header, hipObj::RdmaToken &token, uint64_t &remoteAddr,
                           size_t &size)
     {
-        size_t c1 = header.find(':');
+        /* The token, optionally followed by ":<addr>:<len>" */
+        const size_t c1      = header.find(':');
+        const auto   decoded = hipObj::decodeRdmaTokenHex(std::string_view(header).substr(0, c1));
+        if (!decoded) {
+            return false;
+        }
         if (c1 == std::string::npos) {
+            token      = *decoded;
             remoteAddr = 0;
             size       = 0;
-            return hipObj::decodeRdmaTokenHex(header.c_str(), token);
+            return true;
         }
         size_t c2 = header.find(':', c1 + 1);
         if (c2 == std::string::npos) {
             return false;
         }
-        std::string tokenHex = header.substr(0, c1);
-        if (!hipObj::decodeRdmaTokenHex(tokenHex.c_str(), token)) {
-            return false;
-        }
+        token      = *decoded;
         remoteAddr = std::strtoull(header.substr(c1 + 1, c2 - c1 - 1).c_str(), nullptr, 16);
         size       = static_cast<size_t>(std::strtoull(header.substr(c2 + 1).c_str(), nullptr, 16));
         if (remoteAddr != 0) {

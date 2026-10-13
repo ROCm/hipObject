@@ -67,11 +67,14 @@ struct RcConnV2 final {
 
 namespace v2 {
 
-    /* releaseConnection() result codes (mapped to hipObj errors at the
-     * API boundary). */
-    constexpr int kReleaseOk       = 0;
-    constexpr int kReleaseBusy     = 1;
-    constexpr int kReleaseLeftover = 2;
+    /* What releaseConnection() and discardAndRecreateQp() did (mapped to
+     * hipObj errors at the API boundary). Each function says what
+     * Leftover leaves behind. */
+    enum class ReleaseResult {
+        Ok,
+        Busy,     /* the retired ring is full and nothing changed; retry later */
+        Leftover, /* the release or recreate failed */
+    };
 
     using ConnId = uint64_t;
 

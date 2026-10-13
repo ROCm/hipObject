@@ -8,7 +8,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string>
 
 #include "gid.h"
 
@@ -41,7 +43,18 @@ struct GidCandidate {
  * qualifies. */
 int PickBestGid(std::span<const GidCandidate> candidates);
 
-int GetClosestNicToGpu(int gpuIndex, const char *hca_list, const char **dev_name);
+/* An RDMA NIC: its index in the NIC enumerator's list, and its device
+ * name */
+struct RdmaNic {
+    int         index;
+    std::string name;
+};
+
+/* The NIC with a known PCIe bus id closest to the GPU's, picking the
+ * first of the closest, among the NICs that hca_list (comma-separated
+ * device names, or null for all) allows. std::nullopt when there's no
+ * such NIC or the GPU's bus id can't be found. */
+std::optional<RdmaNic> GetClosestNicToGpu(int gpuIndex, const char *hca_list);
 
 int SelectBestGid(ibv_context *ctx, uint8_t port_num);
 

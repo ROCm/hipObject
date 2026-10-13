@@ -8,6 +8,8 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 
 #include <sys/random.h>
 #include <sys/types.h>
@@ -19,7 +21,7 @@ namespace v2 {
 
         class GetrandomSource : public RandomSource {
         public:
-            bool next32(uint32_t &out) override
+            std::optional<uint32_t> next32() override
             {
                 /* Loop over short reads and EINTR; fail closed on hard errors. */
                 size_t        filled = 0;
@@ -30,10 +32,10 @@ namespace v2 {
                         if (errno == EINTR) {
                             continue;
                         }
-                        return false;
+                        return std::nullopt;
                     }
                     if (n == 0) {
-                        return false;
+                        return std::nullopt;
                     }
                     filled += static_cast<size_t>(n);
                 }
@@ -41,8 +43,7 @@ namespace v2 {
                 for (size_t i = 0; i < sizeof(buf); ++i) {
                     value = (value << 8) | buf[i];
                 }
-                out = value;
-                return true;
+                return value;
             }
         };
 
@@ -63,25 +64,24 @@ namespace v2 {
         return previous;
     }
 
-    bool nextClientPsn(uint32_t &psn)
+    std::optional<uint32_t> nextClientPsn()
     {
         for (int attempt = 0; attempt < 3; ++attempt) {
-            uint32_t value = 0;
-            if (!randomSource().next32(value)) {
-                return false;
+            const auto value = randomSource().next32();
+            if (!value) {
+                return std::nullopt;
             }
-            value &= 0x00ffffff; /* PSNs are 24-bit on the wire */
-            if (value != 0) {
-                psn = value;
-                return true;
+            const uint32_t psn = *value & 0x00ffffff; /* PSNs are 24-bit on the wire */
+            if (psn != 0) {
+                return psn;
             }
         }
-        return false;
+        return std::nullopt;
     }
 
-    bool nextCookie(uint32_t &cookie)
+    std::optional<uint32_t> nextCookie()
     {
-        return randomSource().next32(cookie);
+        return randomSource().next32();
     }
 
 } // namespace v2

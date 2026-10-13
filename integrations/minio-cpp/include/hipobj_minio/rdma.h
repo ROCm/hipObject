@@ -31,18 +31,30 @@ inline constexpr int kRdmaReplyNoContent      = 204;
 inline constexpr int kRdmaReplyPartialContent = 206;
 inline constexpr int kRdmaReplyNotImplemented = 501;
 
-inline constexpr ssize_t kRdmaNotSupported = -2;
-
 inline constexpr long kRdmaConnectTimeoutSecs = 5;
 inline constexpr long kRdmaTimeoutSecs        = 10;
 inline constexpr int  kRdmaMaxAttempts        = 2;
 
-ssize_t rdmaPut(S3RdmaContext *ctx, const char *token, const void *buf, size_t size);
+/* How an RDMA transfer ended */
+enum class RdmaStatus {
+    Ok,
+    Failed,
+    NotSupported, /* the server can't do this transfer by RDMA; use HTTP */
+};
 
-ssize_t rdmaGet(S3RdmaContext *ctx, const char *token, const void *buf, size_t size);
+/* The outcome of an RDMA transfer, and the bytes it moved when it
+ * succeeded */
+struct RdmaResult {
+    RdmaStatus status = RdmaStatus::Failed;
+    size_t     bytes  = 0;
+};
 
-ssize_t rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size);
+RdmaResult rdmaPut(S3RdmaContext *ctx, const char *token, const void *buf, size_t size);
 
-ssize_t rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size);
+RdmaResult rdmaGet(S3RdmaContext *ctx, const char *token, const void *buf, size_t size);
+
+RdmaResult rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size);
+
+RdmaResult rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size);
 
 } // namespace hipobj::minio

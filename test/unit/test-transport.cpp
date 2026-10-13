@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -562,12 +563,12 @@ TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
         ASSERT_EQ(sent.len, hipObj::kRdmaTokenHexLen);
         EXPECT_EQ(sent.bytes[hipObj::kRdmaTokenHexLen], '\0');
 
-        hipObj::RdmaToken token;
-        ASSERT_TRUE(hipObj::decodeRdmaTokenHex(sent.bytes.data(), token));
-        EXPECT_EQ(token.transport, hipObj::TransportType::RC);
-        EXPECT_EQ(token.rkey, 0x1234U);
-        EXPECT_EQ(token.remoteAddr, reinterpret_cast<uint64_t>(kDevBuf) + kOffset);
-        EXPECT_EQ(token.length, kSize);
+        const auto token = hipObj::decodeRdmaTokenHex(std::string_view(sent.bytes.data(), sent.len));
+        ASSERT_TRUE(token);
+        EXPECT_EQ(token->transport, hipObj::TransportType::RC);
+        EXPECT_EQ(token->rkey, 0x1234U);
+        EXPECT_EQ(token->remoteAddr, reinterpret_cast<uint64_t>(kDevBuf) + kOffset);
+        EXPECT_EQ(token->length, kSize);
     }
 }
 

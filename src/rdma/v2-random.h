@@ -11,6 +11,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 namespace hipObj {
 namespace v2 {
@@ -26,10 +27,10 @@ namespace v2 {
         RandomSource(RandomSource &&)                 = delete;
         RandomSource &operator=(RandomSource &&)      = delete;
 
-        /* Draws 32 random bits. Returns false only when the underlying
-         * entropy source failed; callers treat that as an internal error
-         * rather than falling back to a constant. */
-        virtual bool next32(uint32_t &out) = 0;
+        /* Draws 32 random bits. Returns std::nullopt only when the
+         * underlying entropy source failed; callers treat that as an
+         * internal error rather than falling back to a constant. */
+        virtual std::optional<uint32_t> next32() = 0;
     };
 
     /* Returns the active source (production default unless a test
@@ -42,12 +43,13 @@ namespace v2 {
     RandomSource *setRandomSourceForTest(RandomSource *source);
 
     /* Draws a 24-bit non-zero PSN. Retries up to twice when the draw
-     * masks to zero; returns false when the source failed or every
-     * draw was zero. */
-    bool nextClientPsn(uint32_t &psn);
+     * masks to zero; returns std::nullopt when the source failed or
+     * every draw was zero. */
+    std::optional<uint32_t> nextClientPsn();
 
-    /* Draws a full 32-bit completion cookie (0 is a valid cookie). */
-    bool nextCookie(uint32_t &cookie);
+    /* Draws a full 32-bit completion cookie (0 is a valid cookie), or
+     * returns std::nullopt when the source failed. */
+    std::optional<uint32_t> nextCookie();
 
 } // namespace v2
 } // namespace hipObj

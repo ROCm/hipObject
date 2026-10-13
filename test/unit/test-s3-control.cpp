@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstring>
 #include <initializer_list>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -20,6 +21,7 @@
 #include "control.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
+#include "token.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -68,10 +70,9 @@ protected:
         ops_.recvReply   = &fakeRecvReply;
     }
 
-    int receive(int &status)
+    std::optional<hipObj::RdmaReply> receive()
     {
-        std::string_view reply;
-        return hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_, reply, status);
+        return hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_);
     }
 
     hipObjOps_t           ops_ = {};
@@ -101,30 +102,30 @@ TEST_F(S3ControlTest, SendNeedsCallback)
 
 TEST_F(S3ControlTest, ReceiveDecodesStatus)
 {
-    int              status = 99;
-    std::string_view reply;
-    ASSERT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_, reply, status), 0);
-    EXPECT_EQ(status, 0);
-    EXPECT_EQ(reply, "200");
-    EXPECT_EQ(reply.data(), buf_.data());
+    auto reply = receive();
+    ASSERT_TRUE(reply);
+    EXPECT_EQ(reply->status, hipObj::RdmaReplyStatus::Success);
+    EXPECT_EQ(reply->text, "200");
+    EXPECT_EQ(reply->text.data(), buf_.data());
     EXPECT_EQ(g_callbacks.ctx, &ctx_);
 
     g_callbacks.reply = "404";
-    ASSERT_EQ(receive(status), 0);
-    EXPECT_EQ(status, -1);
+    reply             = receive();
+    ASSERT_TRUE(reply);
+    EXPECT_EQ(reply->status, hipObj::RdmaReplyStatus::Failed);
 
     /* The server doesn't support RDMA */
     g_callbacks.reply = "501";
-    ASSERT_EQ(receive(status), 0);
-    EXPECT_EQ(status, -2);
+    reply             = receive();
+    ASSERT_TRUE(reply);
+    EXPECT_EQ(reply->status, hipObj::RdmaReplyStatus::NotSupported);
 }
 
 TEST_F(S3ControlTest, ReceiveRejectsMalformedReply)
 {
-    int status = 0;
     for (std::string_view reply : {"", "2000", "abc", "200x"}) {
         g_callbacks.reply = reply;
-        EXPECT_EQ(receive(status), -1) << "reply \"" << reply << "\"";
+        EXPECT_FALSE(receive()) << "reply \"" << reply << "\"";
     }
 }
 
@@ -135,35 +136,29 @@ TEST_F(S3ControlTest, ReceiveRejectsLengthPastBuffer)
      * bytes. The fourth is the NUL after the buffer, which the parser
      * would skip and accept the reply if it read it. */
     const std::span<char> replyBuf(buf_.data(), 3);
-    g_callbacks.extraLen    = 1;
-    int              status = 99;
-    std::string_view reply  = "untouched";
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf, reply, status), -1);
-    EXPECT_EQ(status, 99);
-    EXPECT_EQ(reply, "untouched");
+    g_callbacks.extraLen = 1;
+    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf));
 
     /* Filling the buffer exactly is fine */
     g_callbacks.extraLen = 0;
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf, reply, status), 0);
-    EXPECT_EQ(status, 0);
-    EXPECT_EQ(reply, "200");
+    const auto reply     = hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf);
+    ASSERT_TRUE(reply);
+    EXPECT_EQ(reply->status, hipObj::RdmaReplyStatus::Success);
+    EXPECT_EQ(reply->text, "200");
 }
 
 TEST_F(S3ControlTest, ReceiveReportsCallbackFailure)
 {
     g_callbacks.recvRet = 3;
-    int status          = 0;
-    EXPECT_EQ(receive(status), 3);
+    EXPECT_FALSE(receive());
 }
 
 TEST_F(S3ControlTest, ReceiveNeedsCallbackAndBuffer)
 {
-    int              status = 0;
-    std::string_view reply;
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(nullptr, &ctx_, buf_, reply, status), -1);
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, {}, reply, status), -1);
+    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(nullptr, &ctx_, buf_));
+    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, {}));
     ops_.recvReply = nullptr;
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_, reply, status), -1);
+    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_));
 }
 
 } // namespace

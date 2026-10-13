@@ -123,21 +123,20 @@ namespace v2 {
 
     } // namespace
 
-    bool splitHeaderLine(std::string_view line, std::string_view &name, std::string_view &value)
+    std::optional<HeaderLine> splitHeaderLine(std::string_view line)
     {
         size_t colon = line.find(':');
         if (colon == std::string_view::npos || colon == 0)
-            return false;
-        name  = trimOws(line.substr(0, colon));
-        value = trimOws(line.substr(colon + 1));
-        if (name.empty())
-            return false;
-        return true;
+            return std::nullopt;
+        const HeaderLine header{trimOws(line.substr(0, colon)), trimOws(line.substr(colon + 1))};
+        if (header.name.empty())
+            return std::nullopt;
+        return header;
     }
 
-    bool parsePrepareReply(int httpStatus, std::string_view headers, PrepareReply &out)
+    std::optional<PrepareReply> parsePrepareReply(int httpStatus, std::string_view headers)
     {
-        out            = PrepareReply();
+        PrepareReply out;
         out.httpStatus = httpStatus;
         size_t pos     = 0;
         while (pos < headers.size()) {
@@ -148,9 +147,10 @@ namespace v2 {
             pos                         = (eol == headers.size()) ? headers.size() : eol + 2;
             if (line.empty())
                 continue;
-            std::string_view name, value;
-            if (!splitHeaderLine(line, name, value))
-                return false;
+            const auto header = splitHeaderLine(line);
+            if (!header)
+                return std::nullopt;
+            const auto [name, value] = *header;
             if (headerNameIs(name, kProtocolHeader) && value == kProtocolValue) {
                 out.protocolEcho = true;
             }
@@ -162,36 +162,38 @@ namespace v2 {
                  * the payload after the prefix. */
                 constexpr std::string_view kReplyOkPrefix = "200:";
                 if (!value.starts_with(kReplyOkPrefix))
-                    return false;
+                    return std::nullopt;
                 const std::string_view token = value.substr(kReplyOkPrefix.size());
                 if (token.size() != kTokenHexLen)
-                    return false;
+                    return std::nullopt;
                 out.serverToken = token;
             }
             else if (headerNameIs(name, kSessionHeader)) {
                 out.session = value;
             }
             else if (headerNameIs(name, kPsnHeader)) {
-                if (!parsePsn(value, out.serverPsn))
-                    return false;
+                const auto psn = parsePsn(value);
+                if (!psn)
+                    return std::nullopt;
+                out.serverPsn = *psn;
             }
         }
         if (out.httpStatus == 200) {
             if (!out.protocolEcho)
-                return false;
+                return std::nullopt;
             if (!isValidSessionHex(out.session))
-                return false;
+                return std::nullopt;
             if (out.serverToken.size() != kTokenHexLen)
-                return false;
+                return std::nullopt;
             if (out.serverPsn == 0)
-                return false;
+                return std::nullopt;
         }
-        return true;
+        return out;
     }
 
-    bool parseFinalReply(int httpStatus, std::string_view headers, FinalReply &out)
+    std::optional<FinalReply> parseFinalReply(int httpStatus, std::string_view headers)
     {
-        out              = FinalReply();
+        FinalReply out;
         out.httpStatus   = httpStatus;
         bool   sawCookie = false;
         size_t pos       = 0;
@@ -203,18 +205,19 @@ namespace v2 {
             pos                         = (eol == headers.size()) ? headers.size() : eol + 2;
             if (line.empty())
                 continue;
-            std::string_view name, value;
-            if (!splitHeaderLine(line, name, value))
-                return false;
+            const auto header = splitHeaderLine(line);
+            if (!header)
+                return std::nullopt;
+            const auto [name, value] = *header;
             if (headerNameIs(name, kProtocolHeader) && value == kProtocolValue) {
                 out.protocolEcho = true;
             }
             else if (headerNameIs(name, kCookieHeader)) {
                 if (value.size() != kCookieHexLen)
-                    return false;
+                    return std::nullopt;
                 const auto cookie = parseNumber<uint32_t>(value, 16);
                 if (!cookie)
-                    return false;
+                    return std::nullopt;
                 out.cookieEcho = *cookie;
                 sawCookie      = true;
             }
@@ -222,7 +225,7 @@ namespace v2 {
                 /* A count that doesn't fit is malformed, not wrapped */
                 const auto bytes = parseNumber<uint64_t>(value);
                 if (!bytes)
-                    return false;
+                    return std::nullopt;
                 out.bytes = *bytes;
             }
             else if (headerNameIs(name, kEtagHeader)) {
@@ -232,30 +235,31 @@ namespace v2 {
                 out.versionId = value;
             }
             else if (headerNameIs(name, kChecksumHeader)) {
-                if (!validateChecksumText(value, out.checksumB64))
-                    return false;
+                const auto checksum = validateChecksumText(value);
+                if (!checksum)
+                    return std::nullopt;
+                out.checksumB64 = *checksum;
             }
         }
         if ((httpStatus == 200 || httpStatus == 204) && !out.protocolEcho) {
-            return false;
+            return std::nullopt;
         }
         if ((httpStatus == 200 || httpStatus == 204) && !sawCookie) {
-            return false;
+            return std::nullopt;
         }
         out.cookiePresent = sawCookie;
-        return true;
+        return out;
     }
 
-    bool validateChecksumText(std::string_view headerValue, std::string &out)
+    std::optional<std::string_view> validateChecksumText(std::string_view headerValue)
     {
         constexpr std::string_view kPrefix = "CRC64NVME ";
         if (!headerValue.starts_with(kPrefix))
-            return false;
+            return std::nullopt;
         const std::string_view text = trimOws(headerValue.substr(kPrefix.size()));
         if (!canonicalBase64_8Bytes(text))
-            return false;
-        out = text;
-        return true;
+            return std::nullopt;
+        return text;
     }
 
     bool isValidSessionHex(std::string_view s)
@@ -263,15 +267,14 @@ namespace v2 {
         return s.size() == kSessionHexLen && std::ranges::all_of(s, isHexDigit);
     }
 
-    bool parsePsn(std::string_view s, uint32_t &psn)
+    std::optional<uint32_t> parsePsn(std::string_view s)
     {
         if (s.size() != kPsnHexLen)
-            return false;
+            return std::nullopt;
         const auto v = parseNumber<uint32_t>(s, 16);
         if (!v || *v == 0 || *v > 0xffffff)
-            return false;
-        psn = *v;
-        return true;
+            return std::nullopt;
+        return v;
     }
 
     std::string formatCookie(uint32_t cookie)

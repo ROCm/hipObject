@@ -9,6 +9,8 @@
 #include <atomic>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 #include <arpa/inet.h>
@@ -151,11 +153,8 @@ namespace v2 {
 
     } // namespace
 
-    int createRcConnV2(DeviceHandle &dh, RcConnV2 &conn, bool *rollbackFailed)
+    int createRcConnV2(DeviceHandle &dh, RcConnV2 &conn)
     {
-        if (rollbackFailed) {
-            *rollbackFailed = false;
-        }
         conn.cq.reset(ibv.create_cq(dh.ctx.get(), kCqSize, nullptr, nullptr, 0));
         if (!conn.cq) {
             return -1;
@@ -171,12 +170,10 @@ namespace v2 {
         init.cap.max_recv_sge = 1;
         conn.qp.reset(ibv.create_qp(dh.pd.get(), &init));
         if (!conn.qp) {
-            /* ibvDestroy() keeps conn.cq when the destroy fails: clearing
-             * it would lose the handle the caller needs for the reaper
-             * retry. */
-            if (ibvDestroy(conn.cq) != 0 && rollbackFailed) {
-                *rollbackFailed = true;
-            }
+            /* ibvDestroy() keeps conn.cq when the destroy fails, which is
+             * how the caller learns the rollback failed: clearing it would
+             * lose the handle the caller needs for the reaper retry. */
+            ibvDestroy(conn.cq);
             return -1;
         }
         conn.qpNum = conn.qp->qp_num;
@@ -186,22 +183,14 @@ namespace v2 {
         return 0;
     }
 
-    void destroyRcConnV2(RcConnV2 &conn, bool *qpOk, bool *cqOk)
+    DestroyResult destroyRcConnV2(RcConnV2 &conn)
     {
-        if (qpOk) {
-            *qpOk = true;
-        }
-        if (cqOk) {
-            *cqOk = true;
-        }
         /* A successful destroy clears the handle; a failed one leaves
-         * the surviving object in conn for a retry. */
-        if (ibvDestroy(conn.qp) != 0 && qpOk) {
-            *qpOk = false;
-        }
-        if (ibvDestroy(conn.cq) != 0 && cqOk) {
-            *cqOk = false;
-        }
+         * the surviving object in conn for a retry. The qp goes first,
+         * since it uses the cq. */
+        const bool qpOk = ibvDestroy(conn.qp) == 0;
+        const bool cqOk = ibvDestroy(conn.cq) == 0;
+        return {qpOk, cqOk};
     }
 
     int createRcQpOnly(DeviceHandle &dh, struct ibv_cq *cq, RcConnV2 &conn)
@@ -264,11 +253,11 @@ namespace v2 {
         return ibv.post_recv(conn.qp.get(), &wr, &bad);
     }
 
-    int releaseConnection(ConnId id)
+    ReleaseResult releaseConnection(ConnId id)
     {
         ConnectionRegistry &reg = registry();
         if (!reg.claimDestroy(id)) {
-            return 0; /* claimed elsewhere or already gone: idempotent */
+            return ReleaseResult::Ok; /* claimed elsewhere or already gone: idempotent */
         }
         bool     hasQp = false;
         uint64_t rid   = 0;
@@ -288,7 +277,7 @@ namespace v2 {
             rid = reg.retired().reserve();
             if (rid == 0) {
                 abortClaim(id); /* pre-destroy cancel; stays reclaimable */
-                return kReleaseBusy;
+                return ReleaseResult::Busy;
             }
             reg.withEntry(id, [&](ConnectionEntryV2 &entry) { entry.reservationId = rid; });
         }
@@ -320,19 +309,19 @@ namespace v2 {
         reg.commitDestroy(id, qpOk, cqOk);
         if (qpOk && cqOk) {
             reg.eraseDestroyed(id);
-            return 0;
+            return ReleaseResult::Ok;
         }
-        return kReleaseLeftover;
+        return ReleaseResult::Leftover;
     }
 
-    int discardAndRecreateQp(ConnId id)
+    ReleaseResult discardAndRecreateQp(ConnId id)
     {
         ConnectionRegistry &reg = registry();
 
         /* Local slot B guards the tuple we are about to retire. */
         uint64_t slotB = reg.retired().reserve();
         if (slotB == 0) {
-            return kReleaseBusy;
+            return ReleaseResult::Busy;
         }
 
         /* Non-owning copies; the entry keeps ownership of qp and cq. */
@@ -357,7 +346,7 @@ namespace v2 {
             /* Nothing to discard, no device to recreate the qp on, or the
              * entry is mid-teardown. */
             reg.retired().unreserve(slotB);
-            return kReleaseLeftover;
+            return ReleaseResult::Leftover;
         }
 
         /* Destroy the old qp; on failure keep the live qp and return.
@@ -366,7 +355,7 @@ namespace v2 {
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) { destroyRet = ibvDestroy(entry.conn.qp); });
         if (destroyRet != 0) {
             reg.retired().unreserve(slotB);
-            return kReleaseLeftover;
+            return ReleaseResult::Leftover;
         }
         reg.retired().record(slotB, cap.qpn, cap.psn);
 
@@ -386,11 +375,11 @@ namespace v2 {
         if (createRcQpOnly(*cap.device, cap.cq, fresh) != 0) {
             /* No qp: release through the normal teardown path (the cq is
              * destroyed there) and report the failure. */
-            int rc = releaseConnection(id);
-            if (rc != 0) {
-                return rc;
+            const ReleaseResult released = releaseConnection(id);
+            if (released != ReleaseResult::Ok) {
+                return released;
             }
-            return kReleaseLeftover;
+            return ReleaseResult::Leftover;
         }
 
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
@@ -398,41 +387,35 @@ namespace v2 {
             entry.conn.qpNum    = fresh.qpNum;
             entry.reservationId = cap.rid;
         });
-        return 0;
+        return ReleaseResult::Ok;
     }
 
-    bool validateDataCompletion(const struct ibv_wc &wc, const WcExpectation &expect, const char **reason)
+    std::optional<std::string_view> dataCompletionMismatch(const struct ibv_wc &wc,
+                                                           const WcExpectation &expect)
     {
         if (wc.status != IBV_WC_SUCCESS) {
-            *reason = "completion status is not success";
-            return false;
+            return "completion status is not success";
         }
         if (wc.wr_id != expect.wrId) {
-            *reason = "unexpected wr_id";
-            return false;
+            return "unexpected wr_id";
         }
         if (expect.kind == WcKind::kGet) {
             if (wc.opcode != IBV_WC_RECV_RDMA_WITH_IMM) {
-                *reason = "expected RECV_RDMA_WITH_IMM";
-                return false;
+                return "expected RECV_RDMA_WITH_IMM";
             }
         }
         else {
             if (wc.opcode != IBV_WC_RECV) {
-                *reason = "expected RECV";
-                return false;
+                return "expected RECV";
             }
             if (!(wc.wc_flags & IBV_WC_WITH_IMM)) {
-                *reason = "immediate flag missing";
-                return false;
+                return "immediate flag missing";
             }
         }
         if (ntohl(wc.imm_data) != expect.cookie) {
-            *reason = "immediate cookie mismatch";
-            return false;
+            return "immediate cookie mismatch";
         }
-        *reason = "";
-        return true;
+        return std::nullopt;
     }
 
 } // namespace v2

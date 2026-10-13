@@ -119,15 +119,16 @@ checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size,
     return {hipObjSuccess, 0};
 }
 
-static bool
-buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset, RdmaToken &token)
+static std::optional<RdmaToken>
+buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset)
 {
     if (!buf.mr || !g_conn->qp) {
-        return false;
+        return std::nullopt;
     }
     if (!rangeInRegistration(offset, size, buf.size)) {
-        return false;
+        return std::nullopt;
     }
+    RdmaToken token;
     token.transport  = TransportType::RC;
     token.qpNum      = g_conn->qp->qp_num;
     token.gid        = toGid(g_conn->localGid);
@@ -136,16 +137,14 @@ buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset, RdmaTo
     token.length     = size;
     token.portNum    = g_conn->portNum;
     token.lid        = 0;
-    return true;
+    return token;
 }
 
 static int
 finishTransferAfterReply(std::string_view reply, bool requiresDeviceSync)
 {
-    RdmaToken peerToken{};
-    int       httpCode = 0;
-    if (parsePeerTokenFromReply(reply, peerToken, httpCode)) {
-        if (connectRcPeer(*g_conn, peerToken) != 0) {
+    if (const auto peerToken = parsePeerTokenFromReply(reply)) {
+        if (connectRcPeer(*g_conn, *peerToken) != 0) {
             return -1;
         }
     }
@@ -281,21 +280,20 @@ stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t off
 static hipObjError_t
 runRdmaTransfer(const BufferMap::BufEntry &buf, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
 {
-    RdmaToken token{};
-    if (!buildRdmaToken(buf, size, offset, token)) {
+    const auto token = buildRdmaToken(buf, size, offset);
+    if (!token) {
         return {hipObjRdmaError, 0};
     }
-    const RdmaTokenHex encoded = encodeRdmaTokenHex(token);
+    const RdmaTokenHex encoded = encodeRdmaTokenHex(*token);
     if (injectRdmaToken(ops, ctx, std::string_view(encoded.data(), kRdmaTokenHexLen)) != 0) {
         return {hipObjS3Error, 0};
     }
     std::array<char, 512> replyBuf;
-    std::string_view      reply;
-    int                   rdmaStatus = 0;
-    if (receiveRdmaReplyRaw(ops, ctx, replyBuf, reply, rdmaStatus) != 0 || rdmaStatus != 0) {
+    const auto            reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
+    if (!reply || reply->status != RdmaReplyStatus::Success) {
         return {hipObjS3Error, 0};
     }
-    if (finishTransferAfterReply(reply, buf.isDmabuf) != 0) {
+    if (finishTransferAfterReply(reply->text, buf.isDmabuf) != 0) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -524,26 +522,22 @@ try {
             return {hipObjInvalidValue, 0};
         }
     }
-    const char *devName  = nullptr;
-    int         nicIndex = -1;
+    std::optional<hipObj::RdmaNic> nic;
     if (gpuDevice >= 0) {
-        nicIndex =
-            hipObj::GetClosestNicToGpu(gpuDevice, config->nicHint ? config->nicHint : nullptr, &devName);
+        nic = hipObj::GetClosestNicToGpu(gpuDevice, config->nicHint);
     }
-    if (nicIndex < 0) {
+    if (!nic) {
         // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
         // hint is provided, try opening it directly without GPU topology so the
         // library works in GPU-less environments (e.g. CI with emulated RDMA).
         if (haveNicHint) {
-            devName  = config->nicHint;
-            nicIndex = 0;
+            nic = hipObj::RdmaNic{0, config->nicHint};
         }
         else {
             return {hipObjNicNotFound, 0};
         }
     }
-    int ret = (devName) ? hipObj::openRdmaDeviceByName(devName, *hipObj::g_conn)
-                        : hipObj::openRdmaDevice(nicIndex, *hipObj::g_conn);
+    int ret = hipObj::openRdmaDeviceByName(nic->name.c_str(), *hipObj::g_conn);
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -562,7 +556,7 @@ try {
     state.endpoint    = config->endpoint ? config->endpoint : "";
     state.region      = config->region ? config->region : "";
     state.nicHint     = config->nicHint ? config->nicHint : "";
-    state.nicIndex    = nicIndex;
+    state.nicIndex    = nic->index;
     state.flags       = config->flags;
     return {hipObjSuccess, 0};
 }
@@ -590,8 +584,7 @@ try {
     std::vector<hipObj::v2::ConnId> ids;
     reg.forEachId([&ids](hipObj::v2::ConnId id) { ids.push_back(id); });
     for (auto id : ids) {
-        int rc = hipObj::v2::releaseConnection(id);
-        if (rc == hipObj::v2::kReleaseLeftover) {
+        if (hipObj::v2::releaseConnection(id) == hipObj::v2::ReleaseResult::Leftover) {
             poisonLeft = true;
         }
     }
@@ -804,11 +797,11 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    hipObj::RdmaToken token{};
-    if (!hipObj::buildRdmaToken(*buf, size, 0, token)) {
+    const auto token = hipObj::buildRdmaToken(*buf, size, 0);
+    if (!token) {
         return {hipObjRdmaError, 0};
     }
-    const hipObj::RdmaTokenHex encoded = hipObj::encodeRdmaTokenHex(token);
+    const hipObj::RdmaTokenHex encoded = hipObj::encodeRdmaTokenHex(*token);
     char                      *copy    = static_cast<char *>(std::malloc(encoded.size()));
     if (!copy) {
         return {hipObjInternalError, 0};
@@ -840,11 +833,11 @@ try {
     if (!reply || !httpCode) {
         return {hipObjInvalidValue, 0};
     }
-    int code = 0;
-    if (!hipObj::parseRdmaReplyHttpCode(std::string_view(reply, replyLen), code)) {
+    const auto code = hipObj::parseRdmaReplyHttpCode(std::string_view(reply, replyLen));
+    if (!code) {
         return {hipObjInvalidValue, 0};
     }
-    *httpCode = code;
+    *httpCode = *code;
     return {hipObjSuccess, 0};
 }
 catch (...) {

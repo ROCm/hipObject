@@ -355,11 +355,13 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
             std::fprintf(stderr, "dp: reply token missing/invalid code\n");
             return 1;
         }
-        std::string tokHex = sreply.substr(cpos + 1);
-        if (tokHex.size() != 88 || !hipObj::decodeRdmaTokenHex(tokHex.c_str(), replyTok)) {
+        std::string tokHex  = sreply.substr(cpos + 1);
+        const auto  decoded = hipObj::decodeRdmaTokenHex(tokHex);
+        if (!decoded) {
             std::fprintf(stderr, "dp: reply token does not decode\n");
             return 1;
         }
+        replyTok = *decoded;
         if (replyTok.qpNum != sqpn) {
             std::fprintf(stderr, "dp: reply token qpn mismatch\n");
             return 1;

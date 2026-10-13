@@ -246,7 +246,9 @@ namespace v2 {
         bool connRefHeld = false;
         table_.withSession(id, [&](V2Session &s) { connRefHeld = s.connRefHeld; });
         if (conn.qp != nullptr || conn.cq != nullptr) {
-            hipObj::v2::destroyRcConnV2(conn, &qpOk, &cqOk);
+            const hipObj::v2::DestroyResult destroyed = hipObj::v2::destroyRcConnV2(conn);
+            qpOk                                      = destroyed.qpOk;
+            cqOk                                      = destroyed.cqOk;
             if (qpOk && connRefHeld && s_dev != nullptr) {
                 /* Consume this session's device reference exactly once:
                  * only a session whose QP was actually created (and now
@@ -382,15 +384,14 @@ namespace v2 {
         std::string id;
         bool        inserted = false;
         for (int attempt = 0; attempt < 3 && !inserted; ++attempt) {
-            uint32_t w[4] = {0, 0, 0, 0};
-            if (!randomSource().next32(w[0]) || !randomSource().next32(w[1]) ||
-                !randomSource().next32(w[2]) || !randomSource().next32(w[3])) {
-                table_.ringUnreserve(slot);
-                return error(500);
-            }
             id.clear();
-            for (const uint32_t word : w) {
-                id += hipObj::formatHex(word, 8);
+            for (int i = 0; i < 4; ++i) {
+                const auto word = randomSource().next32();
+                if (!word) {
+                    table_.ringUnreserve(slot);
+                    return error(500);
+                }
+                id += hipObj::formatHex(*word, 8);
             }
             V2Session s;
             s.id        = id;
@@ -409,15 +410,15 @@ namespace v2 {
                 s.hasPeerGid = false;
             }
             else {
-                hipObj::RdmaToken peerTok;
-                if (!hipObj::decodeRdmaTokenHex(tokBase.c_str(), peerTok) ||
+                const auto peerTok = hipObj::decodeRdmaTokenHex(tokBase);
+                if (!peerTok ||
                     /* Semantic checks: this server pairs RC transports only,
                      * and a nonzero token must carry a real peer GID. */
-                    peerTok.transport != hipObj::TransportType::RC || peerTok.gid == hipObj::Gid{}) {
+                    peerTok->transport != hipObj::TransportType::RC || peerTok->gid == hipObj::Gid{}) {
                     table_.ringUnreserve(slot);
                     return error(400);
                 }
-                s.peerGid    = hipObj::toIbvGid(peerTok.gid);
+                s.peerGid    = hipObj::toIbvGid(peerTok->gid);
                 s.hasPeerGid = true;
             }
             s.accessKey        = cred->accessKey;
@@ -431,13 +432,14 @@ namespace v2 {
         }
 
         /* Server PSN draw. */
-        uint32_t serverPsn = 0;
-        if (!nextClientPsn(serverPsn)) {
+        const auto psnDraw = nextClientPsn();
+        if (!psnDraw) {
             table_.toReaping(id);
             table_.releaseIo(id);
             table_.ringUnreserve(slot);
             return error(500);
         }
+        const uint32_t serverPsn = *psnDraw;
         table_.withSession(id, [&](V2Session &s) { s.serverPsn = serverPsn; });
 
         /* Per-session connection on the shared device: one qp/cq pair
@@ -447,8 +449,7 @@ namespace v2 {
         hipObj::DeviceHandle *dh = serverDevice();
         if (dh != nullptr && dh->pd != nullptr) {
             hipObj::RcConnV2 conn;
-            bool             rollbackFailed = false;
-            bool             created        = hipObj::v2::createRcConnV2(*dh, conn, &rollbackFailed) == 0;
+            bool             created = hipObj::v2::createRcConnV2(*dh, conn) == 0;
             if (created &&
                 /* The pair starts in RESET; move it to INIT so the READY
                  * RTR/RTS transitions are valid. */
@@ -456,15 +457,15 @@ namespace v2 {
                 /* INIT failed: destroy the pair here or its handles leak
                  * on every PREPARE. A handle that fails to destroy stays
                  * on the session so the reaper keeps retrying it. */
-                bool qOk = true, cOk = true;
-                hipObj::v2::destroyRcConnV2(conn, &qOk, &cOk);
+                const hipObj::v2::DestroyResult destroyed = hipObj::v2::destroyRcConnV2(conn);
+                const bool                      qOk       = destroyed.qpOk;
                 if (qOk) {
                     /* The QP existed and destroyed cleanly: consume this
                      * session's device reference right here - the reaper
                      * will find no handle and must not release again. */
                     hipObj::v2::releaseDevice(*dh);
                 }
-                if (!qOk || !cOk) {
+                if (!qOk || !destroyed.cqOk) {
                     /* The surviving handles move to the session in the
                      * failure branch below. */
                     table_.withSession(id, [&](V2Session &s) {

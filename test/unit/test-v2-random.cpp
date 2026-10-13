@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,13 +44,12 @@ public:
         next  = 0;
     }
 
-    bool next32(uint32_t &out) override
+    std::optional<uint32_t> next32() override
     {
         if (failAll || next >= draws.size()) {
-            return false;
+            return std::nullopt;
         }
-        out = draws[next++];
-        return true;
+        return draws[next++];
     }
 };
 
@@ -73,34 +73,28 @@ protected:
  * zero draws, failure on exhausted source. */
 TEST_F(V2RandomTest, PsnGeneration)
 {
-    uint32_t psn = 0;
     scripted_->setDraws({0x00000000U, 0x00abcdefU});
-    ASSERT_TRUE(hipObj::v2::nextClientPsn(psn));
-    EXPECT_EQ(psn, 0x00abcdefU); /* zero draw retried, then accepted */
+    EXPECT_EQ(hipObj::v2::nextClientPsn(), 0x00abcdefU); /* zero draw retried, then accepted */
 
     scripted_->setDraws({0xffffffffU});
-    ASSERT_TRUE(hipObj::v2::nextClientPsn(psn));
-    EXPECT_EQ(psn, 0x00ffffffU); /* masked to 24 bits */
+    EXPECT_EQ(hipObj::v2::nextClientPsn(), 0x00ffffffU); /* masked to 24 bits */
 
     scripted_->setDraws({0U, 0U, 0U});
-    EXPECT_FALSE(hipObj::v2::nextClientPsn(psn)); /* all-zero: fail */
+    EXPECT_FALSE(hipObj::v2::nextClientPsn()); /* all-zero: fail */
 
     scripted_->failAll = true;
-    EXPECT_FALSE(hipObj::v2::nextClientPsn(psn)); /* source failure */
+    EXPECT_FALSE(hipObj::v2::nextClientPsn()); /* source failure */
 }
 
 /* Cookies pass through unmasked (0 is a valid cookie). */
 TEST_F(V2RandomTest, CookiePassThrough)
 {
-    uint32_t cookie = 99;
     scripted_->setDraws({0U});
-    ASSERT_TRUE(hipObj::v2::nextCookie(cookie));
-    EXPECT_EQ(cookie, 0U);
+    EXPECT_EQ(hipObj::v2::nextCookie(), 0U);
     scripted_->setDraws({0xdeadbeefU});
-    ASSERT_TRUE(hipObj::v2::nextCookie(cookie));
-    EXPECT_EQ(cookie, 0xdeadbeefU);
+    EXPECT_EQ(hipObj::v2::nextCookie(), 0xdeadbeefU);
     scripted_->failAll = true;
-    EXPECT_FALSE(hipObj::v2::nextCookie(cookie));
+    EXPECT_FALSE(hipObj::v2::nextCookie());
 }
 
 /* PSNs reach the RTR/RTS attributes (modify_qp spy). */
@@ -165,26 +159,24 @@ TEST_F(V2PsnDeliveryTest, PsnsReachQpAttrs)
  * struct carries it. */
 TEST(V2CookiePresenceTest, ParserSetsPresence)
 {
-    hipObj::v2::FinalReply reply;
-    const std::string      headers = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n"
-                                     "X-Amz-Rdma-Cookie: 00000000\r\n"
-                                     "X-Amz-Rdma-Bytes: 0\r\n";
-    ASSERT_TRUE(hipObj::v2::parseFinalReply(200, headers, reply));
-    EXPECT_TRUE(reply.cookiePresent);
-    EXPECT_EQ(reply.cookieEcho, 0U); /* zero cookie is valid */
+    const std::string headers = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n"
+                                "X-Amz-Rdma-Cookie: 00000000\r\n"
+                                "X-Amz-Rdma-Bytes: 0\r\n";
+    const auto        reply   = hipObj::v2::parseFinalReply(200, headers);
+    ASSERT_TRUE(reply);
+    EXPECT_TRUE(reply->cookiePresent);
+    EXPECT_EQ(reply->cookieEcho, 0U); /* zero cookie is valid */
 
     /* Missing cookie on a success status fails the parse. */
-    const std::string      noCookie = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n"
-                                      "X-Amz-Rdma-Bytes: 0\r\n";
-    hipObj::v2::FinalReply reply2;
-    EXPECT_FALSE(hipObj::v2::parseFinalReply(200, noCookie, reply2));
-    EXPECT_FALSE(reply2.cookiePresent);
+    const std::string noCookie = "X-Amz-Rdma-Protocol: hipobj-rc-v2\r\n"
+                                 "X-Amz-Rdma-Bytes: 0\r\n";
+    EXPECT_FALSE(hipObj::v2::parseFinalReply(200, noCookie));
 
     /* Public struct mapping: engine code copies the flag; verify the
      * field exists at the tail and holds the parsed value. */
     hipObjFinalReplyV2_t pub{};
-    pub.cookiePresent = reply.cookiePresent ? 1 : 0;
-    pub.cookieEcho    = reply.cookieEcho;
+    pub.cookiePresent = reply->cookiePresent ? 1 : 0;
+    pub.cookieEcho    = reply->cookieEcho;
     EXPECT_EQ(pub.cookiePresent, 1);
     EXPECT_EQ(pub.cookieEcho, 0U);
 }
