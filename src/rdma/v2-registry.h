@@ -189,9 +189,6 @@ namespace v2 {
 #endif
 
     private:
-        ConnectionEntryV2       *find(ConnId id);
-        const ConnectionEntryV2 *find(ConnId id) const;
-
         std::map<ConnId, ConnectionEntryV2> entries_;
         size_t                              pendingReserves_ = 0;
         RetiredRing                         retired_;
