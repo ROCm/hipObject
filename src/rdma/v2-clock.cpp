@@ -15,11 +15,9 @@ namespace v2 {
 
         class SteadyClock : public ClockSource {
         public:
-            uint64_t nowMs() override
+            TimePoint now() override
             {
-                auto now = std::chrono::steady_clock::now().time_since_epoch();
-                return static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+                return std::chrono::steady_clock::now();
             }
         };
 

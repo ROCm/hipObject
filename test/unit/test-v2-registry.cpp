@@ -13,6 +13,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
+#include "v2-clock.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
 
@@ -590,10 +592,10 @@ TEST_F(V2RegistryTest, RetiredRingLifecycle)
     /* Record survives within the expiry window (fake clock default
      * is the steady clock; expiry collection only picks recorded
      * slots past 60 s). */
-    EXPECT_EQ(ring.collectExpired(0), 0U);
+    EXPECT_EQ(ring.collectExpired(hipObj::v2::TimePoint{}), 0U);
     EXPECT_TRUE(ring.contains(5, 6));
     /* Far future: collected. */
-    EXPECT_EQ(ring.collectExpired(UINT64_MAX), 1U);
+    EXPECT_EQ(ring.collectExpired(hipObj::v2::TimePoint::max()), 1U);
     EXPECT_FALSE(ring.contains(5, 6));
     EXPECT_EQ(ring.used(), 0U);
 }

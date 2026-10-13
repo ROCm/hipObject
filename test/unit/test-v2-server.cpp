@@ -6,7 +6,7 @@
  * Unit tests for the server-side v2 request parsers and session
  * table state machine (no RDMA hardware; transitions only). */
 
-#include <cstdint>
+#include <chrono>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -34,10 +34,10 @@ using hipObj::v2::SessState;
 /* Scriptable clock so deadline arithmetic is deterministic. */
 class FakeClock : public hipObj::v2::ClockSource {
 public:
-    uint64_t now = 1000;
-    uint64_t nowMs() override
+    hipObj::v2::TimePoint current{std::chrono::seconds(1)};
+    hipObj::v2::TimePoint now() override
     {
-        return now;
+        return current;
     }
 };
 
@@ -89,7 +89,7 @@ protected:
         s.cookie           = 0x1a2b3c4d;
         s.clientPsn        = 7;
         s.accessKey        = "AKIA-test";
-        s.clientDeadlineAt = clock_->now + 10000;
+        s.clientDeadlineAt = clock_->current + std::chrono::seconds(10);
         return s;
     }
 
@@ -124,18 +124,19 @@ TEST_F(V2SessionTest, PublishingRoundTripRearmsDeadline)
     table_.insert(makeSession("bb"));
     EXPECT_TRUE(table_.beginPublishing("bb"));
     EXPECT_EQ(table_.stateOf("bb"), SessState::Publishing);
-    clock_->now += 4000; /* slow response path */
-    EXPECT_TRUE(table_.finishPublishing("bb", 10000));
+    clock_->current += std::chrono::seconds(4); /* slow response path */
+    EXPECT_TRUE(table_.finishPublishing("bb", std::chrono::seconds(10)));
     EXPECT_EQ(table_.stateOf("bb"), SessState::Prepared);
-    table_.withSession(
-        "bb", [this](hipObj::v2::V2Session &s) { EXPECT_EQ(s.clientDeadlineAt, clock_->now + 10000); });
+    table_.withSession("bb", [this](hipObj::v2::V2Session &s) {
+        EXPECT_EQ(s.clientDeadlineAt, clock_->current + std::chrono::seconds(10));
+    });
 }
 
 /* finishPublishing only applies while still Publishing. */
 TEST_F(V2SessionTest, FinishPublishingRejectedOutsidePublishing)
 {
     table_.insert(makeSession("cc"));
-    EXPECT_FALSE(table_.finishPublishing("cc", 10000));
+    EXPECT_FALSE(table_.finishPublishing("cc", std::chrono::seconds(10)));
 }
 
 /* READY transitions Prepared -> Transferring and arms T_exec;
@@ -143,16 +144,18 @@ TEST_F(V2SessionTest, FinishPublishingRejectedOutsidePublishing)
 TEST_F(V2SessionTest, ReadyTransitionsAndExpiryCheck)
 {
     table_.insert(makeSession("dd"));
-    EXPECT_TRUE(table_.beginTransferring("dd", 30000));
+    EXPECT_TRUE(table_.beginTransferring("dd", std::chrono::seconds(30)));
     EXPECT_EQ(table_.stateOf("dd"), SessState::Transferring);
 
     /* Second READY while Transferring does not transition. */
-    EXPECT_FALSE(table_.beginTransferring("dd", 30000));
+    EXPECT_FALSE(table_.beginTransferring("dd", std::chrono::seconds(30)));
 
     /* Expired: deadline passes, READY must not revive. */
     table_.insert(makeSession("ee"));
-    table_.withSession("ee", [this](hipObj::v2::V2Session &s) { s.clientDeadlineAt = clock_->now - 1; });
-    EXPECT_FALSE(table_.beginTransferring("ee", 30000));
+    table_.withSession("ee", [this](hipObj::v2::V2Session &s) {
+        s.clientDeadlineAt = clock_->current - std::chrono::milliseconds(1);
+    });
+    EXPECT_FALSE(table_.beginTransferring("ee", std::chrono::seconds(30)));
     EXPECT_EQ(table_.stateOf("ee"), SessState::Reaping);
 }
 
@@ -160,7 +163,7 @@ TEST_F(V2SessionTest, ReadyTransitionsAndExpiryCheck)
 TEST_F(V2SessionTest, CompletingTransition)
 {
     table_.insert(makeSession("ff"));
-    ASSERT_TRUE(table_.beginTransferring("ff", 30000));
+    ASSERT_TRUE(table_.beginTransferring("ff", std::chrono::seconds(30)));
     EXPECT_TRUE(table_.beginCompleting("ff"));
     EXPECT_EQ(table_.stateOf("ff"), SessState::Completing);
     /* Only from Transferring. */
@@ -224,10 +227,10 @@ TEST_F(V2SessionTest, AwaitNotPublishing)
 {
     table_.insert(makeSession("kk"));
     table_.beginPublishing("kk");
-    uint64_t deadline = clock_->now + 5000;
+    const hipObj::v2::TimePoint deadline = clock_->current + std::chrono::seconds(5);
     /* Transition from another "thread" - simulated inline before the
      * wait by finishing early: emulate via direct finish. */
-    table_.finishPublishing("kk", 10000);
+    table_.finishPublishing("kk", std::chrono::seconds(10));
     EXPECT_EQ(table_.awaitNotPublishing("kk", deadline), SessState::Prepared);
 }
 
@@ -244,7 +247,8 @@ TEST_F(V2SessionTest, AwaitOnErasedId)
     table_.claimDestroy("ll");
     table_.commitDestroy("ll", true, true);
     EXPECT_EQ(table_.size(), 0U);
-    EXPECT_EQ(table_.awaitNotPublishing("ll", clock_->now + 100), SessState::Reaping);
+    EXPECT_EQ(table_.awaitNotPublishing("ll", clock_->current + std::chrono::milliseconds(100)),
+              SessState::Reaping);
 }
 
 /* ---- request parsers ------------------------------------------- */

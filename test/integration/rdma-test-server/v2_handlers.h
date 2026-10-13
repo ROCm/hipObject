@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -33,8 +34,8 @@ namespace v2 {
     struct ReadyRequest;
 
     struct ServerConfig {
-        uint64_t tPrepMs = 10000;
-        uint64_t tExecMs = 30000;
+        std::chrono::milliseconds tPrep = std::chrono::seconds(10);
+        std::chrono::milliseconds tExec = std::chrono::seconds(30);
     };
 
     struct HandlerResult {

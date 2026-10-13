@@ -30,11 +30,13 @@
 
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,6 +45,7 @@
 #include "ibv-ptr.h"
 #include "malloc_ptr.h"
 #include "replace-by-move.h"
+#include "v2-clock.h"
 #include "v2-registry.h"
 
 namespace hipObj {
@@ -70,14 +73,15 @@ namespace v2 {
         uint64_t    offset = 0;
         std::string authorization; /* credential identity reference */
         std::string accessKey;     /* verified access key (identity) */
-        uint32_t    cookie           = 0;
-        uint32_t    clientPsn        = 0;
-        uint32_t    serverPsn        = 0;
-        uint32_t    serverQpn        = 0;
-        uint64_t    reservationId    = 0; /* retired-ring slot */
-        uint64_t    clientDeadlineAt = 0; /* ms, absolute (clockSource) */
-        uint64_t    txDeadlineAt     = 0; /* response transmission bound */
-        int         ioActive         = 0;
+        uint32_t    cookie        = 0;
+        uint32_t    clientPsn     = 0;
+        uint32_t    serverPsn     = 0;
+        uint32_t    serverQpn     = 0;
+        uint64_t    reservationId = 0;  /* retired-ring slot */
+        TimePoint   clientDeadlineAt{}; /* absolute (clockSource) */
+        /* Response transmission bound, when one is armed */
+        std::optional<TimePoint> txDeadlineAt;
+        int                      ioActive = 0;
         /* Origin of the outstanding io reference: true while the
          * worker holds it from READY entry to the final send. The
          * reaper force-releases only references still awaiting a
@@ -149,11 +153,11 @@ namespace v2 {
         bool beginPublishing(const std::string &id);
 
         /* After a successful PREPARE send: Publishing -> Prepared with
-         * the client deadline re-armed from now + tPrepMs. */
-        bool finishPublishing(const std::string &id, uint64_t tPrepMs);
+         * the client deadline re-armed from now + tPrep. */
+        bool finishPublishing(const std::string &id, std::chrono::milliseconds tPrep);
 
         /* Transferring transition from a READY (only from Prepared). */
-        bool beginTransferring(const std::string &id, uint64_t tExecMs);
+        bool beginTransferring(const std::string &id, std::chrono::milliseconds tExec);
 
         /* FINAL response confirmed: Transferring -> Completing. */
         bool beginCompleting(const std::string &id);
@@ -164,7 +168,7 @@ namespace v2 {
         /* Wakes when the session leaves Publishing (waitDeadline is a
          * value copied by the caller). Returns the state observed (or
          * Reaping for an erased id). */
-        SessState awaitNotPublishing(const std::string &id, uint64_t waitDeadlineMs);
+        SessState awaitNotPublishing(const std::string &id, TimePoint waitDeadline);
 
         /* States helper for handlers. */
         SessState stateOf(const std::string &id);
@@ -191,7 +195,7 @@ namespace v2 {
         uint64_t ringReserve();
         void     ringUnreserve(uint64_t reservationId);
         void     ringRecord(uint64_t reservationId, uint32_t qpn, uint32_t psn);
-        void     ringCollectExpired(uint64_t nowMs);
+        void     ringCollectExpired(TimePoint now);
 
         /* Acquires (ioActive++) and releases the handler reference for a
          * session. Release returns the post-decrement count. */

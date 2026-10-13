@@ -10,10 +10,15 @@
 
 #pragma once
 
-#include <cstdint>
+#include <chrono>
 
 namespace hipObj {
 namespace v2 {
+
+    /* A time from a ClockSource. It's a steady-clock time point because
+     * some callers wait for a deadline from clockSource() on the real
+     * steady clock (a condition variable, a CQ poll). */
+    using TimePoint = std::chrono::steady_clock::time_point;
 
     class ClockSource {
     public:
@@ -26,7 +31,7 @@ namespace v2 {
         ClockSource(ClockSource &&)                 = delete;
         ClockSource &operator=(ClockSource &&)      = delete;
 
-        virtual uint64_t nowMs() = 0;
+        virtual TimePoint now() = 0;
     };
 
     /* Returns the active clock. Production default unless a test

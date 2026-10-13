@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ratio>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -20,6 +21,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace hipobj::test {
@@ -81,30 +83,43 @@ namespace {
         }
     }
 
+    /* Sets a socket timeout (SO_SNDTIMEO or SO_RCVTIMEO) to the time left
+     * before the absolute deadline, capped per syscall so the caller's
+     * loop re-checks the deadline. Returns false once it has passed. */
+    bool setTimeoutUntil(int fd, int optname, std::chrono::steady_clock::time_point deadline)
+    {
+        constexpr std::chrono::microseconds kMaxPerCall = std::chrono::seconds(5);
+
+        /* Round up: a zero timeval would mean no timeout at all */
+        auto remain =
+            std::chrono::ceil<std::chrono::microseconds>(deadline - std::chrono::steady_clock::now());
+        if (remain <= std::chrono::microseconds::zero()) {
+            return false;
+        }
+        if (remain > kMaxPerCall) {
+            remain = kMaxPerCall;
+        }
+        /* Durations with timeval's field types, so no casts are needed */
+        const auto secs = std::chrono::duration_cast<std::chrono::duration<time_t>>(remain);
+        const auto usecs =
+            std::chrono::duration_cast<std::chrono::duration<suseconds_t, std::micro>>(remain - secs);
+        timeval tv{};
+        tv.tv_sec  = secs.count();
+        tv.tv_usec = usecs.count();
+        setsockopt(fd, SOL_SOCKET, optname, &tv, sizeof(tv));
+        return true;
+    }
+
     /* Sends the whole buffer honoring the absolute deadline; MSG_NOSIGNAL
      * keeps a vanished peer from killing the process. Returns false on
      * failure or deadline expiry. */
-    bool sendAll(int fd, const std::string &data, uint64_t deadlineMs)
+    bool sendAll(int fd, const std::string &data, std::chrono::steady_clock::time_point deadline)
     {
         size_t sent = 0;
         while (sent < data.size()) {
-            auto     now = std::chrono::steady_clock::now().time_since_epoch();
-            uint64_t nowMs =
-                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
-            if (nowMs >= deadlineMs) {
+            if (!setTimeoutUntil(fd, SO_SNDTIMEO, deadline)) {
                 return false;
             }
-            uint64_t remain = deadlineMs - nowMs;
-            if (remain > 5000) {
-                remain = 5000; /* per-syscall cap; the loop re-checks */
-            }
-            timeval tv{};
-            tv.tv_sec  = static_cast<long>(remain / 1000);
-            tv.tv_usec = static_cast<long>((remain % 1000) * 1000);
-            if (remain == 0) {
-                tv.tv_usec = 1000; /* at least 1ms */
-            }
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
             ssize_t n = ::send(fd, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -329,33 +344,17 @@ void
 HttpServer::handleConnection(int client, bool closeFd)
 {
     /* Absolute receive deadline (request bytes only). */
-    auto     now = std::chrono::steady_clock::now().time_since_epoch();
-    uint64_t deadlineMs =
-        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count()) + 5000;
+    const auto  deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::string raw;
     char        buf[65536];
     size_t      headerEnd = std::string::npos;
     while (headerEnd == std::string::npos) {
-        auto     now2 = std::chrono::steady_clock::now().time_since_epoch();
-        uint64_t now2Ms =
-            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now2).count());
-        if (now2Ms >= deadlineMs) {
+        if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
             if (closeFd) {
                 close(client);
             }
             return;
         }
-        uint64_t remain = deadlineMs - now2Ms;
-        if (remain > 5000) {
-            remain = 5000;
-        }
-        timeval tv{};
-        tv.tv_sec  = static_cast<long>(remain / 1000);
-        tv.tv_usec = static_cast<long>((remain % 1000) * 1000);
-        if (remain == 0) {
-            tv.tv_usec = 1000;
-        }
-        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         ssize_t n = recv(client, buf, sizeof(buf), 0);
         if (n <= 0) {
             if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -396,23 +395,9 @@ HttpServer::handleConnection(int client, bool closeFd)
      * rather than half-delivered. */
     bool bodyComplete = false;
     while (raw.size() - headerLen < contentLen) {
-        auto     nowB = std::chrono::steady_clock::now().time_since_epoch();
-        uint64_t nowBMs =
-            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(nowB).count());
-        if (nowBMs >= deadlineMs) {
+        if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
             break;
         }
-        uint64_t remain = deadlineMs - nowBMs;
-        if (remain > 5000) {
-            remain = 5000;
-        }
-        timeval tv{};
-        tv.tv_sec  = static_cast<long>(remain / 1000);
-        tv.tv_usec = static_cast<long>((remain % 1000) * 1000);
-        if (remain == 0) {
-            tv.tv_usec = 1000;
-        }
-        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         ssize_t n = recv(client, buf, sizeof(buf), 0);
         if (n <= 0) {
             if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -435,10 +420,8 @@ HttpServer::handleConnection(int client, bool closeFd)
     HttpResponse resp = handler_(req);
 
     /* Response transmission deadline: 5s from handler completion. */
-    auto     now3 = std::chrono::steady_clock::now().time_since_epoch();
-    uint64_t txDeadline =
-        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now3).count()) + 5000;
-    bool sentOk = false;
+    const auto txDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    bool       sentOk     = false;
     try {
         std::string out = serializeResponse(resp);
         sentOk          = sendAll(client, out, txDeadline);

@@ -11,18 +11,17 @@
 
 #include "hipobj-warnings.h"
 #include "no-destructor.h"
-#include "v2-clock.h"
 
 namespace hipObj {
 namespace v2 {
 
     // ---- RetiredRing ---------------------------------------------------
 
-    size_t RetiredRing::collectExpired(uint64_t nowMs)
+    size_t RetiredRing::collectExpired(TimePoint now)
     {
         size_t collected = 0;
         for (auto &slot : slots_) {
-            if (slot.reservationId != 0 && slot.recorded && nowMs >= slot.expireAtMs) {
+            if (slot.reservationId != 0 && slot.recorded && now >= slot.expireAt) {
                 slot = Slot{};
                 --used_;
                 ++collected;
@@ -37,7 +36,7 @@ namespace v2 {
             if (slot.reservationId == 0) {
                 slot.reservationId = nextReservationId_++;
                 slot.recorded      = false;
-                slot.expireAtMs    = 0;
+                slot.expireAt      = {};
                 slot.qpn           = 0;
                 slot.psn           = 0;
                 ++used_;
@@ -71,10 +70,10 @@ namespace v2 {
          * no-op rather than corrupting the ring. */
         for (auto &slot : slots_) {
             if (slot.reservationId == reservationId && !slot.recorded) {
-                slot.recorded   = true;
-                slot.expireAtMs = clockSource().nowMs() + kExpiryMs;
-                slot.qpn        = qpn;
-                slot.psn        = psn;
+                slot.recorded = true;
+                slot.expireAt = clockSource().now() + kExpiry;
+                slot.qpn      = qpn;
+                slot.psn      = psn;
                 --reserved_;
                 return;
             }

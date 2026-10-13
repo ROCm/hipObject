@@ -5,9 +5,11 @@
 
 #include "rdma_server.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -99,7 +101,7 @@ namespace {
         if (hipObj::ibv.post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
-        return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, 10000);
+        return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, std::chrono::seconds(10));
     }
 
     int postRdmaRead(hipObj::RcConnection &conn, struct ibv_mr *localMr, size_t size,
@@ -123,7 +125,7 @@ namespace {
         if (hipObj::ibv.post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
-        return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, 10000);
+        return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::seconds(10));
     }
 
 } // namespace

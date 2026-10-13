@@ -220,12 +220,12 @@ connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
 }
 
 int
-pollCompletion(RcConnection &conn, int expectedOpcode, int timeoutMs)
+pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout)
 {
     if (!conn.cq) {
         return -1;
     }
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         struct ibv_wc wc;
         int           n = ibv.poll_cq(conn.cq.get(), 1, &wc);
@@ -254,8 +254,9 @@ pollCompletion(RcConnection &conn, int expectedOpcode, int timeoutMs)
     // A timeout is a failure: no completion arrived for the awaited work
     // request, so the transfer outcome is unknown and must not be reported
     // as success.
+    const int64_t timeoutMs = timeout.count();
     fprintf(stderr,
-            "hipObj: no work completion within %d ms (awaiting opcode %d); the "
+            "hipObj: no work completion within %" PRId64 " ms (awaiting opcode %d); the "
             "transfer outcome is unknown\n",
             timeoutMs, expectedOpcode);
     return -1;

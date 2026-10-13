@@ -290,7 +290,7 @@ namespace v2 {
     void ControlHandlers::finishPrepareSend(const std::string &id, bool sentOk)
     {
         if (sentOk) {
-            table_.finishPublishing(id, cfg_.tPrepMs);
+            table_.finishPublishing(id, cfg_.tPrep);
         }
         else {
             table_.toReaping(id);
@@ -310,8 +310,8 @@ namespace v2 {
     {
         while (!reaperStop_.load()) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
-            table_.ringCollectExpired(clockSource().nowMs());
-            uint64_t now = clockSource().nowMs();
+            table_.ringCollectExpired(clockSource().now());
+            const TimePoint now = clockSource().now();
             for (const auto &id : table_.ids()) {
                 table_.withSession(id, [&](V2Session &s) {
                     /* Client-lifetime expiry: no READY arrived in time, or the
@@ -335,11 +335,10 @@ namespace v2 {
                      * finalizer; the origin flag tells the two apart even
                      * after a concurrent CANCEL moved the state to
                      * Reaping. */
-                    if (!s.ioFromCompleting && s.txDeadlineAt != 0 && now > s.txDeadlineAt &&
-                        s.ioActive > 0) {
+                    if (!s.ioFromCompleting && s.txDeadlineAt && now > *s.txDeadlineAt && s.ioActive > 0) {
                         --s.ioActive;
                     }
-                    if (s.txDeadlineAt != 0 && now > s.txDeadlineAt && s.ioActive == 0) {
+                    if (s.txDeadlineAt && now > *s.txDeadlineAt && s.ioActive == 0) {
                         s.state = SessState::Reaping;
                     }
                 });
@@ -423,7 +422,7 @@ namespace v2 {
             }
             s.accessKey        = cred->accessKey;
             s.reservationId    = slot;
-            s.clientDeadlineAt = clockSource().nowMs() + cfg_.tPrepMs;
+            s.clientDeadlineAt = clockSource().now() + cfg_.tPrep;
             inserted           = table_.insert(std::move(s));
         }
         if (!inserted) {
@@ -645,8 +644,9 @@ namespace v2 {
 
         SessState st = table_.stateOf(req.session);
         if (st == SessState::Publishing) {
-            uint64_t deadline = 0;
-            table_.withSession(req.session, [&](V2Session &s) { deadline = s.txDeadlineAt; });
+            TimePoint deadline{};
+            table_.withSession(req.session,
+                               [&](V2Session &s) { deadline = s.txDeadlineAt.value_or(TimePoint{}); });
             st = table_.awaitNotPublishing(req.session, deadline);
         }
 
@@ -682,7 +682,7 @@ namespace v2 {
         if (!table_.acquireIo(req.session)) {
             return error(409);
         }
-        if (!table_.beginTransferring(req.session, cfg_.tExecMs)) {
+        if (!table_.beginTransferring(req.session, cfg_.tExec)) {
             table_.releaseIo(req.session);
             return error(409); /* expired under the lock */
         }
@@ -720,7 +720,7 @@ namespace v2 {
          * feeds FINAL directly; failures release the io reference here
          * because no response finalizer will run for them. */
         DataPhaseStats stats;
-        uint64_t       deadline = 0;
+        TimePoint      deadline{};
         DataPhaseView  view;
         table_.withSession(req.session, [&](V2Session &s) {
             deadline          = s.clientDeadlineAt;
