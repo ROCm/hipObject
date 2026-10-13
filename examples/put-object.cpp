@@ -34,6 +34,68 @@ struct HipFreeDeleter {
     }
 };
 
+// Shuts hipObject down when it goes out of scope. Create one once
+// hipObjInit() has succeeded, before anything that has to be released
+// while hipObject is still running, so that's released first.
+class HipObjShutdownGuard {
+public:
+    HipObjShutdownGuard() = default;
+    ~HipObjShutdownGuard()
+    {
+        (void)hipObjShutdown();
+    }
+
+    HipObjShutdownGuard(const HipObjShutdownGuard &)            = delete;
+    HipObjShutdownGuard &operator=(const HipObjShutdownGuard &) = delete;
+};
+
+// Deregisters a buffer from hipObject when it goes out of scope. Create
+// one once hipObjBufRegister() has succeeded, after the buffer's owner,
+// so the buffer is deregistered before it's freed.
+class HipObjBufRegistration {
+public:
+    explicit HipObjBufRegistration(void *devPtr) : devPtr_(devPtr)
+    {
+    }
+    ~HipObjBufRegistration()
+    {
+        (void)hipObjBufDeregister(devPtr_);
+    }
+
+    HipObjBufRegistration(const HipObjBufRegistration &)            = delete;
+    HipObjBufRegistration &operator=(const HipObjBufRegistration &) = delete;
+
+private:
+    void *devPtr_;
+};
+
+#if defined(HIPOBJ_HAVE_CURL)
+// Initializes libcurl for as long as it's in scope, when asked to
+class CurlGlobal {
+public:
+    explicit CurlGlobal(bool init) : ok_(init && curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK)
+    {
+    }
+    ~CurlGlobal()
+    {
+        if (ok_) {
+            curl_global_cleanup();
+        }
+    }
+
+    CurlGlobal(const CurlGlobal &)            = delete;
+    CurlGlobal &operator=(const CurlGlobal &) = delete;
+
+    bool ok() const
+    {
+        return ok_;
+    }
+
+private:
+    bool ok_;
+};
+#endif
+
 static int
 stubSendRequest(void *, const char *, size_t tokenLen)
 {
@@ -115,17 +177,20 @@ main(int argc, char *argv[])
     cfg.gpuDevice = 0;
     cfg.nicHint   = std::getenv("HIPOBJ_NIC_HINT");
 
+    // The guards below release what they own when main() returns, in the
+    // reverse of the order they were created in: the buffer is
+    // deregistered, then freed, and then hipObject is shut down.
     hipObjError_t err = hipObjInit(&cfg);
     if (err.opError != hipObjSuccess) {
         fprintf(stderr, "hipObjInit failed: %s\n", hipObjGetErrorString(err.opError));
         return 1;
     }
+    HipObjShutdownGuard shutdownGuard;
 
     void      *rawDevPtr = nullptr;
     hipError_t hip_err   = hipMalloc(&rawDevPtr, objSize);
     if (hip_err != hipSuccess) {
         fprintf(stderr, "hipMalloc failed: %d\n", hip_err);
-        hipObjShutdown();
         return 1;
     }
     std::unique_ptr<void, HipFreeDeleter> devPtr(rawDevPtr);
@@ -133,16 +198,20 @@ main(int argc, char *argv[])
     err = hipObjBufRegister(devPtr.get(), objSize);
     if (err.opError != hipObjSuccess) {
         fprintf(stderr, "hipObjBufRegister failed: %s\n", hipObjGetErrorString(err.opError));
-        hipObjShutdown();
         return 1;
     }
+    HipObjBufRegistration registration(devPtr.get());
 
     hipObjOps_t ops;
     void       *opsCtx = nullptr;
 #if defined(HIPOBJ_HAVE_CURL)
+    CurlGlobal curl(live);
+    if (live && !curl.ok()) {
+        fprintf(stderr, "curl_global_init failed\n");
+        return 1;
+    }
     hipObjS3CurlCtx curlCtx{};
     if (live) {
-        curl_global_init(CURL_GLOBAL_DEFAULT);
         curlCtx.endpoint   = endpoint;
         curlCtx.bucket     = bucket;
         curlCtx.object     = object;
@@ -161,24 +230,11 @@ main(int argc, char *argv[])
         ops.recvReply   = stubRecvReply;
     }
 
-    int exitCode = 0;
-    err          = hipObjPut(nullptr, devPtr.get(), objSize, 0, &ops, opsCtx);
+    err = hipObjPut(nullptr, devPtr.get(), objSize, 0, &ops, opsCtx);
     if (err.opError != hipObjSuccess) {
         fprintf(stderr, "hipObjPut failed: %s\n", hipObjGetErrorString(err.opError));
-        exitCode = 1;
+        return 1;
     }
-    else {
-        fprintf(stdout, "hipObjPut succeeded for %zu bytes\n", objSize);
-    }
-
-#if defined(HIPOBJ_HAVE_CURL)
-    if (live) {
-        curl_global_cleanup();
-    }
-#endif
-
-    hipObjBufDeregister(devPtr.get());
-    devPtr.reset();
-    hipObjShutdown();
-    return exitCode;
+    fprintf(stdout, "hipObjPut succeeded for %zu bytes\n", objSize);
+    return 0;
 }

@@ -120,6 +120,13 @@
   only call the HIP runtime API, so they don't need the kernel-language
   declarations, and a program that uses hipObject from host code only
   needs the same header.
+- The `get-object` and `put-object` examples release what they set up
+  with small guard classes, whose destructors call `hipObjBufDeregister()`,
+  `hipObjShutdown()`, and `curl_global_cleanup()`, instead of calling them
+  by hand on each way out of `main()`. The classes are C++11, and show
+  one way to make sure an application releases hipObject's resources on
+  every path. In `--live` mode, the examples now exit with an error if
+  `curl_global_init()` fails.
 - The public API can be called from multiple threads. Functions that use
   the library's state (`hipObjInit()`, `hipObjShutdown()`, buffer
   registration, transfers, `hipObjBufSync()`, and `hipObjGetRdmaToken()`,
@@ -202,6 +209,9 @@
   Ubuntu), and always downloaded and built its own. It now uses the
   installed one, and `minio-getput-rdma` links it as a shared library.
   An RPM package built that way requires `libcurlpp.so.1`.
+- The MinIO bridge leaked the token it gets from `hipObjGetRdmaToken()`
+  for each transfer when building or sending the request threw an
+  exception. It now releases the token on every path.
 - Building the MinIO bridge with GCC 14 or later warned that two
   returns in `integrations/minio-cpp/src/client.cpp` couldn't avoid a
   copy, and failed with `HIPOBJ_WERROR=ON`.

@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 
 #include "ibv-wrapper.h"
+#include "scope-guard.h"
 #include "vendor-ops.h"
 
 namespace hipObj {
@@ -259,50 +260,49 @@ namespace v2 {
         if (!reg.claimDestroy(id)) {
             return ReleaseResult::Ok; /* claimed elsewhere or already gone: idempotent */
         }
-        bool     hasQp = false;
-        uint64_t rid   = 0;
-        uint32_t qpn   = 0;
+        /* A return before the destroy below cancels the claim, and the
+         * entry stays reclaimable */
+        ScopeGuard unclaim([id] { abortClaim(id); });
+
+        /* The entry's reservation is owned here during the destroy. A
+         * destroyed qp records it, a surviving one takes it back for the
+         * retry, and otherwise it serves no future destroy, so going out
+         * of scope gives it back. */
+        RetiredRing::Reservation res;
+        bool                     hasQp = false;
+        uint32_t                 qpn   = 0;
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
-            hasQp               = entry.conn.qp != nullptr;
-            rid                 = entry.reservationId;
-            qpn                 = entry.conn.qpNum;
-            entry.reservationId = 0; /* local ownership during destroy */
+            hasQp = entry.conn.qp != nullptr;
+            qpn   = entry.conn.qpNum;
+            res   = RetiredRing::Reservation::adopt(reg.retired(), std::exchange(entry.reservationId, 0));
         });
-        if (hasQp && rid == 0) {
+        if (hasQp && !res) {
             /* Defensive: the normal creation sequence always inserts an
              * entry with a live reservation, so a live qp without one is
              * not expected. Keep the handling anyway so the teardown path
              * stays complete: reserve a slot now, and report busy when the
              * retired ring is exhausted so the caller can retry later. */
-            rid = reg.retired().reserve();
-            if (rid == 0) {
-                abortClaim(id); /* pre-destroy cancel; stays reclaimable */
+            res = RetiredRing::Reservation(reg.retired());
+            if (!res) {
                 return ReleaseResult::Busy;
             }
-            reg.withEntry(id, [&](ConnectionEntryV2 &entry) { entry.reservationId = rid; });
         }
-        bool     qpOk = true;
-        bool     cqOk = true;
-        uint32_t psn  = 0;
+        unclaim.dismiss(); /* commitDestroy() ends the claim from here */
+
+        bool qpOk = true;
+        bool cqOk = true;
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
-            psn = entry.clientPsn; /* recorded into the retired ring below */
             if (entry.conn.qp) {
                 qpOk = ibvDestroy(entry.conn.qp) == 0;
                 if (qpOk) {
-                    if (rid != 0) {
-                        /* Record the destroyed pair immediately; the tuple tracks
-                         * the QP lifetime, independent of the CQ result below. */
-                        reg.retired().record(rid, qpn, psn);
-                    }
+                    /* Record the destroyed pair immediately; the tuple tracks
+                     * the QP lifetime, independent of the CQ result below. */
+                    res.record(qpn, entry.clientPsn);
                     entry.conn.qpNum = 0;
                 }
                 else {
-                    entry.reservationId = rid; /* keep for the retry */
+                    entry.reservationId = res.release(); /* keep for the retry */
                 }
-            }
-            else if (rid != 0) {
-                /* No live qp: the reservation serves no future destroy. */
-                reg.retired().unreserve(rid);
             }
             cqOk = ibvDestroy(entry.conn.cq) == 0;
         });
@@ -318,9 +318,10 @@ namespace v2 {
     {
         ConnectionRegistry &reg = registry();
 
-        /* Local slot B guards the tuple we are about to retire. */
-        uint64_t slotB = reg.retired().reserve();
-        if (slotB == 0) {
+        /* Local slot B guards the tuple we are about to retire. Until
+         * it's recorded, a return gives it back. */
+        RetiredRing::Reservation slotB(reg.retired());
+        if (!slotB) {
             return ReleaseResult::Busy;
         }
 
@@ -345,7 +346,6 @@ namespace v2 {
         if (!found || !cap.qp || !cap.cq || !cap.device || cap.rid == 0) {
             /* Nothing to discard, no device to recreate the qp on, or the
              * entry is mid-teardown. */
-            reg.retired().unreserve(slotB);
             return ReleaseResult::Leftover;
         }
 
@@ -354,21 +354,19 @@ namespace v2 {
         int destroyRet = -1;
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) { destroyRet = ibvDestroy(entry.conn.qp); });
         if (destroyRet != 0) {
-            reg.retired().unreserve(slotB);
             return ReleaseResult::Leftover;
         }
-        reg.retired().record(slotB, cap.qpn, cap.psn);
+        slotB.record(cap.qpn, cap.psn);
 
-        /* The old reservation A is released back: the tuple it guarded is
-         * now recorded through slot B, tied to the destroyed qp. */
-        reg.retired().unreserve(cap.rid);
-
-        /* Move ownership of A's slot to the caller and clear the fields
-         * before the recreate attempt, so the entry never holds a live
-         * reservationId without a qp. */
+        /* The old tuple is recorded through slot B, so the entry's
+         * reservation A is free to guard the new qp. Move it here and
+         * clear the fields before the recreate attempt, so the entry never
+         * holds a live reservationId without a qp. A goes back to the
+         * entry with the new qp, or back to the ring if there isn't one. */
+        RetiredRing::Reservation slotA;
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
-            entry.reservationId = 0;
-            entry.conn.qpNum    = 0;
+            slotA = RetiredRing::Reservation::adopt(reg.retired(), std::exchange(entry.reservationId, 0));
+            entry.conn.qpNum = 0;
         });
 
         RcConnV2 fresh;
@@ -385,7 +383,7 @@ namespace v2 {
         reg.withEntry(id, [&](ConnectionEntryV2 &entry) {
             entry.conn.qp       = std::move(fresh.qp);
             entry.conn.qpNum    = fresh.qpNum;
-            entry.reservationId = cap.rid;
+            entry.reservationId = slotA.release();
         });
         return ReleaseResult::Ok;
     }

@@ -26,6 +26,7 @@
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
+#include "scope-guard.h"
 #include "token.h"
 #include "v2-clock.h"
 #include "v2-random.h"
@@ -379,15 +380,25 @@ namespace v2 {
             return error(503);
         }
 
-        /* Session id: 4 draws, insert-if-absent, up to 3 redraws. */
+        /* Until the session is published, every return gives the slot
+         * back, and once the session is in the table, also sends it to
+         * the reaper and drops the io reference insert() gave it. */
         std::string id;
         bool        inserted = false;
+        ScopeGuard  rollback([&] {
+            if (inserted) {
+                table_.toReaping(id);
+                table_.releaseIo(id);
+            }
+            table_.ringUnreserve(slot);
+        });
+
+        /* Session id: 4 draws, insert-if-absent, up to 3 redraws. */
         for (int attempt = 0; attempt < 3 && !inserted; ++attempt) {
             id.clear();
             for (int i = 0; i < 4; ++i) {
                 const auto word = randomSource().next32();
                 if (!word) {
-                    table_.ringUnreserve(slot);
                     return error(500);
                 }
                 id += hipObj::formatHex(*word, 8);
@@ -414,7 +425,6 @@ namespace v2 {
                     /* Semantic checks: this server pairs RC transports only,
                      * and a nonzero token must carry a real peer GID. */
                     peerTok->transport != hipObj::TransportType::RC || peerTok->gid == hipObj::Gid{}) {
-                    table_.ringUnreserve(slot);
                     return error(400);
                 }
                 s.peerGid    = hipObj::toIbvGid(peerTok->gid);
@@ -426,16 +436,12 @@ namespace v2 {
             inserted           = table_.insert(std::move(s));
         }
         if (!inserted) {
-            table_.ringUnreserve(slot);
             return error(503);
         }
 
         /* Server PSN draw. */
         const auto psnDraw = nextClientPsn();
         if (!psnDraw) {
-            table_.toReaping(id);
-            table_.releaseIo(id);
-            table_.ringUnreserve(slot);
             return error(500);
         }
         const uint32_t serverPsn = *psnDraw;
@@ -500,9 +506,6 @@ namespace v2 {
                     s.conn   = std::move(conn);
                     s.device = dh;
                 });
-                table_.toReaping(id);
-                table_.releaseIo(id);
-                table_.ringUnreserve(slot);
                 return error(500);
             }
         }
@@ -523,9 +526,6 @@ namespace v2 {
                 });
             }
             if (!staged) {
-                table_.toReaping(id);
-                table_.releaseIo(id);
-                table_.ringUnreserve(slot);
                 return error(500);
             }
         }
@@ -535,9 +535,6 @@ namespace v2 {
          * READY data phase can READ straight out of it. */
         if (req.op == "GET") {
             if (!backend_->has(req.target)) {
-                table_.toReaping(id);
-                table_.releaseIo(id);
-                table_.ringUnreserve(slot);
                 return error(500);
             }
             /* Stage the object into the session buffer. The backend copy
@@ -561,21 +558,18 @@ namespace v2 {
              * staging without a PD is fine on transport-free hosts where
              * the data phase is a no-op. */
             if (!staged || (!copied && req.size > 0)) {
-                table_.toReaping(id);
-                table_.releaseIo(id);
-                table_.ringUnreserve(slot);
                 return error(staged ? 416 : 500);
             }
         }
 
         /* Publish: response confirmed under the table lock below via
-         * beginPublishing; published=true marks the tuple as exposed. */
+         * beginPublishing; published=true marks the tuple as exposed. The
+         * session now owns the slot, and the response finalizer
+         * (finishPrepareSend) the io reference. */
         if (!table_.beginPublishing(id)) {
-            table_.toReaping(id);
-            table_.releaseIo(id);
-            table_.ringUnreserve(slot);
             return error(500);
         }
+        rollback.dismiss();
         table_.withSession(id, [&](V2Session &s) { s.published = true; });
 
         return prepareReply(id, serverPsn);
@@ -677,13 +671,14 @@ namespace v2 {
         }
 
         /* Hold the handler reference for the whole READY: the reaper
-         * cannot claim the session while the data phase runs. The
-         * response finalizer (finishFinalSend) releases it. */
+         * cannot claim the session while the data phase runs. On success
+         * the response finalizer (finishFinalSend) releases it; every
+         * other return releases it here, since no finalizer runs. */
         if (!table_.acquireIo(req.session)) {
             return error(409);
         }
+        ScopeGuard ioRef([&] { table_.releaseIo(req.session); });
         if (!table_.beginTransferring(req.session, cfg_.tExec)) {
-            table_.releaseIo(req.session);
             return error(409); /* expired under the lock */
         }
 
@@ -712,13 +707,11 @@ namespace v2 {
         });
         if (!paired) {
             table_.toReaping(req.session);
-            table_.releaseIo(req.session);
             return error(500);
         }
 
         /* Data phase bounded by the transition deadline. The result
-         * feeds FINAL directly; failures release the io reference here
-         * because no response finalizer will run for them. */
+         * feeds FINAL directly. */
         DataPhaseStats stats;
         TimePoint      deadline{};
         DataPhaseView  view;
@@ -742,7 +735,6 @@ namespace v2 {
         DataPhaseResult dpr = runDataPhase(view, deadline, stats);
         if (dpr != DataPhaseResult::Ok) {
             table_.toReaping(req.session);
-            table_.releaseIo(req.session);
             return dpr == DataPhaseResult::Timeout ? error(408) : error(500);
         }
         /* Claim the Completing transition BEFORE persisting: once
@@ -752,7 +744,6 @@ namespace v2 {
          * is still held: it pins the session (and the staging buffer)
          * against the reaper until the write below finishes. */
         if (!table_.beginCompleting(req.session)) {
-            table_.releaseIo(req.session);
             return error(500);
         }
 
@@ -775,6 +766,7 @@ namespace v2 {
             }
         }
 
+        ioRef.dismiss();
         return readyReply(req.cookie, stats.bytes);
     }
 

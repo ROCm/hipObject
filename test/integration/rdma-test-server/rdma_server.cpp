@@ -12,12 +12,14 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "malloc_ptr.h"
+#include "scope-guard.h"
 #include "token.h"
 #include "transport.h"
 
@@ -158,14 +160,6 @@ struct RdmaTestServer::Impl {
             ready = false;
         }
     }
-
-    /* Releases everything after a failed setup */
-    void release()
-    {
-        stagingMr.reset();
-        stagingBuf.reset();
-        hipObj::closeRdmaDevice(conn);
-    }
 };
 
 RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
@@ -173,26 +167,30 @@ RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
     if (!hipObj::ibv().is_initialized()) {
         return;
     }
-    if (hipObj::openRdmaDevice(0, impl_->conn) != 0) {
+    /* Built in locals and moved into impl_ only once everything has
+     * succeeded, so a failure, or an exception, destroys them in reverse
+     * order with no rollback code */
+    hipObj::RcConnection conn;
+    if (hipObj::openRdmaDevice(0, conn) != 0) {
         return;
     }
-    impl_->stagingBuf.reset(std::malloc(impl_->stagingSize));
-    if (!impl_->stagingBuf) {
-        impl_->release();
+    hipObj::MallocPtr stagingBuf(std::malloc(impl_->stagingSize));
+    if (!stagingBuf) {
         return;
     }
-    impl_->stagingMr.reset(
-        hipObj::ibv().reg_mr_host(impl_->conn.pd.get(), impl_->stagingBuf.get(), impl_->stagingSize,
+    hipObj::IbvMrPtr stagingMr(
+        hipObj::ibv().reg_mr_host(conn.pd.get(), stagingBuf.get(), impl_->stagingSize,
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
-    if (!impl_->stagingMr) {
-        impl_->release();
+    if (!stagingMr) {
         return;
     }
-    if (hipObj::createRcQp(impl_->conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(impl_->conn) != 0) {
-        impl_->release();
+    if (hipObj::createRcQp(conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(conn) != 0) {
         return;
     }
-    impl_->ready = true;
+    impl_->conn       = std::move(conn);
+    impl_->stagingBuf = std::move(stagingBuf);
+    impl_->stagingMr  = std::move(stagingMr);
+    impl_->ready      = true;
 }
 
 RdmaTestServer::~RdmaTestServer() = default;
@@ -228,17 +226,16 @@ RdmaTestServer::rdmaWriteToClient(const std::string &tokenHeader, const std::vec
     }
 
     std::memcpy(impl_->stagingBuf.get(), data.data(), xferSize);
+    /* Connecting touches the QP, so every way out from here resets it */
+    const hipObj::ScopeGuard resetQp([this] { impl_->resetQp(); });
     if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
-        impl_->resetQp();
         return rdmaFail("GET", "could not connect the RC QP to the client");
     }
     if (postRdmaWrite(impl_->conn, impl_->stagingMr.get(), xferSize, clientToken) != 0) {
-        impl_->resetQp();
         return rdmaFail("GET", "RDMA WRITE to the client buffer did not complete");
     }
     hipObj::RdmaToken serverToken = buildServerToken(impl_->conn, impl_->stagingMr.get(), xferSize);
     replyHeader                   = hipObj::encodeReplyWithPeerToken(200, serverToken);
-    impl_->resetQp();
     return 0;
 }
 
@@ -269,19 +266,18 @@ RdmaTestServer::rdmaReadFromClient(const std::string &tokenHeader, size_t size, 
         return -1;
     }
 
+    /* Connecting touches the QP, so every way out from here resets it */
+    const hipObj::ScopeGuard resetQp([this] { impl_->resetQp(); });
     if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
-        impl_->resetQp();
         return rdmaFail("PUT", "could not connect the RC QP to the client");
     }
     if (postRdmaRead(impl_->conn, impl_->stagingMr.get(), xferSize, clientToken) != 0) {
-        impl_->resetQp();
         return rdmaFail("PUT", "RDMA READ from the client buffer did not complete");
     }
     data.assign(static_cast<uint8_t *>(impl_->stagingBuf.get()),
                 static_cast<uint8_t *>(impl_->stagingBuf.get()) + xferSize);
     hipObj::RdmaToken serverToken = buildServerToken(impl_->conn, impl_->stagingMr.get(), xferSize);
     replyHeader                   = hipObj::encodeReplyWithPeerToken(200, serverToken);
-    impl_->resetQp();
     return 0;
 }
 
