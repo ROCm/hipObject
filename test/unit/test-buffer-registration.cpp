@@ -5,11 +5,13 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
 #include "buffer.h"
+#include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj-private.h"
 #include "hipobj-warnings.h"
@@ -88,14 +90,12 @@ fakeHipHostFree(void *ptr)
 
 class BufferRegistrationTest : public ::testing::Test {
 protected:
-    using Funcs = hipObj::IbvFuncs;
-
     void SetUp() override
     {
-        auto &funcs        = hipObj::ibv().funcsForTest();
-        savedFuncs_        = funcs;
-        funcs.reg_mr_iova2 = &fakeRegisterMrIova2;
-        funcs.dereg_mr     = &fakeDeregisterMr;
+        hipObj::IbvFuncs funcs = {};
+        funcs.reg_mr_iova2     = &fakeRegisterMrIova2;
+        funcs.dereg_mr         = &fakeDeregisterMr;
+        fakeIbv_.emplace(funcs);
 
         savedHipOps_       = hipObj::hipOps();
         hipObj::HipOps ops = savedHipOps_;
@@ -112,12 +112,12 @@ protected:
 
     void TearDown() override
     {
-        hipObj::ibv().funcsForTest() = savedFuncs_;
-        hipObj::hipOps()             = savedHipOps_;
+        fakeIbv_.reset();
+        hipObj::hipOps() = savedHipOps_;
     }
 
-    Funcs          savedFuncs_ = {};
-    hipObj::HipOps savedHipOps_;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
+    hipObj::HipOps                           savedHipOps_;
 };
 
 TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)

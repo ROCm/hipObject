@@ -25,9 +25,19 @@
 
 namespace hipObj {
 
+// Wrapper installed by tests; null means the library's own is active.
+// The library itself never swaps the pointer.
+static IBVWrapper *g_ibv_override = nullptr;
+
 IBVWrapper &
 ibv()
 {
+    /* Checked first, so a test that installs fakes never loads
+     * libibverbs */
+    if (g_ibv_override) {
+        return *g_ibv_override;
+    }
+
     /* Created on the first call, not when the library loads, so an
      * application that never initializes hipObject never loads
      * libibverbs. Never destroyed, so libibverbs stays loaded until
@@ -38,6 +48,14 @@ ibv()
     static NoDestructor<IBVWrapper> wrapper;
     HIPOBJ_WARN_NO_EXIT_DTOR_ON
     return *wrapper;
+}
+
+IBVWrapper *
+setIbvForTest(IBVWrapper *wrapper)
+{
+    IBVWrapper *previous = g_ibv_override;
+    g_ibv_override       = wrapper;
+    return previous;
 }
 
 namespace {
@@ -127,7 +145,12 @@ IBVWrapper::IBVWrapper()
         return;
     }
 
-    is_initialized = true;
+    initialized_ = true;
+}
+
+IBVWrapper::IBVWrapper(const IbvFuncs &funcs) : funcs_(funcs), initialized_(true)
+{
+    init_dmabuf_settings();
 }
 
 void

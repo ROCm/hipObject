@@ -3,21 +3,23 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Unit tests for the three test seams (HIP runtime, NIC topology,
- * driver state). All run without GPU or RDMA hardware by substituting
- * fakes through the seam accessors.
+ * Unit tests for the test seams (HIP runtime, NIC topology, driver
+ * state, libibverbs). All run without GPU or RDMA hardware by
+ * substituting fakes through the seam accessors.
  */
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
+#include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -214,6 +216,21 @@ TEST_F(StateSeamTest, OverrideRedirectsGetState)
     EXPECT_EQ(hipObj::setStateForTest(savedState_), &fresh_);
 }
 
+// ---- IBV wrapper seam --------------------------------------------
+
+TEST(IbvWrapperSeamTest, OverrideRedirectsIbv)
+{
+    hipObj::IBVWrapper fake(hipObj::IbvFuncs{});
+    EXPECT_TRUE(fake.is_initialized());
+
+    hipObj::IBVWrapper *previous = hipObj::setIbvForTest(&fake);
+    EXPECT_EQ(previous, nullptr);
+    EXPECT_EQ(&hipObj::ibv(), &fake);
+
+    EXPECT_EQ(hipObj::setIbvForTest(previous), &fake);
+    EXPECT_NE(&hipObj::ibv(), &fake);
+}
+
 // ---- IBV function table seam -------------------------------------
 
 namespace {
@@ -281,28 +298,26 @@ namespace {
 
 class IbvSeamTest : public ::testing::Test {
 protected:
-    using Funcs = hipObj::IbvFuncs;
-
     void SetUp() override
     {
-        auto &funcs        = hipObj::ibv().funcsForTest();
-        saved_             = funcs;
-        funcs.create_cq    = &fakeCreateCq;
-        funcs.create_qp    = &fakeCreateQp;
-        funcs.destroy_cq   = &fakeDestroyCq;
-        funcs.destroy_qp   = &fakeDestroyQp;
-        funcs.dealloc_pd   = &fakeDeallocPd;
-        funcs.close_device = &fakeCloseDevice;
-        funcs.modify_qp    = &fakeRecordingModifyQp;
-        g_calls            = IbvCallLog();
+        hipObj::IbvFuncs funcs = {};
+        funcs.create_cq        = &fakeCreateCq;
+        funcs.create_qp        = &fakeCreateQp;
+        funcs.destroy_cq       = &fakeDestroyCq;
+        funcs.destroy_qp       = &fakeDestroyQp;
+        funcs.dealloc_pd       = &fakeDeallocPd;
+        funcs.close_device     = &fakeCloseDevice;
+        funcs.modify_qp        = &fakeRecordingModifyQp;
+        fakeIbv_.emplace(funcs);
+        g_calls = IbvCallLog();
     }
 
     void TearDown() override
     {
-        hipObj::ibv().funcsForTest() = saved_;
+        fakeIbv_.reset();
     }
 
-    Funcs saved_ = {};
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
 };
 
 TEST_F(IbvSeamTest, QpCreationAndTeardownUseTheTable)
@@ -487,8 +502,6 @@ namespace {
 
     class InitAndTransferTest : public ::testing::Test {
     protected:
-        using Funcs = hipObj::IbvFuncs;
-
         void SetUp() override
         {
             savedState_      = hipObj::setStateForTest(&state_);
@@ -502,8 +515,7 @@ namespace {
             ops.hipDeviceSynchronize = &fakeSynchronizeNoDevice;
             hipObj::hipOps()         = ops;
 
-            auto &funcs            = hipObj::ibv().funcsForTest();
-            savedFuncs_            = funcs;
+            hipObj::IbvFuncs funcs = {};
             funcs.get_device_list  = &fakeGetDeviceList;
             funcs.free_device_list = &fakeFreeDeviceList;
             funcs.open_device      = &fakeOpenDevice;
@@ -521,19 +533,17 @@ namespace {
             funcs.modify_qp        = &fakeModifyQp;
             funcs.destroy_qp       = &fakeTransferDestroyQp;
             funcs.poll_cq          = &fakePollCq;
+            fakeIbv_.emplace(funcs);
 
-            savedIbvInitialized_         = hipObj::ibv().is_initialized;
-            hipObj::ibv().is_initialized = true;
-            g_apiTransferLog             = {};
-            g_calls                      = IbvCallLog();
+            g_apiTransferLog = {};
+            g_calls          = IbvCallLog();
         }
 
         void TearDown() override
         {
             (void)hipObjShutdown();
-            hipObj::ibv().is_initialized = savedIbvInitialized_;
-            hipObj::ibv().funcsForTest() = savedFuncs_;
-            hipObj::hipOps()             = savedHipOps_;
+            fakeIbv_.reset();
+            hipObj::hipOps() = savedHipOps_;
             hipObj::setNicEnumerator(savedEnumerator_);
             hipObj::setStateForTest(savedState_);
         }
@@ -546,13 +556,12 @@ namespace {
             return config;
         }
 
-        hipObj::DriverState    state_;
-        hipObj::DriverState   *savedState_ = nullptr;
-        FakeNicEnumerator      enumerator_;
-        hipObj::NicEnumerator *savedEnumerator_ = nullptr;
-        Funcs                  savedFuncs_      = {};
-        hipObj::HipOps         savedHipOps_;
-        bool                   savedIbvInitialized_ = false;
+        hipObj::DriverState                      state_;
+        hipObj::DriverState                     *savedState_ = nullptr;
+        FakeNicEnumerator                        enumerator_;
+        hipObj::NicEnumerator                   *savedEnumerator_ = nullptr;
+        std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
+        hipObj::HipOps                           savedHipOps_;
     };
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)

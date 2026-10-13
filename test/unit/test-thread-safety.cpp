@@ -20,6 +20,7 @@
 #include <functional>
 #include <latch>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -29,6 +30,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
+#include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -282,8 +284,7 @@ protected:
         ops.hipPointerGetAttributes = nullptr;
         hipObj::hipOps()            = ops;
 
-        auto &funcs            = hipObj::ibv().funcsForTest();
-        savedFuncs_            = funcs;
+        hipObj::IbvFuncs funcs = {};
         funcs.get_device_list  = &fakeGetDeviceList;
         funcs.free_device_list = &fakeFreeDeviceList;
         funcs.get_device_name  = &fakeGetDeviceName;
@@ -301,10 +302,8 @@ protected:
         funcs.destroy_qp       = &fakeDestroyQp;
         funcs.modify_qp        = &fakeModifyQp;
         funcs.poll_cq          = &fakePollCq;
-
-        savedIbvInitialized_         = hipObj::ibv().is_initialized;
-        hipObj::ibv().is_initialized = true;
-        g_openDeviceCalls            = 0;
+        fakeIbv_.emplace(funcs);
+        g_openDeviceCalls = 0;
 
         probeOps_.sendRequest = &probeSendRequest;
         probeOps_.recvReply   = &probeRecvReply;
@@ -313,9 +312,8 @@ protected:
     void TearDown() override
     {
         (void)hipObjShutdown();
-        hipObj::ibv().is_initialized = savedIbvInitialized_;
-        hipObj::ibv().funcsForTest() = savedFuncs_;
-        hipObj::hipOps()             = savedHipOps_;
+        fakeIbv_.reset();
+        hipObj::hipOps() = savedHipOps_;
         hipObj::setStateForTest(savedState_);
     }
 
@@ -326,14 +324,13 @@ protected:
         return pool_.data() + static_cast<size_t>(index) * kBufSize;
     }
 
-    hipObj::DriverState  state_;
-    hipObj::DriverState *savedState_ = nullptr;
-    hipObj::IbvFuncs     savedFuncs_ = {};
-    hipObj::HipOps       savedHipOps_;
-    bool                 savedIbvInitialized_ = false;
-    std::vector<char>    pool_                = std::vector<char>(kThreads * kBufSize);
-    TransferProbe        probe_;
-    hipObjOps_t          probeOps_ = {};
+    hipObj::DriverState                      state_;
+    hipObj::DriverState                     *savedState_ = nullptr;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
+    hipObj::HipOps                           savedHipOps_;
+    std::vector<char>                        pool_ = std::vector<char>(kThreads * kBufSize);
+    TransferProbe                            probe_;
+    hipObjOps_t                              probeOps_ = {};
 };
 
 TEST_F(ThreadSafetyTest, TransfersRunOneAtATime)

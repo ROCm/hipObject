@@ -5,11 +5,10 @@
  * IBVWrapper::reg_mr()'s dma-buf path, with the HSA export and close and
  * the libibverbs registration faked, so no GPU or NIC is needed.
  *
- * The DmabufDisabledTest tests need HIPOBJ_DMABUF=0, which hipObject reads
- * once, when it loads libibverbs, so they skip unless it's set.
- * CMakeLists.txt runs this program a second time, with it set, for just
- * those tests. The DmabufTest tests skip when HIPOBJ_DMABUF turns dma-buf
- * registration off.
+ * The DmabufDisabledTest tests need HIPOBJ_DMABUF=0 in the environment the
+ * program starts with, so they skip unless it's set, and CMakeLists.txt
+ * runs this program a second time, with it set, for just those tests. The
+ * DmabufTest tests skip when HIPOBJ_DMABUF turns dma-buf registration off.
  */
 
 #include <cerrno>
@@ -17,10 +16,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 
+#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
@@ -148,25 +150,25 @@ fakeDeregisterMr(struct ibv_mr *mr)
     return 0;
 }
 
-/* Installs the fakes for each test, and restores the real functions after */
+/* Installs the fakes for each test, and removes them after */
 class FakeDmabufTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        auto &funcs         = hipObj::ibv().funcsForTest();
-        saved_              = funcs;
-        funcs.export_dmabuf = &fakeExportDmabuf;
-        funcs.close_dmabuf  = &fakeCloseDmabuf;
-        funcs.reg_dmabuf_mr = &fakeRegisterDmabufMr;
-        funcs.reg_mr_iova2  = &fakeRegisterMrIova2;
-        funcs.dereg_mr      = &fakeDeregisterMr;
+        hipObj::IbvFuncs funcs = {};
+        funcs.export_dmabuf    = &fakeExportDmabuf;
+        funcs.close_dmabuf     = &fakeCloseDmabuf;
+        funcs.reg_dmabuf_mr    = &fakeRegisterDmabufMr;
+        funcs.reg_mr_iova2     = &fakeRegisterMrIova2;
+        funcs.dereg_mr         = &fakeDeregisterMr;
+        fakeIbv_.emplace(funcs);
 
         g_log = {};
     }
 
     void TearDown() override
     {
-        hipObj::ibv().funcsForTest() = saved_;
+        fakeIbv_.reset();
     }
 
     static hipObj::IbvMrPtr registerFakeBuffer()
@@ -174,7 +176,7 @@ protected:
         return hipObj::IbvMrPtr(hipObj::ibv().reg_mr(fakePd(), fakeDevBuf(), kBufSize, kAccess));
     }
 
-    hipObj::IbvFuncs saved_ = {};
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
 };
 
 class DmabufTest : public FakeDmabufTest {
@@ -246,7 +248,9 @@ TEST_F(DmabufTest, FailedExportClosesNothing)
 /* libibverbs older than rdma-core 34 has no ibv_reg_dmabuf_mr() */
 TEST_F(DmabufTest, NoDmabufVerbSkipsExport)
 {
-    hipObj::ibv().funcsForTest().reg_dmabuf_mr = nullptr;
+    hipObj::IbvFuncs funcs = fakeIbv_->funcs();
+    funcs.reg_dmabuf_mr    = nullptr;
+    fakeIbv_->replace(funcs);
 
     hipObj::IbvMrPtr mr = registerFakeBuffer();
     ASSERT_NE(mr, nullptr);
@@ -268,6 +272,58 @@ protected:
         }
     }
 };
+
+/* Sets an environment variable for its lifetime, and puts back the value
+ * it had before */
+class ScopedEnv {
+public:
+    ScopedEnv(const char *name, const char *value) : name_(name)
+    {
+        if (const char *previous = std::getenv(name)) {
+            previous_ = previous;
+        }
+        EXPECT_EQ(setenv(name, value, 1), 0);
+    }
+
+    ~ScopedEnv()
+    {
+        if (previous_) {
+            (void)setenv(name_, previous_->c_str(), 1);
+        }
+        else {
+            (void)unsetenv(name_);
+        }
+    }
+
+    ScopedEnv(const ScopedEnv &)            = delete;
+    ScopedEnv &operator=(const ScopedEnv &) = delete;
+    ScopedEnv(ScopedEnv &&)                 = delete;
+    ScopedEnv &operator=(ScopedEnv &&)      = delete;
+
+private:
+    const char                *name_;
+    std::optional<std::string> previous_;
+};
+
+/* The wrapper reads HIPOBJ_DMABUF when it's created, not when the program
+ * starts, so a program can set it before calling hipObjInit() */
+TEST_F(FakeDmabufTest, SettingIsReadWhenWrapperIsCreated)
+{
+    {
+        const ScopedEnv off("HIPOBJ_DMABUF", "0");
+        fakeIbv_->replace(fakeIbv_->funcs());
+        hipObj::IbvMrPtr mr = registerFakeBuffer();
+        ASSERT_NE(mr, nullptr);
+        EXPECT_EQ(g_log.exportCalls, 0);
+    }
+    {
+        const ScopedEnv on("HIPOBJ_DMABUF", "1");
+        fakeIbv_->replace(fakeIbv_->funcs());
+        hipObj::IbvMrPtr mr = registerFakeBuffer();
+        ASSERT_NE(mr, nullptr);
+        EXPECT_EQ(g_log.exportCalls, 1);
+    }
+}
 
 TEST_F(DmabufDisabledTest, RegistersWithoutExporting)
 {

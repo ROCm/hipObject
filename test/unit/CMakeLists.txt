@@ -4,9 +4,10 @@
 
 # Unit tests link a separate build of the library objects with
 # HIPOBJ_UNIT_TESTS defined. The macro only opens test accessors
-# (IBVWrapper::funcsForTest); compiling the sources twice into two
-# distinct targets avoids ODR issues, and the shipped hipobj library
-# is compiled without the macro so the accessors are absent there.
+# (ConnectionRegistry::insertRawForTest); compiling the sources twice
+# into two distinct targets avoids ODR issues, and the shipped hipobj
+# library is compiled without the macro so the accessors are absent
+# there.
 
 # HIPOBJ_SOURCES is exported by src/CMakeLists.txt as absolute paths.
 hipobj_add_library(
@@ -176,11 +177,14 @@ hipobj_add_test(test-gid-select
 hipobj_add_test(test-buffer-registration
   test-buffer-registration.cpp)
 
+hipobj_add_test(test-ibv-lazy-load
+  test-ibv-lazy-load.cpp)
+
 hipobj_add_test(test-ibv-dmabuf
   test-ibv-dmabuf.cpp)
-# hipObject reads HIPOBJ_DMABUF once, when it loads libibverbs, so the
-# tests of turning dma-buf registration off run in a process of their own
-# (see test-ibv-dmabuf.cpp)
+# The tests of turning dma-buf registration off need HIPOBJ_DMABUF=0 in
+# the environment, so they run in a process of their own (see
+# test-ibv-dmabuf.cpp)
 add_test(NAME test-ibv-dmabuf-disabled
   COMMAND test-ibv-dmabuf --gtest_filter=DmabufDisabledTest.*)
 set_tests_properties(test-ibv-dmabuf-disabled PROPERTIES
