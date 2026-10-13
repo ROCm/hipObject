@@ -13,17 +13,21 @@
 #include <cstring>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <utility>
+
+#include <sys/types.h>
 
 #include <hip/hip_runtime_api.h>
 
 #include <hipobj.h>
-#include <miniocpp/baseclient.h>
+#include <miniocpp/args.h>
 #include <miniocpp/error.h>
 #include <miniocpp/http.h>
 
 #include "hipobj-warnings.h"
+#include "hipobj_minio/context.h"
 #include "hipobj_minio/rdma.h"
 
 namespace hipobj::minio {
@@ -157,6 +161,41 @@ namespace {
         ScopedBufRegistration &operator=(ScopedBufRegistration &&)      = delete;
     };
 
+    /* The response to a transfer that RDMA completed. Client::PutObject and
+     * Client::GetObject return other objects on their other paths, which
+     * rules out the named return value optimization for a local there, so
+     * they return this one as a prvalue instead. */
+    template <typename ResponseT> ResponseT RdmaResponse(std::string etag)
+    {
+        ResponseT resp;
+        resp.etag = std::move(etag);
+        return resp;
+    }
+
+    /* An HTTP GET of the whole object into args.buf, which holds size bytes.
+     * The object is accumulated in a string and copied to args.buf only if
+     * the GET succeeds. */
+    minio::s3::GetObjectResponse HttpGetIntoBuffer(minio::s3::Client              &client,
+                                                   const minio::s3::GetObjectArgs &args, size_t size)
+    {
+        std::string received;
+        received.reserve(size);
+        minio::s3::GetObjectArgs http_args = args;
+        http_args.datafunc                 = [&](minio::http::DataFunctionArgs chunk) -> bool {
+            received.append(chunk.datachunk);
+            return true;
+        };
+        http_args.buf                     = nullptr;
+        http_args.size                    = std::nullopt;
+        minio::s3::GetObjectResponse resp = client.GetObject(http_args);
+        if (resp) {
+            size_t copy_len = std::min(received.size(), size);
+            std::memcpy(args.buf, received.data(), copy_len);
+        }
+        CountHttpGet(size);
+        return resp;
+    }
+
 } // namespace
 
 TransferStats
@@ -271,9 +310,7 @@ Client::PutObject(minio::s3::PutObjectArgs args)
     ssize_t ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
     if (ret > 0) {
         CountRdmaPut(static_cast<size_t>(ret));
-        minio::s3::PutObjectResponse resp;
-        resp.etag = put_ctx.etag;
-        return resp;
+        return RdmaResponse<minio::s3::PutObjectResponse>(std::move(put_ctx.etag));
     }
 
     // The fallback below streams the buffer from the host, so it cannot be
@@ -316,23 +353,7 @@ Client::GetObject(minio::s3::GetObjectArgs args)
     hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
         // RDMA not available — fall back to HTTP GET.
-        // Accumulate response into a string, then memcpy to the caller's buffer.
-        std::string received;
-        received.reserve(size);
-        minio::s3::GetObjectArgs http_args = args;
-        http_args.datafunc                 = [&](minio::http::DataFunctionArgs chunk) -> bool {
-            received.append(chunk.datachunk);
-            return true;
-        };
-        http_args.buf                     = nullptr;
-        http_args.size                    = std::nullopt;
-        minio::s3::GetObjectResponse resp = s3_client_.GetObject(http_args);
-        if (resp) {
-            size_t copy_len = std::min(received.size(), size);
-            std::memcpy(args.buf, received.data(), copy_len);
-        }
-        CountHttpGet(size);
-        return resp;
+        return HttpGetIntoBuffer(s3_client_, args, size);
     }
 
     bool          registered_here = false;
@@ -365,9 +386,7 @@ Client::GetObject(minio::s3::GetObjectArgs args)
     ssize_t ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
     if (ret > 0) {
         CountRdmaGet(static_cast<size_t>(ret));
-        minio::s3::GetObjectResponse resp;
-        resp.etag = get_ctx.etag;
-        return resp;
+        return RdmaResponse<minio::s3::GetObjectResponse>(std::move(get_ctx.etag));
     }
 
     // As in PutObject: the fallback memcpys into args.buf from the host.

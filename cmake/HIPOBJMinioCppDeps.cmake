@@ -64,21 +64,27 @@ if(NOT TARGET unofficial::inih::inireader)
 endif()
 
 if(NOT TARGET unofficial::curlpp::curlpp)
-  find_path(CURLPP_INCLUDE_DIR curlpp/Easy.h
+  find_path(CURLPP_INCLUDE_DIR curlpp/Easy.hpp
     PATHS /usr/include /usr/local/include)
   find_library(CURLPP_LIBRARY curlpp)
   if(CURLPP_INCLUDE_DIR AND CURLPP_LIBRARY)
-    add_library(unofficial-curlpp STATIC IMPORTED GLOBAL)
+    # find_library() prefers the shared library, but takes the static
+    # one if that's all there is
+    add_library(unofficial-curlpp UNKNOWN IMPORTED GLOBAL)
     set_target_properties(unofficial-curlpp PROPERTIES
       IMPORTED_LOCATION "${CURLPP_LIBRARY}"
       INTERFACE_INCLUDE_DIRECTORIES "${CURLPP_INCLUDE_DIR}"
       INTERFACE_LINK_LIBRARIES "CURL::libcurl")
     add_library(unofficial::curlpp::curlpp ALIAS unofficial-curlpp)
   else()
+    # v0.8.1, the latest release, doesn't compile against libcurl 8.10
+    # or later, which defines CURLOPT_CLOSEPOLICY as a plain int rather
+    # than a CURLoption. Upstream removed that option after the release,
+    # so pin a later commit on master.
     FetchContent_Declare(
       curlpp
       GIT_REPOSITORY https://github.com/jpbarrette/curlpp.git
-      GIT_TAG v0.8.1
+      GIT_TAG ec1b66e699557cd9d608d322c013a1ebda16bd08
     )
     FetchContent_GetProperties(curlpp)
     if(NOT curlpp_POPULATED)

@@ -178,6 +178,17 @@
 - Optimized Clang builds against glibc 2.40 or later warned about every
   call to `fprintf()`, `snprintf()`, and similar functions, and failed
   with `HIPOBJ_WERROR=ON`.
+- The MinIO bridge (`HIPOBJ_MINIO_CLIENT=ON`) didn't build against
+  libcurl 8.10 or later. The curlpp release it downloaded, v0.8.1,
+  doesn't compile against them, so it now downloads a later curlpp
+  commit that does.
+- The MinIO bridge never used an installed curlpp (`libcurlpp-dev` on
+  Ubuntu), and always downloaded and built its own. It now uses the
+  installed one, and `minio-getput-rdma` links it as a shared library.
+  An RPM package built that way requires `libcurlpp.so.1`.
+- Building the MinIO bridge with GCC 14 or later warned that two
+  returns in `integrations/minio-cpp/src/client.cpp` couldn't avoid a
+  copy, and failed with `HIPOBJ_WERROR=ON`.
 - `hipObjBufRegister()` kept a dmabuf file descriptor open for each GPU
   buffer it registered through dmabuf, until the buffer was deregistered.
   It now closes the descriptor once the registration is done. If
