@@ -7,14 +7,16 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -26,6 +28,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "s3_curl_ops.h"
 #include "unique-fd.h"
@@ -75,8 +78,7 @@ public:
         int one = 1;
         setsockopt(listenFd_.get(), SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
+        struct sockaddr_in addr {};
         addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port        = 0;
@@ -247,7 +249,8 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            ssize_t n = send(fd.get(), response_.data() + sent, response_.size() - sent, MSG_NOSIGNAL);
+            const std::string_view rest = std::string_view(response_).substr(sent);
+            ssize_t                n    = send(fd.get(), rest.data(), rest.size(), MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
@@ -314,8 +317,7 @@ void
 expectSendResult(const std::string &response, int expectedRc)
 {
     StubHttpServer  server(response);
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
     int actualRc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
     ASSERT_TRUE(server.waitDone().ok());
@@ -381,44 +383,39 @@ TEST(S3CurlOps, MissingReplyHeaderFails)
 TEST(S3CurlOps, ReplyHeaderMixedCase)
 {
     StubHttpServer  server(kR200ErrMixed);
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
     int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
-    char reply[16];
-    memset(reply, 0, sizeof(reply));
-    size_t len = sizeof(reply);
-    EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply, &len));
+    std::array<char, 16> reply{};
+    size_t               len = reply.size();
+    EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply.data(), &len));
     EXPECT_EQ(3U, len);
-    EXPECT_EQ(0, memcmp(reply, "err", 3));
+    EXPECT_EQ(hipObj::asStringView(std::span(reply).first(3)), "err");
 }
 
 TEST(S3CurlOps, ReplyHeaderAllCaps)
 {
     StubHttpServer  server(kR200OkCaps);
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
     int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
-    char reply[16];
-    memset(reply, 0, sizeof(reply));
-    size_t len = sizeof(reply);
-    EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply, &len));
+    std::array<char, 16> reply{};
+    size_t               len = reply.size();
+    EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply.data(), &len));
     EXPECT_EQ(2U, len);
-    EXPECT_EQ(0, memcmp(reply, "ok", 2));
+    EXPECT_EQ(hipObj::asStringView(std::span(reply).first(2)), "ok");
 }
 
 TEST(S3CurlOps, RequestContract)
 {
     StubHttpServer  server(kR200OkCaps);
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
     int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
     ASSERT_TRUE(server.waitDone().ok());
@@ -436,8 +433,7 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     // are refused deterministically.
     const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM, 0));
     ASSERT_TRUE(fd);
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
+    struct sockaddr_in addr {};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port        = 0;
@@ -446,8 +442,7 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     ASSERT_EQ(0, getsockname(fd.get(), reinterpret_cast<struct sockaddr *>(&addr), &slen));
     const std::string url = "http://127.0.0.1:" + std::to_string(static_cast<unsigned>(ntohs(addr.sin_port)));
 
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, url);
     int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
     EXPECT_EQ(-1, rc);
@@ -460,42 +455,38 @@ TEST(S3CurlOps, SendRequestNullCtx)
 
 TEST(S3CurlOps, SendRequestNullToken)
 {
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    hipObjS3CurlCtx ctx{};
     EXPECT_EQ(-1, hipObjS3CurlSendRequest(&ctx, nullptr, 0));
 }
 
 TEST(S3CurlOps, RecvReplyTooSmall)
 {
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    memcpy(ctx.lastReply, "ok", sizeof("ok"));
-    char   reply[8];
-    size_t len = 1;
-    EXPECT_EQ(-1, hipObjS3CurlRecvReply(&ctx, reply, &len));
+    hipObjS3CurlCtx ctx{};
+    std::ranges::copy(std::string_view("ok"), std::span(ctx.lastReply).begin());
+    std::array<char, 8> reply{};
+    size_t              len = 1;
+    EXPECT_EQ(-1, hipObjS3CurlRecvReply(&ctx, reply.data(), &len));
 }
 
 TEST(S3CurlOps, RecvReplyExactSize)
 {
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    memcpy(ctx.lastReply, "ok", sizeof("ok"));
-    char   reply[2];
-    size_t len = 2;
-    EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply, &len));
+    hipObjS3CurlCtx ctx{};
+    std::ranges::copy(std::string_view("ok"), std::span(ctx.lastReply).begin());
+    std::array<char, 2> reply{};
+    size_t              len = reply.size();
+    EXPECT_EQ(0, hipObjS3CurlRecvReply(&ctx, reply.data(), &len));
     EXPECT_EQ(2U, len);
-    EXPECT_EQ(0, memcmp(reply, "ok", 2));
+    EXPECT_EQ(hipObj::asStringView(reply), "ok");
 }
 
 TEST(S3CurlOps, RecvReplyNullArgs)
 {
-    hipObjS3CurlCtx ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    char   reply[8];
-    size_t len = sizeof(reply);
-    EXPECT_EQ(-1, hipObjS3CurlRecvReply(nullptr, reply, &len));
+    hipObjS3CurlCtx     ctx{};
+    std::array<char, 8> reply{};
+    size_t              len = reply.size();
+    EXPECT_EQ(-1, hipObjS3CurlRecvReply(nullptr, reply.data(), &len));
     EXPECT_EQ(-1, hipObjS3CurlRecvReply(&ctx, nullptr, &len));
-    EXPECT_EQ(-1, hipObjS3CurlRecvReply(&ctx, reply, nullptr));
+    EXPECT_EQ(-1, hipObjS3CurlRecvReply(&ctx, reply.data(), nullptr));
 }
 
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

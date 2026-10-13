@@ -23,6 +23,7 @@
 #include "../../../src/rdma/v2-transport.h"
 #include "gid.h"
 #include "hipobj-format.h"
+#include "hipobj-span.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -542,12 +543,13 @@ namespace v2 {
              * would serialize every other request behind this one. */
             struct ibv_pd *pd = (dh != nullptr && dh->pd != nullptr) ? dh->pd.get() : nullptr;
             V2Session      stageScratch;
-            stageScratch.op   = req.op;
-            stageScratch.size = req.size;
-            bool  staged      = stagePutBuffer(stageScratch, static_cast<size_t>(req.size), pd);
-            void *staging     = stageScratch.staging.get();
-            bool  copied      = staged && staging != nullptr &&
-                          backend_->read(req.target, req.offset, static_cast<size_t>(req.size), staging);
+            stageScratch.op    = req.op;
+            stageScratch.size  = req.size;
+            const auto size    = static_cast<size_t>(req.size);
+            bool       staged  = stagePutBuffer(stageScratch, size, pd);
+            auto      *staging = static_cast<uint8_t *>(stageScratch.staging.get());
+            bool       copied  = staged && staging != nullptr &&
+                          backend_->read(req.target, req.offset, spanFromPointer(staging, size));
             if (staged) {
                 table_.withSession(id, [&](V2Session &s) {
                     s.staging   = std::move(stageScratch.staging);
@@ -762,7 +764,7 @@ namespace v2 {
                 sessionClientQpn = s.clientQpn;
             });
             if (sessionClientQpn != 0 && staging != nullptr) {
-                backend_->write(target, staging, stats.bytes);
+                backend_->write(target, spanFromPointer(static_cast<const uint8_t *>(staging), stats.bytes));
             }
         }
 

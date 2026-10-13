@@ -9,6 +9,7 @@
 
 #include <charconv>
 #include <concepts>
+#include <memory>
 #include <optional>
 #include <string_view>
 #include <system_error>
@@ -30,7 +31,7 @@ parseNumber(std::string_view text, int base = 10)
         return std::nullopt;
     }
     T           value{};
-    const char *end      = text.data() + text.size();
+    const char *end      = std::to_address(text.end());
     const auto [ptr, ec] = std::from_chars(text.data(), end, value, base);
     if (ec != std::errc{} || ptr != end) {
         return std::nullopt;

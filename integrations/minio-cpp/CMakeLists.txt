@@ -81,6 +81,9 @@ hipobj_add_executable(
   NAME minio-getput-rdma
   SRCS examples/getput-rdma.cpp)
 
+target_include_directories(minio-getput-rdma PRIVATE
+  ${PROJECT_SOURCE_DIR}/shared)
+
 target_link_libraries(minio-getput-rdma PRIVATE
   hipobj_minio
   hipobj

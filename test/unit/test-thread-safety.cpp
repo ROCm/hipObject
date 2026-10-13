@@ -12,15 +12,16 @@
  * ThreadSanitizer build, which reports any data race the lock misses.
  */
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <latch>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -32,6 +33,7 @@
 
 #include "fake-ibv.h"
 #include "hip-seam.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -107,7 +109,7 @@ int
 fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
 {
     if (attr) {
-        std::memset(attr, 0, sizeof(*attr));
+        hipObj::zeroObject(*attr);
     }
     return 0;
 }
@@ -116,7 +118,7 @@ int
 fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *gid)
 {
     if (gid) {
-        std::memset(gid, 0, sizeof(*gid));
+        hipObj::zeroObject(*gid);
     }
     return 0;
 }
@@ -194,7 +196,7 @@ int
 fakePollCq(struct ibv_cq *, int, struct ibv_wc *wc)
 {
     if (wc) {
-        std::memset(wc, 0, sizeof(*wc));
+        hipObj::zeroObject(*wc);
         wc->status = IBV_WC_SUCCESS;
     }
     return 1;
@@ -222,7 +224,7 @@ plainRecvReply(void *, char *reply, size_t *replyLen)
     if (!reply || !replyLen || *replyLen < kReply.size()) {
         return -1;
     }
-    std::memcpy(reply, kReply.data(), kReply.size());
+    std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).begin());
     *replyLen = kReply.size();
     return 0;
 }
@@ -322,7 +324,7 @@ protected:
      * other thread's */
     void *buffer(int index)
     {
-        return pool_.data() + static_cast<size_t>(index) * kBufSize;
+        return std::span(pool_).subspan(static_cast<size_t>(index) * kBufSize, kBufSize).data();
     }
 
     hipObj::DriverState                      state_{};

@@ -18,8 +18,8 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "hipobj-parse.h"
+#include "hipobj-span.h"
 #include "http_server.h"
 #include "rdma_server.h"
 #include "token_header.h"
@@ -49,26 +50,26 @@ objectKey(const std::string &path)
 }
 
 void
-usage(const char *prog)
+usage(const std::string &prog)
 {
     fprintf(stderr,
             "usage: %s [--v2] [--v2-access-key KEY] [--v2-secret-key KEY] "
             "[--hang-after-prepare] [port]\n",
-            prog);
+            prog.c_str());
 }
 
-/* Returns the value that follows the option at argv[i] and advances i
+/* Returns the value that follows the option at args[i] and advances i
  * past it. Exits with a usage error if the option is the last argument
  * or is followed by another option. */
-const char *
-optionValue(int argc, char *argv[], int &i)
+const std::string &
+optionValue(const std::vector<std::string> &args, size_t &i)
 {
-    if (i + 1 >= argc || std::string_view(argv[i + 1]).starts_with("--")) {
-        fprintf(stderr, "hipobj-rdma-test-server: %s requires a value\n", argv[i]);
-        usage(argv[0]);
+    if (i + 1 >= args.size() || args[i + 1].starts_with("--")) {
+        fprintf(stderr, "hipobj-rdma-test-server: %s requires a value\n", args[i].c_str());
+        usage(args[0]);
         std::exit(2);
     }
-    return argv[++i];
+    return args[++i];
 }
 
 } // namespace
@@ -76,23 +77,26 @@ optionValue(int argc, char *argv[], int &i)
 int
 main(int argc, char *argv[])
 {
-    int  port   = 9000;
-    bool v2Mode = false;
+    const std::span<char *>        argvSpan = hipObj::argSpan(argc, argv);
+    const std::vector<std::string> args(argvSpan.begin(), argvSpan.end());
+    const std::string              prog   = args.empty() ? "hipobj-rdma-test-server" : args[0];
+    int                            port   = 9000;
+    bool                           v2Mode = false;
 #ifdef HIPOBJECT_V2_API
     bool hangAfterPrepare = false;
 #endif
     std::string accessKey = "hipobj-test-key";
     std::string secretKey = "hipobj-test-secret";
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
+    for (size_t i = 1; i < args.size(); ++i) {
+        const std::string &arg = args[i];
         if (arg == "--v2") {
             v2Mode = true;
         }
         else if (arg == "--v2-access-key") {
-            accessKey = optionValue(argc, argv, i);
+            accessKey = optionValue(args, i);
         }
         else if (arg == "--v2-secret-key") {
-            secretKey = optionValue(argc, argv, i);
+            secretKey = optionValue(args, i);
         }
         else if (arg == "--hang-after-prepare") {
 #ifdef HIPOBJECT_V2_API
@@ -101,14 +105,14 @@ main(int argc, char *argv[])
         }
         else if (arg[0] == '-') {
             fprintf(stderr, "hipobj-rdma-test-server: unknown option %s\n", arg.c_str());
-            usage(argv[0]);
+            usage(prog);
             return 2;
         }
         else {
             const std::optional<uint16_t> value = hipObj::parseNumber<uint16_t>(arg);
             if (!value || *value == 0) {
                 fprintf(stderr, "hipobj-rdma-test-server: invalid port %s\n", arg.c_str());
-                usage(argv[0]);
+                usage(prog);
                 return 2;
             }
             port = *value;

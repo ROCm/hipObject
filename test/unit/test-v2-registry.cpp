@@ -10,7 +10,6 @@
 
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -22,6 +21,7 @@
 
 #include "buffer.h"
 #include "fake-ibv.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -96,7 +96,7 @@ fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
         return nullptr;
     }
     auto *qp = new struct ibv_qp();
-    std::memset(qp, 0, sizeof(*qp));
+    hipObj::zeroObject(*qp);
     qp->qp_num = 1000 + g_fake.createQpCalls;
     return qp;
 }
@@ -133,7 +133,7 @@ fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *a)
 {
     /* Mirror a healthy port: active MTU 4096 so the RTR transition
      * under test keeps a full-size path MTU. */
-    std::memset(a, 0, sizeof(*a));
+    hipObj::zeroObject(*a);
     a->active_mtu = IBV_MTU_4096;
     return 0;
 }
@@ -482,7 +482,7 @@ TEST_F(V2RegistryTest, DefensiveBusyPath)
     auto                         &reg = hipObj::v2::registry();
     hipObj::v2::ConnectionEntryV2 entry;
     auto                         *rawQp = new struct ibv_qp();
-    std::memset(rawQp, 0, sizeof(*rawQp));
+    hipObj::zeroObject(*rawQp);
     rawQp->qp_num = 7;
     entry.conn.qp.reset(rawQp); /* fakeDestroyQp() deletes it */
     entry.conn.qpNum    = 7;
@@ -519,7 +519,7 @@ TEST_F(V2RegistryTest, TopologyFieldsReachQpAttrs)
     ASSERT_EQ(hipObj::v2::createRcConnV2(dh_, conn), 0);
     EXPECT_EQ(hipObj::v2::transitionQpToInitV2(dh_, conn), 0);
     union ibv_gid gid;
-    std::memset(&gid, 0, sizeof(gid));
+    hipObj::zeroObject(gid);
     EXPECT_EQ(hipObj::v2::transitionQpToRtrV2(dh_, conn, 42, gid, 0xAABBCC), 0);
     EXPECT_EQ(hipObj::v2::transitionQpToRtsV2(conn, dh_, 0x112233), 0);
     /* PSNs captured by the modify spy. */
@@ -540,7 +540,7 @@ TEST_F(V2RegistryTest, OutOfRangeGidIndexRejected)
     hipObj::RcConnV2 conn;
     ASSERT_EQ(hipObj::v2::createRcConnV2(dh_, conn), 0);
     union ibv_gid gid;
-    std::memset(&gid, 0, sizeof(gid));
+    hipObj::zeroObject(gid);
     for (int gidIndex : {-1, 256}) {
         dh_.gidIndex = gidIndex;
         EXPECT_NE(hipObj::v2::transitionQpToRtrV2(dh_, conn, 42, gid, 0xAABBCC), 0) << gidIndex;

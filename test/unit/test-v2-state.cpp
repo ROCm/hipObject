@@ -6,8 +6,8 @@
 
 /* Unit tests for the v2 client phase machine (src/rdma/v2-state.*). */
 
+#include <bit>
 #include <cstdint>
-#include <cstring>
 
 #include <gtest/gtest.h>
 
@@ -119,12 +119,11 @@ TEST(V2State, PhaseNames)
     EXPECT_STREQ(hipObj::v2::phaseName(Phase::Transferring), "Transferring");
     EXPECT_STREQ(hipObj::v2::phaseName(Phase::Draining), "Draining");
 
-    /* A value no enumerator has, as a corrupted phase would hold. Copy it
-     * in rather than cast it, which static analysis flags. */
+    /* A value no enumerator has, as a corrupted phase would hold. Copy its
+     * bits in rather than cast it, which static analysis flags. */
     const uint8_t raw = 6;
-    Phase         unknown;
-    static_assert(sizeof(unknown) == sizeof(raw));
-    std::memcpy(&unknown, &raw, sizeof(unknown));
+    static_assert(sizeof(Phase) == sizeof(raw));
+    const auto unknown = std::bit_cast<Phase>(raw);
     EXPECT_STREQ(hipObj::v2::phaseName(unknown), "?");
 }
 

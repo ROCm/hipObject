@@ -7,7 +7,6 @@
 #include "v2-transport.h"
 
 #include <atomic>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -15,6 +14,7 @@
 
 #include <arpa/inet.h>
 
+#include "hipobj-span.h"
 #include "ibv-wrapper.h"
 #include "scope-guard.h"
 #include "vendor-ops.h"
@@ -56,7 +56,7 @@ namespace v2 {
                 return;
             }
             struct ibv_device_attr devAttr;
-            std::memset(&devAttr, 0, sizeof(devAttr));
+            zeroObject(devAttr);
             if (ibv().query_device(ctx, &devAttr) != 0) {
                 return;
             }
@@ -75,7 +75,7 @@ namespace v2 {
         int modifyQpToInit(DeviceHandle &dh, struct ibv_qp *qp)
         {
             struct ibv_qp_attr attr;
-            std::memset(&attr, 0, sizeof(attr));
+            zeroObject(attr);
             attr.qp_state        = IBV_QPS_INIT;
             attr.pkey_index      = 0;
             attr.port_num        = dh.portNum;
@@ -97,14 +97,14 @@ namespace v2 {
             }
 
             struct ibv_qp_attr attr;
-            std::memset(&attr, 0, sizeof(attr));
+            zeroObject(attr);
             attr.qp_state = IBV_QPS_RTR;
             /* The path MTU must not exceed the port's active MTU: emulated
              * devices commonly report 1024 while HCAs run 4096, and a
              * larger value fails the transition with EINVAL. */
             {
                 struct ibv_port_attr pa;
-                std::memset(&pa, 0, sizeof(pa));
+                zeroObject(pa);
                 if (ibv().query_port(ctx, portNum, &pa) == 0 && pa.active_mtu >= IBV_MTU_512) {
                     attr.path_mtu = pa.active_mtu;
                 }
@@ -139,7 +139,7 @@ namespace v2 {
         int modifyQpToRts(struct ibv_context *ctx, struct ibv_qp *qp, uint32_t sqPsn)
         {
             struct ibv_qp_attr attr;
-            std::memset(&attr, 0, sizeof(attr));
+            zeroObject(attr);
             attr.qp_state = IBV_QPS_RTS;
             applyVendorQpAttrs(ctx, attr);
             attr.timeout       = 14;
@@ -161,7 +161,7 @@ namespace v2 {
             return -1;
         }
         struct ibv_qp_init_attr init;
-        std::memset(&init, 0, sizeof(init));
+        zeroObject(init);
         init.qp_type          = IBV_QPT_RC;
         init.send_cq          = conn.cq.get();
         init.recv_cq          = conn.cq.get();
@@ -200,7 +200,7 @@ namespace v2 {
             return -1;
         }
         struct ibv_qp_init_attr init;
-        std::memset(&init, 0, sizeof(init));
+        zeroObject(init);
         init.qp_type          = IBV_QPT_RC;
         init.send_cq          = cq;
         init.recv_cq          = cq;
@@ -246,8 +246,8 @@ namespace v2 {
         struct ibv_recv_wr  wr;
         struct ibv_recv_wr *bad = nullptr;
         struct ibv_sge      sge; /* zero-SGE: no scatter entry */
-        std::memset(&wr, 0, sizeof(wr));
-        std::memset(&sge, 0, sizeof(sge));
+        zeroObject(wr);
+        zeroObject(sge);
         wr.wr_id   = kRecvImm;
         wr.sg_list = nullptr;
         wr.num_sge = 0;

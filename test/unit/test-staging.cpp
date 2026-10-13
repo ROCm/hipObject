@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <string_view>
 #include <system_error>
 
@@ -346,7 +347,7 @@ TEST_F(StagingEnvTest, AbandonsCopyThatMissesDeadline)
     ASSERT_NE(envValue, nullptr);
     const std::string_view env       = envValue;
     int64_t                timeoutMs = 0;
-    ASSERT_EQ(std::from_chars(env.data(), env.data() + env.size(), timeoutMs).ec, std::errc{});
+    ASSERT_EQ(std::from_chars(env.data(), std::to_address(env.end()), timeoutMs).ec, std::errc{});
     ASSERT_GT(timeoutMs, 0);
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
     g_async.neverComplete = true;

@@ -14,7 +14,6 @@
 #include <fstream>
 #include <functional>
 #include <limits>
-#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -139,8 +138,9 @@ namespace {
             if (!dev_list || num_devs <= 0)
                 return result;
 
-            for (size_t i = 0; i < static_cast<size_t>(num_devs) && dev_list[i]; ++i) {
-                ibv_device *dev      = dev_list[i];
+            for (ibv_device *dev : deviceSpan(dev_list, num_devs)) {
+                if (!dev)
+                    break;
                 const char *dev_name = ibv().get_device_name(dev);
                 if (!dev_name)
                     continue;

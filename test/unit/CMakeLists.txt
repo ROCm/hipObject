@@ -89,6 +89,9 @@ hipobj_add_test(test-parse-number
 hipobj_add_test(test-format-hex
   test-format-hex.cpp)
 
+hipobj_add_test(test-span
+  test-span.cpp)
+
 # The MinIO bridge's header parsing doesn't need minio-cpp, so it's tested
 # in every build, not only with HIPOBJ_MINIO_CLIENT
 hipobj_add_test(test-minio-bytes-transferred
@@ -133,6 +136,12 @@ if(CURL_FOUND)
     ${PROJECT_SOURCE_DIR}/examples/s3_curl_ops.cpp)
   target_include_directories(test-s3-curl-ops PRIVATE
     ${PROJECT_SOURCE_DIR}/examples)
+  # s3_curl_ops.cpp is example code, written to C++11, so it's exempt
+  # from Clang's -Wunsafe-buffer-usage, as in examples/CMakeLists.txt
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set_source_files_properties(${PROJECT_SOURCE_DIR}/examples/s3_curl_ops.cpp
+      PROPERTIES COMPILE_OPTIONS -Wno-unsafe-buffer-usage)
+  endif()
   target_link_libraries(test-s3-curl-ops PRIVATE
     CURL::libcurl
     Threads::Threads)

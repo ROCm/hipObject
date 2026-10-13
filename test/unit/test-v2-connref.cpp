@@ -12,7 +12,6 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,6 +26,7 @@
 #include "../../../src/rdma/v2-registry.h"
 #include "../../../src/rdma/v2-transport.h"
 #include "fake-ibv.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "malloc_ptr.h"
 #include "v2_backend.h"
@@ -161,14 +161,14 @@ fakeDeallocPd(struct ibv_pd *pd)
 int
 fakeQueryDevice(struct ibv_context *, struct ibv_device_attr *a)
 {
-    std::memset(a, 0, sizeof(*a));
+    hipObj::zeroObject(*a);
     return 0;
 }
 
 int
 fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *a)
 {
-    std::memset(a, 0, sizeof(*a));
+    hipObj::zeroObject(*a);
     a->active_mtu = IBV_MTU_4096;
     return 0;
 }
@@ -183,7 +183,7 @@ fakeCloseDevice(struct ibv_context *ctx)
 int
 fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *g)
 {
-    std::memset(g, 0, sizeof(*g));
+    hipObj::zeroObject(*g);
     return 0;
 }
 

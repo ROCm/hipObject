@@ -7,9 +7,9 @@
  * tests call the functions directly.
  */
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstring>
 #include <initializer_list>
 #include <optional>
 #include <span>
@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 
 #include "control.h"
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "token.h"
@@ -56,7 +57,8 @@ fakeRecvReply(void *ctx, char *reply, size_t *replyLen)
     if (g_callbacks.recvRet != 0) {
         return g_callbacks.recvRet;
     }
-    std::memcpy(reply, g_callbacks.reply.data(), g_callbacks.reply.size());
+    std::ranges::copy(g_callbacks.reply,
+                      hipObj::spanFromPointer(reply, *replyLen).first(g_callbacks.reply.size()).begin());
     *replyLen = g_callbacks.reply.size() + g_callbacks.extraLen;
     return 0;
 }
@@ -135,8 +137,8 @@ TEST_F(S3ControlTest, ReceiveRejectsLengthPastBuffer)
     /* The callback writes "200" into a three-byte buffer and reports four
      * bytes. The fourth is the NUL after the buffer, which the parser
      * would skip and accept the reply if it read it. */
-    const std::span<char> replyBuf(buf_.data(), 3);
-    g_callbacks.extraLen = 1;
+    const std::span<char> replyBuf = std::span(buf_).first(3);
+    g_callbacks.extraLen           = 1;
     EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf));
 
     /* Filling the buffer exactly is fine */

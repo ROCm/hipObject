@@ -13,7 +13,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <optional>
 #include <span>
 #include <string>
@@ -22,6 +21,7 @@
 #include <netinet/in.h>
 
 #include "hipobj-parse.h"
+#include "hipobj-span.h"
 
 namespace hipObj {
 
@@ -232,13 +232,13 @@ parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen)
 {
     if (!nicIp || nicIpLen == 0)
         return false;
-    nicIp[0] = '\0';
+    const std::span<char> out = spanFromPointer(nicIp, nicIpLen);
+    out[0]                    = '\0';
     if (!tokenHex)
         return false;
 
     /* Bound the scan: anything longer than a token is rejected anyway */
-    const auto token =
-        decodeRdmaTokenHex(std::string_view(tokenHex, strnlen(tokenHex, kRdmaTokenHexLen + 1)));
+    const auto token = decodeRdmaTokenHex(cStringView(tokenHex, kRdmaTokenHexLen + 1));
     if (!token)
         return false;
 
@@ -247,13 +247,13 @@ parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen)
 
     /* Format into a fixed-size buffer first so the snprintf output is
      * bounded; nicIpLen is caller-supplied. */
-    char buf[INET_ADDRSTRLEN];
-    int  n = std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u", static_cast<unsigned>(token->gid[12]),
-                           static_cast<unsigned>(token->gid[13]), static_cast<unsigned>(token->gid[14]),
-                           static_cast<unsigned>(token->gid[15]));
+    std::array<char, INET_ADDRSTRLEN> buf{};
+    int n = std::snprintf(buf.data(), buf.size(), "%u.%u.%u.%u", static_cast<unsigned>(token->gid[12]),
+                          static_cast<unsigned>(token->gid[13]), static_cast<unsigned>(token->gid[14]),
+                          static_cast<unsigned>(token->gid[15]));
     if (n < 0 || static_cast<size_t>(n) >= nicIpLen)
         return false;
-    std::memcpy(nicIp, buf, static_cast<size_t>(n) + 1);
+    std::ranges::copy(std::span(buf).first(static_cast<size_t>(n) + 1), out.begin());
     return true;
 }
 

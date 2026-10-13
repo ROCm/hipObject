@@ -21,13 +21,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -37,6 +38,7 @@
 #include "../../../src/rdma/token.h"
 #include "hipobj-format.h"
 #include "hipobj-parse.h"
+#include "hipobj-span.h"
 #include "http_status.h"
 #include "unique-fd.h"
 #include "v2_sigv4.h"
@@ -64,7 +66,8 @@ sendAll(int fd, const std::string &data)
 {
     size_t sent = 0;
     while (sent < data.size()) {
-        ssize_t n = send(fd, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
+        const std::string_view rest = std::string_view(data).substr(sent);
+        ssize_t                n    = send(fd, rest.data(), rest.size(), MSG_NOSIGNAL);
         if (n <= 0) {
             if (n < 0 && errno == EINTR) {
                 continue;
@@ -152,32 +155,32 @@ nowAmzDate()
 }
 
 void
-usage(const char *prog)
+usage(const std::string &prog)
 {
     fprintf(stderr,
             "usage: %s host port op target size [--expect N] "
             "[--cookie-hex N] [--ready-cookie-hex N] [--cancel]\n",
-            prog);
+            prog.c_str());
 }
 
-/* Returns the value that follows the option at argv[i] and advances i
+/* Returns the value that follows the option at args[i] and advances i
  * past it. Exits with a usage error if the option is the last argument
  * or is followed by another option. */
-const char *
-optionValue(int argc, char *argv[], int &i)
+const std::string &
+optionValue(const std::vector<std::string> &args, size_t &i)
 {
-    if (i + 1 >= argc || std::string_view(argv[i + 1]).starts_with("--")) {
-        fprintf(stderr, "harness: %s requires a value\n", argv[i]);
-        usage(argv[0]);
+    if (i + 1 >= args.size() || args[i + 1].starts_with("--")) {
+        fprintf(stderr, "harness: %s requires a value\n", args[i].c_str());
+        usage(args[0]);
         std::exit(2);
     }
-    return argv[++i];
+    return args[++i];
 }
 
 [[noreturn]] void
-invalidValue(const char *prog, const char *what, const char *value)
+invalidValue(const std::string &prog, const std::string &what, const std::string &value)
 {
-    fprintf(stderr, "harness: invalid %s %s\n", what, value);
+    fprintf(stderr, "harness: invalid %s %s\n", what.c_str(), value.c_str());
     usage(prog);
     std::exit(2);
 }
@@ -186,7 +189,7 @@ invalidValue(const char *prog, const char *what, const char *value)
  * usage error naming what was being parsed. */
 template <std::integral T>
 T
-numberArg(const char *prog, const char *what, const char *text, int base = 10)
+numberArg(const std::string &prog, const std::string &what, const std::string &text, int base = 10)
 {
     const std::optional<T> value = hipObj::parseNumber<T>(text, base);
     if (!value) {
@@ -200,46 +203,49 @@ numberArg(const char *prog, const char *what, const char *text, int base = 10)
 int
 main(int argc, char *argv[])
 {
-    if (argc < 6) {
-        usage(argv[0]);
+    const std::span<char *>        argvSpan = hipObj::argSpan(argc, argv);
+    const std::vector<std::string> args(argvSpan.begin(), argvSpan.end());
+    if (args.size() < 6) {
+        usage(args.empty() ? "v2-client-harness" : args[0]);
         return 2;
     }
-    const std::string host                = argv[1];
-    const uint16_t    port                = numberArg<uint16_t>(argv[0], "port", argv[2]);
-    const std::string op                  = argv[3];
-    const std::string target              = argv[4];
-    const uint64_t    size                = numberArg<uint64_t>(argv[0], "size", argv[5]);
-    int               expect              = 200;
-    uint32_t          cookie              = 0x11223344;
-    uint32_t          readyCookie         = 0;
-    bool              overrideReadyCookie = false;
-    bool              doCancel            = false;
+    const std::string &prog                = args[0];
+    const std::string &host                = args[1];
+    const uint16_t     port                = numberArg<uint16_t>(prog, "port", args[2]);
+    const std::string &op                  = args[3];
+    const std::string &target              = args[4];
+    const uint64_t     size                = numberArg<uint64_t>(prog, "size", args[5]);
+    int                expect              = 200;
+    uint32_t           cookie              = 0x11223344;
+    uint32_t           readyCookie         = 0;
+    bool               overrideReadyCookie = false;
+    bool               doCancel            = false;
     if (port == 0) {
-        invalidValue(argv[0], "port", argv[2]);
+        invalidValue(prog, "port", args[2]);
     }
-    for (int i = 6; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--expect") == 0) {
-            const char *value = optionValue(argc, argv, i);
-            expect            = numberArg<int>(argv[0], "HTTP status", value);
+    for (size_t i = 6; i < args.size(); ++i) {
+        if (args[i] == "--expect") {
+            const std::string &value = optionValue(args, i);
+            expect                   = numberArg<int>(prog, "HTTP status", value);
             if (expect < 100 || expect > 599) {
-                invalidValue(argv[0], "HTTP status", value);
+                invalidValue(prog, "HTTP status", value);
             }
         }
-        else if (std::strcmp(argv[i], "--cookie-hex") == 0) {
-            const char *value = optionValue(argc, argv, i);
-            cookie            = numberArg<uint32_t>(argv[0], "cookie", value, 16);
+        else if (args[i] == "--cookie-hex") {
+            const std::string &value = optionValue(args, i);
+            cookie                   = numberArg<uint32_t>(prog, "cookie", value, 16);
         }
-        else if (std::strcmp(argv[i], "--ready-cookie-hex") == 0) {
-            const char *value   = optionValue(argc, argv, i);
-            readyCookie         = numberArg<uint32_t>(argv[0], "cookie", value, 16);
-            overrideReadyCookie = true;
+        else if (args[i] == "--ready-cookie-hex") {
+            const std::string &value = optionValue(args, i);
+            readyCookie              = numberArg<uint32_t>(prog, "cookie", value, 16);
+            overrideReadyCookie      = true;
         }
-        else if (std::strcmp(argv[i], "--cancel") == 0) {
+        else if (args[i] == "--cancel") {
             doCancel = true;
         }
         else {
-            fprintf(stderr, "harness: unknown option %s\n", argv[i]);
-            usage(argv[0]);
+            fprintf(stderr, "harness: unknown option %s\n", args[i].c_str());
+            usage(prog);
             return 2;
         }
     }

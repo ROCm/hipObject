@@ -17,9 +17,12 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
+#include <span>
 #include <tuple>
 
+#include "hipobj-span.h"
 #include "ibv-core.h"
 
 namespace hipObj {
@@ -58,6 +61,17 @@ using IbvMrPtr      = std::unique_ptr<struct ibv_mr, IbvMrDeleter>;
 
 /* The NULL-terminated array returned by ibv_get_device_list() */
 using IbvDeviceListPtr = std::unique_ptr<struct ibv_device *[], IbvDeviceListDeleter>;
+
+/* Views the devices in list, given the count ibv_get_device_list()
+ * returned with it. Empty when list is null or count isn't positive. */
+inline std::span<struct ibv_device *>
+deviceSpan(const IbvDeviceListPtr &list, int count) noexcept
+{
+    if (!list || count <= 0) {
+        return {};
+    }
+    return spanFromPointer(list.get(), static_cast<size_t>(count));
+}
 
 /* Destroys the object and gives up ownership only when the verb
  * succeeded. On failure the pointer still owns the object so a retry

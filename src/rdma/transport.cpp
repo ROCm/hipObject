@@ -8,11 +8,12 @@
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
-#include <cstring>
-#include <memory>
+#include <span>
+#include <string_view>
 #include <thread>
 #include <utility>
 
+#include "hipobj-span.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -31,7 +32,7 @@ openRdmaDevice(int nicIndex, RcConnection &conn)
     if (!devList || numDevs <= 0 || nicIndex < 0 || nicIndex >= numDevs) {
         return -1;
     }
-    struct ibv_device *dev = devList[static_cast<size_t>(nicIndex)];
+    struct ibv_device *dev = deviceSpan(devList, numDevs)[static_cast<size_t>(nicIndex)];
     if (!dev) {
         return -1;
     }
@@ -71,11 +72,12 @@ openRdmaDeviceByName(const char *devName, RcConnection &conn)
     if (!devList || numDevs <= 0) {
         return -1;
     }
-    int nicIndex = -1;
-    for (int i = 0; i < numDevs; ++i) {
-        struct ibv_device *dev = devList[static_cast<size_t>(i)];
-        if (ibv().get_device_name(dev) && std::strcmp(ibv().get_device_name(dev), devName) == 0) {
-            nicIndex = i;
+    const std::span<struct ibv_device *> devices  = deviceSpan(devList, numDevs);
+    int                                  nicIndex = -1;
+    for (size_t i = 0; i < devices.size(); ++i) {
+        const char *name = ibv().get_device_name(devices[i]);
+        if (name && std::string_view(name) == devName) {
+            nicIndex = static_cast<int>(i);
             break;
         }
     }
@@ -102,7 +104,7 @@ createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvW
         return -1;
     }
     struct ibv_qp_init_attr initAttr;
-    std::memset(&initAttr, 0, sizeof(initAttr));
+    zeroObject(initAttr);
     initAttr.send_cq          = cq.get();
     initAttr.recv_cq          = cq.get();
     initAttr.cap.max_send_wr  = maxSendWr;
@@ -123,7 +125,7 @@ int
 transitionQpToInit(RcConnection &conn)
 {
     struct ibv_qp_attr attr;
-    std::memset(&attr, 0, sizeof(attr));
+    zeroObject(attr);
     attr.qp_state        = IBV_QPS_INIT;
     attr.pkey_index      = 0;
     attr.port_num        = conn.portNum;
@@ -139,7 +141,7 @@ applyVendorQpAttrs(RcConnection &conn, struct ibv_qp_attr &attr)
         return;
     }
     struct ibv_device_attr devAttr;
-    std::memset(&devAttr, 0, sizeof(devAttr));
+    zeroObject(devAttr);
     if (ibv().query_device(conn.ctx.get(), &devAttr) != 0) {
         return;
     }
@@ -166,7 +168,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     }
 
     struct ibv_qp_attr attr;
-    std::memset(&attr, 0, sizeof(attr));
+    zeroObject(attr);
     attr.qp_state = IBV_QPS_RTR;
     attr.path_mtu = IBV_MTU_4096;
     applyVendorQpAttrs(conn, attr);
@@ -193,7 +195,7 @@ int
 transitionQpToRts(RcConnection &conn)
 {
     struct ibv_qp_attr attr;
-    std::memset(&attr, 0, sizeof(attr));
+    zeroObject(attr);
     attr.qp_state = IBV_QPS_RTS;
     applyVendorQpAttrs(conn, attr);
     attr.timeout       = 14;

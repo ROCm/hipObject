@@ -55,3 +55,13 @@
 #define HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 #define HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
 #endif
+
+/* Also turns off the -Wunsafe-buffer-usage-in-* warnings, which are in
+ * its group */
+#if defined(__clang__)
+#define HIPOBJ_WARN_UNSAFE_BUFFER_OFF HIPOBJ_WARN_OFF("unsafe-buffer-usage")
+#define HIPOBJ_WARN_UNSAFE_BUFFER_ON  HIPOBJ_WARN_ON("unsafe-buffer-usage")
+#else
+#define HIPOBJ_WARN_UNSAFE_BUFFER_OFF
+#define HIPOBJ_WARN_UNSAFE_BUFFER_ON
+#endif

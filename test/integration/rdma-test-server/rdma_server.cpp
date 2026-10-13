@@ -5,16 +5,20 @@
 
 #include "rdma_server.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
+#include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
+#include "hipobj-span.h"
 #include "ibv-wrapper.h"
 #include "malloc_ptr.h"
 #include "scope-guard.h"
@@ -30,9 +34,9 @@ namespace {
      * turns into "500 RDMA PUT failed" with no reply header -- indistinguishable,
      * from the client, from a server that does not speak the RDMA extension at
      * all. Six different faults reported as one. Name which one it was. */
-    int rdmaFail(const char *op, const char *why)
+    int rdmaFail(const std::string &op, const std::string &why)
     {
-        fprintf(stderr, "hipobj-rdma-test-server: %s failed: %s\n", op, why);
+        fprintf(stderr, "hipobj-rdma-test-server: %s failed: %s\n", op.c_str(), why.c_str());
         return -1;
     }
 
@@ -108,6 +112,13 @@ struct RdmaTestServer::Impl {
     hipObj::IbvMrPtr     stagingMr{};
     size_t               stagingSize = 64 * 1024 * 1024;
     bool                 ready       = false;
+
+    /* The staging buffer's bytes. Only call it once the buffer is
+     * allocated. */
+    std::span<uint8_t> staging() const
+    {
+        return hipObj::spanFromPointer(static_cast<uint8_t *>(stagingBuf.get()), stagingSize);
+    }
 
     /* One QP serves every request in turn, so it has to come back to INIT
      * between them -- an RC QP already in RTS cannot be moved to RTR for the
@@ -189,7 +200,7 @@ RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vec
         return -1;
     }
 
-    std::memcpy(impl_->stagingBuf.get(), data.data(), xferSize);
+    std::ranges::copy(std::span(data).first(xferSize), impl_->staging().begin());
     /* Connecting touches the QP, so every way out from here resets it */
     const hipObj::ScopeGuard resetQp([this] { impl_->resetQp(); });
     if (hipObj::connectRcPeer(impl_->conn, clientToken) != 0) {
@@ -234,8 +245,8 @@ RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size, 
     if (postRdmaRead(impl_->conn, impl_->stagingMr.get(), xferSize, clientToken) != 0) {
         return rdmaFail("PUT", "RDMA READ from the client buffer did not complete");
     }
-    data.assign(static_cast<uint8_t *>(impl_->stagingBuf.get()),
-                static_cast<uint8_t *>(impl_->stagingBuf.get()) + xferSize);
+    const std::span<const uint8_t> received = impl_->staging().first(xferSize);
+    data.assign(received.begin(), received.end());
     hipObj::RdmaToken serverToken = buildServerToken(impl_->conn, impl_->stagingMr.get(), xferSize);
     replyHeader                   = hipObj::encodeReplyWithPeerToken(200, serverToken);
     return 0;

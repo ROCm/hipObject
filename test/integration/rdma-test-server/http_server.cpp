@@ -9,17 +9,19 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <mutex>
 #include <optional>
 #include <ratio>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/select.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -123,7 +125,8 @@ namespace {
             if (!setTimeoutUntil(fd, SO_SNDTIMEO, deadline)) {
                 return false;
             }
-            ssize_t n = ::send(fd, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
+            const std::string_view rest = std::string_view(data).substr(sent);
+            ssize_t                n    = ::send(fd, rest.data(), rest.size(), MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
@@ -150,9 +153,10 @@ HttpServer::HttpServer(int port) : listen_fd_(socket(AF_INET, SOCK_STREAM, 0))
     addr.sin_port        = htons(static_cast<uint16_t>(port));
     if (bind(listen_fd_.get(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
         /* Silence here is what made a busy port look like a crash: the object
-         * went on being constructed, and the abort arrived later from select().
-         * Say which port and why, once, where it happened. */
-        fprintf(stderr, "hipobj-rdma-test-server: cannot bind port %d: %s\n", port, strerror(errno));
+         * went on being constructed, and the abort arrived later from the
+         * accept loop. Say which port and why, once, where it happened. */
+        const std::string reason = std::generic_category().message(errno);
+        fprintf(stderr, "hipobj-rdma-test-server: cannot bind port %d: %s\n", port, reason.c_str());
         listen_fd_.reset();
         return;
     }
@@ -208,21 +212,19 @@ HttpServer::runThreaded()
      * startThreaded() so stop() can join it as the production
      * barrier. */
     if (!listen_fd_) {
-        /* FD_SET(-1) is a glibc fortify abort, so without this check a
-         * failed bind killed the process with "bit out of range 0 -
-         * FD_SETSIZE on fd_set" and no mention of a port. startThreaded()
-         * refuses to spawn the thread, but the loop must hold the
-         * invariant itself: it is also reachable directly. */
+        /* When the loop used select(), FD_SET(-1) was a glibc fortify
+         * abort, so a failed bind killed the process with "bit out of
+         * range 0 - FD_SETSIZE on fd_set" and no mention of a port. poll()
+         * just ignores a negative fd, so the loop would wait on nothing.
+         * startThreaded() refuses to spawn the thread, but the loop must
+         * hold the invariant itself: it is also reachable directly. */
         return;
     }
     while (!stopping_.load()) {
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(listen_fd_.get(), &fds);
-        timeval tv{};
-        tv.tv_sec  = 0;
-        tv.tv_usec = 200 * 1000; /* wake for stop checks */
-        int ready  = select(listen_fd_.get() + 1, &fds, nullptr, nullptr, &tv);
+        pollfd pfd{};
+        pfd.fd     = listen_fd_.get();
+        pfd.events = POLLIN;
+        int ready  = poll(&pfd, 1, 200); /* wake every 200 ms for stop checks */
         if (ready <= 0) {
             continue;
         }

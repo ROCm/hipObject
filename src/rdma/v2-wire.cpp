@@ -9,7 +9,9 @@
 #include "v2-wire.h"
 
 #include <algorithm>
+#include <array>
 #include <optional>
+#include <string_view>
 
 #include "hipobj-format.h"
 #include "hipobj-parse.h"
@@ -58,9 +60,9 @@ namespace v2 {
                 if (!isBase64Char(text[i]))
                     return false;
             }
-            uint8_t bytes[8] = {0};
-            int     v[11];
-            for (size_t i = 0; i < 11; ++i) {
+            std::array<uint8_t, 8> bytes{};
+            std::array<int, 11>    v{};
+            for (size_t i = 0; i < v.size(); ++i) {
                 v[i] = b64Val(text[i]);
                 if (v[i] < 0)
                     return false;
@@ -77,12 +79,13 @@ namespace v2 {
             if (v[10] & 0x3)
                 return false;
             /* Re-encode and compare. */
-            static const char *tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-            std::string        re;
-            uint32_t           acc  = 0;
-            int                bits = 0;
-            for (int i = 0; i < 8; ++i) {
-                acc = (acc << 8) | bytes[i];
+            constexpr std::string_view tbl =
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            std::string re;
+            uint32_t    acc  = 0;
+            int         bits = 0;
+            for (const uint8_t byte : bytes) {
+                acc = (acc << 8) | byte;
                 bits += 8;
                 while (bits >= 6) {
                     bits -= 6;
@@ -290,9 +293,9 @@ namespace v2 {
 
     std::string buildTarget(std::string_view bucket, std::string_view key, std::string_view canonicalQuery)
     {
-        static const char *hex = "0123456789ABCDEF";
-        std::string        out = "/";
-        auto               enc = [&](std::string_view s, bool keepSlash) {
+        constexpr std::string_view hex = "0123456789ABCDEF";
+        std::string                out = "/";
+        auto                       enc = [&](std::string_view s, bool keepSlash) {
             for (char ch : s) {
                 /* Percent-encoding works on raw bytes, so view each char as
                  * its 0-255 byte value (well-defined for negative chars). */

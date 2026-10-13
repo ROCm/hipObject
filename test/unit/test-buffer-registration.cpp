@@ -216,8 +216,11 @@ TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
 
 TEST_F(BufferRegistrationTest, FindsOnlyRegisteredBuffers)
 {
-    hipObj::BufferMap buffers;
-    void             *gpuBuf = reinterpret_cast<void *>(0x5000);
+    /* A fake address: registration is faked, so nothing reads or writes
+     * it, and there's no object there to do pointer arithmetic in */
+    constexpr uintptr_t kGpuAddr = 0x5000;
+    hipObj::BufferMap   buffers;
+    void               *gpuBuf = reinterpret_cast<void *>(kGpuAddr);
 
     EXPECT_EQ(buffers.find(gpuBuf), nullptr);
     EXPECT_FALSE(buffers.isRegistered(gpuBuf));
@@ -226,7 +229,7 @@ TEST_F(BufferRegistrationTest, FindsOnlyRegisteredBuffers)
     EXPECT_NE(buffers.find(gpuBuf), nullptr);
     EXPECT_TRUE(buffers.isRegistered(gpuBuf));
     /* Only the start of a registration finds it */
-    EXPECT_EQ(buffers.find(static_cast<char *>(gpuBuf) + 1), nullptr);
+    EXPECT_EQ(buffers.find(reinterpret_cast<void *>(kGpuAddr + 1)), nullptr);
 
     ASSERT_EQ(buffers.deregisterBuffer(gpuBuf), 0);
     EXPECT_EQ(buffers.find(gpuBuf), nullptr);

@@ -10,11 +10,13 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #include <hip/hip_runtime_api.h>
@@ -24,6 +26,7 @@
 #include <miniocpp/error.h>
 #include <miniocpp/http.h>
 
+#include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj_minio/context.h"
 #include "hipobj_minio/rdma.h"
@@ -199,8 +202,8 @@ namespace {
         http_args.size                    = std::nullopt;
         minio::s3::GetObjectResponse resp = client.GetObject(http_args);
         if (resp) {
-            size_t copy_len = std::min(received.size(), size);
-            std::memcpy(args.buf, received.data(), copy_len);
+            const std::span<char> dst = hipObj::spanFromPointer(args.buf, size);
+            std::ranges::copy(std::string_view(received).substr(0, dst.size()), dst.begin());
         }
         CountHttpGet(size);
         return resp;
@@ -410,14 +413,14 @@ Client::GetObject(minio::s3::GetObjectArgs args)
               << std::endl;
 
     minio::s3::GetObjectArgs http_args = args;
-    char                    *dst       = args.buf;
+    const std::span<char>    dst       = hipObj::spanFromPointer(args.buf, size);
     size_t                   offset    = 0;
-    http_args.datafunc                 = [&](minio::http::DataFunctionArgs chunk) -> bool {
-        size_t len = chunk.datachunk.size();
-        if (offset + len > size)
-            len = size - offset;
-        std::memcpy(dst + offset, chunk.datachunk.data(), len);
-        offset += len;
+    http_args.datafunc                 = [&](const minio::http::DataFunctionArgs &chunk) -> bool {
+        /* Anything past size is dropped */
+        const std::span<char>  rest = dst.subspan(offset);
+        const std::string_view data = std::string_view(chunk.datachunk).substr(0, rest.size());
+        std::ranges::copy(data, rest.begin());
+        offset += data.size();
         return true;
     };
     http_args.buf  = nullptr;
