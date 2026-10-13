@@ -7,7 +7,7 @@
 # The long comment above the job is the important one: this topology has
 # requirements that are not obvious and were expensive to find.
 
-name: hipObject - Hardware Test - AIS and Host Buffers
+name: hipObject - Emulated HW Test - AIS and Host Buffers
 
 on:
   # Pull requests, pushes to develop, and manual runs. The push run

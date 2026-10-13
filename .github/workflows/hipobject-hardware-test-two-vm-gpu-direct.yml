@@ -30,7 +30,7 @@
 # from the same rocjitsu build that serves the socket -- it describes the
 # device, so it cannot come from anywhere else.
 
-name: hipObject - Hardware Test - Two-VM AIS and Host Buffers
+name: hipObject - Emulated HW Test - Two-VM AIS and Host Buffers
 
 on:
   # Pull requests, pushes to develop, and manual runs. The push run
