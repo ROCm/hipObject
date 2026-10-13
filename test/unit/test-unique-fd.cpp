@@ -40,7 +40,7 @@ isClosed(int fd)
 std::pair<UniqueFd, UniqueFd>
 makePipe()
 {
-    std::array<int, 2> fds{-1, -1};
+    std::array<int, 2> fds{{-1, -1}};
     if (pipe(fds.data()) != 0) {
         return {};
     }

@@ -9,6 +9,7 @@
 
 #include "ibv-wrapper.h"
 
+#include <bit>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -60,10 +61,13 @@ setIbvForTest(IBVWrapper *wrapper)
 
 namespace {
 
-    /* Sets out to the symbol, or to nullptr when the library doesn't have it */
+    /* Sets out to the symbol, or to nullptr when the library doesn't have it.
+     * Casting dlsym()'s void * to a function pointer is only conditionally
+     * supported in C++, so copy the pointer's bits instead (std::bit_cast
+     * doesn't compile if the two pointers differ in size). */
     template <typename FuncPtr> void dlsym_load_optional(FuncPtr &out, void *handle, const char *name)
     {
-        out = reinterpret_cast<FuncPtr>(dlsym(handle, name));
+        out = std::bit_cast<FuncPtr>(dlsym(handle, name));
     }
 
     /* As dlsym_load_optional(), but a missing symbol is an error: it's

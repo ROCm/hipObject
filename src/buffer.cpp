@@ -253,7 +253,7 @@ BufferMap::mrRefCount(void *devPtr) const
 bool
 BufferMap::anyPinned() const
 {
-    return std::ranges::any_of(entries_, [](const auto &kv) { return kv.second.refCount > 0; });
+    return std::ranges::any_of(entries_, [](const auto &kv) noexcept { return kv.second.refCount > 0; });
 }
 #endif /* HIPOBJECT_V2_API */
 

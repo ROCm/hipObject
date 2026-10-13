@@ -256,7 +256,7 @@ main(int argc, char *argv[])
 
     /* --- PREPARE --- */
     std::map<std::string, std::string> hdrs = {
-        {"host", host + ":" + std::to_string(port)},
+        {"host", host + ":" + std::to_string(static_cast<unsigned>(port))},
         {"x-amz-date", amzDate},
         {"x-amz-rdma-protocol", "hipobj-rc-v2"},
         {"x-amz-rdma-token", harnessTokenHex()},
@@ -297,7 +297,7 @@ main(int argc, char *argv[])
 
     /* --- READY --- */
     std::map<std::string, std::string> rhdrs = {
-        {"host", host + ":" + std::to_string(port)},
+        {"host", host + ":" + std::to_string(static_cast<unsigned>(port))},
         {"x-amz-date", amzDate},
         {"x-amz-rdma-protocol", "hipobj-rc-v2"},
         {"x-amz-rdma-session", session},
@@ -341,7 +341,7 @@ main(int argc, char *argv[])
     /* --- optional CANCEL --- */
     if (doCancel) {
         std::map<std::string, std::string> chdrs = {
-            {"host", host + ":" + std::to_string(port)},
+            {"host", host + ":" + std::to_string(static_cast<unsigned>(port))},
             {"x-amz-date", amzDate},
             {"x-amz-rdma-protocol", "hipobj-rc-v2"},
             {"x-amz-rdma-session", session},

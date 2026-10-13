@@ -118,7 +118,7 @@ namespace v2 {
         bool headerNameIs(std::string_view name, std::string_view expected)
         {
             return std::ranges::equal(name, expected,
-                                      [](char a, char b) { return asciiLower(a) == asciiLower(b); });
+                                      [](char a, char b) noexcept { return asciiLower(a) == asciiLower(b); });
         }
 
     } // namespace
