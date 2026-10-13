@@ -60,16 +60,6 @@ HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 FakeIbv g_fake;
 HIPOBJ_WARN_NO_EXIT_DTOR_ON
 
-struct FakeCq {
-    int magic = 0xC0;
-};
-struct FakePd {
-    int alive = 1;
-};
-struct FakeCtx {
-    int device_fd = -1;
-};
-
 struct ibv_cq *
 fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
 {
@@ -79,7 +69,7 @@ fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
         errno = ENOMEM;
         return nullptr;
     }
-    return reinterpret_cast<struct ibv_cq *>(new FakeCq());
+    return new struct ibv_cq();
 }
 
 int
@@ -92,7 +82,7 @@ fakeDestroyCq(struct ibv_cq *cq)
         return 1;
     }
     g_fake.destroyed.push_back(cq);
-    delete reinterpret_cast<FakeCq *>(cq);
+    delete cq;
     return 0;
 }
 
@@ -158,7 +148,7 @@ int
 fakeDeallocPd(struct ibv_pd *pd)
 {
     ++g_fake.deallocPdCalls;
-    delete reinterpret_cast<FakePd *>(pd);
+    delete pd;
     return 0;
 }
 

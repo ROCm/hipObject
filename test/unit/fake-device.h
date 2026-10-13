@@ -103,7 +103,7 @@ struct FakeDevice {
     size_t                      modifyQpCount = 0;
 
     /* The S3 server's reply to a transfer (see setReply()) */
-    std::array<char, 128> reply    = {'2', '0', '0', '\0'};
+    std::array<char, 128> reply    = {{'2', '0', '0', '\0'}};
     size_t                replyLen = 4;
 };
 

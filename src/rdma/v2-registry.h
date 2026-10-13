@@ -166,6 +166,10 @@ namespace v2 {
 
     private:
         struct Slot {
+            /* std::chrono::time_point's default constructor isn't marked
+             * noexcept, so the implicit one wouldn't be either */
+            Slot() noexcept = default;
+
             uint64_t  reservationId = 0; /* 0 = free */
             bool      recorded      = false;
             TimePoint expireAt{};

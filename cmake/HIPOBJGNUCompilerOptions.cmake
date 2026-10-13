@@ -50,10 +50,10 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     # Plain -Wcast-align only warns on targets that require aligned
     # access, so it does nothing on x86-64. =strict warns everywhere.
     -Wcast-align
-    #-Wcast-align=strict # TODO: Fix issues
+    -Wcast-align=strict
     -Wcast-qual
     -Wcatch-value=3
-    #-Wconditionally-supported # TODO: Fix issues
+    -Wconditionally-supported
     -Wconversion
     -Wctor-dtor-privacy
     -Wdate-time
@@ -74,10 +74,10 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     # This is a warning for when using <C++11
     #-Wlong-long
     -Wlogical-op
-    #-Wmissing-braces # TODO: Fix issues
+    -Wmissing-braces
     -Wmissing-declarations
     -Wmissing-include-dirs
-    #-Wnoexcept # TODO: Fix issues
+    -Wnoexcept
     -Wnon-virtual-dtor
     -Wnormalized
     -Wnull-dereference
@@ -92,7 +92,7 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     -Wshift-overflow=2
     # In C++, -Wconversion doesn't include this
     -Wsign-conversion
-    #-Wsign-promo # TODO: Fix issues
+    -Wsign-promo
     # Warn about functions the stack protector doesn't cover
     -Wstack-protector
     -Wno-strict-overflow

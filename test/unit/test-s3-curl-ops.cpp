@@ -444,7 +444,7 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     ASSERT_EQ(0, bind(fd.get(), reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)));
     socklen_t slen = sizeof(addr);
     ASSERT_EQ(0, getsockname(fd.get(), reinterpret_cast<struct sockaddr *>(&addr), &slen));
-    const std::string url = "http://127.0.0.1:" + std::to_string(ntohs(addr.sin_port));
+    const std::string url = "http://127.0.0.1:" + std::to_string(static_cast<unsigned>(ntohs(addr.sin_port)));
 
     hipObjS3CurlCtx ctx;
     memset(&ctx, 0, sizeof(ctx));

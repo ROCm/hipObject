@@ -71,7 +71,8 @@ std::atomic<int> g_openDeviceCalls{0};
 struct ibv_device **
 fakeGetDeviceList(int *numDevices)
 {
-    static std::array<struct ibv_device *, 2> devices = {reinterpret_cast<struct ibv_device *>(0x1), nullptr};
+    static std::array<struct ibv_device *, 2> devices = {
+        {reinterpret_cast<struct ibv_device *>(0x1), nullptr}};
     if (numDevices) {
         *numDevices = 1;
     }

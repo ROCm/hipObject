@@ -49,13 +49,13 @@ HIPOBJ_WARN_NO_EXIT_DTOR_ON
 struct ibv_cq *
 fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
 {
-    return reinterpret_cast<struct ibv_cq *>(new int(1));
+    return new struct ibv_cq();
 }
 
 int
 fakeDestroyCq(struct ibv_cq *cq)
 {
-    delete reinterpret_cast<int *>(cq);
+    delete cq;
     return 0;
 }
 

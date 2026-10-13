@@ -54,19 +54,6 @@ struct FaultCtl {
 
 FaultCtl g_fault;
 
-struct FakeCq {
-    int magic = 0x4351;
-};
-struct FakeCtx {
-    int magic = 0x4358;
-};
-struct FakeDev {
-    int magic = 0x4445;
-};
-struct FakePd {
-    int magic = 0x5044;
-};
-
 int
 fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int)
 {
@@ -95,7 +82,7 @@ int
 fakeDestroyCq(struct ibv_cq *cq)
 {
     ++g_fault.destroyCqCalls;
-    delete reinterpret_cast<FakeCq *>(cq);
+    delete cq;
     return 0;
 }
 
@@ -131,14 +118,14 @@ fakeDeregMr(struct ibv_mr *mr)
 struct ibv_cq *
 fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
 {
-    return reinterpret_cast<struct ibv_cq *>(new FakeCq());
+    return new struct ibv_cq();
 }
 
 struct ibv_context *
 fakeOpenDevice(struct ibv_device *)
 {
     ++g_fault.openDeviceCalls;
-    return reinterpret_cast<struct ibv_context *>(new FakeCtx());
+    return new struct ibv_context();
 }
 
 struct ibv_device **
@@ -147,27 +134,27 @@ fakeGetDeviceList(int *n)
     *n = 1;
     /* NULL-terminated, like the real ibv_get_device_list(); allocated
      * as an array to match the delete[] in fakeFreeDeviceList(). */
-    auto *dev = reinterpret_cast<struct ibv_device *>(new FakeDev());
+    auto *dev = new struct ibv_device();
     return new struct ibv_device *[2]{dev, nullptr};
 }
 
 void
 fakeFreeDeviceList(struct ibv_device **list)
 {
-    delete reinterpret_cast<FakeDev *>(*list);
+    delete *list;
     delete[] list;
 }
 
 struct ibv_pd *
 fakeAllocPd(struct ibv_context *)
 {
-    return reinterpret_cast<struct ibv_pd *>(new FakePd());
+    return new struct ibv_pd();
 }
 
 int
 fakeDeallocPd(struct ibv_pd *pd)
 {
-    delete reinterpret_cast<FakePd *>(pd);
+    delete pd;
     return 0;
 }
 
@@ -189,7 +176,7 @@ fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *a)
 int
 fakeCloseDevice(struct ibv_context *ctx)
 {
-    delete reinterpret_cast<FakeCtx *>(ctx);
+    delete ctx;
     return 0;
 }
 
@@ -209,7 +196,7 @@ freeAbandonedFakes(struct ibv_qp *qp, struct ibv_cq *cq, struct ibv_mr *stagingM
 {
     delete qp;
     if (g_fault.destroyCqCalls == 0) {
-        delete reinterpret_cast<FakeCq *>(cq);
+        delete cq;
     }
     if (g_fault.deregMrCalls == 0) {
         delete stagingMr;
