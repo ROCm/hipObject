@@ -326,7 +326,7 @@ fakeRecvReply(void *, char *reply, size_t *replyLen)
 hipObjOps_t
 makeOps()
 {
-    hipObjOps_t ops = {};
+    hipObjOps_t ops{};
     ops.sendRequest = &fakeSendRequest;
     ops.recvReply   = &fakeRecvReply;
     return ops;
@@ -364,7 +364,7 @@ FakeDeviceTest::SetUp()
     ops.hipEventDestroy = nullptr;
     hipObj::hipOps()    = ops;
 
-    hipObj::IbvFuncs funcs = {};
+    hipObj::IbvFuncs funcs{};
     funcs.get_device_list  = &fakeGetDeviceList;
     funcs.free_device_list = &fakeFreeDeviceList;
     funcs.open_device      = &fakeOpenDevice;
@@ -401,9 +401,9 @@ FakeDeviceTest::TearDown()
 hipObjConfig_t
 FakeDeviceTest::makeConfig()
 {
-    hipObjConfig_t config = {};
-    config.gpuDevice      = -1;
-    config.nicHint        = "mlx5_0";
+    hipObjConfig_t config{};
+    config.gpuDevice = -1;
+    config.nicHint   = "mlx5_0";
     return config;
 }
 

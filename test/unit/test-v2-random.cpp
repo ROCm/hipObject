@@ -103,8 +103,8 @@ class V2PsnDeliveryTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs funcs = {};
-        funcs.modify_qp        = [](struct ibv_qp *, struct ibv_qp_attr *attr, int) -> int {
+        hipObj::IbvFuncs funcs{};
+        funcs.modify_qp = [](struct ibv_qp *, struct ibv_qp_attr *attr, int) -> int {
             if (attr->qp_state == 3) { /* RTS */
                 g_sqPsn.push_back(attr->sq_psn);
             }

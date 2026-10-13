@@ -72,8 +72,8 @@ struct Faults {
 
 /* One modify_qp() call */
 struct ModifyQpCall {
-    struct ibv_qp_attr attr = {};
-    int                mask = 0;
+    ibv_qp_attr attr{};
+    int         mask = 0;
 };
 
 /* What the fakes return, and what they record. The fixture resets it before
@@ -95,11 +95,11 @@ struct FakeDevice {
 
     /* ibverbs: the vendor query_device() reports, what poll_cq() returns,
      * and the QP transitions */
-    uint32_t                    vendorId      = 0;
-    int                         pollResult    = 1;
-    enum ibv_wc_status          pollStatus    = IBV_WC_SUCCESS;
-    enum ibv_wc_opcode          pollOpcode    = IBV_WC_SEND;
-    std::array<ModifyQpCall, 8> modifyQp      = {};
+    uint32_t                    vendorId   = 0;
+    int                         pollResult = 1;
+    enum ibv_wc_status          pollStatus = IBV_WC_SUCCESS;
+    enum ibv_wc_opcode          pollOpcode = IBV_WC_SEND;
+    std::array<ModifyQpCall, 8> modifyQp{};
     size_t                      modifyQpCount = 0;
 
     /* The S3 server's reply to a transfer (see setReply()) */

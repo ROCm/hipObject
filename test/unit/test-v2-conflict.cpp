@@ -110,14 +110,14 @@ fakeDeallocPd(struct ibv_pd *)
 hipObj::IbvFuncs
 fakeVerbs()
 {
-    hipObj::IbvFuncs funcs = {};
-    funcs.create_cq        = fakeCreateCq;
-    funcs.destroy_cq       = fakeDestroyCq;
-    funcs.create_qp        = fakeCreateQp;
-    funcs.destroy_qp       = fakeDestroyQp;
-    funcs.modify_qp        = fakeModifyQp;
-    funcs.query_device     = fakeQueryDevice;
-    funcs.dealloc_pd       = fakeDeallocPd;
+    hipObj::IbvFuncs funcs{};
+    funcs.create_cq    = fakeCreateCq;
+    funcs.destroy_cq   = fakeDestroyCq;
+    funcs.create_qp    = fakeCreateQp;
+    funcs.destroy_qp   = fakeDestroyQp;
+    funcs.modify_qp    = fakeModifyQp;
+    funcs.query_device = fakeQueryDevice;
+    funcs.dealloc_pd   = fakeDeallocPd;
     return funcs;
 }
 
@@ -286,15 +286,15 @@ TEST_F(V2ConflictTest, DiscardWithoutDeviceKeepsQp)
 
 /* What the transport fakes below record, and how they fail */
 struct TransportFakes {
-    bool               createCqFails    = false;
-    bool               queryPortFails   = false;
-    bool               queryDeviceFails = false;
-    enum ibv_mtu       activeMtu        = IBV_MTU_4096;
-    uint32_t           vendorId         = 0;
-    struct ibv_qp_attr lastAttr         = {};
-    int                lastMask         = 0;
-    struct ibv_recv_wr lastRecv         = {};
-    int                recvs            = 0;
+    bool         createCqFails    = false;
+    bool         queryPortFails   = false;
+    bool         queryDeviceFails = false;
+    enum ibv_mtu activeMtu        = IBV_MTU_4096;
+    uint32_t     vendorId         = 0;
+    ibv_qp_attr  lastAttr{};
+    int          lastMask = 0;
+    ibv_recv_wr  lastRecv{};
+    int          recvs = 0;
 };
 
 TransportFakes g_transport;
@@ -378,7 +378,7 @@ protected:
 
     int rtr(hipObj::RcConnV2 &conn)
     {
-        union ibv_gid gid = {};
+        ibv_gid gid{};
         return hipObj::v2::transitionQpToRtrV2(dh_, conn, 7, gid, 1);
     }
 };
@@ -494,7 +494,7 @@ TEST_F(V2TransportTest, PostsZeroSgeReceive)
 struct WcTestData : public ::testing::Test {
     struct ibv_wc makeWc(enum ibv_wc_opcode op, unsigned int flags, uint32_t immHost)
     {
-        struct ibv_wc wc {};
+        ibv_wc wc{};
         wc.status   = IBV_WC_SUCCESS;
         wc.opcode   = op;
         wc.wc_flags = flags;

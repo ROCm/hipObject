@@ -27,7 +27,7 @@ struct RcConnection final {
     IbvQpPtr      qp;
     uint8_t       portNum  = 1;
     int           gidIndex = -1;
-    union ibv_gid localGid = {};
+    ibv_gid       localGid{};
 
     RcConnection()                                = default;
     ~RcConnection()                               = default;

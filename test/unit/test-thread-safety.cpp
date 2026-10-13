@@ -263,9 +263,9 @@ probeRecvReply(void *ctx, char *reply, size_t *replyLen)
 hipObjConfig_t
 makeConfig()
 {
-    hipObjConfig_t config = {};
-    config.gpuDevice      = -1;
-    config.nicHint        = "mlx5_0";
+    hipObjConfig_t config{};
+    config.gpuDevice = -1;
+    config.nicHint   = "mlx5_0";
     return config;
 }
 
@@ -285,7 +285,7 @@ protected:
         ops.hipPointerGetAttributes = nullptr;
         hipObj::hipOps()            = ops;
 
-        hipObj::IbvFuncs funcs = {};
+        hipObj::IbvFuncs funcs{};
         funcs.get_device_list  = &fakeGetDeviceList;
         funcs.free_device_list = &fakeFreeDeviceList;
         funcs.get_device_name  = &fakeGetDeviceName;
@@ -331,7 +331,7 @@ protected:
     hipObj::HipOps                           savedHipOps_;
     std::vector<char>                        pool_ = std::vector<char>(kThreads * kBufSize);
     TransferProbe                            probe_;
-    hipObjOps_t                              probeOps_ = {};
+    hipObjOps_t                              probeOps_{};
 };
 
 TEST_F(ThreadSafetyTest, TransfersRunOneAtATime)
@@ -568,7 +568,7 @@ TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
     const std::string expectedVersion = std::to_string(HIPOBJ_VERSION_MAJOR) + "." +
                                         std::to_string(HIPOBJ_VERSION_MINOR) + "." +
                                         std::to_string(HIPOBJ_VERSION_PATCH);
-    std::array<const char *, kThreads> versions = {};
+    std::array<const char *, kThreads> versions{};
 
     runThreads(kThreads, [&](int t) {
         versions[static_cast<size_t>(t)] = hipObjGetVersionString();
@@ -580,7 +580,7 @@ TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
             EXPECT_EQ(hipObjParseRdmaReply(kReply.data(), kReply.size(), &code).opError, hipObjSuccess);
             EXPECT_EQ(code, 206);
 
-            std::array<char, 32> nicIp = {};
+            std::array<char, 32> nicIp{};
             EXPECT_EQ(hipObjTokenClientNic(token, nicIp.data(), nicIp.size()).opError, hipObjSuccess);
         }
     });

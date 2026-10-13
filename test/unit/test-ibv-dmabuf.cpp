@@ -155,12 +155,12 @@ class FakeDmabufTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs funcs = {};
-        funcs.export_dmabuf    = &fakeExportDmabuf;
-        funcs.close_dmabuf     = &fakeCloseDmabuf;
-        funcs.reg_dmabuf_mr    = &fakeRegisterDmabufMr;
-        funcs.reg_mr_iova2     = &fakeRegisterMrIova2;
-        funcs.dereg_mr         = &fakeDeregisterMr;
+        hipObj::IbvFuncs funcs{};
+        funcs.export_dmabuf = &fakeExportDmabuf;
+        funcs.close_dmabuf  = &fakeCloseDmabuf;
+        funcs.reg_dmabuf_mr = &fakeRegisterDmabufMr;
+        funcs.reg_mr_iova2  = &fakeRegisterMrIova2;
+        funcs.dereg_mr      = &fakeDeregisterMr;
         fakeIbv_.emplace(funcs);
 
         g_log = {};

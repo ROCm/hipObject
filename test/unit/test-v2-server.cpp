@@ -49,9 +49,9 @@ public:
 hipObj::IbvFuncs
 fakeDestroyVerbs()
 {
-    hipObj::IbvFuncs funcs = {};
-    funcs.destroy_qp       = [](struct ibv_qp *) -> int { return 0; };
-    funcs.destroy_cq       = [](struct ibv_cq *) -> int { return 0; };
+    hipObj::IbvFuncs funcs{};
+    funcs.destroy_qp = [](struct ibv_qp *) -> int { return 0; };
+    funcs.destroy_cq = [](struct ibv_cq *) -> int { return 0; };
     return funcs;
 }
 

@@ -312,7 +312,7 @@ namespace v2 {
             return std::nullopt;
         }
         {
-            struct tm tmv = {};
+            tm tmv{};
             if (strptime(amzDate.c_str(), "%Y%m%dT%H%M%SZ", &tmv) == nullptr) {
                 return std::nullopt;
             }
