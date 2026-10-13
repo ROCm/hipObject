@@ -194,15 +194,16 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     )
   endif()
 
-  # TODO: Turn these on when they can be tested with g++ 16
-  #if(compiler_version VERSION_GREATER_EQUAL 16)
-  #  set(flags
-  #    # Misc warnings
-  #    -Wkeyword-macro
-  #    -Wsfinae-incomplete=2
-  #    ${flags}
-  #  )
-  #endif()
+  if(compiler_version VERSION_GREATER_EQUAL 16)
+    set(flags
+      # Misc warnings
+      -Wkeyword-macro
+      # The default level (1) only warns where the class is defined;
+      # 2 also warns at the substitution failure that saw it incomplete
+      -Wsfinae-incomplete=2
+      ${flags}
+    )
+  endif()
 
   # Control-flow protection (Intel CET) only exists on x86
   check_cxx_compiler_flag(-fcf-protection=full
