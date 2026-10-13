@@ -447,6 +447,37 @@ configuration files.
   pass with a report in its output; run the UBSan build's tests with
   `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1` so they fail instead. CI
   only runs AddressSanitizer.
+- **Lifetime safety, when a change could leave something dangling.** Clang
+  23's `-Wlifetime-safety` looks for use-after-free, use-after-scope, and
+  dangling references, but it reports too many false positives to leave
+  on, so it's commented out in
+  [`HIPOBJClangCompilerOptions.cmake`](cmake/HIPOBJClangCompilerOptions.cmake).
+  When a change creates or moves a pointer, reference, iterator, or view
+  (`std::string_view`, `std::span`) into memory that something else owns,
+  stores one in an object or lambda that outlives the call, or destroys,
+  moves, or resizes an object that other code may still point into, build
+  once with it on and read what it reports for the files you touched. Turn
+  it on from the configure line, not by editing the CMake file:
+
+  ```bash
+  cmake -B build-lifetime -DCMAKE_C_COMPILER=clang-23 \
+    -DCMAKE_CXX_COMPILER=clang++-23 -DCMAKE_PREFIX_PATH=/opt/rocm \
+    -DBUILD_TESTING=ON -DHIPOBJ_BNXT=ON -DHIPOBJ_IONIC=ON \
+    -DCMAKE_CXX_FLAGS=-Wlifetime-safety
+  cmake --build build-lifetime -j"$(nproc)"
+  ```
+
+  Unlike the other checks, it doesn't have to report nothing. Fix the
+  reports that are real, and leave the code alone for the false positives:
+  don't rewrite code just to quiet the check, and don't add suppressions
+  for it. Most false positives come from its
+  `-Wlifetime-safety-invalidation` subgroup, which treats changing a
+  container as invalidating references to the container itself, not just
+  pointers into it. It flags a `std::string &` parameter that's appended to
+  twice, for example, and the `std::destroy_at()` and `std::construct_at()`
+  pair in `replaceByMove()`
+  ([`src/common/replace-by-move.h`](src/common/replace-by-move.h)), which
+  are correct. Nothing in CI runs it.
 
 ### Shell
 

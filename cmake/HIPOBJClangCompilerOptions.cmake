@@ -315,7 +315,12 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
       -fno-strict-bool
 
       # Use-after-free, use-after-scope, and dangling reference checks
-      #-Wlifetime-safety # TODO: Fix issues
+      #
+      # This generates a lot of false positives at this time (e.g., the
+      # -Wlifetime-safety-invalidation subgroup flags modifying a
+      # std::string through a reference and then using it again), so
+      # only turn it on temporarily to look for legitimate problems.
+      #-Wlifetime-safety
 
       # Misc warnings
       -Wnonportable-include-path-separator

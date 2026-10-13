@@ -105,15 +105,18 @@ namespace v2 {
             if (p4 == std::string::npos) {
                 return false;
             }
+            if (cred.find('/', p4 + 1) != std::string::npos) {
+                return false; /* trailing garbage */
+            }
+            if (p1 == 0) {
+                return false; /* empty AKID */
+            }
             accessKey  = cred.substr(0, p1);
             date       = cred.substr(p1 + 1, p2 - p1 - 1);
             region     = cred.substr(p2 + 1, p3 - p2 - 1);
             service    = cred.substr(p3 + 1, p4 - p3 - 1);
             terminator = cred.substr(p4 + 1);
-            if (cred.find('/', p4 + 1) != std::string::npos) {
-                return false; /* trailing garbage */
-            }
-            return !accessKey.empty();
+            return true;
         }
 
         std::string parseSignedHeaders(const std::string &auth)
@@ -159,7 +162,7 @@ namespace v2 {
             }
             std::stringstream ss(signedList);
             std::string       name;
-            canonicalOut.clear();
+            std::string       canonical;
             while (std::getline(ss, name, ';')) {
                 if (name.empty()) {
                     continue;
@@ -168,12 +171,16 @@ namespace v2 {
                 if (it == present.end()) {
                     return false;
                 }
-                canonicalOut += name;
-                canonicalOut += ':';
-                canonicalOut += it->second;
-                canonicalOut += '\n';
+                canonical += name;
+                canonical += ':';
+                canonical += it->second;
+                canonical += '\n';
             }
-            return !canonicalOut.empty();
+            if (canonical.empty()) {
+                return false;
+            }
+            canonicalOut = std::move(canonical);
+            return true;
         }
 
     } // namespace

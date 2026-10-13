@@ -294,8 +294,10 @@ namespace v2 {
     std::string buildTarget(std::string_view bucket, std::string_view key, std::string_view canonicalQuery)
     {
         constexpr std::string_view hex = "0123456789ABCDEF";
-        std::string                out = "/";
-        auto                       enc = [&](std::string_view s, bool keepSlash) {
+        std::string                out;
+        /* Appends "/" and the percent-encoded segment */
+        auto appendSegment = [&](std::string_view s, bool keepSlash) {
+            out += '/';
             for (char ch : s) {
                 /* Percent-encoding works on raw bytes, so view each char as
                  * its 0-255 byte value (well-defined for negative chars). */
@@ -311,9 +313,8 @@ namespace v2 {
                 }
             }
         };
-        enc(bucket, false);
-        out += '/';
-        enc(key, true);
+        appendSegment(bucket, false);
+        appendSegment(key, true);
         if (!canonicalQuery.empty()) {
             out += '?';
             out += canonicalQuery;
