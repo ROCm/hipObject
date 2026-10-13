@@ -80,7 +80,7 @@ protected:
         hipObj::hipOps() = saved_;
     }
 
-    hipObj::HipOps saved_;
+    hipObj::HipOps saved_{};
 };
 
 TEST_F(HipSeamTest, SubstitutedFunctionsAreCalled)
@@ -104,8 +104,8 @@ public:
         return nics_;
     }
 
-    std::vector<hipObj::NicInfo> nics_;
-    std::string                  last_hca_list_;
+    std::vector<hipObj::NicInfo> nics_{};
+    std::string                  last_hca_list_{};
 };
 
 class NicSeamTest : public ::testing::Test {
@@ -125,9 +125,9 @@ protected:
         hipObj::hipOps() = saved_hip_;
     }
 
-    FakeNicEnumerator      fake_;
+    FakeNicEnumerator      fake_{};
     hipObj::NicEnumerator *previous_ = nullptr;
-    hipObj::HipOps         saved_hip_;
+    hipObj::HipOps         saved_hip_{};
 };
 
 TEST_F(NicSeamTest, ClosestBusIdWins)
@@ -192,7 +192,7 @@ protected:
 
     // A fixture member rather than a test-body local, so the override
     // stays valid until TearDown() even if the body exits early.
-    hipObj::DriverState  fresh_;
+    hipObj::DriverState  fresh_{};
     hipObj::DriverState *savedState_ = nullptr;
 };
 
@@ -317,7 +317,7 @@ protected:
         fakeIbv_.reset();
     }
 
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
 };
 
 TEST_F(IbvSeamTest, QpCreationAndTeardownUseTheTable)
@@ -556,12 +556,12 @@ namespace {
             return config;
         }
 
-        hipObj::DriverState                      state_;
+        hipObj::DriverState                      state_{};
         hipObj::DriverState                     *savedState_ = nullptr;
-        FakeNicEnumerator                        enumerator_;
+        FakeNicEnumerator                        enumerator_{};
         hipObj::NicEnumerator                   *savedEnumerator_ = nullptr;
-        std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
-        hipObj::HipOps                           savedHipOps_;
+        std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
+        hipObj::HipOps                           savedHipOps_{};
     };
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)

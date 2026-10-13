@@ -34,8 +34,8 @@ namespace v2 {
         size_t objectCount() const;
 
     private:
-        mutable std::mutex                          mtx_;
-        std::map<std::string, std::vector<uint8_t>> objects_;
+        mutable std::mutex                          mtx_{};
+        std::map<std::string, std::vector<uint8_t>> objects_{};
     };
 
 } // namespace v2

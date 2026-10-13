@@ -21,8 +21,8 @@
 namespace hipObj {
 
 struct NicInfo {
-    std::string dev_name;
-    std::string pcie_bus_id;
+    std::string dev_name{};
+    std::string pcie_bus_id{};
     int         numa_node = -1;
     int         port_num  = 1;
 };

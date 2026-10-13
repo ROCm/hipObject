@@ -268,9 +268,9 @@ protected:
         return req;
     }
 
-    std::optional<hipObjTest::ScopedFakeIbv>   fakeIbv_;
-    std::unique_ptr<hipObj::v2::SigV4Verifier> verifier_;
-    std::unique_ptr<hipObj::v2::MemoryBackend> backend_;
+    std::optional<hipObjTest::ScopedFakeIbv>   fakeIbv_{};
+    std::unique_ptr<hipObj::v2::SigV4Verifier> verifier_{};
+    std::unique_ptr<hipObj::v2::MemoryBackend> backend_{};
 };
 
 /* INIT fails inside onPrepare and the first destroy fails: the

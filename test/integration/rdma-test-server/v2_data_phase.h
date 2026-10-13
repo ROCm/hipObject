@@ -50,7 +50,7 @@ namespace v2 {
      * anything: the caller's io reference keeps the session's objects
      * alive for the duration. */
     struct DataPhaseView {
-        std::string    op;
+        std::string    op{};
         uint64_t       size         = 0;
         uint32_t       cookie       = 0;
         struct ibv_qp *qp           = nullptr;

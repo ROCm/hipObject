@@ -262,10 +262,10 @@ private:
 
     hipObj::UniqueFd listenFd_;
     std::string      response_;
-    std::string      endpoint_;
-    std::string      request_;
-    ServeResult      result_;
-    std::thread      worker_;
+    std::string      endpoint_{};
+    std::string      request_{};
+    ServeResult      result_{};
+    std::thread      worker_{};
 };
 
 const char       kToken[]  = "0123456789abcdef";

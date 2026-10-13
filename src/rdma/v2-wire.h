@@ -59,8 +59,8 @@ namespace v2 {
         int         httpStatus        = 0;
         bool        protocolEcho      = false;
         bool        unsupportedMarker = false;
-        std::string serverToken; /* 88 hex chars */
-        std::string session;     /* 32 hex chars */
+        std::string serverToken{}; /* 88 hex chars */
+        std::string session{};     /* 32 hex chars */
         uint32_t    serverPsn = 0;
     };
 
@@ -70,9 +70,9 @@ namespace v2 {
         uint64_t    bytes         = 0;
         uint32_t    cookieEcho    = 0;
         bool        cookiePresent = false; /* cookie echo header seen */
-        std::string etag;
-        std::string versionId;
-        std::string checksumB64; /* 12-char canonical base64 text */
+        std::string etag{};
+        std::string versionId{};
+        std::string checksumB64{}; /* 12-char canonical base64 text */
     };
 
     /* A "Name: value" header line, with the OWS around each part trimmed */

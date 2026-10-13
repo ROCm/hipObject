@@ -81,8 +81,8 @@ protected:
         return s;
     }
 
-    std::unique_ptr<FakeClock> clock_;
-    hipObj::v2::ClockSource   *prevClock_;
+    std::unique_ptr<FakeClock> clock_{};
+    hipObj::v2::ClockSource   *prevClock_ = nullptr;
 
 private:
     /* Declared before table_ so the fakes outlive it (members are
@@ -90,7 +90,7 @@ private:
     hipObjTest::ScopedFakeIbv fakeVerbs_{fakeDestroyVerbs()};
 
 protected:
-    hipObj::v2::SessionTable table_;
+    hipObj::v2::SessionTable table_{};
 };
 
 /* Insert sets ioActive=1 atomically with publication. */

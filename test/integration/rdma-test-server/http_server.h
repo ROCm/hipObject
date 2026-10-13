@@ -21,23 +21,23 @@
 namespace hipobj::test {
 
 struct HttpRequest {
-    std::string                        method;
-    std::string                        path;
-    std::map<std::string, std::string> headers;    /* lower-case names */
-    std::string                        rawHeaders; /* original header block (credentials) */
-    std::string                        body;
+    std::string                        method{};
+    std::string                        path{};
+    std::map<std::string, std::string> headers{};    /* lower-case names */
+    std::string                        rawHeaders{}; /* original header block (credentials) */
+    std::string                        body{};
     size_t contentLength = 0; /* Content-Length, which HttpServer validates; 0 if absent */
 };
 
 struct HttpResponse {
     int                                status = 500;
-    std::map<std::string, std::string> headers;
-    std::string                        body;
+    std::map<std::string, std::string> headers{};
+    std::string                        body{};
     /* Runs exactly once after the response bytes are sent (or the
      * attempt fails). The finalizer is moved out before execution so
      * no path can run it twice; exceptions from the callback are
      * contained. */
-    std::function<void(bool sentOk)> afterSend;
+    std::function<void(bool sentOk)> afterSend{};
 };
 
 using HttpHandler = std::function<HttpResponse(const HttpRequest &)>;
@@ -106,19 +106,19 @@ private:
     void handleConnection(int client);
 
     hipObj::UniqueFd  listen_fd_;
-    HttpHandler       handler_;
+    HttpHandler       handler_{};
     std::atomic<bool> stopping_{false};
     /* The accept loop runs on its own thread when started via
      * startThreaded(); stop() joins it as the production barrier. */
-    std::thread acceptLoop_;
-    std::mutex  workersMtx_;
+    std::thread acceptLoop_{};
+    std::mutex  workersMtx_{};
     /* Detached workers: stop() waits for this count to reach zero
      * after shutting down the registered fds. */
     int                     liveWorkers_ = 0;
-    std::condition_variable workerDoneCv_;
+    std::condition_variable workerDoneCv_{};
     /* Client fds with a live worker; guarded by workersMtx_. stop()
      * shutdowns these (via dup'd handles) to unblock workers. */
-    std::set<int> activeFds_;
+    std::set<int> activeFds_{};
 };
 
 HttpRequest parseRequest(const std::string &raw);

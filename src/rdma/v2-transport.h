@@ -29,8 +29,8 @@ namespace hipObj {
 /* pd is declared after ctx so it is deallocated before the context
  * closes. */
 struct DeviceHandle {
-    IbvContextPtr         ctx;
-    IbvPdPtr              pd;
+    IbvContextPtr         ctx{};
+    IbvPdPtr              pd{};
     uint8_t               portNum  = 1;
     int                   gidIndex = -1;
     ibv_gid               localGid{};

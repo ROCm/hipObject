@@ -40,8 +40,8 @@ namespace v2 {
 
     struct HandlerResult {
         int                                status = 500;
-        std::map<std::string, std::string> headers;
-        std::string                        body;
+        std::map<std::string, std::string> headers{};
+        std::string                        body{};
     };
 
     class ControlHandlers {
@@ -86,8 +86,8 @@ namespace v2 {
         SigV4Verifier    *verifier_;
         MemoryBackend    *backend_;
         ServerConfig      cfg_;
-        SessionTable      table_;
-        std::thread       reaper_;
+        SessionTable      table_{};
+        std::thread       reaper_{};
         std::atomic<bool> reaperStop_{false};
     };
 

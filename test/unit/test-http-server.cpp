@@ -127,8 +127,8 @@ protected:
     }
 
 private:
-    std::mutex               mtx_;
-    std::vector<HttpRequest> requests_;
+    std::mutex               mtx_{};
+    std::vector<HttpRequest> requests_{};
     uint16_t                 port_ = 0;
     /* Last, so it's destroyed, and its threads stopped, before the members
      * its handler uses */

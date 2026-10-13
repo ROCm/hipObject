@@ -79,8 +79,8 @@ struct ModifyQpCall {
 /* What the fakes return, and what they record. The fixture resets it before
  * each test. Trivially destructible, so it can live in a static. */
 struct FakeDevice {
-    CallLog log;
-    Faults  fail;
+    CallLog log{};
+    Faults  fail{};
 
     /* HIP: the GPUs, and what the runtime reports for every pointer (its
      * memory type and the allocation it's in) */
@@ -157,12 +157,12 @@ protected:
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
     static void initAndRegister();
 
-    hipObj::DriverState          state_;
+    hipObj::DriverState          state_{};
     hipObj::DriverState         *savedState_ = nullptr;
-    EmptyNicEnumerator           enumerator_;
+    EmptyNicEnumerator           enumerator_{};
     hipObj::NicEnumerator       *savedEnumerator_ = nullptr;
-    std::optional<ScopedFakeIbv> fakeIbv_;
-    hipObj::HipOps               savedHipOps_;
+    std::optional<ScopedFakeIbv> fakeIbv_{};
+    hipObj::HipOps               savedHipOps_{};
 };
 
 } // namespace hipObjTest

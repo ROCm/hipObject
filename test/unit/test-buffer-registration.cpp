@@ -116,8 +116,8 @@ protected:
         hipObj::hipOps() = savedHipOps_;
     }
 
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
-    hipObj::HipOps                           savedHipOps_;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
+    hipObj::HipOps                           savedHipOps_{};
 };
 
 TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)

@@ -22,8 +22,8 @@ namespace hipObj {
 namespace v2 {
 
     struct VerifiedCredential {
-        std::string accessKey;
-        std::string signedHeaders; /* "host;x-amz-date;..." */
+        std::string accessKey{};
+        std::string signedHeaders{}; /* "host;x-amz-date;..." */
     };
 
     class SigV4Verifier {

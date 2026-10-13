@@ -101,7 +101,7 @@ private:
     void init_dmabuf_settings();
     bool init_function_table();
 
-    DlHandle ibv_handle_;
+    DlHandle ibv_handle_{};
     IbvFuncs funcs_{};
     bool     initialized_    = false;
     bool     dmabuf_enabled_ = true;
