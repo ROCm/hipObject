@@ -7,7 +7,8 @@ on:
   # The excluded paths hold nothing this build compiles or runs: ansible/
   # and ci/ belong to their own lanes, the documentation inputs are only
   # used with HIPOBJ_BUILD_DOCS, which is OFF here (the Documentation
-  # Check lane configures and builds those), and .github/ holds the other
+  # Check lane configures and builds those), the .clang-tidy files only
+  # configure the clang-tidy lane, and .github/ holds the other
   # workflows and their configuration. The thread-safety checker's Python
   # files are excluded too: ctest runs the checker and its self-test, but
   # so does the pylint workflow, which runs for any change to them. A
@@ -21,6 +22,7 @@ on:
       - '**'
       - '!**/*.md'
       - '!**/*.rst'
+      - '!**/.clang-tidy'
       - '!ansible/**'
       - '!ci/**'
       - '!cmake/HIPOBJDocumentation.cmake'

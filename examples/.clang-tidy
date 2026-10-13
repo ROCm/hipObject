@@ -1,0 +1,33 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+# clang-tidy configuration for the examples
+#
+# The examples are written to C++11 (see AGENTS.md), but the build
+# compiles them as C++20, so clang-tidy would suggest newer constructs.
+# This turns off the checks whose fixes need C++14 or later, and
+# otherwise uses the top-level configuration.
+---
+InheritParentConfig: true
+Checks:
+  - -modernize-concat-nested-namespaces
+  - -modernize-make-unique
+  - -modernize-type-traits
+  - -modernize-unary-static-assert
+  - -modernize-use-constraints
+  - -modernize-use-designated-initializers
+  - -modernize-use-integer-sign-comparison
+  - -modernize-use-nodiscard
+  - -modernize-use-ranges
+  - -modernize-use-scoped-lock
+  - -modernize-use-starts-ends-with
+  - -modernize-use-std-bit
+  - -modernize-use-std-format
+  - -modernize-use-std-numbers
+  - -modernize-use-std-print
+  - -modernize-use-string-view
+  - -modernize-use-structured-binding
+  - -modernize-use-transparent-functors
+  - -modernize-use-uncaught-exceptions
+  - -readability-container-contains

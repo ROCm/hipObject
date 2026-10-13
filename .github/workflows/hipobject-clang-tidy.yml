@@ -1,0 +1,166 @@
+name: hipObject - clang-tidy
+
+# Builds with HIPOBJ_USE_CLANG_TIDY, which runs clang-tidy on each C++
+# file as it's compiled, with the checks in .clang-tidy. Every finding is
+# an error, so the job fails if clang-tidy reports anything.
+#
+# This uses upstream clang-tidy rather than ROCm's, which is built
+# without the clang-analyzer-* checks, as hipFile's clang-tidy workflow
+# does. The compiler is still ROCm's amdclang++. Keep LLVM_VERSION at
+# the LLVM major version of the image's ROCm (ROCm 10.0 is LLVM 23), so
+# clang-tidy understands the compiler's flags.
+
+on:
+  # The same triggers and paths as the Build workflow, since anything that
+  # it compiles can have findings, plus this workflow's own file. The
+  # .clang-tidy files are matched by '**'. The paths are a list with
+  # negations and not paths-ignore, so the last entry can add a path back
+  # (see hipobject-build.yml).
+  pull_request:
+    branches: [develop]
+    paths: &paths
+      - '**'
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!ansible/**'
+      - '!ci/**'
+      - '!cmake/HIPOBJDocumentation.cmake'
+      - '!docs/**'
+      - '!requirements.txt'
+      - '!test/thread-safety/*.py'
+      - '!.github/**'
+      - '.github/workflows/hipobject-clang-tidy.yml'
+  push:
+    branches: [develop]
+    paths: *paths
+  workflow_dispatch:
+
+# A newer commit on a pull request cancels the run for the older one.
+# Every other run (a push, a manual run) gets a group of its own: in a
+# shared group, a newer run replaces a pending one even without
+# cancel-in-progress, which would leave a commit untested.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Every run step uses bash, including in container jobs, where the runner
+# would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
+# -o pipefail, which these scripts are not written for.
+defaults:
+  run:
+    shell: bash -e {0}
+
+jobs:
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    container:
+      image: rocm/dev-ubuntu-24.04:10.0.0-full
+      options: --user root
+    env:
+      ROCM_PATH: /opt/rocm
+      LLVM_VERSION: 23
+      # The Ubuntu release of the image, for apt.llvm.org
+      UBUNTU_CODENAME: noble
+      # The fingerprint of apt.llvm.org's signing key, which is public
+      LLVM_SIGNER_FINGERPRINT: 6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Ninja keeps each command's output together, so clang-tidy's
+      # output for one file isn't interleaved with another's in the
+      # build log
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            ca-certificates \
+            cmake \
+            curl \
+            git \
+            gnupg \
+            libcurl4-openssl-dev \
+            libibverbs-dev \
+            libssl-dev \
+            ninja-build
+
+      # apt only trusts the key with the known fingerprint, and only for
+      # this repository. Exporting the key by its fingerprint from a
+      # scratch keyring leaves out any other key in the download, and
+      # exports nothing if the key isn't there.
+      - name: Install clang-tidy
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            -o /tmp/llvm.asc
+          GNUPGHOME=$(mktemp -d)
+          export GNUPGHOME
+          gpg --batch --import /tmp/llvm.asc
+          install -d -m 0755 /etc/apt/keyrings
+          gpg --batch --export "${LLVM_SIGNER_FINGERPRINT}" \
+            > /etc/apt/keyrings/llvm.gpg
+          if [[ ! -s /etc/apt/keyrings/llvm.gpg ]]; then
+            echo "::error::apt.llvm.org's key isn't ${LLVM_SIGNER_FINGERPRINT}"
+            exit 1
+          fi
+          echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg]" \
+            "https://apt.llvm.org/${UBUNTU_CODENAME}/" \
+            "llvm-toolchain-${UBUNTU_CODENAME}-${LLVM_VERSION} main" \
+            > /etc/apt/sources.list.d/llvm.list
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            "clang-tidy-${LLVM_VERSION}"
+          "clang-tidy-${LLVM_VERSION}" --version
+
+      # CLANG_TIDY_EXE is the variable HIPOBJClangTidy.cmake searches
+      # for clang-tidy with, so setting it skips the search.
+      #
+      # HIPOBJ_WERROR is off: the Build workflow checks for warnings, and
+      # this job is only about clang-tidy.
+      - name: Configure
+        env:
+          CC: /opt/rocm/llvm/bin/amdclang
+          CXX: /opt/rocm/llvm/bin/amdclang++
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DBUILD_TESTING=ON \
+            -DHIPOBJ_BNXT=ON \
+            -DHIPOBJ_IONIC=ON \
+            -DHIPOBJ_USE_CLANG_TIDY=ON \
+            -DCLANG_TIDY_EXE="/usr/bin/clang-tidy-${LLVM_VERSION}"
+
+      # -k 0 keeps building after a file fails, so one run reports every
+      # finding, not just those in the first files to fail. pipefail
+      # keeps tee from hiding the build's exit status.
+      - name: Build
+        run: |
+          set -o pipefail
+          cmake --build build -j"$(nproc)" -- -k 0 2>&1 \
+            | tee build/clang-tidy.log
+
+      # A header's findings are reported once for each file that includes
+      # it, so the lines are deduplicated before they're counted. There's
+      # no log if an earlier step failed.
+      - name: Summarize findings
+        if: failure()
+        run: |
+          if [[ ! -f build/clang-tidy.log ]]; then
+            exit 0
+          fi
+          {
+            echo '# clang-tidy findings'
+            echo
+            echo 'Findings by check:'
+            echo '```'
+            grep -E ': (warning|error): .*\[[^][]+\]$' \
+              build/clang-tidy.log \
+              | sort -u \
+              | sed -E 's/.*\[([^][]+)\]$/\1/; s/,-warnings-as-errors$//' \
+              | sort | uniq -c | sort -rn
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -366,7 +366,13 @@ configuration files.
   already marks its headers `SYSTEM` and builds it with its warnings off.
 - **clang-tidy**: configure with `-DHIPOBJ_USE_CLANG_TIDY=ON` and Clang as the
   C++ compiler (configuring fails with GCC, whose flags clang-tidy rejects),
-  and build; it must report nothing. CI doesn't run clang-tidy.
+  and build; it must report nothing. The checks are in
+  [`.clang-tidy`](.clang-tidy), which needs clang-tidy 19 or later, and
+  [`examples/.clang-tidy`](examples/.clang-tidy) turns off the ones that
+  would suggest constructs newer than C++11 there. ROCm's clang-tidy lacks
+  the `clang-analyzer-*` checks, so prefer an upstream one. CI:
+  [hipobject-clang-tidy.yml](.github/workflows/hipobject-clang-tidy.yml),
+  with upstream clang-tidy 23.
 - **include-what-you-use (IWYU)**: configure with `-DHIPOBJ_USE_IWYU=ON` and
   build; IWYU prints the `#include` lines it suggests adding or removing for
   each file. Unlike the other checks, it doesn't have to report nothing, since

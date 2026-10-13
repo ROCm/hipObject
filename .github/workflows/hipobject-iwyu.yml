@@ -20,6 +20,7 @@ on:
       - '**'
       - '!**/*.md'
       - '!**/*.rst'
+      - '!**/.clang-tidy'
       - '!ansible/**'
       - '!ci/**'
       - '!cmake/HIPOBJDocumentation.cmake'
