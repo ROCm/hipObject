@@ -144,8 +144,8 @@ struct FakeDevice {
     /* ibverbs: the vendor query_device() reports, what poll_cq() returns,
      * and the QP transitions. modifyQpCount counts the modify_qp() calls,
      * and modifyQp holds the first ones; read it only once no thread is
-     * calling modify_qp(). Each QP create_qp() makes gets the next
-     * nextQpNum. */
+     * calling modify_qp(). Each QP returned by create_qp() gets the next
+     * nextQpNum value. */
     uint32_t                    vendorId   = 0;
     int                         pollResult = 1;
     enum ibv_wc_status          pollStatus = IBV_WC_SUCCESS;
