@@ -7,6 +7,7 @@
  */
 
 #include <stdexcept>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -29,6 +30,16 @@ guardedWork(int &cleanups, bool fail)
         return;
     }
     guard.dismiss();
+}
+
+/* Builds a result, or throws, the way building a reply can */
+std::string
+buildResult(bool fail)
+{
+    if (fail) {
+        throw std::runtime_error("failure");
+    }
+    return "result";
 }
 
 } // namespace
@@ -55,6 +66,29 @@ TEST(ScopeGuard, DismissedDoesNotRun)
     int cleanups = 0;
     guardedWork(cleanups, false);
     EXPECT_EQ(cleanups, 0);
+}
+
+TEST(ScopeGuard, DismissAfterPassesTheValueThrough)
+{
+    int cleanups = 0;
+    {
+        ScopeGuard guard([&cleanups] { ++cleanups; });
+        EXPECT_EQ(guard.dismissAfter(buildResult(false)), "result");
+    }
+    EXPECT_EQ(cleanups, 0);
+}
+
+TEST(ScopeGuard, DismissAfterRunsWhenTheValueThrows)
+{
+    int cleanups = 0;
+    try {
+        ScopeGuard guard([&cleanups] { ++cleanups; });
+        (void)guard.dismissAfter(buildResult(true));
+    }
+    catch (const std::runtime_error &) {
+        EXPECT_EQ(cleanups, 1);
+    }
+    EXPECT_EQ(cleanups, 1);
 }
 
 TEST(ScopeGuard, RunsWhenAnExceptionUnwinds)

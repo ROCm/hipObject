@@ -16,6 +16,9 @@
  *     ...
  *     rollback.dismiss();
  *
+ * Dismiss it after the last thing that can fail, including building the
+ * result the success path returns (see dismissAfter()).
+ *
  * The cleanup runs in the destructor, which is noexcept, so a cleanup
  * that throws terminates the program. */
 
@@ -33,7 +36,9 @@ public:
     {
     }
 
-    ~ScopeGuard()
+    /* Explicitly noexcept: otherwise a lambda capturing something whose
+     * destructor can throw would make this one potentially throwing too */
+    ~ScopeGuard() noexcept
     {
         if (active_) {
             cleanup_();
@@ -50,6 +55,27 @@ public:
     void dismiss() noexcept
     {
         active_ = false;
+    }
+
+    /* Keeps the cleanup from running, and passes value through. The
+     * argument is built before the guard is dismissed, so a return
+     * statement can hand ownership on only once its result exists:
+     *
+     *     return guard.dismissAfter(buildReply());
+     *
+     * If buildReply() throws, the cleanup still runs. Returning a named
+     * result after dismiss() would do the same, but costs a copy when
+     * the function also returns other values (GCC's -Wnrvo).
+     *
+     * The guard is dismissed before value is moved out to the caller, so
+     * T's move constructor must not throw: if it did, the result would be
+     * lost without the cleanup running. */
+    template <typename T> [[nodiscard]] T dismissAfter(T value) noexcept
+    {
+        static_assert(std::is_nothrow_move_constructible_v<T>,
+                      "dismissAfter() dismisses the guard before moving the result out");
+        active_ = false;
+        return value;
     }
 
 private:

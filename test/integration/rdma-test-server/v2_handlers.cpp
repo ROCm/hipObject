@@ -563,16 +563,16 @@ namespace v2 {
         }
 
         /* Publish: response confirmed under the table lock below via
-         * beginPublishing; published=true marks the tuple as exposed. The
-         * session now owns the slot, and the response finalizer
-         * (finishPrepareSend) the io reference. */
+         * beginPublishing; published=true marks the tuple as exposed. Once
+         * the reply is built, the session owns the slot, and the response
+         * finalizer (finishPrepareSend) the io reference. A reply that
+         * fails to build never leaves, so the rollback still applies. */
         if (!table_.beginPublishing(id)) {
             return error(500);
         }
-        rollback.dismiss();
         table_.withSession(id, [&](V2Session &s) { s.published = true; });
 
-        return prepareReply(id, serverPsn);
+        return rollback.dismissAfter(prepareReply(id, serverPsn));
     }
 
     HandlerResult ControlHandlers::prepareReply(const std::string &id, uint32_t serverPsn)
@@ -766,8 +766,7 @@ namespace v2 {
             }
         }
 
-        ioRef.dismiss();
-        return readyReply(req.cookie, stats.bytes);
+        return ioRef.dismissAfter(readyReply(req.cookie, stats.bytes));
     }
 
     HandlerResult ControlHandlers::onCancel(const CancelRequest &req, const std::string &rawHeaders)
