@@ -20,7 +20,7 @@
 # and verifies the payload end to end. The GPU-buffer form of this transfer
 # is hipobject-hardware-test-gpu-direct.yml's job.
 
-name: hipObject - Hardware Test - Two-VM Protocol
+name: hipObject - Emulated HW Test - Two-VM Protocol
 
 on:
   # Pull requests, pushes to develop, and manual runs. The push run

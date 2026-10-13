@@ -24,7 +24,7 @@
 # exists to watch. The GPU-buffer form of the same transfer is
 # hipobject-hardware-test-two-vm-gpu-direct.yml.
 
-name: hipObject - Hardware Test - MinIO Bridge
+name: hipObject - Emulated HW Test - MinIO Bridge
 
 on:
   # Pull requests, pushes to develop, and manual runs. The push run

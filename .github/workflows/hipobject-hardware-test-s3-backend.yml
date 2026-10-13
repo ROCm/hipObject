@@ -15,7 +15,7 @@
 # This is the job that exercises the RDMA data path on host buffers: a
 # passing run carries x-amz-rdma-token / x-amz-rdma-reply on the wire.
 
-name: hipObject - Hardware Test - S3 Backend
+name: hipObject - Emulated HW Test - S3 Backend
 
 on:
   # Pull requests, pushes to develop, and manual runs. The push run
