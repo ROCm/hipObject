@@ -16,7 +16,6 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cstdint>
 #include <functional>
 #include <latch>
 #include <memory>
@@ -35,8 +34,6 @@
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
-#include "ibv-core.h"
-#include "ibv-wrapper.h"
 #include "state.h"
 
 /* Google Test registers each test with a global constructor */
@@ -63,142 +60,6 @@ runThreads(int count, const std::function<void(int)> &body)
         });
     }
     // Each std::jthread joins its thread when it's destroyed
-}
-
-// ---- Fake libibverbs ---------------------------------------------------
-
-std::atomic<int> g_openDeviceCalls{0};
-
-struct ibv_device **
-fakeGetDeviceList(int *numDevices)
-{
-    static std::array<struct ibv_device *, 2> devices = {
-        {reinterpret_cast<struct ibv_device *>(0x1), nullptr}};
-    if (numDevices) {
-        *numDevices = 1;
-    }
-    return devices.data();
-}
-
-void
-fakeFreeDeviceList(struct ibv_device **)
-{
-}
-
-const char *
-fakeGetDeviceName(struct ibv_device *)
-{
-    return "mlx5_0";
-}
-
-struct ibv_context *
-fakeOpenDevice(struct ibv_device *)
-{
-    g_openDeviceCalls.fetch_add(1);
-    return reinterpret_cast<struct ibv_context *>(0x2);
-}
-
-int
-fakeCloseDevice(struct ibv_context *)
-{
-    return 0;
-}
-
-int
-fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
-{
-    if (attr) {
-        hipObj::zeroObject(*attr);
-    }
-    return 0;
-}
-
-int
-fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *gid)
-{
-    if (gid) {
-        hipObj::zeroObject(*gid);
-    }
-    return 0;
-}
-
-struct ibv_pd *
-fakeAllocPd(struct ibv_context *)
-{
-    return reinterpret_cast<struct ibv_pd *>(0x3);
-}
-
-int
-fakeDeallocPd(struct ibv_pd *)
-{
-    return 0;
-}
-
-/* The library owns the MR until it passes it to fakeDeregMr() */
-struct ibv_mr *
-fakeRegMr(struct ibv_pd *, void *addr, size_t, int)
-{
-    auto mr  = std::make_unique<struct ibv_mr>();
-    mr->addr = addr;
-    mr->rkey = 0x1234;
-    return mr.release();
-}
-
-struct ibv_mr *
-fakeRegMrIova2(struct ibv_pd *pd, void *addr, size_t size, uintptr_t, int access)
-{
-    return fakeRegMr(pd, addr, size, access);
-}
-
-int
-fakeDeregMr(struct ibv_mr *mr)
-{
-    std::unique_ptr<struct ibv_mr> owned(mr);
-    return 0;
-}
-
-struct ibv_cq *
-fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-{
-    return reinterpret_cast<struct ibv_cq *>(0x4);
-}
-
-int
-fakeDestroyCq(struct ibv_cq *)
-{
-    return 0;
-}
-
-/* The library owns the QP until it passes it to fakeDestroyQp() */
-struct ibv_qp *
-fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-{
-    auto qp    = std::make_unique<struct ibv_qp>();
-    qp->qp_num = 0x55;
-    return qp.release();
-}
-
-int
-fakeDestroyQp(struct ibv_qp *qp)
-{
-    std::unique_ptr<struct ibv_qp> owned(qp);
-    return 0;
-}
-
-int
-fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *, int)
-{
-    return 0;
-}
-
-int
-fakePollCq(struct ibv_cq *, int, struct ibv_wc *wc)
-{
-    if (wc) {
-        hipObj::zeroObject(*wc);
-        wc->status = IBV_WC_SUCCESS;
-    }
-    return 1;
 }
 
 // ---- Transfer callbacks ------------------------------------------------
@@ -275,26 +136,7 @@ protected:
          * hipObjInit() opens the hinted NIC directly */
         fakeHip_.emplace(hip_);
 
-        hipObj::IbvFuncs funcs{};
-        funcs.get_device_list  = &fakeGetDeviceList;
-        funcs.free_device_list = &fakeFreeDeviceList;
-        funcs.get_device_name  = &fakeGetDeviceName;
-        funcs.open_device      = &fakeOpenDevice;
-        funcs.close_device     = &fakeCloseDevice;
-        funcs.query_port       = &fakeQueryPort;
-        funcs.query_gid        = &fakeQueryGid;
-        funcs.alloc_pd         = &fakeAllocPd;
-        funcs.dealloc_pd       = &fakeDeallocPd;
-        funcs.reg_mr_iova2     = &fakeRegMrIova2;
-        funcs.dereg_mr         = &fakeDeregMr;
-        funcs.create_cq        = &fakeCreateCq;
-        funcs.destroy_cq       = &fakeDestroyCq;
-        funcs.create_qp        = &fakeCreateQp;
-        funcs.destroy_qp       = &fakeDestroyQp;
-        funcs.modify_qp        = &fakeModifyQp;
-        funcs.poll_cq          = &fakePollCq;
-        fakeIbv_.emplace(funcs);
-        g_openDeviceCalls = 0;
+        fakeIbv_.emplace(verbs_);
 
         probeOps_.sendRequest = &probeSendRequest;
         probeOps_.recvReply   = &probeRecvReply;
@@ -317,8 +159,9 @@ protected:
 
     hipObj::DriverState                      state_{};
     hipObj::DriverState                     *savedState_ = nullptr;
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
     hipObjTest::FakeDevice                   hipDevice_{};
+    hipObjTest::FakeVerbs                    verbs_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
     hipObjTest::FakeHip                      hip_{hipDevice_};
     std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
     std::vector<char>                        pool_ = std::vector<char>(kThreads * kBufSize);
@@ -401,7 +244,7 @@ TEST_F(ThreadSafetyTest, ConcurrentInitHasOneWinner)
 
     EXPECT_EQ(succeeded.load(), 1);
     EXPECT_EQ(alreadyInitialized.load(), kThreads - 1);
-    EXPECT_EQ(g_openDeviceCalls.load(), 1);
+    EXPECT_EQ(hipDevice_.log.openDevice, 1);
 }
 
 TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)

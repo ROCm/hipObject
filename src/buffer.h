@@ -19,6 +19,26 @@
 
 namespace hipObj {
 
+class HipRuntime;
+class Verbs;
+
+/* How registerDeviceMemory() registers memory: whether it tries a
+ * dma-buf registration first (HIPOBJ_DMABUF), and whether it reports an
+ * export that fails (HIPOBJ_RDMA_DEBUG) */
+struct DmabufPolicy {
+    bool enabled = true;
+    bool debug   = false;
+};
+
+/* Registers [addr, addr + length) with the NIC, for memory that may be
+ * on a GPU. When policy and verbs allow it, it exports the memory from
+ * runtime as a dma-buf and registers that, which is how the NIC reaches
+ * GPU memory. Otherwise, or when either step fails, it registers the
+ * memory as host memory, which fails for GPU memory. Null when nothing
+ * registers. */
+IbvMrPtr registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_pd *pd, void *addr,
+                              size_t length, int access, const DmabufPolicy &policy);
+
 /* Frees a host staging buffer allocated with hipHostMalloc() */
 struct HostBufDeleter {
     void operator()(void *hostBuf) const noexcept;

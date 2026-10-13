@@ -14,8 +14,8 @@
  * (client QP, PSN, MR endpoint) arrive in the PREPARE and READY
  * headers and are staged on the session.
  *
- * Everything goes through the same ibverbs wrapper the client
- * uses, so unit tests can swap the function table as usual. */
+ * Everything goes through the same verbs seam the client uses, so
+ * unit tests can substitute fake verbs as usual. */
 
 #pragma once
 

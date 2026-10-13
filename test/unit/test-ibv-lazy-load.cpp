@@ -2,9 +2,9 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * hipObject loads libibverbs the first time ibv() is called, not when the
- * program starts. This is a program of its own, so that nothing calls
- * ibv() before the test does.
+ * hipObject loads libibverbs the first time ibvAvailable() or ibv() is
+ * called, not when the program starts. This is a program of its own, so
+ * that nothing calls either before the test does.
  */
 
 #include <memory>
@@ -32,14 +32,17 @@ libibverbsIsLoaded()
 
 TEST(IbvLazyLoad, LibibverbsLoadsOnFirstUse)
 {
-    EXPECT_FALSE(libibverbsIsLoaded()) << "libibverbs was loaded before ibv() was called";
+    EXPECT_FALSE(libibverbsIsLoaded()) << "libibverbs was loaded before ibvAvailable() was called";
 
-    const hipObj::IBVWrapper &wrapper = hipObj::ibv();
-    EXPECT_EQ(&hipObj::ibv(), &wrapper);
-    if (!wrapper.is_initialized()) {
+    if (!hipObj::ibvAvailable()) {
         GTEST_SKIP() << "libibverbs couldn't be loaded";
     }
     EXPECT_TRUE(libibverbsIsLoaded());
+
+    /* Loaded once */
+    const hipObj::Verbs &verbs = hipObj::ibv();
+    EXPECT_TRUE(hipObj::ibvAvailable());
+    EXPECT_EQ(&hipObj::ibv(), &verbs);
 }
 
 } // namespace

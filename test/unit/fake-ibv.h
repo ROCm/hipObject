@@ -2,14 +2,11 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Installs a wrapper built from fake verbs as hipObj::ibv(), so tests run
- * without libibverbs or an RDMA device.
+ * Installs fake verbs as hipObj::ibv(), so tests run without libibverbs
+ * or an RDMA device.
  */
 
 #pragma once
-
-#include <memory>
-#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -17,23 +14,20 @@
 
 namespace hipObjTest {
 
-/* Makes ibv() return a wrapper that calls funcs for as long as it lives,
- * and puts the previous wrapper back when it's destroyed. funcs is used
- * as given: an entry the test leaves null crashes if it's called, rather
- * than reaching the real libibverbs. Create and destroy it only while no
- * other thread is calling ibv(). */
+/* Makes ibv() return verbs for as long as it lives, and puts the previous
+ * verbs back when it's destroyed. verbs has to outlive it. Create and
+ * destroy it only while no other thread is calling ibv(). */
 class ScopedFakeIbv {
 public:
-    explicit ScopedFakeIbv(const hipObj::IbvFuncs &funcs)
-        : funcs_(funcs), wrapper_(std::make_unique<hipObj::IBVWrapper>(funcs)),
-          previous_(hipObj::setIbvForTest(wrapper_.get()))
+    explicit ScopedFakeIbv(const hipObj::Verbs &verbs)
+        : verbs_(&verbs), previous_(hipObj::setIbvForTest(&verbs))
     {
     }
 
     ~ScopedFakeIbv()
     {
         /* Restored in the reverse order they were installed */
-        EXPECT_EQ(hipObj::setIbvForTest(previous_), wrapper_.get());
+        EXPECT_EQ(hipObj::setIbvForTest(previous_), verbs_);
     }
 
     ScopedFakeIbv(const ScopedFakeIbv &)            = delete;
@@ -41,26 +35,9 @@ public:
     ScopedFakeIbv(ScopedFakeIbv &&)                 = delete;
     ScopedFakeIbv &operator=(ScopedFakeIbv &&)      = delete;
 
-    const hipObj::IbvFuncs &funcs() const noexcept
-    {
-        return funcs_;
-    }
-
-    /* Switches to new fakes, for a test that changes some of its
-     * fixture's. The new wrapper is installed before the old one is
-     * destroyed, so ibv() never returns a destroyed wrapper. */
-    void replace(const hipObj::IbvFuncs &funcs)
-    {
-        auto wrapper = std::make_unique<hipObj::IBVWrapper>(funcs);
-        hipObj::setIbvForTest(wrapper.get());
-        wrapper_ = std::move(wrapper);
-        funcs_   = funcs;
-    }
-
 private:
-    hipObj::IbvFuncs                    funcs_;
-    std::unique_ptr<hipObj::IBVWrapper> wrapper_;
-    hipObj::IBVWrapper                 *previous_;
+    const hipObj::Verbs *verbs_;
+    const hipObj::Verbs *previous_;
 };
 
 } // namespace hipObjTest

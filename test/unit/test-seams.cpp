@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdlib>
 #include <optional>
 #include <span>
 #include <string>
@@ -265,100 +264,36 @@ TEST_F(StateSeamTest, OverrideRedirectsGetState)
     EXPECT_EQ(hipObj::setStateForTest(savedState_), &fresh_);
 }
 
-// ---- IBV wrapper seam --------------------------------------------
+// ---- libibverbs seam --------------------------------------------
 
-TEST(IbvWrapperSeamTest, OverrideRedirectsIbv)
+TEST(IbvSeamTest, OverrideRedirectsIbv)
 {
-    hipObj::IBVWrapper fake(hipObj::IbvFuncs{});
-    EXPECT_TRUE(fake.is_initialized());
+    hipObjTest::FakeDevice      device{};
+    const hipObjTest::FakeVerbs fake(device);
 
-    hipObj::IBVWrapper *previous = hipObj::setIbvForTest(&fake);
+    const hipObj::Verbs *previous = hipObj::setIbvForTest(&fake);
     EXPECT_EQ(previous, nullptr);
+    EXPECT_TRUE(hipObj::ibvAvailable());
     EXPECT_EQ(&hipObj::ibv(), &fake);
 
+    int numDevices = 0;
+    EXPECT_NE(hipObj::ibv().get_device_list(&numDevices), nullptr);
+    EXPECT_EQ(numDevices, 1);
+    device.fail.getDeviceList = true;
+    EXPECT_EQ(hipObj::ibv().get_device_list(&numDevices), nullptr);
+
     EXPECT_EQ(hipObj::setIbvForTest(previous), &fake);
-    EXPECT_NE(&hipObj::ibv(), &fake);
+    /* Without fakes, ibv() loads libibverbs, if it can */
+    if (hipObj::ibvAvailable()) {
+        EXPECT_NE(&hipObj::ibv(), &fake);
+    }
 }
 
-// ---- IBV function table seam -------------------------------------
-
-namespace {
-
-    struct IbvCallLog {
-        int create_cq_calls    = 0;
-        int create_qp_calls    = 0;
-        int destroy_cq_calls   = 0;
-        int destroy_qp_calls   = 0;
-        int dealloc_pd_calls   = 0;
-        int close_device_calls = 0;
-        int modify_qp_calls    = 0;
-        int modify_qp_mask     = 0;
-        /* From the last modify_qp() */
-        unsigned int qp_access_flags = 0;
-    };
-
-    IbvCallLog g_calls;
-
-    struct ibv_cq *fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-    {
-        ++g_calls.create_cq_calls;
-        return reinterpret_cast<struct ibv_cq *>(0xC0FFEE);
-    }
-
-    struct ibv_qp *fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-    {
-        ++g_calls.create_qp_calls;
-        return reinterpret_cast<struct ibv_qp *>(0x0DDba11);
-    }
-
-    int fakeDestroyCq(struct ibv_cq *)
-    {
-        ++g_calls.destroy_cq_calls;
-        return 0;
-    }
-
-    int fakeDestroyQp(struct ibv_qp *)
-    {
-        ++g_calls.destroy_qp_calls;
-        return 0;
-    }
-
-    int fakeDeallocPd(struct ibv_pd *)
-    {
-        ++g_calls.dealloc_pd_calls;
-        return 0;
-    }
-
-    int fakeCloseDevice(struct ibv_context *)
-    {
-        ++g_calls.close_device_calls;
-        return 0;
-    }
-
-    int fakeRecordingModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask)
-    {
-        ++g_calls.modify_qp_calls;
-        g_calls.modify_qp_mask  = mask;
-        g_calls.qp_access_flags = attr->qp_access_flags;
-        return 0;
-    }
-
-} // namespace
-
-class IbvSeamTest : public ::testing::Test {
+class FakeVerbsSeamTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs funcs{};
-        funcs.create_cq    = &fakeCreateCq;
-        funcs.create_qp    = &fakeCreateQp;
-        funcs.destroy_cq   = &fakeDestroyCq;
-        funcs.destroy_qp   = &fakeDestroyQp;
-        funcs.dealloc_pd   = &fakeDeallocPd;
-        funcs.close_device = &fakeCloseDevice;
-        funcs.modify_qp    = &fakeRecordingModifyQp;
-        fakeIbv_.emplace(funcs);
-        g_calls = IbvCallLog();
+        fakeIbv_.emplace(verbs_);
     }
 
     void TearDown() override
@@ -366,30 +301,32 @@ protected:
         fakeIbv_.reset();
     }
 
+    hipObjTest::FakeDevice                   device_{};
+    hipObjTest::FakeVerbs                    verbs_{device_};
     std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
 };
 
-TEST_F(IbvSeamTest, QpCreationAndTeardownUseTheTable)
+TEST_F(FakeVerbsSeamTest, QpCreationAndTeardownUseTheSeam)
 {
     hipObj::RcConnection conn;
     conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
     conn.pd.reset(reinterpret_cast<struct ibv_pd *>(0x5678));
 
     EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
-    EXPECT_EQ(g_calls.create_cq_calls, 1);
-    EXPECT_EQ(g_calls.create_qp_calls, 1);
+    EXPECT_EQ(device_.log.createCq, 1);
+    EXPECT_EQ(device_.log.createQp, 1);
     EXPECT_NE(conn.qp, nullptr);
 
     hipObj::closeRdmaDevice(conn);
-    EXPECT_EQ(g_calls.destroy_qp_calls, 1);
-    EXPECT_EQ(g_calls.destroy_cq_calls, 1);
-    EXPECT_EQ(g_calls.dealloc_pd_calls, 1);
-    EXPECT_EQ(g_calls.close_device_calls, 1);
+    EXPECT_EQ(device_.log.destroyQp, 1);
+    EXPECT_EQ(device_.log.destroyCq, 1);
+    EXPECT_EQ(device_.log.deallocPd, 1);
+    EXPECT_EQ(device_.log.closeDevice, 1);
     EXPECT_EQ(conn.qp, nullptr);
     EXPECT_EQ(conn.ctx, nullptr);
 }
 
-TEST_F(IbvSeamTest, InitTransitionGrantsRemoteReadAndWrite)
+TEST_F(FakeVerbsSeamTest, InitTransitionGrantsRemoteReadAndWrite)
 {
     hipObj::RcConnection conn;
     conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
@@ -397,11 +334,12 @@ TEST_F(IbvSeamTest, InitTransitionGrantsRemoteReadAndWrite)
     ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
 
     ASSERT_EQ(hipObj::transitionQpToInit(conn), 0);
-    EXPECT_EQ(g_calls.modify_qp_calls, 1);
-    EXPECT_NE(g_calls.modify_qp_mask & IBV_QP_ACCESS_FLAGS, 0);
+    ASSERT_EQ(device_.modifyQpCount, 1U);
+    const hipObjTest::ModifyQpCall &call = device_.modifyQp[0];
+    EXPECT_NE(call.mask & IBV_QP_ACCESS_FLAGS, 0);
     /* The peer reads the buffer for a PUT and writes it for a GET, and
      * nothing else */
-    EXPECT_EQ(g_calls.qp_access_flags,
+    EXPECT_EQ(call.attr.qp_access_flags,
               static_cast<unsigned int>(IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
 }
 
@@ -413,110 +351,6 @@ namespace {
     };
 
     ApiTransferLog g_apiTransferLog;
-
-    struct ibv_device *g_fakeIbvDevices[] = {reinterpret_cast<struct ibv_device *>(0x1), nullptr};
-
-    struct ibv_device **fakeGetDeviceList(int *num_devices)
-    {
-        if (num_devices) {
-            *num_devices = 1;
-        }
-        return g_fakeIbvDevices;
-    }
-
-    void fakeFreeDeviceList(struct ibv_device **)
-    {
-    }
-
-    struct ibv_context *fakeOpenDevice(struct ibv_device *)
-    {
-        return reinterpret_cast<struct ibv_context *>(0x2);
-    }
-
-    struct ibv_pd *fakeAllocPd(struct ibv_context *)
-    {
-        return reinterpret_cast<struct ibv_pd *>(0x3);
-    }
-
-    int fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
-    {
-        /* Like the real ibv_query_port, fill every field. Callers do not
-         * initialize the struct, so gid_tbl_len would otherwise be stack
-         * garbage and drive the GID scan for billions of iterations. */
-        if (attr) {
-            hipObj::zeroObject(*attr);
-        }
-        return 0;
-    }
-
-    int fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *gid)
-    {
-        if (gid) {
-            hipObj::zeroObject(*gid);
-        }
-        return 0;
-    }
-
-    const char *fakeGetDeviceName(struct ibv_device *)
-    {
-        return "mlx5_0";
-    }
-
-    struct ibv_mr *fakeTransferRegisterMr(struct ibv_pd *, void *addr, size_t, int)
-    {
-        auto *mr = static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
-        if (mr) {
-            mr->addr = addr;
-            mr->rkey = 0x1234;
-        }
-        return mr;
-    }
-
-    struct ibv_mr *fakeTransferRegisterMrIova2(struct ibv_pd *pd, void *addr, size_t size, uintptr_t,
-                                               int access)
-    {
-        return fakeTransferRegisterMr(pd, addr, size, access);
-    }
-
-    int fakeTransferDeregisterMr(struct ibv_mr *mr)
-    {
-        std::free(mr);
-        return 0;
-    }
-
-    struct ibv_cq *fakeTransferCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-    {
-        return reinterpret_cast<struct ibv_cq *>(0x4);
-    }
-
-    struct ibv_qp *fakeTransferCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-    {
-        auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
-        if (qp) {
-            qp->qp_num = 0x55;
-        }
-        return qp;
-    }
-
-    int fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *, int)
-    {
-        return 0;
-    }
-
-    int fakePollCq(struct ibv_cq *, int, struct ibv_wc *wc)
-    {
-        if (wc) {
-            hipObj::zeroObject(*wc);
-            wc->status = IBV_WC_SUCCESS;
-        }
-        return 1;
-    }
-
-    int fakeTransferDestroyQp(struct ibv_qp *qp)
-    {
-        std::free(qp);
-        return 0;
-    }
 
     int fakeSendRequest(void *, const char *, size_t)
     {
@@ -547,28 +381,9 @@ namespace {
             hipDevice_.deviceSyncErr = hipErrorNoDevice;
             fakeHip_.emplace(hip_);
 
-            hipObj::IbvFuncs funcs{};
-            funcs.get_device_list  = &fakeGetDeviceList;
-            funcs.free_device_list = &fakeFreeDeviceList;
-            funcs.open_device      = &fakeOpenDevice;
-            funcs.close_device     = &fakeCloseDevice;
-            funcs.get_device_name  = &fakeGetDeviceName;
-            funcs.query_port       = &fakeQueryPort;
-            funcs.query_gid        = &fakeQueryGid;
-            funcs.alloc_pd         = &fakeAllocPd;
-            funcs.dealloc_pd       = &fakeDeallocPd;
-            funcs.reg_mr_iova2     = &fakeTransferRegisterMrIova2;
-            funcs.dereg_mr         = &fakeTransferDeregisterMr;
-            funcs.create_cq        = &fakeTransferCreateCq;
-            funcs.destroy_cq       = &fakeDestroyCq;
-            funcs.create_qp        = &fakeTransferCreateQp;
-            funcs.modify_qp        = &fakeModifyQp;
-            funcs.destroy_qp       = &fakeTransferDestroyQp;
-            funcs.poll_cq          = &fakePollCq;
-            fakeIbv_.emplace(funcs);
+            fakeIbv_.emplace(verbs_);
 
             g_apiTransferLog = {};
-            g_calls          = IbvCallLog();
         }
 
         void TearDown() override
@@ -592,8 +407,9 @@ namespace {
         hipObj::DriverState                     *savedState_ = nullptr;
         FakeNicEnumerator                        enumerator_{};
         hipObj::NicEnumerator                   *savedEnumerator_ = nullptr;
-        std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
         hipObjTest::FakeDevice                   hipDevice_{};
+        hipObjTest::FakeVerbs                    verbs_{hipDevice_};
+        std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
         hipObjTest::FakeHip                      hip_{hipDevice_};
         std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
     };

@@ -6,7 +6,7 @@
  * Unit tests for the v2 per-token connection registry, capacity
  * accounting, MR reference gating, teardown ordering, and the
  * device/connection ownership split. All tests run without RDMA
- * hardware: ibverbs calls go through the function-table seam. */
+ * hardware: ibverbs calls go through the verbs seam. */
 
 #include <cerrno>
 #include <cstdint>
@@ -20,11 +20,11 @@
 #include <gtest/gtest.h>
 
 #include "buffer.h"
+#include "fake-device.h"
 #include "fake-ibv.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
-#include "ibv-wrapper.h"
 #include "v2-clock.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
@@ -60,113 +60,95 @@ HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 FakeIbv g_fake;
 HIPOBJ_WARN_NO_EXIT_DTOR_ON
 
-struct ibv_cq *
-fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-{
-    ++g_fake.createCqCalls;
-    if (g_fake.createCqFails > 0) {
-        --g_fake.createCqFails;
-        errno = ENOMEM;
-        return nullptr;
+/* Unique qp numbers, scriptable failures, and the destroy order */
+class RegistryVerbs : public hipObjTest::FakeVerbs {
+public:
+    using FakeVerbs::FakeVerbs;
+
+    struct ibv_cq *create_cq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int) const override
+    {
+        ++g_fake.createCqCalls;
+        if (g_fake.createCqFails > 0) {
+            --g_fake.createCqFails;
+            errno = ENOMEM;
+            return nullptr;
+        }
+        return new struct ibv_cq();
     }
-    return new struct ibv_cq();
-}
 
-int
-fakeDestroyCq(struct ibv_cq *cq)
-{
-    ++g_fake.destroyCqCalls;
-    if (g_fake.destroyCqFails > 0) {
-        --g_fake.destroyCqFails;
-        errno = EBUSY;
-        return 1;
+    int destroy_cq(struct ibv_cq *cq) const override
+    {
+        ++g_fake.destroyCqCalls;
+        if (g_fake.destroyCqFails > 0) {
+            --g_fake.destroyCqFails;
+            errno = EBUSY;
+            return 1;
+        }
+        g_fake.destroyed.push_back(cq);
+        delete cq;
+        return 0;
     }
-    g_fake.destroyed.push_back(cq);
-    delete cq;
-    return 0;
-}
 
-struct ibv_qp *
-fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-{
-    ++g_fake.createQpCalls;
-    if (g_fake.createQpFails > 0) {
-        --g_fake.createQpFails;
-        errno = ENOMEM;
-        return nullptr;
+    struct ibv_qp *create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const override
+    {
+        ++g_fake.createQpCalls;
+        if (g_fake.createQpFails > 0) {
+            --g_fake.createQpFails;
+            errno = ENOMEM;
+            return nullptr;
+        }
+        auto *qp = new struct ibv_qp();
+        hipObj::zeroObject(*qp);
+        qp->qp_num = 1000 + g_fake.createQpCalls;
+        return qp;
     }
-    auto *qp = new struct ibv_qp();
-    hipObj::zeroObject(*qp);
-    qp->qp_num = 1000 + g_fake.createQpCalls;
-    return qp;
-}
 
-int
-fakeDestroyQp(struct ibv_qp *qp)
-{
-    ++g_fake.destroyQpCalls;
-    if (g_fake.destroyQpFails > 0) {
-        --g_fake.destroyQpFails;
-        errno = EBUSY;
-        return 1;
+    int destroy_qp(struct ibv_qp *qp) const override
+    {
+        ++g_fake.destroyQpCalls;
+        if (g_fake.destroyQpFails > 0) {
+            --g_fake.destroyQpFails;
+            errno = EBUSY;
+            return 1;
+        }
+        g_fake.destroyed.push_back(qp);
+        delete qp;
+        return 0;
     }
-    g_fake.destroyed.push_back(qp);
-    delete qp;
-    return 0;
-}
 
-int
-fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int)
-{
-    /* Capture PSN values for the RTR/RTS spy tests. */
-    if (attr->qp_state == 3) { /* RTS */
-        g_fake.qpAttrSqPsn.push_back({attr->sq_psn});
+    int modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int) const override
+    {
+        /* Capture PSN values for the RTR/RTS spy tests. */
+        if (attr->qp_state == 3) { /* RTS */
+            g_fake.qpAttrSqPsn.push_back({attr->sq_psn});
+        }
+        else if (attr->qp_state == 2) { /* RTR */
+            g_fake.qpAttrRqPsn.push_back({attr->rq_psn});
+        }
+        return 0;
     }
-    else if (attr->qp_state == 2) { /* RTR */
-        g_fake.qpAttrRqPsn.push_back({attr->rq_psn});
+
+    int query_port(struct ibv_context *, uint8_t, struct ibv_port_attr *a) const override
+    {
+        /* Mirror a healthy port: active MTU 4096 so the RTR transition
+         * under test keeps a full-size path MTU. */
+        hipObj::zeroObject(*a);
+        a->active_mtu = IBV_MTU_4096;
+        return 0;
     }
-    return 0;
-}
 
-int
-fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *a)
-{
-    /* Mirror a healthy port: active MTU 4096 so the RTR transition
-     * under test keeps a full-size path MTU. */
-    hipObj::zeroObject(*a);
-    a->active_mtu = IBV_MTU_4096;
-    return 0;
-}
+    int query_device(struct ibv_context *, struct ibv_device_attr *) const override
+    {
+        return 0;
+    }
 
-int
-fakeQueryDevice(struct ibv_context *, struct ibv_device_attr *)
-{
-    return 0;
-}
-
-int
-fakeDeallocPd(struct ibv_pd *pd)
-{
-    ++g_fake.deallocPdCalls;
-    delete pd;
-    return 0;
-}
-
-/* The fakes the fixture installs */
-hipObj::IbvFuncs
-fakeVerbs()
-{
-    hipObj::IbvFuncs funcs{};
-    funcs.create_cq    = fakeCreateCq;
-    funcs.destroy_cq   = fakeDestroyCq;
-    funcs.create_qp    = fakeCreateQp;
-    funcs.destroy_qp   = fakeDestroyQp;
-    funcs.modify_qp    = fakeModifyQp;
-    funcs.query_device = fakeQueryDevice;
-    funcs.query_port   = fakeQueryPort;
-    funcs.dealloc_pd   = fakeDeallocPd;
-    return funcs;
-}
+    int dealloc_pd(struct ibv_pd *pd) const override
+    {
+        ++g_fake.deallocPdCalls;
+        delete pd;
+        return 0;
+    }
+};
 
 /* ---- registry fixture ------------------------------------------- */
 
@@ -175,7 +157,7 @@ protected:
     void SetUp() override
     {
         g_fake.reset();
-        install_.emplace(fakeVerbs());
+        install_.emplace(verbs_);
         testReg_ = std::make_unique<hipObj::v2::ConnectionRegistry>();
         prevReg_ = hipObj::v2::setRegistryForTest(testReg_.get());
     }
@@ -207,8 +189,10 @@ protected:
         return reg.insert(std::move(entry));
     }
 
-    /* install_ is declared first so it's destroyed last: the registry
-     * entries free their fake objects through the fake table. */
+    /* The fakes are declared first so they're destroyed last: the
+     * registry entries free their fake objects through them. */
+    hipObjTest::FakeDevice                          device_{};
+    RegistryVerbs                                   verbs_{device_};
     std::optional<hipObjTest::ScopedFakeIbv>        install_{};
     std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_{};
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;

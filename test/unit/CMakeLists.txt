@@ -167,19 +167,19 @@ if(HIPOBJECT_V2_API)
   hipobj_add_test(test-v2-state
     test-v2-state.cpp)
 
-  hipobj_add_test(test-v2-registry
+  hipobj_add_fake_device_test(test-v2-registry
     test-v2-registry.cpp)
 
-  hipobj_add_test(test-v2-random
+  hipobj_add_fake_device_test(test-v2-random
     test-v2-random.cpp)
 
-  hipobj_add_test(test-v2-conflict
+  hipobj_add_fake_device_test(test-v2-conflict
     test-v2-conflict.cpp)
 
-  hipobj_add_test(test-v2-server
+  hipobj_add_fake_device_test(test-v2-server
     test-v2-server.cpp)
 
-  hipobj_add_test(test-v2-connref
+  hipobj_add_fake_device_test(test-v2-connref
     test-v2-connref.cpp)
 endif()
 
@@ -203,6 +203,9 @@ hipobj_add_fake_device_test(test-buffer-registration
 
 hipobj_add_test(test-ibv-lazy-load
   test-ibv-lazy-load.cpp)
+
+hipobj_add_test(test-loaded-verbs
+  test-loaded-verbs.cpp)
 
 hipobj_add_fake_device_test(test-ibv-dmabuf
   test-ibv-dmabuf.cpp)

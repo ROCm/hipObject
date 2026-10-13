@@ -7,7 +7,7 @@
  * library can load libibverbs with dlopen() and build without its
  * headers, matches <infiniband/verbs.h>. A struct that doesn't match
  * would make libibverbs read and write the wrong memory, and a call
- * through ibv_context_ops (see IBVWrapper::post_send()) would call the
+ * through ibv_context_ops (see LoadedVerbs::post_send()) would call the
  * wrong function, all without a warning.
  */
 

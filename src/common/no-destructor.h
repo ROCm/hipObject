@@ -15,12 +15,19 @@
 #pragma once
 
 #include <type_traits>
+#include <utility>
 
 namespace hipObj {
 
 template <typename T> class NoDestructor {
 public:
     NoDestructor() noexcept(std::is_nothrow_default_constructible_v<T>) : value_()
+    {
+    }
+
+    /* Holds value, for a T that's built by a function call */
+    explicit NoDestructor(T value) noexcept(std::is_nothrow_move_constructible_v<T>)
+        : value_(std::move(value))
     {
     }
 

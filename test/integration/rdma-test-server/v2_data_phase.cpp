@@ -46,19 +46,12 @@ namespace v2 {
             return false;
         }
         /* Without a PD (transport-free host) the buffer stages without
-         * an MR; the data phase is a no-op there anyway.
-         *
-         * Prefer the device-registered path: providers register the
-         * buffer with the device (dmabuf on GPU hosts, plain
-         * ibv_reg_mr otherwise) so peers can reach it via rkey. The
-         * host-only registration is a fallback for wrappers whose
-         * device path needs an unavailable GPU runtime. */
+         * an MR; the data phase is a no-op there anyway. The buffer is
+         * host memory, so it's registered as host memory, which lets
+         * peers reach it via rkey. */
         IbvMrPtr mr;
         if (pd != nullptr) {
             mr.reset(ibv().reg_mr(pd, buf.get(), size, kAccess));
-            if (mr == nullptr) {
-                mr.reset(ibv().reg_mr_host(pd, buf.get(), size, kAccess));
-            }
             if (mr == nullptr) {
                 return false;
             }
