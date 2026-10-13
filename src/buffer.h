@@ -89,7 +89,7 @@ public:
     size_t size() const;
 
 private:
-    std::map<uintptr_t, BufEntry> entries_;
+    std::map<uintptr_t, BufEntry> entries_{};
 };
 
 } // namespace hipObj

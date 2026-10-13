@@ -52,6 +52,10 @@ Checks:
   - -portability-avoid-pragma-once
   - -readability-identifier-length
   - -modernize-use-trailing-return-type
+  # GCC's -Weffc++ wants every member initialized in the constructor's
+  # initializer list or in its declaration, and this check reports exactly
+  # those initializers as redundant, so the two can't both pass
+  - -readability-redundant-member-init
 
   # TODO: These checks report problems in the current code. Fix the code
   # and delete the check's line here, or move it to "Not wanted" with a
@@ -135,7 +139,6 @@ Checks:
   - -readability-make-member-function-const  # TODO(21)
   - -readability-math-missing-parentheses  # TODO(5)
   - -readability-named-parameter  # TODO(124)
-  - -readability-redundant-member-init  # TODO(3)
   - -readability-redundant-nested-if  # TODO(1)
   - -readability-redundant-parentheses  # TODO(6)
   - -readability-simplify-boolean-expr  # TODO(1)

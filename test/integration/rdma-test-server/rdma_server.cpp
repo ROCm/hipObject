@@ -104,8 +104,8 @@ struct RdmaTestServer::Impl {
     /* Destroyed in reverse order: the MR is deregistered and its buffer
      * freed before the connection's PD and context go away. */
     hipObj::RcConnection conn{};
-    hipObj::MallocPtr    stagingBuf;
-    hipObj::IbvMrPtr     stagingMr;
+    hipObj::MallocPtr    stagingBuf{};
+    hipObj::IbvMrPtr     stagingMr{};
     size_t               stagingSize = 64 * 1024 * 1024;
     bool                 ready       = false;
 

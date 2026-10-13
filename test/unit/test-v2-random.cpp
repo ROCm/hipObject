@@ -35,7 +35,7 @@ namespace {
 /* Deterministic random source with a scriptable draw sequence. */
 class ScriptedRandom : public hipObj::v2::RandomSource {
 public:
-    std::vector<uint32_t> draws;
+    std::vector<uint32_t> draws{};
     size_t                next    = 0;
     bool                  failAll = false;
 
@@ -66,7 +66,7 @@ protected:
         hipObj::v2::setRandomSourceForTest(prev_);
     }
 
-    std::unique_ptr<ScriptedRandom> scripted_;
+    std::unique_ptr<ScriptedRandom> scripted_{};
     hipObj::v2::RandomSource       *prev_ = nullptr;
 };
 
@@ -130,7 +130,7 @@ protected:
         fakeIbv_.reset();
     }
 
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
     static std::vector<uint32_t>             g_rqPsn;
     static std::vector<uint32_t>             g_sqPsn;
 };

@@ -325,12 +325,12 @@ protected:
         return pool_.data() + static_cast<size_t>(index) * kBufSize;
     }
 
-    hipObj::DriverState                      state_;
+    hipObj::DriverState                      state_{};
     hipObj::DriverState                     *savedState_ = nullptr;
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
-    hipObj::HipOps                           savedHipOps_;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
+    hipObj::HipOps                           savedHipOps_{};
     std::vector<char>                        pool_ = std::vector<char>(kThreads * kBufSize);
-    TransferProbe                            probe_;
+    TransferProbe                            probe_{};
     hipObjOps_t                              probeOps_{};
 };
 
@@ -482,7 +482,7 @@ struct ReentryProbe {
     hipObjOpsV2_t v2Ops = {{}, &unusedSendPrepare, &unusedSendReady, &unusedSendCancel};
 #endif
 
-    std::vector<std::pair<std::string_view, hipObjOpError_t>> locked;
+    std::vector<std::pair<std::string_view, hipObjOpError_t>> locked{};
     char                                                     *token       = nullptr;
     hipObjOpError_t                                           parseResult = hipObjInternalError;
     int                                                       parsedCode  = 0;

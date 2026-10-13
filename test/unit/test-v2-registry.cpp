@@ -46,9 +46,9 @@ struct FakeIbv {
     int                                destroyQpCalls = 0;
     int                                destroyCqCalls = 0;
     int                                deallocPdCalls = 0;
-    std::vector<std::vector<uint32_t>> qpAttrRqPsn;
-    std::vector<std::vector<uint32_t>> qpAttrSqPsn;
-    std::vector<const void *>          destroyed; /* qps and cqs, in destroy order */
+    std::vector<std::vector<uint32_t>> qpAttrRqPsn{};
+    std::vector<std::vector<uint32_t>> qpAttrSqPsn{};
+    std::vector<const void *>          destroyed{}; /* qps and cqs, in destroy order */
 
     void reset()
     {
@@ -209,10 +209,10 @@ protected:
 
     /* install_ is declared first so it's destroyed last: the registry
      * entries free their fake objects through the fake table. */
-    std::optional<hipObjTest::ScopedFakeIbv>        install_;
-    std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_;
+    std::optional<hipObjTest::ScopedFakeIbv>        install_{};
+    std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_{};
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;
-    hipObj::DeviceHandle                            dh_;
+    hipObj::DeviceHandle                            dh_{};
 };
 
 /* Registry CRUD plus the capacity limit. */

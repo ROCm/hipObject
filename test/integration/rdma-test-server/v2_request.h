@@ -25,32 +25,32 @@ namespace v2 {
     enum class ControlOp { kPrepare, kReady, kCancel };
 
     struct PrepareRequest {
-        std::string protocol;      /* echo header value */
-        std::string token;         /* 88-hex peer token */
+        std::string protocol{};    /* echo header value */
+        std::string token{};       /* 88-hex peer token */
         uint32_t    clientPsn = 0; /* 1..0xffffff */
         uint32_t    cookie    = 0;
-        std::string op;     /* "GET" | "PUT" */
-        std::string target; /* canonical object target (path[?q]) */
+        std::string op{};     /* "GET" | "PUT" */
+        std::string target{}; /* canonical object target (path[?q]) */
         uint64_t    size      = 0;
         uint64_t    offset    = 0;
         bool        hasOffset = false;
-        std::string authorization; /* raw Authorization value */
+        std::string authorization{}; /* raw Authorization value */
     };
 
     struct ReadyRequest {
-        std::string protocol;
-        std::string session; /* 32-hex session id */
+        std::string protocol{};
+        std::string session{}; /* 32-hex session id */
         uint32_t    cookie = 0;
         uint64_t    mrAddr = 0; /* client MR address (hex 0x...) */
         uint32_t    mrRkey = 0; /* client MR rkey (hex) */
         uint32_t    qpn    = 0; /* client QP number (hex) */
-        std::string authorization;
+        std::string authorization{};
     };
 
     struct CancelRequest {
-        std::string protocol;
-        std::string session;
-        std::string authorization;
+        std::string protocol{};
+        std::string session{};
+        std::string authorization{};
     };
 
     /* Parses a PREPARE from the normalized header map. Returns nullopt

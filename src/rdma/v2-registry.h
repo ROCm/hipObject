@@ -51,8 +51,8 @@ struct DeviceHandle;
  * the cq it uses. Move assignment destroys the target first, so it
  * releases them in that order too. */
 struct RcConnV2 final {
-    IbvCqPtr cq;
-    IbvQpPtr qp;
+    IbvCqPtr cq{};
+    IbvQpPtr qp{};
     uint32_t qpNum = 0;
 
     RcConnV2()                            = default;
@@ -83,7 +83,7 @@ namespace v2 {
     /* Move-only: the entry owns its connection's qp/cq. device is a
      * non-owning reference to the shared handle. */
     struct ConnectionEntryV2 {
-        RcConnV2      conn;
+        RcConnV2      conn{};
         DeviceHandle *device         = nullptr;
         uint64_t      reservationId  = 0; /* retired-ring slot for this QP */
         uint32_t      clientPsn      = 0; /* client PSN (recorded on destroy) */
@@ -243,9 +243,9 @@ namespace v2 {
 #endif
 
     private:
-        std::map<ConnId, ConnectionEntryV2> entries_;
+        std::map<ConnId, ConnectionEntryV2> entries_{};
         size_t                              pendingReserves_ = 0;
-        RetiredRing                         retired_;
+        RetiredRing                         retired_{};
         ConnId                              nextId_ = 1;
     };
 

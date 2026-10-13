@@ -39,7 +39,7 @@ struct FakeState {
     int                   nextQpn        = 1000;
     int                   destroyQpCalls = 0;
     int                   createQpCalls  = 0;
-    std::vector<uint32_t> destroyedQpns;
+    std::vector<uint32_t> destroyedQpns{};
 };
 
 HIPOBJ_WARN_NO_EXIT_DTOR_OFF
@@ -161,10 +161,10 @@ protected:
 
     /* install_ is declared first so it's destroyed last: the registry
      * entries free their fake objects through the fake table. */
-    std::optional<hipObjTest::ScopedFakeIbv>        install_;
-    std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_;
+    std::optional<hipObjTest::ScopedFakeIbv>        install_{};
+    std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_{};
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;
-    hipObj::DeviceHandle                            dh_;
+    hipObj::DeviceHandle                            dh_{};
 };
 
 /* Conflict discard: old qp destroyed and recorded, a fresh qp is

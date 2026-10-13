@@ -21,10 +21,10 @@ struct RdmaToken;
  * order ibverbs requires. Move assignment destroys the target first, so
  * it releases them in that order too. */
 struct RcConnection final {
-    IbvContextPtr ctx;
-    IbvPdPtr      pd;
-    IbvCqPtr      cq;
-    IbvQpPtr      qp;
+    IbvContextPtr ctx{};
+    IbvPdPtr      pd{};
+    IbvCqPtr      cq{};
+    IbvQpPtr      qp{};
     uint8_t       portNum  = 1;
     int           gidIndex = -1;
     ibv_gid       localGid{};

@@ -90,13 +90,13 @@ template <typename T> using VerbsPtr = std::unique_ptr<T, VerbsDeleter>;
  * are leaked instead of freed. The remaining members are released by
  * their deleters, in reverse declaration order. */
 struct ClientVerbs {
-    VerbsPtr<struct ibv_device *[]> devs;
-    VerbsPtr<struct ibv_context>    ctx;
-    VerbsPtr<struct ibv_pd>         pd;
-    VerbsPtr<struct ibv_cq>         cq;
-    hipObj::MallocPtr               buf;
-    VerbsPtr<struct ibv_mr>         mr;
-    VerbsPtr<struct ibv_qp>         qp;
+    VerbsPtr<struct ibv_device *[]> devs{};
+    VerbsPtr<struct ibv_context>    ctx{};
+    VerbsPtr<struct ibv_pd>         pd{};
+    VerbsPtr<struct ibv_cq>         cq{};
+    hipObj::MallocPtr               buf{};
+    VerbsPtr<struct ibv_mr>         mr{};
+    VerbsPtr<struct ibv_qp>         qp{};
 
     ClientVerbs() = default;
     ~ClientVerbs()

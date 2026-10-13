@@ -176,7 +176,7 @@ protected:
         return hipObj::IbvMrPtr(hipObj::ibv().reg_mr(fakePd(), fakeDevBuf(), kBufSize, kAccess));
     }
 
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
 };
 
 class DmabufTest : public FakeDmabufTest {
@@ -302,7 +302,7 @@ public:
 
 private:
     const char                *name_;
-    std::optional<std::string> previous_;
+    std::optional<std::string> previous_{};
 };
 
 /* The wrapper reads HIPOBJ_DMABUF when it's created, not when the program

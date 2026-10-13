@@ -65,14 +65,14 @@ namespace v2 {
     };
 
     struct V2Session final {
-        std::string id; /* 32 hex */
+        std::string id{}; /* 32 hex */
         SessState   state = SessState::Prepared;
-        std::string op;
-        std::string target;
+        std::string op{};
+        std::string target{};
         uint64_t    size   = 0;
         uint64_t    offset = 0;
-        std::string authorization; /* credential identity reference */
-        std::string accessKey;     /* verified access key (identity) */
+        std::string authorization{}; /* credential identity reference */
+        std::string accessKey{};     /* verified access key (identity) */
         uint32_t    cookie        = 0;
         uint32_t    clientPsn     = 0;
         uint32_t    serverPsn     = 0;
@@ -80,7 +80,7 @@ namespace v2 {
         uint64_t    reservationId = 0;  /* retired-ring slot */
         TimePoint   clientDeadlineAt{}; /* absolute (clockSource) */
         /* Response transmission bound, when one is armed */
-        std::optional<TimePoint> txDeadlineAt;
+        std::optional<TimePoint> txDeadlineAt{};
         int                      ioActive = 0;
         /* Origin of the outstanding io reference: true while the
          * worker holds it from READY entry to the final send. The
@@ -103,11 +103,12 @@ namespace v2 {
         uint32_t clientQpn    = 0; /* client QP to pair against */
         /* Peer endpoint decoded from the 88-hex token: routes the RTR
          * address handle to the real client GID instead of our own. */
-        union ibv_gid peerGid;
-        bool          hasPeerGid = false;
+        union ibv_gid peerGid {
+        };
+        bool hasPeerGid = false;
         /* PUT staging (host buffer + MR owned by the session). */
-        MallocPtr staging;
-        IbvMrPtr  stagingMr;
+        MallocPtr staging{};
+        IbvMrPtr  stagingMr{};
         /* Transport objects owned by the session. Declared after the
          * staging members so the QP is destroyed before the MR that a
          * posted work request may still reference. Move assignment
@@ -115,7 +116,7 @@ namespace v2 {
          * too. Member destruction ignores failures, so ControlHandlers
          * relinquishes whatever survives its final reap instead of
          * relying on this. */
-        RcConnV2      conn;
+        RcConnV2      conn{};
         DeviceHandle *device = nullptr; /* shared, not owned */
 
         V2Session()                             = default;
@@ -203,12 +204,12 @@ namespace v2 {
         int  releaseIo(const std::string &id);
 
     private:
-        mutable std::mutex               mtx_;
-        std::map<std::string, V2Session> entries_;
+        mutable std::mutex               mtx_{};
+        std::map<std::string, V2Session> entries_{};
         /* Table-scoped CV: safe against entry erase. */
-        std::condition_variable cv_;
+        std::condition_variable cv_{};
         /* (qpn, psn) reuse guard ring; guarded by mtx_. */
-        RetiredRing ring_;
+        RetiredRing ring_{};
     };
 
 } // namespace v2

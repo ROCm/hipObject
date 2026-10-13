@@ -82,6 +82,18 @@ namespace {
         return true;
     }
 
+    /* Loads libibverbs, trying Debian and Ubuntu's x86-64 library
+     * directory when the loader's search path doesn't find it. Empty when
+     * neither loads. */
+    DlHandle open_libibverbs()
+    {
+        DlHandle handle(dlopen("libibverbs.so", RTLD_NOW));
+        if (!handle) {
+            handle.reset(dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW));
+        }
+        return handle;
+    }
+
     /* The HSA dma-buf calls in the form IbvFuncs holds them, with
      * HSA_STATUS_SUCCESS (0) or the failing status as an int */
     int hsa_export_dmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset)
@@ -130,15 +142,12 @@ namespace {
 
 } // anonymous namespace
 
-IBVWrapper::IBVWrapper()
+IBVWrapper::IBVWrapper() : ibv_handle_(open_libibverbs())
 {
     funcs_.export_dmabuf = &hsa_export_dmabuf;
     funcs_.close_dmabuf  = &hsa_close_dmabuf;
     init_dmabuf_settings();
 
-    ibv_handle_.reset(dlopen("libibverbs.so", RTLD_NOW));
-    if (!ibv_handle_)
-        ibv_handle_.reset(dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW));
     if (!ibv_handle_) {
         fprintf(stderr, "hipObj: Could not open libibverbs.so. RDMA disabled.\n");
         return;

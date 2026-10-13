@@ -61,7 +61,8 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
     -Wdouble-promotion
     -Wduplicated-branches
     -Wduplicated-cond
-    #-Weffc++ # TODO: Fix issues
+    # Suggestions from the Effective C++ book
+    -Weffc++
     -Wextra-semi
     -Wfloat-equal
     # Includes -Wformat-nonliteral, -Wformat-security, and -Wformat-y2k

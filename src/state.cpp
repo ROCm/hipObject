@@ -26,12 +26,12 @@ apiMutex()
     return lock;
 }
 
-ApiGuard::ApiGuard()
+ApiGuard::ApiGuard() : lock_(apiMutex(), std::defer_lock)
 {
     if (t_holdsApiLock) {
         return;
     }
-    lock_          = std::unique_lock<std::mutex>(apiMutex());
+    lock_.lock();
     t_holdsApiLock = true;
 }
 
