@@ -92,7 +92,7 @@ protected:
 
     void SetUp() override
     {
-        auto &funcs        = hipObj::ibv.funcsForTest();
+        auto &funcs        = hipObj::ibv().funcsForTest();
         savedFuncs_        = funcs;
         funcs.reg_mr_iova2 = &fakeRegisterMrIova2;
         funcs.dereg_mr     = &fakeDeregisterMr;
@@ -112,8 +112,8 @@ protected:
 
     void TearDown() override
     {
-        hipObj::ibv.funcsForTest() = savedFuncs_;
-        hipObj::hipOps()           = savedHipOps_;
+        hipObj::ibv().funcsForTest() = savedFuncs_;
+        hipObj::hipOps()             = savedHipOps_;
     }
 
     Funcs          savedFuncs_ = {};

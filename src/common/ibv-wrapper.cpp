@@ -21,15 +21,24 @@
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
+#include "no-destructor.h"
 
 namespace hipObj {
 
-/* Global by design; its destructor dlclose()s libibverbs at exit */
-HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
-HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-IBVWrapper ibv;
-HIPOBJ_WARN_NO_EXIT_DTOR_ON
-HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
+IBVWrapper &
+ibv()
+{
+    /* Created on the first call, not when the library loads, so an
+     * application that never initializes hipObject never loads
+     * libibverbs. Never destroyed, so libibverbs stays loaded until
+     * exit: a global holding verbs objects can outlive a wrapper that
+     * was created after it. Clang still warns, since NoDestructor's
+     * empty destructor isn't trivial. */
+    HIPOBJ_WARN_NO_EXIT_DTOR_OFF
+    static NoDestructor<IBVWrapper> wrapper;
+    HIPOBJ_WARN_NO_EXIT_DTOR_ON
+    return *wrapper;
+}
 
 namespace {
 
@@ -356,37 +365,37 @@ IBVWrapper::post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv
 void
 IbvContextDeleter::operator()(struct ibv_context *ctx) const noexcept
 {
-    (void)ibv.close_device(ctx);
+    (void)ibv().close_device(ctx);
 }
 
 void
 IbvPdDeleter::operator()(struct ibv_pd *pd) const noexcept
 {
-    (void)ibv.dealloc_pd(pd);
+    (void)ibv().dealloc_pd(pd);
 }
 
 void
 IbvCqDeleter::operator()(struct ibv_cq *cq) const noexcept
 {
-    (void)ibv.destroy_cq(cq);
+    (void)ibv().destroy_cq(cq);
 }
 
 void
 IbvQpDeleter::operator()(struct ibv_qp *qp) const noexcept
 {
-    (void)ibv.destroy_qp(qp);
+    (void)ibv().destroy_qp(qp);
 }
 
 void
 IbvMrDeleter::operator()(struct ibv_mr *mr) const noexcept
 {
-    (void)ibv.dereg_mr(mr);
+    (void)ibv().dereg_mr(mr);
 }
 
 void
 IbvDeviceListDeleter::operator()(struct ibv_device **list) const noexcept
 {
-    ibv.free_device_list(list);
+    ibv().free_device_list(list);
 }
 
 int
@@ -396,7 +405,7 @@ ibvDestroy(IbvQpPtr &qp)
     if (!raw) {
         return 0;
     }
-    int ret = ibv.destroy_qp(raw);
+    int ret = ibv().destroy_qp(raw);
     if (ret != 0) {
         qp.reset(raw); /* still alive: hand it back for a retry */
     }
@@ -410,7 +419,7 @@ ibvDestroy(IbvCqPtr &cq)
     if (!raw) {
         return 0;
     }
-    int ret = ibv.destroy_cq(raw);
+    int ret = ibv().destroy_cq(raw);
     if (ret != 0) {
         cq.reset(raw); /* still alive: hand it back for a retry */
     }

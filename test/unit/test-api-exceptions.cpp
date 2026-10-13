@@ -100,7 +100,7 @@ protected:
 
     static void throwFromRegisterMr()
     {
-        auto &funcs        = hipObj::ibv.funcsForTest();
+        auto &funcs        = hipObj::ibv().funcsForTest();
         funcs.reg_mr_iova2 = &throwingRegisterMrIova2;
     }
 };
@@ -115,7 +115,7 @@ TEST_P(ApiExceptionTest, Init)
 
 TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
 {
-    auto      &funcs    = hipObj::ibv.funcsForTest();
+    auto      &funcs    = hipObj::ibv().funcsForTest();
     const auto createQp = funcs.create_qp;
     funcs.create_qp     = &throwingCreateQp;
 

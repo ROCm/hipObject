@@ -87,8 +87,7 @@ jobs:
             git \
             libcurl4-openssl-dev \
             libssl-dev \
-            libibverbs-dev \
-            libnuma-dev
+            libibverbs-dev
 
       - name: Install mc (MinIO client)
         shell: bash

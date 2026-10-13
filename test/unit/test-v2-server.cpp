@@ -47,15 +47,15 @@ public:
  * through these fakes instead of passing them to libibverbs. */
 class FakeDestroyVerbs {
 public:
-    FakeDestroyVerbs() : saved_(hipObj::ibv.funcsForTest())
+    FakeDestroyVerbs() : saved_(hipObj::ibv().funcsForTest())
     {
-        auto &funcs      = hipObj::ibv.funcsForTest();
+        auto &funcs      = hipObj::ibv().funcsForTest();
         funcs.destroy_qp = [](struct ibv_qp *) -> int { return 0; };
         funcs.destroy_cq = [](struct ibv_cq *) -> int { return 0; };
     }
     ~FakeDestroyVerbs()
     {
-        hipObj::ibv.funcsForTest() = saved_;
+        hipObj::ibv().funcsForTest() = saved_;
     }
 
     FakeDestroyVerbs(const FakeDestroyVerbs &)            = delete;

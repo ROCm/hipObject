@@ -11,7 +11,6 @@ set(HIPOBJ_SOURCES
   common/hip-seam.cpp
   common/ibv-wrapper.cpp
   common/rdma-topology.cpp
-  common/rdma-numa-wrapper.cpp
   rdma/transport.cpp
   rdma/token.cpp
   s3/control.cpp)

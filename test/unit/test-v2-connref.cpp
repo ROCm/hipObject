@@ -231,8 +231,8 @@ class ConnRefFaultTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        saved_             = hipObj::ibv.funcsForTest();
-        auto &f            = hipObj::ibv.funcsForTest();
+        saved_             = hipObj::ibv().funcsForTest();
+        auto &f            = hipObj::ibv().funcsForTest();
         f.modify_qp        = fakeModifyQp;
         f.destroy_qp       = fakeDestroyQp;
         f.destroy_cq       = fakeDestroyCq;
@@ -255,7 +255,7 @@ protected:
     }
     void TearDown() override
     {
-        hipObj::ibv.funcsForTest() = saved_;
+        hipObj::ibv().funcsForTest() = saved_;
     }
 
     /* A PUT PREPARE that reaches the transport path */

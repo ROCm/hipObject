@@ -55,9 +55,9 @@ namespace v2 {
          * device path needs an unavailable GPU runtime. */
         IbvMrPtr mr;
         if (pd != nullptr) {
-            mr.reset(ibv.reg_mr(pd, buf.get(), size, kAccess));
+            mr.reset(ibv().reg_mr(pd, buf.get(), size, kAccess));
             if (mr == nullptr) {
-                mr.reset(ibv.reg_mr_host(pd, buf.get(), size, kAccess));
+                mr.reset(ibv().reg_mr_host(pd, buf.get(), size, kAccess));
             }
             if (mr == nullptr) {
                 return false;
@@ -75,7 +75,7 @@ namespace v2 {
          * until the QP is gone. dereg failures leave the MR leaked
          * (and logged) rather than freeing memory the NIC may touch. */
         if (s.stagingMr != nullptr) {
-            if (ibv.dereg_mr(s.stagingMr.get()) != 0) {
+            if (ibv().dereg_mr(s.stagingMr.get()) != 0) {
                 fprintf(stderr, "v2: staging dereg failed; leaking buffer\n");
                 dropOwnership(s.staging); /* intentionally leaked */
             }
@@ -99,7 +99,7 @@ namespace v2 {
         wr.num_sge = 1;
 
         struct ibv_recv_wr *bad = nullptr;
-        return ibv.post_recv(qp, &wr, &bad) == 0;
+        return ibv().post_recv(qp, &wr, &bad) == 0;
     }
 
     bool postWriteWithImm(struct ibv_qp *qp, struct ibv_mr *src, uint64_t remoteAddr, uint32_t rkey,
@@ -125,7 +125,7 @@ namespace v2 {
         wr.num_sge             = 1;
 
         struct ibv_send_wr *bad = nullptr;
-        return ibv.post_send(qp, &wr, &bad) == 0;
+        return ibv().post_send(qp, &wr, &bad) == 0;
     }
 
     namespace {
@@ -138,7 +138,7 @@ namespace v2 {
         PollOutcome pollCqUntil(struct ibv_cq *cq, TimePoint deadline, struct ibv_wc *out)
         {
             for (;;) {
-                int n = ibv.poll_cq(cq, 1, out);
+                int n = ibv().poll_cq(cq, 1, out);
                 if (n > 0) {
                     return PollOutcome::Ok;
                 }

@@ -81,7 +81,7 @@ cmake -B build \
 cmake --build build
 ```
 
-Install runtime deps: ROCm, `libibverbs`, `libnuma`, OpenSSL, libcurl.
+Install runtime deps: ROCm, `libibverbs`, OpenSSL, libcurl.
 
 ### Procedure
 

@@ -282,7 +282,7 @@ protected:
         ops.hipPointerGetAttributes = nullptr;
         hipObj::hipOps()            = ops;
 
-        auto &funcs            = hipObj::ibv.funcsForTest();
+        auto &funcs            = hipObj::ibv().funcsForTest();
         savedFuncs_            = funcs;
         funcs.get_device_list  = &fakeGetDeviceList;
         funcs.free_device_list = &fakeFreeDeviceList;
@@ -302,9 +302,9 @@ protected:
         funcs.modify_qp        = &fakeModifyQp;
         funcs.poll_cq          = &fakePollCq;
 
-        savedIbvInitialized_       = hipObj::ibv.is_initialized;
-        hipObj::ibv.is_initialized = true;
-        g_openDeviceCalls          = 0;
+        savedIbvInitialized_         = hipObj::ibv().is_initialized;
+        hipObj::ibv().is_initialized = true;
+        g_openDeviceCalls            = 0;
 
         probeOps_.sendRequest = &probeSendRequest;
         probeOps_.recvReply   = &probeRecvReply;
@@ -313,9 +313,9 @@ protected:
     void TearDown() override
     {
         (void)hipObjShutdown();
-        hipObj::ibv.is_initialized = savedIbvInitialized_;
-        hipObj::ibv.funcsForTest() = savedFuncs_;
-        hipObj::hipOps()           = savedHipOps_;
+        hipObj::ibv().is_initialized = savedIbvInitialized_;
+        hipObj::ibv().funcsForTest() = savedFuncs_;
+        hipObj::hipOps()             = savedHipOps_;
         hipObj::setStateForTest(savedState_);
     }
 

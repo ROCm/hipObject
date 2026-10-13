@@ -10,8 +10,7 @@ set(HIPOBJ_TEST_SERVER_SOURCES
   ${PROJECT_SOURCE_DIR}/src/rdma/token.cpp
   ${PROJECT_SOURCE_DIR}/src/rdma/transport.cpp
   ${PROJECT_SOURCE_DIR}/src/common/hip-seam.cpp
-  ${PROJECT_SOURCE_DIR}/src/common/rdma-topology.cpp
-  ${PROJECT_SOURCE_DIR}/src/common/rdma-numa-wrapper.cpp)
+  ${PROJECT_SOURCE_DIR}/src/common/rdma-topology.cpp)
 
 if(HIPOBJ_BNXT)
   list(APPEND HIPOBJ_TEST_SERVER_SOURCES
@@ -51,7 +50,6 @@ target_include_directories(hipobj-rdma-test-server PRIVATE
 
 target_link_libraries(hipobj-rdma-test-server PRIVATE
   dl
-  numa
   hip::host
   hsa-runtime64::hsa-runtime64)
 

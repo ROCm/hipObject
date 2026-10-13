@@ -285,7 +285,7 @@ protected:
 
     void SetUp() override
     {
-        auto &funcs        = hipObj::ibv.funcsForTest();
+        auto &funcs        = hipObj::ibv().funcsForTest();
         saved_             = funcs;
         funcs.create_cq    = &fakeCreateCq;
         funcs.create_qp    = &fakeCreateQp;
@@ -299,7 +299,7 @@ protected:
 
     void TearDown() override
     {
-        hipObj::ibv.funcsForTest() = saved_;
+        hipObj::ibv().funcsForTest() = saved_;
     }
 
     Funcs saved_ = {};
@@ -502,7 +502,7 @@ namespace {
             ops.hipDeviceSynchronize = &fakeSynchronizeNoDevice;
             hipObj::hipOps()         = ops;
 
-            auto &funcs            = hipObj::ibv.funcsForTest();
+            auto &funcs            = hipObj::ibv().funcsForTest();
             savedFuncs_            = funcs;
             funcs.get_device_list  = &fakeGetDeviceList;
             funcs.free_device_list = &fakeFreeDeviceList;
@@ -522,18 +522,18 @@ namespace {
             funcs.destroy_qp       = &fakeTransferDestroyQp;
             funcs.poll_cq          = &fakePollCq;
 
-            savedIbvInitialized_       = hipObj::ibv.is_initialized;
-            hipObj::ibv.is_initialized = true;
-            g_apiTransferLog           = {};
-            g_calls                    = IbvCallLog();
+            savedIbvInitialized_         = hipObj::ibv().is_initialized;
+            hipObj::ibv().is_initialized = true;
+            g_apiTransferLog             = {};
+            g_calls                      = IbvCallLog();
         }
 
         void TearDown() override
         {
             (void)hipObjShutdown();
-            hipObj::ibv.is_initialized = savedIbvInitialized_;
-            hipObj::ibv.funcsForTest() = savedFuncs_;
-            hipObj::hipOps()           = savedHipOps_;
+            hipObj::ibv().is_initialized = savedIbvInitialized_;
+            hipObj::ibv().funcsForTest() = savedFuncs_;
+            hipObj::hipOps()             = savedHipOps_;
             hipObj::setNicEnumerator(savedEnumerator_);
             hipObj::setStateForTest(savedState_);
         }

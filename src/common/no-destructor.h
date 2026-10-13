@@ -7,10 +7,10 @@
  *
  * The library's long-lived globals own ibverbs and HIP resources through
  * smart pointers. If they were ordinary globals, process exit would run
- * those deleters from static destructors, in no defined order relative to
- * the ibv wrapper in another translation unit (which may already have
- * dlclose()d libibverbs). hipObjShutdown() is the teardown path; at exit
- * the resources are simply left to the kernel. */
+ * those deleters from static destructors, which is unsafe in general:
+ * they could run after a static that they depend on is destroyed.
+ * hipObjShutdown() is the teardown path; at exit the resources are simply
+ * left to the kernel. */
 
 #pragma once
 

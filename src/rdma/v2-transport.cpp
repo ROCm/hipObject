@@ -56,7 +56,7 @@ namespace v2 {
             }
             struct ibv_device_attr devAttr;
             std::memset(&devAttr, 0, sizeof(devAttr));
-            if (ibv.query_device(ctx, &devAttr) != 0) {
+            if (ibv().query_device(ctx, &devAttr) != 0) {
                 return;
             }
 #ifdef HIPOBJ_BNXT
@@ -81,7 +81,7 @@ namespace v2 {
             attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
             applyVendorQpAttrs(dh.ctx.get(), attr);
             int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
-            return ibv.modify_qp(qp, &attr, mask);
+            return ibv().modify_qp(qp, &attr, mask);
         }
 
         int modifyQpToRtr(struct ibv_context *ctx, struct ibv_qp *qp, uint32_t destQpNum,
@@ -104,7 +104,7 @@ namespace v2 {
             {
                 struct ibv_port_attr pa;
                 std::memset(&pa, 0, sizeof(pa));
-                if (ibv.query_port(ctx, portNum, &pa) == 0 && pa.active_mtu >= IBV_MTU_512) {
+                if (ibv().query_port(ctx, portNum, &pa) == 0 && pa.active_mtu >= IBV_MTU_512) {
                     attr.path_mtu = pa.active_mtu;
                 }
                 else {
@@ -132,7 +132,7 @@ namespace v2 {
             attr.ah_attr.port_num = portNum;
             int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                        IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-            return ibv.modify_qp(qp, &attr, mask);
+            return ibv().modify_qp(qp, &attr, mask);
         }
 
         int modifyQpToRts(struct ibv_context *ctx, struct ibv_qp *qp, uint32_t sqPsn)
@@ -148,14 +148,14 @@ namespace v2 {
             attr.max_rd_atomic = 1;
             int mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                        IBV_QP_MAX_QP_RD_ATOMIC;
-            return ibv.modify_qp(qp, &attr, mask);
+            return ibv().modify_qp(qp, &attr, mask);
         }
 
     } // namespace
 
     int createRcConnV2(DeviceHandle &dh, RcConnV2 &conn)
     {
-        conn.cq.reset(ibv.create_cq(dh.ctx.get(), kCqSize, nullptr, nullptr, 0));
+        conn.cq.reset(ibv().create_cq(dh.ctx.get(), kCqSize, nullptr, nullptr, 0));
         if (!conn.cq) {
             return -1;
         }
@@ -168,7 +168,7 @@ namespace v2 {
         init.cap.max_recv_wr  = kMaxRecvWr;
         init.cap.max_send_sge = 1;
         init.cap.max_recv_sge = 1;
-        conn.qp.reset(ibv.create_qp(dh.pd.get(), &init));
+        conn.qp.reset(ibv().create_qp(dh.pd.get(), &init));
         if (!conn.qp) {
             /* ibvDestroy() keeps conn.cq when the destroy fails, which is
              * how the caller learns the rollback failed: clearing it would
@@ -207,7 +207,7 @@ namespace v2 {
         init.cap.max_recv_wr  = kMaxRecvWr;
         init.cap.max_send_sge = 1;
         init.cap.max_recv_sge = 1;
-        conn.qp.reset(ibv.create_qp(dh.pd.get(), &init));
+        conn.qp.reset(ibv().create_qp(dh.pd.get(), &init));
         if (!conn.qp) {
             return -1;
         }
@@ -250,7 +250,7 @@ namespace v2 {
         wr.wr_id   = kRecvImm;
         wr.sg_list = nullptr;
         wr.num_sge = 0;
-        return ibv.post_recv(conn.qp.get(), &wr, &bad);
+        return ibv().post_recv(conn.qp.get(), &wr, &bad);
     }
 
     ReleaseResult releaseConnection(ConnId id)

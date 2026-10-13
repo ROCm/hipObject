@@ -144,6 +144,15 @@
 - Building the documentation (`HIPOBJ_BUILD_DOCS`) requires Breathe 4.36
   or later, up from 4.35. The documentation build installs it from
   `requirements.txt` into its own virtual environment.
+- hipObject no longer loads other libraries or prints anything when the
+  program starts. It used to load libibverbs and libnuma, and to print a
+  message to stderr if libibverbs was missing, even in a program that
+  never called `hipObjInit()`. hipObject now loads libibverbs, prints
+  that message, and reads the `HIPOBJ_DMABUF` and `HIPOBJ_RDMA_DEBUG`
+  environment variables when `hipObjInit()` first runs, so a program can
+  set them before calling it. It doesn't load libnuma, which it never
+  used. libibverbs stays loaded until the program exits. Building the
+  tests no longer needs libnuma's development package (`libnuma-dev`).
 
 ### Removed
 

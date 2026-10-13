@@ -102,7 +102,7 @@ class V2PsnDeliveryTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        auto &funcs     = hipObj::ibv.funcsForTest();
+        auto &funcs     = hipObj::ibv().funcsForTest();
         saved_          = funcs;
         funcs.modify_qp = [](struct ibv_qp *, struct ibv_qp_attr *attr, int) -> int {
             if (attr->qp_state == 3) { /* RTS */
@@ -126,7 +126,7 @@ protected:
     }
     void TearDown() override
     {
-        hipObj::ibv.funcsForTest() = saved_;
+        hipObj::ibv().funcsForTest() = saved_;
     }
 
     hipObj::IbvFuncs             saved_;

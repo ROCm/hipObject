@@ -178,9 +178,9 @@ hipobj_add_test(test-buffer-registration
 
 hipobj_add_test(test-ibv-dmabuf
   test-ibv-dmabuf.cpp)
-# hipObject reads HIPOBJ_DMABUF once, when it loads, so the tests of
-# turning dma-buf registration off run in a process of their own (see
-# test-ibv-dmabuf.cpp)
+# hipObject reads HIPOBJ_DMABUF once, when it loads libibverbs, so the
+# tests of turning dma-buf registration off run in a process of their own
+# (see test-ibv-dmabuf.cpp)
 add_test(NAME test-ibv-dmabuf-disabled
   COMMAND test-ibv-dmabuf --gtest_filter=DmabufDisabledTest.*)
 set_tests_properties(test-ibv-dmabuf-disabled PROPERTIES
