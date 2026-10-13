@@ -143,7 +143,11 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wdate-time
     -Wdirect-ivar-access
     -Wdisabled-macro-expansion
-    #-Wdocumentation-pedantic # TODO: Fix issues
+    # -Wdocumentation-pedantic only adds -Wdocumentation-unknown-command,
+    # which flags the @serialized and @concurrent Doxygen aliases in the
+    # public header. Declaring them with -fcomment-block-commands just
+    # makes every use warn about an empty paragraph instead.
+    #-Wdocumentation-pedantic
     -Wdouble-promotion
     -Wdtor-name
     -Wduplicate-enum
@@ -285,7 +289,11 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
 
       # Misc warnings
       -Wignored-base-class-qualifiers
-      #-Wnrvo # TODO: Fix issues
+      # Clang's -Wnrvo flags returns of small, trivially copyable locals
+      # (error codes, durations, optionals), where the copy it warns about
+      # is just a register move. Rewriting them to suit it would make the
+      # code worse. GCC's -Wnrvo is on and doesn't warn about this code.
+      #-Wnrvo
       -Wshift-bool
       -Wunique-object-duplication
       ${flags}
