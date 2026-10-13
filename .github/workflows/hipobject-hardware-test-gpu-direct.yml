@@ -170,12 +170,17 @@ jobs:
     container: &container
       image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
       options: --device /dev/kvm -v /var/run/docker.sock:/var/run/docker.sock
+    # GUEST_ARTIFACT_*: the ernic-rocjitsu guest: mainline 7.2.4 (the
+    # ionic_rdma floor), the patched amdgpu-dkms, the generated gfx1250 gap
+    # firmware and therock ROCm 10.0 userspace, with render/video group
+    # membership. Only ip_discovery.bin is still the consumer's to stage, and
+    # it has to come from the rocjitsu build serving the socket
+    # (ROCJITSU_IMAGE_GPU).
+    #
+    # Nothing may come between the anchor and the first key: CodeQL's YAML
+    # parser fails on a comment there ("expected <block end>, but found
+    # '<block mapping start>'") and skips the whole file.
     env: &job_env
-      # The ernic-rocjitsu guest: mainline 7.2.4 (the ionic_rdma floor), the
-      # patched amdgpu-dkms, the generated gfx1250 gap firmware and therock
-      # ROCm 10.0 userspace, with render/video group membership. Only
-      # ip_discovery.bin is still the consumer's to stage, and it has to come
-      # from the rocjitsu build serving the socket (ROCJITSU_IMAGE_GPU).
       GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
       GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
       S3_ADDR: 192.168.200.1
