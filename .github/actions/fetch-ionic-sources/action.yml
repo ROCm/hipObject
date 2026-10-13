@@ -1,0 +1,69 @@
+---
+name: Fetch ionic driver sources
+description: >-
+  Fetch and patch the upstream ionic driver sources that rocm-ernic's guest
+  role builds into its DKMS package, on the runner and cached, so the guests
+  do not each clone the kernel themselves.
+
+inputs:
+  rocm_ernic:
+    description: Path of the rocm-ernic checkout, relative to the workspace
+    required: false
+    default: rocm-ernic
+  dest:
+    description: Directory to fetch into
+    required: false
+    default: /tmp/ionic-src
+
+outputs:
+  ref:
+    description: Kernel ref the sources were fetched at
+    value: ${{ steps.ref.outputs.ref }}
+  source_dir:
+    description: Directory holding the patched sources
+    value: ${{ inputs.dest }}
+
+runs:
+  using: composite
+  steps:
+  - id: ref
+    shell: bash
+    env:
+      ROCM_ERNIC: ${{ inputs.rocm_ernic }}
+    run: |
+      set -euo pipefail
+      # The pin rocm-ernic's ernic_source role reads, read the same way.
+      CMAKE_FILE="${ROCM_ERNIC}/cmake/ErnicKernelModule.cmake"
+      REF=$(grep -oP 'set\(IONIC_KERNEL_REF\s+"\K[^"]+' "$CMAKE_FILE" || true)
+      if [ -z "$REF" ]; then
+        echo "✗ no IONIC_KERNEL_REF in ${CMAKE_FILE}"
+        exit 1
+      fi
+      echo "ionic sources pinned at ${REF}"
+      echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+  # Keyed on everything that decides the tree: the ref, the patches applied
+  # on top of it and the script that applies them.
+  - id: cache
+    uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    with:
+      path: ${{ inputs.dest }}
+      key: ionic-src-${{ steps.ref.outputs.ref }}-${{ hashFiles(format('{0}/patches/*.patch', inputs.rocm_ernic), format('{0}/scripts/fetch-ionic-sources.sh', inputs.rocm_ernic)) }}
+
+  - if: steps.cache.outputs.cache-hit != 'true'
+    shell: bash
+    env:
+      ROCM_ERNIC: ${{ inputs.rocm_ernic }}
+      DEST: ${{ inputs.dest }}
+      REF: ${{ steps.ref.outputs.ref }}
+    run: |
+      set -euo pipefail
+      # The guests' own fetch runs this script too, with the same patches
+      # (stage_sources.yml copies rocm-ernic's patches/), so the tree is the
+      # one they would have built.
+      bash "${ROCM_ERNIC}/scripts/fetch-ionic-sources.sh" \
+        --source-dir "$DEST" --kernel-ref "$REF"
+      # setup-ionic-dkms.sh reads only the two driver directories, so the
+      # sparse clone's history need not be cached or copied into a guest.
+      rm -rf "${DEST}/.git"
+      ls -la "$DEST"
