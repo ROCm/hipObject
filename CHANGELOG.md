@@ -184,6 +184,10 @@
   allocating memory failed just after a successful registration, the
   buffer also stayed registered for remote access, and its descriptor
   leaked.
+- If an application's `recvReply` callback reported a reply longer than
+  the buffer hipObject passed it, `hipObjGet()` and `hipObjPut()` read
+  past the end of the buffer. The transfer now fails with
+  `hipObjS3Error` instead.
 
 ### Known issues
 

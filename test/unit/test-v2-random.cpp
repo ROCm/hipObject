@@ -153,8 +153,8 @@ TEST_F(V2PsnDeliveryTest, PsnsReachQpAttrs)
     conn.qp.reset(reinterpret_cast<struct ibv_qp *>(0x1));
     union ibv_gid gid;
     std::memset(&gid, 0, sizeof(gid));
-    ASSERT_EQ(hipObj::v2::transitionQpToRtrV2(&dh, conn, 77, gid, 0x334455), 0);
-    ASSERT_EQ(hipObj::v2::transitionQpToRtsV2(conn, &dh, 0x667788), 0);
+    ASSERT_EQ(hipObj::v2::transitionQpToRtrV2(dh, conn, 77, gid, 0x334455), 0);
+    ASSERT_EQ(hipObj::v2::transitionQpToRtsV2(conn, dh, 0x667788), 0);
     ASSERT_EQ(g_rqPsn.size(), 1U);
     EXPECT_EQ(g_rqPsn[0], 0x334455U); /* server PSN -> rq_psn */
     ASSERT_EQ(g_sqPsn.size(), 1U);

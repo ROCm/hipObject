@@ -471,6 +471,23 @@ TEST_P(TransferArgsTest, ChecksStagedBuffersBeforeCopying)
     EXPECT_EQ(fake().log.memcpy, 1);
 }
 
+/* Writes a valid reply but reports one more byte than the buffer holds */
+int
+overlongRecvReply(void *, char *reply, size_t *replyLen)
+{
+    std::memcpy(reply, "200", 3);
+    *replyLen += 1;
+    return 0;
+}
+
+TEST_P(TransferArgsTest, RejectsReplyLongerThanBuffer)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    hipObjOps_t ops = makeOps();
+    ops.recvReply   = &overlongRecvReply;
+    EXPECT_EQ(GetParam()(kDevBuf, kBufSize, 0, &ops).opError, hipObjS3Error);
+}
+
 INSTANTIATE_TEST_SUITE_P(ApiArgs, TransferArgsTest, ::testing::Values(&callGet, &callPut),
                          [](const ::testing::TestParamInfo<TransferFn> &paramInfo) {
                              return paramInfo.param == &callGet ? "Get" : "Put";

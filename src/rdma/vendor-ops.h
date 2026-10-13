@@ -50,7 +50,7 @@ provider_from_string(std::string_view s)
 bool isBnxtDevice(uint32_t vendorId);
 bool isIonicDevice(uint32_t vendorId);
 
-int configureBnxtQp(struct ibv_qp_attr *attr);
-int configureIonicQp(struct ibv_qp_attr *attr);
+void configureBnxtQp(struct ibv_qp_attr &attr);
+void configureIonicQp(struct ibv_qp_attr &attr);
 
 } // namespace hipObj

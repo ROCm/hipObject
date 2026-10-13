@@ -16,17 +16,13 @@ isBnxtDevice(uint32_t vendorId)
     return vendorId == VENDOR_ID_BROADCOM;
 }
 
-int
-configureBnxtQp(struct ibv_qp_attr *attr)
+void
+configureBnxtQp(struct ibv_qp_attr &attr)
 {
-    if (!attr) {
-        return -1;
-    }
-    attr->path_mtu  = IBV_MTU_4096;
-    attr->timeout   = 14;
-    attr->retry_cnt = 7;
-    attr->rnr_retry = 7;
-    return 0;
+    attr.path_mtu  = IBV_MTU_4096;
+    attr.timeout   = 14;
+    attr.retry_cnt = 7;
+    attr.rnr_retry = 7;
 }
 
 } // namespace hipObj

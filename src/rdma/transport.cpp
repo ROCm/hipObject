@@ -133,9 +133,9 @@ transitionQpToInit(RcConnection &conn)
 }
 
 static void
-applyVendorQpAttrs(RcConnection &conn, struct ibv_qp_attr *attr)
+applyVendorQpAttrs(RcConnection &conn, struct ibv_qp_attr &attr)
 {
-    if (!conn.ctx || !attr) {
+    if (!conn.ctx) {
         return;
     }
     struct ibv_device_attr devAttr;
@@ -169,7 +169,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     std::memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
     attr.path_mtu = IBV_MTU_4096;
-    applyVendorQpAttrs(conn, &attr);
+    applyVendorQpAttrs(conn, attr);
     attr.dest_qp_num               = destQpNum;
     attr.rq_psn                    = 0;
     attr.max_dest_rd_atomic        = 1;
@@ -195,7 +195,7 @@ transitionQpToRts(RcConnection &conn)
     struct ibv_qp_attr attr;
     std::memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTS;
-    applyVendorQpAttrs(conn, &attr);
+    applyVendorQpAttrs(conn, attr);
     attr.timeout       = 14;
     attr.retry_cnt     = 7;
     attr.rnr_retry     = 7;

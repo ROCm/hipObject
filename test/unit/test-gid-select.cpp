@@ -6,6 +6,7 @@
  * GID table entries are built in memory.
  */
 
+#include <span>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -66,7 +67,7 @@ globalV6(int index, int roceVersion)
 int
 pick(const std::vector<GidCandidate> &v)
 {
-    return PickBestGid(v.data(), v.size());
+    return PickBestGid(v);
 }
 
 } // namespace

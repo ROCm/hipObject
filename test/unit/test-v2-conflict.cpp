@@ -156,7 +156,7 @@ protected:
         uint64_t                      rid = reg.retired().reserve();
         hipObj::v2::ConnectionEntryV2 entry;
         hipObj::RcConnV2              conn;
-        if (hipObj::v2::createRcConnV2(&dh_, conn) != 0) {
+        if (hipObj::v2::createRcConnV2(dh_, conn) != 0) {
             reg.unreserveSlot();
             if (rid) {
                 reg.retired().unreserve(rid);
@@ -270,6 +270,24 @@ TEST_F(V2ConflictTest, DiscardRecreateFailureReleases)
     EXPECT_EQ(reg.pendingReserves(), 0U);
 }
 
+/* Without a device there's nothing to recreate the qp on, so the old
+ * one is kept and the slot reserved for it is given back. */
+TEST_F(V2ConflictTest, DiscardWithoutDeviceKeepsQp)
+{
+    auto &reg = hipObj::v2::registry();
+    auto  id  = makeEntry();
+    ASSERT_NE(id, 0U);
+    reg.withEntry(id, [](hipObj::v2::ConnectionEntryV2 &e) { e.device = nullptr; });
+    size_t reservedBefore = reg.retired().reservedCount();
+    EXPECT_EQ(hipObj::v2::discardAndRecreateQp(id), hipObj::v2::kReleaseLeftover);
+    void *qp = nullptr;
+    reg.withEntry(id, [&](hipObj::v2::ConnectionEntryV2 &e) { qp = e.conn.qp.get(); });
+    EXPECT_NE(qp, nullptr);
+    EXPECT_TRUE(g_state.destroyedQpns.empty());
+    EXPECT_EQ(reg.retired().reservedCount(), reservedBefore);
+    EXPECT_EQ(hipObj::v2::releaseConnection(id), 0);
+}
+
 /* ---- qp setup and teardown -------------------------------------- */
 
 /* What the transport fakes below record, and how they fail */
@@ -366,26 +384,26 @@ protected:
     int rtr(hipObj::RcConnV2 &conn)
     {
         union ibv_gid gid = {};
-        return hipObj::v2::transitionQpToRtrV2(&dh_, conn, 7, gid, 1);
+        return hipObj::v2::transitionQpToRtrV2(dh_, conn, 7, gid, 1);
     }
 };
 
 TEST_F(V2TransportTest, InitGrantsOnlyRemoteReadAndWrite)
 {
     hipObj::RcConnV2 conn;
-    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
-    ASSERT_EQ(hipObj::v2::transitionQpToInitV2(&dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::createRcConnV2(dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::transitionQpToInitV2(dh_, conn), 0);
     EXPECT_EQ(g_transport.lastAttr.qp_state, IBV_QPS_INIT);
     EXPECT_EQ(g_transport.lastAttr.qp_access_flags,
               static_cast<unsigned int>(IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     EXPECT_EQ(g_transport.lastAttr.port_num, dh_.portNum);
-    hipObj::v2::releaseDevice(&dh_);
+    hipObj::v2::releaseDevice(dh_);
 }
 
 TEST_F(V2TransportTest, RtrPathMtuFollowsActivePortMtu)
 {
     hipObj::RcConnV2 conn;
-    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::createRcConnV2(dh_, conn), 0);
 
     ASSERT_EQ(rtr(conn), 0);
     EXPECT_EQ(g_transport.lastAttr.path_mtu, IBV_MTU_4096);
@@ -401,25 +419,25 @@ TEST_F(V2TransportTest, RtrPathMtuFollowsActivePortMtu)
     g_transport.queryPortFails = true;
     ASSERT_EQ(rtr(conn), 0);
     EXPECT_EQ(g_transport.lastAttr.path_mtu, IBV_MTU_1024);
-    hipObj::v2::releaseDevice(&dh_);
+    hipObj::v2::releaseDevice(dh_);
 }
 
 TEST_F(V2TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
 {
     hipObj::RcConnV2 conn;
-    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::createRcConnV2(dh_, conn), 0);
     for (int index : {-1, 256}) {
         dh_.gidIndex = index;
         EXPECT_EQ(rtr(conn), -1) << "index " << index;
     }
     EXPECT_EQ(g_transport.lastMask, 0);
-    hipObj::v2::releaseDevice(&dh_);
+    hipObj::v2::releaseDevice(dh_);
 }
 
 TEST_F(V2TransportTest, VendorAttributesNeedDeviceQuery)
 {
     hipObj::RcConnV2 conn;
-    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::createRcConnV2(dh_, conn), 0);
     setContext();
 #ifdef HIPOBJ_BNXT
     g_transport.vendorId = hipObj::VENDOR_ID_BROADCOM;
@@ -434,7 +452,7 @@ TEST_F(V2TransportTest, VendorAttributesNeedDeviceQuery)
     g_transport.queryDeviceFails = true;
     ASSERT_EQ(rtr(conn), 0);
     EXPECT_EQ(g_transport.lastAttr.timeout, 0);
-    hipObj::v2::releaseDevice(&dh_);
+    hipObj::v2::releaseDevice(dh_);
 }
 
 TEST_F(V2TransportTest, CreateFailsWithoutCq)
@@ -442,7 +460,7 @@ TEST_F(V2TransportTest, CreateFailsWithoutCq)
     g_transport.createCqFails = true;
     hipObj::RcConnV2 conn;
     bool             rollbackFailed = true;
-    EXPECT_EQ(hipObj::v2::createRcConnV2(&dh_, conn, &rollbackFailed), -1);
+    EXPECT_EQ(hipObj::v2::createRcConnV2(dh_, conn, &rollbackFailed), -1);
     EXPECT_FALSE(rollbackFailed);
     EXPECT_EQ(dh_.connRefs.load(), 0U);
     EXPECT_EQ(g_state.createQpCalls, 0);
@@ -451,31 +469,30 @@ TEST_F(V2TransportTest, CreateFailsWithoutCq)
 TEST_F(V2TransportTest, CreateQpOnlyNeedsCq)
 {
     hipObj::RcConnV2 conn;
-    EXPECT_EQ(hipObj::v2::createRcQpOnly(&dh_, nullptr, conn), -1);
+    EXPECT_EQ(hipObj::v2::createRcQpOnly(dh_, nullptr, conn), -1);
     EXPECT_EQ(g_state.createQpCalls, 0);
 }
 
 TEST_F(V2TransportTest, ReleaseDeviceNeverUnderflows)
 {
     dh_.connRefs = 1;
-    hipObj::v2::releaseDevice(&dh_);
+    hipObj::v2::releaseDevice(dh_);
     EXPECT_EQ(dh_.connRefs.load(), 0U);
-    hipObj::v2::releaseDevice(&dh_);
+    hipObj::v2::releaseDevice(dh_);
     EXPECT_EQ(dh_.connRefs.load(), 0U);
-    hipObj::v2::releaseDevice(nullptr);
 }
 
 TEST_F(V2TransportTest, PostsZeroSgeReceive)
 {
     hipObj::RcConnV2 conn;
-    ASSERT_EQ(hipObj::v2::createRcConnV2(&dh_, conn), 0);
-    ASSERT_EQ(hipObj::v2::postRecvImm(&dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::createRcConnV2(dh_, conn), 0);
+    ASSERT_EQ(hipObj::v2::postRecvImm(conn), 0);
     EXPECT_EQ(g_transport.recvs, 1);
     EXPECT_EQ(g_transport.lastRecv.wr_id, hipObj::v2::kRecvImm);
     EXPECT_EQ(g_transport.lastRecv.num_sge, 0);
     EXPECT_EQ(g_transport.lastRecv.sg_list, nullptr);
     EXPECT_EQ(g_transport.lastRecv.next, nullptr);
-    hipObj::v2::releaseDevice(&dh_);
+    hipObj::v2::releaseDevice(dh_);
 }
 
 /* ---- completion validation -------------------------------------- */

@@ -5,7 +5,6 @@
 
 #include <cctype>
 #include <cstddef>
-#include <cstring>
 #include <initializer_list>
 #include <string>
 
@@ -100,41 +99,41 @@ TEST(RdmaToken, EncodeDcTransportByte)
 TEST(RdmaReply, DecodeOk)
 {
     int status = -1;
-    EXPECT_TRUE(hipObj::decodeRdmaReply("ok", 2, status));
+    EXPECT_TRUE(hipObj::decodeRdmaReply("ok", status));
     EXPECT_EQ(status, 0);
 }
 
 TEST(RdmaReply, DecodeErr)
 {
     int status = 0;
-    EXPECT_TRUE(hipObj::decodeRdmaReply("err", 3, status));
+    EXPECT_TRUE(hipObj::decodeRdmaReply("err", status));
     EXPECT_EQ(status, -1);
 }
 
-TEST(RdmaReply, DecodeNullReturnsFalse)
+TEST(RdmaReply, DecodeEmptyReturnsFalse)
 {
     int status = 0;
-    EXPECT_FALSE(hipObj::decodeRdmaReply(nullptr, 0, status));
+    EXPECT_FALSE(hipObj::decodeRdmaReply({}, status));
 }
 
 TEST(RdmaReply, DecodeHttp200)
 {
     int status = -1;
-    EXPECT_TRUE(hipObj::decodeRdmaReply("200", 3, status));
+    EXPECT_TRUE(hipObj::decodeRdmaReply("200", status));
     EXPECT_EQ(status, 0);
 }
 
 TEST(RdmaReply, DecodeHttp501NotSupported)
 {
     int status = 0;
-    EXPECT_TRUE(hipObj::decodeRdmaReply("501", 3, status));
+    EXPECT_TRUE(hipObj::decodeRdmaReply("501", status));
     EXPECT_EQ(status, -2);
 }
 
 TEST(RdmaReply, ParseHttp206)
 {
     int code = 0;
-    EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode("206", 3, code));
+    EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode("206", code));
     EXPECT_EQ(code, 206);
 }
 
@@ -144,7 +143,7 @@ TEST(RdmaReply, ParseHttp200WithPeerToken)
     peer.qpNum        = 7;
     std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
     int         code  = 0;
-    EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode(reply.c_str(), reply.size(), code));
+    EXPECT_TRUE(hipObj::parseRdmaReplyHttpCode(reply, code));
     EXPECT_EQ(code, 200);
 }
 
@@ -176,7 +175,7 @@ TEST(RdmaReply, ParsePeerTokenFromReply)
     std::string       reply = hipObj::encodeReplyWithPeerToken(200, peer);
     hipObj::RdmaToken parsed;
     int               code = 0;
-    EXPECT_TRUE(hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code));
+    EXPECT_TRUE(hipObj::parsePeerTokenFromReply(reply, parsed, code));
     EXPECT_EQ(code, 200);
     EXPECT_EQ(parsed.qpNum, 99U);
     EXPECT_EQ(parsed.transport, hipObj::TransportType::RC);
@@ -186,7 +185,7 @@ TEST(RdmaReply, LegacyOkHasNoPeerToken)
 {
     hipObj::RdmaToken parsed;
     int               code = 0;
-    EXPECT_FALSE(hipObj::parsePeerTokenFromReply("ok", 2, parsed, code));
+    EXPECT_FALSE(hipObj::parsePeerTokenFromReply("ok", parsed, code));
 }
 
 TEST(RdmaReply, ParsePeerTokenRejectsMalformedReply)
@@ -210,8 +209,7 @@ TEST(RdmaReply, ParsePeerTokenRejectsMalformedReply)
         hipObj::RdmaToken parsed;
         parsed.qpNum = 1234;
         int code     = 5678;
-        EXPECT_FALSE(hipObj::parsePeerTokenFromReply(reply.c_str(), reply.size(), parsed, code))
-            << "reply \"" << reply << "\"";
+        EXPECT_FALSE(hipObj::parsePeerTokenFromReply(reply, parsed, code)) << "reply \"" << reply << "\"";
         EXPECT_EQ(parsed.qpNum, 1234U);
         EXPECT_EQ(code, 5678);
     }
@@ -267,8 +265,7 @@ TEST(RdmaReply, ParseRejectsStatusThatIsntThreeDigits)
 {
     for (const char *reply : {"+20", "-20", " 20", "20 ", "2 0", "0x1", "-99"}) {
         int code = 5678;
-        EXPECT_FALSE(hipObj::parseRdmaReplyHttpCode(reply, std::strlen(reply), code))
-            << "reply \"" << reply << "\"";
+        EXPECT_FALSE(hipObj::parseRdmaReplyHttpCode(reply, code)) << "reply \"" << reply << "\"";
         EXPECT_EQ(code, 5678);
     }
 }
