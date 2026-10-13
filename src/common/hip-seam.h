@@ -19,6 +19,8 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
+#include <type_traits>
 
 #include <hip/hip_runtime_api.h>
 
@@ -57,6 +59,20 @@ struct HipOps {
     HipPointerGetAttributesFn hipPointerGetAttributes = nullptr;
     HipMemGetAddressRangeFn   hipMemGetAddressRange   = nullptr;
 };
+
+/* Destroys a HIP event with the hipEventDestroy entry the caller had when
+ * it created the event, which it has already checked isn't null */
+struct HipEventDeleter {
+    HipEventDestroyFn destroy = nullptr;
+
+    void operator()(hipEvent_t event) const noexcept
+    {
+        (void)destroy(event);
+    }
+};
+
+/* hipEvent_t is itself a pointer, to an opaque struct */
+using HipEventPtr = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, HipEventDeleter>;
 
 /* Populates a table with the real HIP entry points. Called once for the
  * global table; tests that swap pointers capture and restore the
