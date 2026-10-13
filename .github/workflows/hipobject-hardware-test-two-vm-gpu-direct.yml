@@ -33,8 +33,10 @@
 name: hipObject - Emulated HW Test - Two-VM AIS and Host Buffers
 
 on:
-  # Pull requests, pushes to develop, and manual runs. The push run
-  # catches a develop that no single PR was tested against.
+  # Pull requests, pushes to develop, a nightly run, and manual runs. The
+  # push run catches a develop that no single PR was tested against. The
+  # nightly run is only for the known-failing GPU buffer (see the
+  # two-vm-gpu-direct-gpu-buffer job).
   #
   # The paths are what this lane builds and runs, so a change it cannot
   # observe doesn't spend VM time. Unit, header and install tests,
@@ -75,6 +77,9 @@ on:
   push:
     branches: [develop]
     paths: *paths
+  # Every day at 06:41 UTC
+  schedule:
+    - cron: "41 6 * * *"
   workflow_dispatch:
 
 # A newer commit on a pull request cancels the run for the older one.
@@ -115,20 +120,15 @@ defaults:
 
 jobs:
   two-vm-gpu-direct:
-    name: Two-VM RDMA (${{ matrix.buffer_label }})
+    # Not from the matrix: a skipped job shows its name unexpanded
+    name: Two-VM RDMA (Host Buffer)
+    # Pushes and pull requests already run the host buffer, so the nightly
+    # run would only repeat it.
+    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - buffer_label: GPU Buffer
-            gpu_mode: gpu
-            allow_failure: true
-            # TEMPORARY, with allow_failure: when this known-failing
-            # transfer hangs rather than erroring, the job sits out the whole
-            # guest-side timeout, and at 420 s that made it the slowest job
-            # in the matrix. The same 1 MiB transfer from a host buffer takes
-            # seconds. Raise it back to 420 when the transfer works.
-            client_timeout: 120
           - buffer_label: Host Buffer
             gpu_mode: nogpu
             allow_failure: false
@@ -142,13 +142,13 @@ jobs:
     # own system-test-two-vms lane: two emulated NICs on one bridge, one
     # guest per NIC, hipObject's v1 server in the first and the minio-cpp
     # bridge client in the second.
-    container:
+    container: &container
       image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244
       # /dev/net/tun and NET_ADMIN are as load-bearing as /dev/kvm: without
       # them ionic_eth_net_send() has no fd and every guest frame is dropped,
       # which looks exactly like a healthy-but-silent link.
       options: --device /dev/kvm --device /dev/net/tun --cap-add=NET_ADMIN
-    env:
+    env: &job_env
       GUEST_ARTIFACT_REPO: docker.io/sbates130272/batesste-ci-images-ubuntu-qcow2-gen-ernic-rocjitsu
       GUEST_ARTIFACT_TAG: 20260925.g4868a2e-vm.resolute-ernic-rocjitsu-qm.e73a1e6-qcow2
       ERNIC_TAP_PREFIX: ernic-tap
@@ -164,7 +164,8 @@ jobs:
       # explicitly, so the copies staged there cannot drift from its default.
       IONIC_GUEST_DIR: /var/tmp/ionic-src
 
-    steps:
+    # The two-vm-gpu-direct-gpu-buffer job runs these same steps
+    steps: &steps
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -854,12 +855,13 @@ jobs:
       - name: Run the ${{ matrix.buffer_label }} v1 client in VM 2
         id: client
         timeout-minutes: 10
-        # TEMPORARY. This lane has never passed: the remote read of the
+        # TEMPORARY. The GPU buffer has never passed: the remote read of the
         # client's dmabuf address fails with IBV_WC_REM_ACCESS_ERR, root cause
-        # open (see the step below). Non-fatal so the rest of the PR is not
-        # held behind it -- everything up to this point is still fatal, so a
-        # regression in the build, the guests, the NIC or the GPU enumeration
-        # still fails the job. Remove this the moment the transfer works.
+        # open (see the step below). Non-fatal so the nightly run reports the
+        # known failure rather than going red every night -- everything up to
+        # this point is still fatal, so a regression in the build, the guests,
+        # the NIC or the GPU enumeration still fails the job. Remove this the
+        # moment the transfer works.
         continue-on-error: ${{ matrix.allow_failure }}
         env:
           SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
@@ -938,3 +940,32 @@ jobs:
           docker run --rm -v "${{ github.workspace }}/ernic-build:/d" \
             busybox sh -c "rm -rf /d/*" 2>/dev/null || true
           rm -rf "${{ github.workspace }}/ernic-build" 2>/dev/null || true
+
+  # two-vm-gpu-direct-gpu-buffer: the two-vm-gpu-direct job above, on a GPU
+  # buffer.
+  #
+  # TEMPORARY. The GPU-buffer transfer is known to fail (see the client
+  # step's continue-on-error), so it runs nightly and on manual runs rather
+  # than on every pull request and push, where it cost runner time and
+  # reported nothing. When the transfer works, move this matrix entry back
+  # into the two-vm-gpu-direct job with allow_failure false and a
+  # client_timeout of 420, and delete this job.
+  two-vm-gpu-direct-gpu-buffer:
+    name: Two-VM RDMA (GPU Buffer)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        include:
+          - buffer_label: GPU Buffer
+            gpu_mode: gpu
+            allow_failure: true
+            # When this known-failing transfer hangs rather than erroring,
+            # the job sits out the whole guest-side timeout, and at 420 s that
+            # made it the slowest job in the matrix. The same 1 MiB transfer
+            # from a host buffer takes seconds.
+            client_timeout: 120
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container: *container
+    env: *job_env
+    steps: *steps
