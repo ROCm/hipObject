@@ -40,14 +40,6 @@
 #endif
 /* clang-format on */
 
-#if defined(__clang__) || defined(__GNUC__)
-#define HIPOBJ_WARN_FORMAT_NONLITERAL_OFF HIPOBJ_WARN_OFF("format-nonliteral")
-#define HIPOBJ_WARN_FORMAT_NONLITERAL_ON  HIPOBJ_WARN_ON("format-nonliteral")
-#else
-#define HIPOBJ_WARN_FORMAT_NONLITERAL_OFF
-#define HIPOBJ_WARN_FORMAT_NONLITERAL_ON
-#endif
-
 #if defined(__clang__)
 #define HIPOBJ_WARN_NO_EXIT_DTOR_OFF HIPOBJ_WARN_OFF("exit-time-destructors")
 #define HIPOBJ_WARN_NO_EXIT_DTOR_ON  HIPOBJ_WARN_ON("exit-time-destructors")
