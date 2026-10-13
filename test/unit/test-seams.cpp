@@ -43,9 +43,8 @@ fakeGetDevice(int *device)
 }
 
 hipError_t
-fakeDeviceGetPCIBusId(char *bus_id, int len, int device)
+fakeDeviceGetPCIBusId(char *bus_id, int len, int)
 {
-    (void)device;
     snprintf(bus_id, static_cast<size_t>(len), "0000:42:00.0");
     return hipSuccess;
 }
@@ -514,7 +513,6 @@ namespace {
             funcs.query_gid        = &fakeQueryGid;
             funcs.alloc_pd         = &fakeAllocPd;
             funcs.dealloc_pd       = &fakeDeallocPd;
-            funcs.reg_mr           = &fakeTransferRegisterMr;
             funcs.reg_mr_iova2     = &fakeTransferRegisterMrIova2;
             funcs.dereg_mr         = &fakeTransferDeregisterMr;
             funcs.create_cq        = &fakeTransferCreateCq;

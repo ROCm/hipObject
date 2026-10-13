@@ -49,9 +49,9 @@ struct RdmaResult {
     size_t     bytes  = 0;
 };
 
-RdmaResult rdmaPut(S3RdmaContext *ctx, const char *token, const void *buf, size_t size);
+RdmaResult rdmaPut(S3RdmaContext *ctx, const char *token, size_t size);
 
-RdmaResult rdmaGet(S3RdmaContext *ctx, const char *token, const void *buf, size_t size);
+RdmaResult rdmaGet(S3RdmaContext *ctx, const char *token, size_t size);
 
 RdmaResult rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size);
 

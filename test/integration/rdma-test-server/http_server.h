@@ -50,9 +50,6 @@ public:
 
     void setHandler(HttpHandler handler);
 
-    /* v1 single-shot accept loop (unchanged behavior). */
-    int runOnce(int timeoutMs);
-
     /* v2 threaded mode: accepts connections until stop(), handling
      * each on its own thread. Responses are completed with the
      * afterSend finalizer contract. The loop always runs on the

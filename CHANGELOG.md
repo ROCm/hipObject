@@ -199,6 +199,10 @@
   the buffer hipObject passed it, `hipObjGet()` and `hipObjPut()` read
   past the end of the buffer. The transfer now fails with
   `hipObjS3Error` instead.
+- The `get-object` and `put-object` examples read a size argument such
+  as `12abc` as its leading number, and a negative one such as `-1` as
+  a huge size. They now reject anything but a plain decimal number of
+  bytes that fits in a `size_t`.
 
 ### Known issues
 

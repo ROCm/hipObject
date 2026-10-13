@@ -21,6 +21,9 @@
  * The state machine is pure: transitions are validated and applied
  * without touching verbs or HIP, so the whole matrix is unit-testable
  * without hardware.
+ *
+ * It's for the client transfer path in hipObjGetV2() and hipObjPutV2(),
+ * which aren't implemented yet, so only the unit tests call it so far.
  */
 
 #pragma once

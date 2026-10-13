@@ -330,9 +330,8 @@ main(int argc, char *argv[])
         return resp;
     });
 
-    // Use the threaded server so large HTTP request bodies (e.g. HTTP-only
-    // PUT payloads) are received in full rather than truncated at the
-    // 65 KB single-recv limit of runOnce().
+    // The threaded server receives large HTTP request bodies (e.g. HTTP-only
+    // PUT payloads) in full rather than truncating them at a single recv().
     /* "listening on port N" is what every caller waits for before it starts
      * sending. Printing it without checking made a dead server look ready. */
     if (!server.startThreaded()) {

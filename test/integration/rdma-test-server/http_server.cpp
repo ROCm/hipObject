@@ -172,41 +172,6 @@ HttpServer::setHandler(HttpHandler handler)
     handler_ = std::move(handler);
 }
 
-int
-HttpServer::runOnce(int timeoutMs)
-{
-    if (listen_fd_ < 0 || !handler_) {
-        return -1;
-    }
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(listen_fd_, &fds);
-    timeval tv{};
-    tv.tv_sec  = timeoutMs / 1000;
-    tv.tv_usec = (timeoutMs % 1000) * 1000;
-    int ready  = select(listen_fd_ + 1, &fds, nullptr, nullptr, &tv);
-    if (ready <= 0) {
-        return ready;
-    }
-    int client = accept(listen_fd_, nullptr, nullptr);
-    if (client < 0) {
-        return -1;
-    }
-    char    buf[65536];
-    ssize_t n = recv(client, buf, sizeof(buf) - 1, 0);
-    if (n <= 0) {
-        close(client);
-        return 0;
-    }
-    buf[n]            = '\0';
-    HttpRequest  req  = parseRequest(buf);
-    HttpResponse resp = handler_(req);
-    std::string  out  = serializeResponse(resp);
-    send(client, out.data(), out.size(), MSG_NOSIGNAL);
-    close(client);
-    return 1;
-}
-
 bool
 HttpServer::startThreaded()
 {
@@ -224,11 +189,11 @@ HttpServer::runThreaded()
      * startThreaded() so stop() can join it as the production
      * barrier. */
     if (listen_fd_ < 0) {
-        /* runOnce() has always checked this; this loop did not, and FD_SET(-1)
-         * is a glibc fortify abort -- so a failed bind killed the process with
-         * "bit out of range 0 - FD_SETSIZE on fd_set" and no mention of a port.
-         * startThreaded() refuses to spawn the thread now, but the loop must
-         * hold the invariant itself: it is also reachable directly. */
+        /* FD_SET(-1) is a glibc fortify abort, so without this check a
+         * failed bind killed the process with "bit out of range 0 -
+         * FD_SETSIZE on fd_set" and no mention of a port. startThreaded()
+         * refuses to spawn the thread, but the loop must hold the
+         * invariant itself: it is also reachable directly. */
         return;
     }
     while (!stopping_.load()) {

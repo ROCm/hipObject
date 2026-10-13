@@ -138,14 +138,6 @@ TEST(RdmaReply, ParseHttp200WithPeerToken)
     EXPECT_EQ(hipObj::parseRdmaReplyHttpCode(reply), 200);
 }
 
-TEST(RdmaToken, FormatHeaderValue)
-{
-    const char *token  = "0011";
-    void       *buf    = reinterpret_cast<void *>(0x7f0000001000ULL);
-    std::string header = hipObj::formatRdmaHeaderValue(token, buf, 4096);
-    EXPECT_EQ(header, token);
-}
-
 TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue)
 {
     hipObj::RdmaToken token{};

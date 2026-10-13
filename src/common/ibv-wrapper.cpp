@@ -13,8 +13,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <string>
-#include <string_view>
 
 #include <hsa/hsa_ext_amd.h>
 
@@ -35,23 +33,22 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
 
 namespace {
 
-    template <typename FuncPtr>
-    int dlsym_load(FuncPtr &out, void *handle, std::string_view prefix, std::string_view name)
+    /* Sets out to the symbol, or to nullptr when the library doesn't have it */
+    template <typename FuncPtr> void dlsym_load_optional(FuncPtr &out, void *handle, const char *name)
     {
-        const std::string full_name = std::string(prefix).append(name);
-        out                         = reinterpret_cast<FuncPtr>(dlsym(handle, full_name.c_str()));
-        if (!out) {
-            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", full_name.c_str(), dlerror());
-            return -1;
-        }
-        return 0;
+        out = reinterpret_cast<FuncPtr>(dlsym(handle, name));
     }
 
-    template <typename FuncPtr>
-    void dlsym_load_optional(FuncPtr &out, void *handle, std::string_view prefix, std::string_view name)
+    /* As dlsym_load_optional(), but a missing symbol is an error: it's
+     * reported, and the return value is false */
+    template <typename FuncPtr> bool dlsym_load(FuncPtr &out, void *handle, const char *name)
     {
-        const std::string full_name = std::string(prefix).append(name);
-        out                         = reinterpret_cast<FuncPtr>(dlsym(handle, full_name.c_str()));
+        dlsym_load_optional(out, handle, name);
+        if (!out) {
+            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", name, dlerror());
+            return false;
+        }
+        return true;
     }
 
     /* The HSA dma-buf calls in the form IbvFuncs holds them, with
@@ -116,7 +113,7 @@ IBVWrapper::IBVWrapper()
         return;
     }
 
-    if (init_function_table() != 0) {
+    if (!init_function_table()) {
         fprintf(stderr, "hipObj: Could not init IBV function table. RDMA disabled.\n");
         return;
     }
@@ -132,7 +129,7 @@ IBVWrapper::init_dmabuf_settings()
 
     const char *env = getenv("HIPOBJ_DMABUF");
     if (env && (env[0] == '0' || env[0] == 'n' || env[0] == 'N')) {
-        dmabuf_enabled_ = 0;
+        dmabuf_enabled_ = false;
     }
 }
 
@@ -148,50 +145,42 @@ IBVWrapper::is_dmabuf_supported()
      * the mainline builds the emulated-hardware CI lanes run on do exactly
      * that, and lost GPU-direct to a grep. A config file is a prediction; the
      * registration call is the fact. */
-    return dmabuf_enabled_ != 0 && funcs_.reg_dmabuf_mr != nullptr;
+    return dmabuf_enabled_ && funcs_.reg_dmabuf_mr != nullptr;
 }
 
-int
+bool
 IBVWrapper::init_function_table()
 {
-#define LOAD_SYM(field, prefix, name)                                                                        \
-    do {                                                                                                     \
-        if (dlsym_load(funcs_.field, ibv_handle_.get(), prefix, name) != 0)                                  \
-            return -1;                                                                                       \
-    } while (0)
-#define LOAD_SYM_OPT(field, prefix, name) dlsym_load_optional(funcs_.field, ibv_handle_.get(), prefix, name)
+    void *const handle = ibv_handle_.get();
 
-    LOAD_SYM(get_device_list, "ibv_", "get_device_list");
-    LOAD_SYM(free_device_list, "ibv_", "free_device_list");
-    LOAD_SYM(open_device, "ibv_", "open_device");
-    LOAD_SYM(close_device, "ibv_", "close_device");
-    LOAD_SYM(get_device_name, "ibv_", "get_device_name");
-    LOAD_SYM(query_device, "ibv_", "query_device");
-    LOAD_SYM(query_port, "ibv_", "query_port");
-    LOAD_SYM(query_gid, "ibv_", "query_gid");
-    LOAD_SYM(alloc_pd, "ibv_", "alloc_pd");
-    LOAD_SYM(dealloc_pd, "ibv_", "dealloc_pd");
-    LOAD_SYM(reg_mr, "ibv_", "reg_mr");
-    LOAD_SYM_OPT(reg_dmabuf_mr, "ibv_", "reg_dmabuf_mr");
-    LOAD_SYM(reg_mr_iova2, "ibv_", "reg_mr_iova2");
-    LOAD_SYM(dereg_mr, "ibv_", "dereg_mr");
-    LOAD_SYM(create_cq, "ibv_", "create_cq");
-    LOAD_SYM(destroy_cq, "ibv_", "destroy_cq");
-    LOAD_SYM(create_qp, "ibv_", "create_qp");
-    LOAD_SYM(modify_qp, "ibv_", "modify_qp");
-    LOAD_SYM(destroy_qp, "ibv_", "destroy_qp");
+    dlsym_load_optional(funcs_.reg_dmabuf_mr, handle, "ibv_reg_dmabuf_mr");
     // poll_cq / post_send / post_recv are static inline helpers in verbs.h
     // that delegate to the per-context ops table; depending on the
     // rdma-core build they may not exist as dynamic symbols. Load them
     // optionally and fall back to the context ops entries, which is what
     // the inline functions themselves call.
-    LOAD_SYM_OPT(poll_cq, "ibv_", "poll_cq");
-    LOAD_SYM_OPT(post_send, "ibv_", "post_send");
-    LOAD_SYM_OPT(post_recv, "ibv_", "post_recv");
+    dlsym_load_optional(funcs_.poll_cq, handle, "ibv_poll_cq");
+    dlsym_load_optional(funcs_.post_send, handle, "ibv_post_send");
+    dlsym_load_optional(funcs_.post_recv, handle, "ibv_post_recv");
 
-#undef LOAD_SYM
-#undef LOAD_SYM_OPT
-    return 0;
+    // && stops at the first symbol that's missing
+    return dlsym_load(funcs_.get_device_list, handle, "ibv_get_device_list") &&
+           dlsym_load(funcs_.free_device_list, handle, "ibv_free_device_list") &&
+           dlsym_load(funcs_.open_device, handle, "ibv_open_device") &&
+           dlsym_load(funcs_.close_device, handle, "ibv_close_device") &&
+           dlsym_load(funcs_.get_device_name, handle, "ibv_get_device_name") &&
+           dlsym_load(funcs_.query_device, handle, "ibv_query_device") &&
+           dlsym_load(funcs_.query_port, handle, "ibv_query_port") &&
+           dlsym_load(funcs_.query_gid, handle, "ibv_query_gid") &&
+           dlsym_load(funcs_.alloc_pd, handle, "ibv_alloc_pd") &&
+           dlsym_load(funcs_.dealloc_pd, handle, "ibv_dealloc_pd") &&
+           dlsym_load(funcs_.reg_mr_iova2, handle, "ibv_reg_mr_iova2") &&
+           dlsym_load(funcs_.dereg_mr, handle, "ibv_dereg_mr") &&
+           dlsym_load(funcs_.create_cq, handle, "ibv_create_cq") &&
+           dlsym_load(funcs_.destroy_cq, handle, "ibv_destroy_cq") &&
+           dlsym_load(funcs_.create_qp, handle, "ibv_create_qp") &&
+           dlsym_load(funcs_.modify_qp, handle, "ibv_modify_qp") &&
+           dlsym_load(funcs_.destroy_qp, handle, "ibv_destroy_qp");
 }
 
 struct ibv_device **
@@ -284,21 +273,17 @@ IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
         // invent a registration here.
     }
 
-    int is_access_const = __builtin_constant_p((access & IBV_ACCESS_OPTIONAL_RANGE) == 0);
-    if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
-        return funcs_.reg_mr(pd, addr, length, access);
-    else
-        return funcs_.reg_mr_iova2(pd, addr, length, reinterpret_cast<uintptr_t>(addr), access);
+    return reg_mr_host(pd, addr, length, access);
 }
 
 struct ibv_mr *
 IBVWrapper::reg_mr_host(struct ibv_pd *pd, void *addr, size_t length, int access)
 {
-    int is_access_const = __builtin_constant_p((access & IBV_ACCESS_OPTIONAL_RANGE) == 0);
-    if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
-        return funcs_.reg_mr(pd, addr, length, access);
-    else
-        return funcs_.reg_mr_iova2(pd, addr, length, reinterpret_cast<uintptr_t>(addr), access);
+    /* What the ibv_reg_mr() macro in verbs.h does with an access value that
+     * isn't a compile-time constant. ibv_reg_mr_iova2() with the address as
+     * the IOVA is the same registration as the ibv_reg_mr() function, and
+     * also accepts the optional access flags. */
+    return funcs_.reg_mr_iova2(pd, addr, length, reinterpret_cast<uintptr_t>(addr), access);
 }
 
 int

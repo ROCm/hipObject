@@ -157,7 +157,6 @@ protected:
         funcs.export_dmabuf = &fakeExportDmabuf;
         funcs.close_dmabuf  = &fakeCloseDmabuf;
         funcs.reg_dmabuf_mr = &fakeRegisterDmabufMr;
-        funcs.reg_mr        = &fakeRegisterMr;
         funcs.reg_mr_iova2  = &fakeRegisterMrIova2;
         funcs.dereg_mr      = &fakeDeregisterMr;
 
