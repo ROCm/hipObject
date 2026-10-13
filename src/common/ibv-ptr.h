@@ -5,7 +5,7 @@
 
 /* Owning smart pointers for ibverbs objects.
  *
- * Each deleter releases its object through the ibv wrapper and ignores
+ * Each deleter releases its object through ibv() and ignores
  * the verb's return code, so a deleter is only the last-resort cleanup.
  * Teardown that has to react to a failed destroy (the v2 poison/retry
  * paths) calls ibvDestroy() instead, which gives up ownership only when
@@ -28,7 +28,7 @@
 namespace hipObj {
 
 /* The deleters are defined in ibv-wrapper.cpp so this header doesn't
- * pull in the wrapper. */
+ * pull in the verbs seam. */
 struct IbvContextDeleter {
     void operator()(struct ibv_context *ctx) const noexcept;
 };

@@ -6,8 +6,12 @@
 #include "buffer.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <system_error>
 #include <utility>
 
 #include <hip/hip_runtime_api.h>
@@ -64,7 +68,97 @@ namespace {
         return required;
     }
 
+    /* The dma-buf policy HIPOBJ_DMABUF and HIPOBJ_RDMA_DEBUG set, read on
+     * the first registration */
+    const DmabufPolicy &dmabufPolicy()
+    {
+        static const DmabufPolicy policy = [] {
+            DmabufPolicy result;
+            const char  *debug = std::getenv("HIPOBJ_RDMA_DEBUG");
+            result.debug       = debug && *debug && debug[0] != '0';
+            const char *dmabuf = std::getenv("HIPOBJ_DMABUF");
+            result.enabled     = !(dmabuf && (dmabuf[0] == '0' || dmabuf[0] == 'n' || dmabuf[0] == 'N'));
+            return result;
+        }();
+        return policy;
+    }
+
+    /* Owns a dmabuf fd from HipRuntime::exportDmabuf(), and closes it
+     * with the same runtime's closeDmabuf(). Only the registration needs
+     * it: ibv_reg_dmabuf_mr() takes its own reference to the dma-buf,
+     * which the MR keeps until it's deregistered, so the fd is closed as
+     * soon as the registration call returns, whether or not it
+     * succeeded. */
+    class DmabufFd {
+    public:
+        DmabufFd(int fd, const HipRuntime &runtime) noexcept : fd_(fd), runtime_(&runtime)
+        {
+        }
+        ~DmabufFd()
+        {
+            (void)runtime_->closeDmabuf(fd_);
+        }
+
+        DmabufFd(const DmabufFd &)            = delete;
+        DmabufFd &operator=(const DmabufFd &) = delete;
+        DmabufFd(DmabufFd &&)                 = delete;
+        DmabufFd &operator=(DmabufFd &&)      = delete;
+
+        int get() const noexcept
+        {
+            return fd_;
+        }
+
+    private:
+        int               fd_;
+        const HipRuntime *runtime_;
+    };
+
 } // namespace
+
+IbvMrPtr
+registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_pd *pd, void *addr,
+                     size_t length, int access, const DmabufPolicy &policy)
+{
+    /* Whether a given GPU can export a dma-buf and a given NIC can register
+     * it is answered by trying: both calls report their own failure and
+     * fall through. This used to additionally require
+     * CONFIG_DMABUF_MOVE_NOTIFY=y and CONFIG_PCI_P2PDMA=y from
+     * /boot/config-$(uname -r), which is a false negative on any kernel
+     * that registers dmabuf MRs without move-notify -- the mainline builds
+     * the emulated-hardware CI lanes run on do exactly that, and lost
+     * GPU-direct to a grep. A config file is a prediction; the
+     * registration call is the fact. */
+    if (policy.enabled && verbs.supportsDmabuf()) {
+        uint64_t offset = 0;
+        int      fd     = -1;
+
+        const int status = runtime.exportDmabuf(addr, length, &fd, &offset);
+        if (status != 0) {
+            /* Not an error worth a line on stderr by default: this is also the
+             * answer for a host pointer, and the host-buffer paths register far
+             * more often than the device ones. The plain path below handles it. */
+            if (policy.debug) {
+                fprintf(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: %d\n", status);
+            }
+        }
+        else {
+            const DmabufFd dmabuf(fd, runtime);
+            IbvMrPtr       mr(verbs.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr),
+                                                  dmabuf.get(), access));
+            if (mr) {
+                return mr;
+            }
+            const std::string reason = std::generic_category().message(errno);
+            fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n", reason.c_str());
+        }
+        // Fall through to the plain path: it fails too for device memory, but
+        // the caller distinguishes "no MR" from "wrong MR" and we must not
+        // invent a registration here.
+    }
+
+    return IbvMrPtr(verbs.reg_mr(pd, addr, length, access));
+}
 
 bool
 isValidDeviceRange(void *ptr, size_t size)
@@ -101,7 +195,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr(ibv().reg_mr(pd, devPtr, size, access));
+    IbvMrPtr mr     = registerDeviceMemory(ibv(), hip(), pd, devPtr, size, access, dmabufPolicy());
     if (mr) {
         BufEntry &entry  = entries_[key];
         entry.mr         = std::move(mr);
@@ -134,7 +228,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     HostBufPtr hostBuf(rawHostBuf);
-    mr.reset(ibv().reg_mr_host(pd, hostBuf.get(), size, access));
+    mr.reset(ibv().reg_mr(pd, hostBuf.get(), size, access));
     if (!mr) {
         return -1;
     }
@@ -156,7 +250,7 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr(ibv().reg_mr_host(pd, hostPtr, size, access));
+    IbvMrPtr mr(ibv().reg_mr(pd, hostPtr, size, access));
     if (!mr) {
         return -1;
     }

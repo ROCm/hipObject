@@ -143,7 +143,7 @@ struct RdmaTestServer::Impl {
 
 RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
 {
-    if (!hipObj::ibv().is_initialized()) {
+    if (!hipObj::ibvAvailable()) {
         return;
     }
     /* Built in locals and moved into impl_ only once everything has
@@ -158,8 +158,8 @@ RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
         return;
     }
     hipObj::IbvMrPtr stagingMr(
-        hipObj::ibv().reg_mr_host(conn.pd.get(), stagingBuf.get(), impl_->stagingSize,
-                                  IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+        hipObj::ibv().reg_mr(conn.pd.get(), stagingBuf.get(), impl_->stagingSize,
+                             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!stagingMr) {
         return;
     }

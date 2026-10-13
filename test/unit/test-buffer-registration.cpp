@@ -4,7 +4,6 @@
  */
 
 #include <cstdint>
-#include <cstdlib>
 #include <optional>
 
 #include <gtest/gtest.h>
@@ -15,67 +14,18 @@
 #include "hipobj-private.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
-#include "ibv-wrapper.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
-struct IbvLog {
-    int   registerCalls    = 0;
-    int   deregisterCalls  = 0;
-    void *failRegisterAddr = nullptr;
-};
-
-IbvLog g_ibvLog;
-
-struct ibv_mr *
-makeFakeMr(void *addr)
-{
-    auto *mr = static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
-    if (mr) {
-        mr->addr = addr;
-        mr->rkey = 0x1234;
-    }
-    return mr;
-}
-
-struct ibv_mr *
-fakeRegisterMr(struct ibv_pd *, void *addr, size_t, int)
-{
-    ++g_ibvLog.registerCalls;
-    if (addr == g_ibvLog.failRegisterAddr) {
-        return nullptr;
-    }
-    return makeFakeMr(addr);
-}
-
-struct ibv_mr *
-fakeRegisterMrIova2(struct ibv_pd *, void *addr, size_t, uintptr_t, int)
-{
-    return fakeRegisterMr(nullptr, addr, 0, 0);
-}
-
-int
-fakeDeregisterMr(struct ibv_mr *mr)
-{
-    ++g_ibvLog.deregisterCalls;
-    std::free(mr);
-    return 0;
-}
-
 class BufferRegistrationTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs funcs{};
-        funcs.reg_mr_iova2 = &fakeRegisterMrIova2;
-        funcs.dereg_mr     = &fakeDeregisterMr;
-        fakeIbv_.emplace(funcs);
+        fakeIbv_.emplace(verbs_);
         fakeHip_.emplace(hip_);
-
-        g_ibvLog = {};
     }
 
     void TearDown() override
@@ -84,8 +34,9 @@ protected:
         fakeHip_.reset();
     }
 
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
     hipObjTest::FakeDevice                   hipDevice_{};
+    hipObjTest::FakeVerbs                    verbs_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
     hipObjTest::FakeHip                      hip_{hipDevice_};
     std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
 };
@@ -128,8 +79,8 @@ TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
 TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
 {
     hipObj::BufferMap buffers;
-    void             *gpuBuf  = reinterpret_cast<void *>(0x1000);
-    g_ibvLog.failRegisterAddr = gpuBuf;
+    void             *gpuBuf     = reinterpret_cast<void *>(0x1000);
+    hipDevice_.fail.registerAddr = gpuBuf;
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)), 0);
     const auto *entry = buffers.find(gpuBuf);
@@ -149,8 +100,8 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
 TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers)
 {
     hipObj::BufferMap buffers;
-    void             *gpuBuf  = reinterpret_cast<void *>(0x2000);
-    g_ibvLog.failRegisterAddr = gpuBuf;
+    void             *gpuBuf     = reinterpret_cast<void *>(0x2000);
+    hipDevice_.fail.registerAddr = gpuBuf;
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)), 0);
     ASSERT_NE(hipDevice_.lastHostMalloc, nullptr);
@@ -159,7 +110,7 @@ TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers)
 
     EXPECT_EQ(hipDevice_.log.hostFree, 1);
     EXPECT_EQ(hipDevice_.lastHostFree, hipDevice_.lastHostMalloc);
-    EXPECT_EQ(g_ibvLog.deregisterCalls, 1);
+    EXPECT_EQ(hipDevice_.log.deregMr, 1);
 }
 
 /* The public API checks these first, so the map's own checks are only
@@ -173,13 +124,13 @@ TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, hipObj::MAX_MR_SIZE + 1, pd), -1);
     EXPECT_EQ(buffers.registerHostBuffer(hostBuf, hipObj::MAX_MR_SIZE + 1, pd), -1);
-    EXPECT_EQ(g_ibvLog.registerCalls, 0);
+    EXPECT_EQ(hipDevice_.log.registerMr, 0);
 
     ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), 0);
     ASSERT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), pd), 0);
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), -1);
     EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), pd), -1);
-    EXPECT_EQ(g_ibvLog.registerCalls, 2);
+    EXPECT_EQ(hipDevice_.log.registerMr, 2);
     ASSERT_NE(buffers.find(gpuBuf), nullptr);
     EXPECT_EQ(buffers.find(gpuBuf)->size, 64U);
 }

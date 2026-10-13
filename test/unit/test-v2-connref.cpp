@@ -21,10 +21,10 @@
 
 #include "../../../src/common/ibv-core.h"
 #include "../../../src/common/ibv-ptr.h"
-#include "../../../src/common/ibv-wrapper.h"
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "fake-device.h"
 #include "fake-ibv.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
@@ -54,138 +54,129 @@ struct FaultCtl {
 
 FaultCtl g_fault;
 
-int
-fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int)
-{
-    if (attr->qp_state == IBV_QPS_INIT && g_fault.initFails > 0) {
-        --g_fault.initFails;
-        errno = EINVAL;
-        return 1;
+/* Fresh objects from new, so ASAN catches a double free or a leak, and
+ * scriptable INIT and destroy failures */
+class ConnRefVerbs : public hipObjTest::FakeVerbs {
+public:
+    using FakeVerbs::FakeVerbs;
+
+    int modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int) const override
+    {
+        if (attr->qp_state == IBV_QPS_INIT && g_fault.initFails > 0) {
+            --g_fault.initFails;
+            errno = EINVAL;
+            return 1;
+        }
+        return 0;
     }
-    return 0;
-}
 
-int
-fakeDestroyQp(struct ibv_qp *qp)
-{
-    ++g_fault.destroyQpCalls;
-    if (g_fault.destroyQpFails > 0) {
-        --g_fault.destroyQpFails;
-        errno = EBUSY;
-        return 1;
+    int destroy_qp(struct ibv_qp *qp) const override
+    {
+        ++g_fault.destroyQpCalls;
+        if (g_fault.destroyQpFails > 0) {
+            --g_fault.destroyQpFails;
+            errno = EBUSY;
+            return 1;
+        }
+        delete qp;
+        return 0;
     }
-    delete qp;
-    return 0;
-}
 
-int
-fakeDestroyCq(struct ibv_cq *cq)
-{
-    ++g_fault.destroyCqCalls;
-    delete cq;
-    return 0;
-}
+    int destroy_cq(struct ibv_cq *cq) const override
+    {
+        ++g_fault.destroyCqCalls;
+        delete cq;
+        return 0;
+    }
 
-struct ibv_qp *
-fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-{
-    ++g_fault.createQpCalls;
-    /* A real (zeroed) ibv_qp: the transport reads qp->qp_num. */
-    auto *qp   = new struct ibv_qp();
-    qp->qp_num = 0x77;
-    return qp;
-}
+    struct ibv_qp *create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const override
+    {
+        ++g_fault.createQpCalls;
+        /* A real (zeroed) ibv_qp: the transport reads qp->qp_num. */
+        auto *qp   = new struct ibv_qp();
+        qp->qp_num = 0x77;
+        return qp;
+    }
 
-/* A real (zeroed) ibv_mr: the PREPARE reply reads addr and rkey. */
-struct ibv_mr *
-fakeRegMrIova2(struct ibv_pd *, void *addr, size_t length, uintptr_t, int)
-{
-    auto *mr   = new struct ibv_mr();
-    mr->addr   = addr;
-    mr->length = length;
-    mr->rkey   = 0x5678;
-    return mr;
-}
+    /* A real (zeroed) ibv_mr: the PREPARE reply reads addr and rkey. */
+    struct ibv_mr *reg_mr(struct ibv_pd *, void *addr, size_t length, int) const override
+    {
+        auto *mr   = new struct ibv_mr();
+        mr->addr   = addr;
+        mr->length = length;
+        mr->rkey   = 0x5678;
+        return mr;
+    }
 
-int
-fakeDeregMr(struct ibv_mr *mr)
-{
-    ++g_fault.deregMrCalls;
-    delete mr;
-    return 0;
-}
+    int dereg_mr(struct ibv_mr *mr) const override
+    {
+        ++g_fault.deregMrCalls;
+        delete mr;
+        return 0;
+    }
 
-struct ibv_cq *
-fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-{
-    return new struct ibv_cq();
-}
+    struct ibv_cq *create_cq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int) const override
+    {
+        return new struct ibv_cq();
+    }
 
-struct ibv_context *
-fakeOpenDevice(struct ibv_device *)
-{
-    ++g_fault.openDeviceCalls;
-    return new struct ibv_context();
-}
+    struct ibv_context *open_device(struct ibv_device *) const override
+    {
+        ++g_fault.openDeviceCalls;
+        return new struct ibv_context();
+    }
 
-struct ibv_device **
-fakeGetDeviceList(int *n)
-{
-    *n = 1;
-    /* NULL-terminated, like the real ibv_get_device_list(); allocated
-     * as an array to match the delete[] in fakeFreeDeviceList(). */
-    auto *dev = new struct ibv_device();
-    return new struct ibv_device *[2]{dev, nullptr};
-}
+    struct ibv_device **get_device_list(int *n) const override
+    {
+        *n = 1;
+        /* NULL-terminated, like the real ibv_get_device_list(); allocated
+         * as an array to match the delete[] in free_device_list(). */
+        auto *dev = new struct ibv_device();
+        return new struct ibv_device *[2]{dev, nullptr};
+    }
 
-void
-fakeFreeDeviceList(struct ibv_device **list)
-{
-    delete *list;
-    delete[] list;
-}
+    void free_device_list(struct ibv_device **list) const override
+    {
+        delete *list;
+        delete[] list;
+    }
 
-struct ibv_pd *
-fakeAllocPd(struct ibv_context *)
-{
-    return new struct ibv_pd();
-}
+    struct ibv_pd *alloc_pd(struct ibv_context *) const override
+    {
+        return new struct ibv_pd();
+    }
 
-int
-fakeDeallocPd(struct ibv_pd *pd)
-{
-    delete pd;
-    return 0;
-}
+    int dealloc_pd(struct ibv_pd *pd) const override
+    {
+        delete pd;
+        return 0;
+    }
 
-int
-fakeQueryDevice(struct ibv_context *, struct ibv_device_attr *a)
-{
-    hipObj::zeroObject(*a);
-    return 0;
-}
+    int query_device(struct ibv_context *, struct ibv_device_attr *a) const override
+    {
+        hipObj::zeroObject(*a);
+        return 0;
+    }
 
-int
-fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *a)
-{
-    hipObj::zeroObject(*a);
-    a->active_mtu = IBV_MTU_4096;
-    return 0;
-}
+    int query_port(struct ibv_context *, uint8_t, struct ibv_port_attr *a) const override
+    {
+        hipObj::zeroObject(*a);
+        a->active_mtu = IBV_MTU_4096;
+        return 0;
+    }
 
-int
-fakeCloseDevice(struct ibv_context *ctx)
-{
-    delete ctx;
-    return 0;
-}
+    int close_device(struct ibv_context *ctx) const override
+    {
+        delete ctx;
+        return 0;
+    }
 
-int
-fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *g)
-{
-    hipObj::zeroObject(*g);
-    return 0;
-}
+    int query_gid(struct ibv_context *, uint8_t, int, union ibv_gid *g) const override
+    {
+        hipObj::zeroObject(*g);
+        return 0;
+    }
+};
 
 /* Frees the fake objects a test's handlers gave up on, skipping any a
  * fake destroy verb already freed, so a regression fails the test's
@@ -219,24 +210,7 @@ class ConnRefFaultTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs f{};
-        f.modify_qp        = fakeModifyQp;
-        f.destroy_qp       = fakeDestroyQp;
-        f.destroy_cq       = fakeDestroyCq;
-        f.create_qp        = fakeCreateQp;
-        f.create_cq        = fakeCreateCq;
-        f.open_device      = fakeOpenDevice;
-        f.get_device_list  = fakeGetDeviceList;
-        f.free_device_list = fakeFreeDeviceList;
-        f.alloc_pd         = fakeAllocPd;
-        f.dealloc_pd       = fakeDeallocPd;
-        f.query_port       = fakeQueryPort;
-        f.query_device     = fakeQueryDevice;
-        f.close_device     = fakeCloseDevice;
-        f.query_gid        = fakeQueryGid;
-        f.reg_mr_iova2     = fakeRegMrIova2;
-        f.dereg_mr         = fakeDeregMr;
-        fakeIbv_.emplace(f);
+        fakeIbv_.emplace(verbs_);
         g_fault   = FaultCtl{};
         verifier_ = std::make_unique<PassAllVerifier>();
         backend_  = std::make_unique<hipObj::v2::MemoryBackend>();
@@ -268,6 +242,8 @@ protected:
         return req;
     }
 
+    hipObjTest::FakeDevice                     device_{};
+    ConnRefVerbs                               verbs_{device_};
     std::optional<hipObjTest::ScopedFakeIbv>   fakeIbv_{};
     std::unique_ptr<hipObj::v2::SigV4Verifier> verifier_{};
     std::unique_ptr<hipObj::v2::MemoryBackend> backend_{};

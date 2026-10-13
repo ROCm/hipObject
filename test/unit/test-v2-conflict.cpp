@@ -18,11 +18,11 @@
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 
+#include "fake-device.h"
 #include "fake-ibv.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
-#include "ibv-wrapper.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
 #include "vendor-ops.h"
@@ -46,87 +46,71 @@ HIPOBJ_WARN_NO_EXIT_DTOR_OFF
 FakeState g_state;
 HIPOBJ_WARN_NO_EXIT_DTOR_ON
 
-struct ibv_cq *
-fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-{
-    return new struct ibv_cq();
-}
-
-int
-fakeDestroyCq(struct ibv_cq *cq)
-{
-    delete cq;
-    return 0;
-}
-
-struct ibv_qp *
-fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-{
-    ++g_state.createQpCalls;
-    if (g_state.createQpFails > 0) {
-        --g_state.createQpFails;
-        errno = ENOMEM;
-        return nullptr;
-    }
-    auto *qp = new struct ibv_qp();
-    hipObj::zeroObject(*qp);
-    qp->qp_num = static_cast<uint32_t>(++g_state.nextQpn);
-    return qp;
-}
-
-int
-fakeDestroyQp(struct ibv_qp *qp)
-{
-    ++g_state.destroyQpCalls;
-    if (g_state.destroyQpFails > 0) {
-        --g_state.destroyQpFails;
-        errno = EBUSY;
-        return 1;
-    }
-    g_state.destroyedQpns.push_back(qp->qp_num);
-    delete qp;
-    return 0;
-}
-
-int
-fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *, int)
-{
-    return 0;
-}
-
-int
-fakeQueryDevice(struct ibv_context *, struct ibv_device_attr *)
-{
-    return 0;
-}
-
-int
-fakeDeallocPd(struct ibv_pd *)
-{
-    return 0;
-}
-
 /* The fakes the fixture installs */
-hipObj::IbvFuncs
-fakeVerbs()
-{
-    hipObj::IbvFuncs funcs{};
-    funcs.create_cq    = fakeCreateCq;
-    funcs.destroy_cq   = fakeDestroyCq;
-    funcs.create_qp    = fakeCreateQp;
-    funcs.destroy_qp   = fakeDestroyQp;
-    funcs.modify_qp    = fakeModifyQp;
-    funcs.query_device = fakeQueryDevice;
-    funcs.dealloc_pd   = fakeDeallocPd;
-    return funcs;
-}
+class ConflictVerbs : public hipObjTest::FakeVerbs {
+public:
+    using FakeVerbs::FakeVerbs;
+
+    struct ibv_cq *create_cq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int) const override
+    {
+        return new struct ibv_cq();
+    }
+
+    int destroy_cq(struct ibv_cq *cq) const override
+    {
+        delete cq;
+        return 0;
+    }
+
+    struct ibv_qp *create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const override
+    {
+        ++g_state.createQpCalls;
+        if (g_state.createQpFails > 0) {
+            --g_state.createQpFails;
+            errno = ENOMEM;
+            return nullptr;
+        }
+        auto *qp = new struct ibv_qp();
+        hipObj::zeroObject(*qp);
+        qp->qp_num = static_cast<uint32_t>(++g_state.nextQpn);
+        return qp;
+    }
+
+    int destroy_qp(struct ibv_qp *qp) const override
+    {
+        ++g_state.destroyQpCalls;
+        if (g_state.destroyQpFails > 0) {
+            --g_state.destroyQpFails;
+            errno = EBUSY;
+            return 1;
+        }
+        g_state.destroyedQpns.push_back(qp->qp_num);
+        delete qp;
+        return 0;
+    }
+
+    int modify_qp(struct ibv_qp *, struct ibv_qp_attr *, int) const override
+    {
+        return 0;
+    }
+
+    int query_device(struct ibv_context *, struct ibv_device_attr *) const override
+    {
+        return 0;
+    }
+
+    int dealloc_pd(struct ibv_pd *) const override
+    {
+        return 0;
+    }
+};
 
 class V2ConflictTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
         g_state = FakeState{};
-        install_.emplace(fakeVerbs());
+        install_.emplace(verbs_);
         testReg_ = std::make_unique<hipObj::v2::ConnectionRegistry>();
         prevReg_ = hipObj::v2::setRegistryForTest(testReg_.get());
     }
@@ -159,8 +143,10 @@ protected:
         return reg.insert(std::move(entry));
     }
 
-    /* install_ is declared first so it's destroyed last: the registry
-     * entries free their fake objects through the fake table. */
+    /* The fakes are declared first so they're destroyed last: the
+     * registry entries free their fake objects through them. */
+    hipObjTest::FakeDevice                          device_{};
+    ConflictVerbs                                   verbs_{device_};
     std::optional<hipObjTest::ScopedFakeIbv>        install_{};
     std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_{};
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;
@@ -299,74 +285,68 @@ struct TransportFakes {
 
 TransportFakes g_transport;
 
-struct ibv_cq *
-fakeCreateCqOrFail(struct ibv_context *ctx, int cqe, void *cqCtx, struct ibv_comp_channel *channel,
-                   int vector)
-{
-    if (g_transport.createCqFails) {
-        return nullptr;
+/* The conflict fakes, recording what the transport asks for, and with
+ * scriptable failures */
+class TransportVerbs : public ConflictVerbs {
+public:
+    using ConflictVerbs::ConflictVerbs;
+
+    struct ibv_cq *create_cq(struct ibv_context *ctx, int cqe, void *cqCtx, struct ibv_comp_channel *channel,
+                             int vector) const override
+    {
+        if (g_transport.createCqFails) {
+            return nullptr;
+        }
+        return ConflictVerbs::create_cq(ctx, cqe, cqCtx, channel, vector);
     }
-    return fakeCreateCq(ctx, cqe, cqCtx, channel, vector);
-}
 
-int
-fakeRecordingModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask)
-{
-    g_transport.lastAttr = *attr;
-    g_transport.lastMask = mask;
-    return 0;
-}
-
-int
-fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
-{
-    if (g_transport.queryPortFails) {
-        return -1;
+    int modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask) const override
+    {
+        g_transport.lastAttr = *attr;
+        g_transport.lastMask = mask;
+        return 0;
     }
-    hipObj::zeroObject(*attr);
-    attr->active_mtu = g_transport.activeMtu;
-    return 0;
-}
 
-int
-fakeVendorQueryDevice(struct ibv_context *, struct ibv_device_attr *attr)
-{
-    if (g_transport.queryDeviceFails) {
-        return -1;
+    int query_port(struct ibv_context *, uint8_t, struct ibv_port_attr *attr) const override
+    {
+        if (g_transport.queryPortFails) {
+            return -1;
+        }
+        hipObj::zeroObject(*attr);
+        attr->active_mtu = g_transport.activeMtu;
+        return 0;
     }
-    hipObj::zeroObject(*attr);
-    attr->vendor_id = g_transport.vendorId;
-    return 0;
-}
 
-int
-fakeCloseDevice(struct ibv_context *)
-{
-    return 0;
-}
+    int query_device(struct ibv_context *, struct ibv_device_attr *attr) const override
+    {
+        if (g_transport.queryDeviceFails) {
+            return -1;
+        }
+        hipObj::zeroObject(*attr);
+        attr->vendor_id = g_transport.vendorId;
+        return 0;
+    }
 
-int
-fakePostRecv(struct ibv_qp *, struct ibv_recv_wr *wr, struct ibv_recv_wr **)
-{
-    g_transport.lastRecv = *wr;
-    ++g_transport.recvs;
-    return 0;
-}
+    int close_device(struct ibv_context *) const override
+    {
+        return 0;
+    }
+
+    int post_recv(struct ibv_qp *, struct ibv_recv_wr *wr, struct ibv_recv_wr **) const override
+    {
+        g_transport.lastRecv = *wr;
+        ++g_transport.recvs;
+        return 0;
+    }
+};
 
 class V2TransportTest : public V2ConflictTest {
 protected:
     void SetUp() override
     {
         V2ConflictTest::SetUp();
-        g_transport            = TransportFakes{};
-        hipObj::IbvFuncs funcs = install_->funcs();
-        funcs.create_cq        = fakeCreateCqOrFail;
-        funcs.modify_qp        = fakeRecordingModifyQp;
-        funcs.query_port       = fakeQueryPort;
-        funcs.query_device     = fakeVendorQueryDevice;
-        funcs.close_device     = fakeCloseDevice;
-        funcs.post_recv        = fakePostRecv;
-        install_->replace(funcs);
+        g_transport = TransportFakes{};
+        transportInstall_.emplace(transportVerbs_);
         dh_.gidIndex = 0;
     }
 
@@ -381,6 +361,12 @@ protected:
         ibv_gid gid{};
         return hipObj::v2::transitionQpToRtrV2(dh_, conn, 7, gid, 1);
     }
+
+    /* Installed over the conflict fakes, and removed before them. Both
+     * free what either creates, so the base fixture's teardown can free
+     * objects these created. */
+    TransportVerbs                           transportVerbs_{device_};
+    std::optional<hipObjTest::ScopedFakeIbv> transportInstall_{};
 };
 
 TEST_F(V2TransportTest, InitGrantsOnlyRemoteReadAndWrite)

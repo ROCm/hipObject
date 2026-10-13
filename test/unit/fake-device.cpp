@@ -6,12 +6,13 @@
 #include "fake-device.h"
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <cstdlib>
 #include <span>
 #include <string>
 
 #include "hipobj-span.h"
-#include "ibv-wrapper.h"
 
 namespace hipObjTest {
 
@@ -63,179 +64,217 @@ modifyQpCalls()
     return {calls.begin(), calls.end()};
 }
 
+// ---- ibverbs -------------------------------------------------------
+
 namespace {
 
-    // ---- ibverbs -----------------------------------------------------
-
-    struct ibv_device *g_devices[] = {reinterpret_cast<struct ibv_device *>(0x1), nullptr};
-
-    struct ibv_device **fakeGetDeviceList(int *numDevices)
-    {
-        if (fake().fail.getDeviceList) {
-            return nullptr;
-        }
-        if (numDevices) {
-            *numDevices = 1;
-        }
-        return g_devices;
-    }
-
-    void fakeFreeDeviceList(struct ibv_device **)
-    {
-    }
-
-    struct ibv_context *fakeOpenDevice(struct ibv_device *)
-    {
-        if (fake().fail.openDevice) {
-            return nullptr;
-        }
-        ++fake().log.openDevice;
-        return reinterpret_cast<struct ibv_context *>(0x2);
-    }
-
-    int fakeCloseDevice(struct ibv_context *)
-    {
-        ++fake().log.closeDevice;
-        return 0;
-    }
-
-    const char *fakeGetDeviceName(struct ibv_device *)
-    {
-        return "mlx5_0";
-    }
-
-    int fakeQueryDevice(struct ibv_context *, struct ibv_device_attr *attr)
-    {
-        if (fake().fail.queryDevice) {
-            return -1;
-        }
-        hipObj::zeroObject(*attr);
-        attr->vendor_id = fake().vendorId;
-        return 0;
-    }
-
-    /* An empty GID table, so GID selection never looks at the device */
-    int fakeQueryPort(struct ibv_context *, uint8_t, struct ibv_port_attr *attr)
-    {
-        if (fake().fail.queryPort) {
-            return -1;
-        }
-        if (attr) {
-            hipObj::zeroObject(*attr);
-        }
-        return 0;
-    }
-
-    int fakeQueryGid(struct ibv_context *, uint8_t, int, union ibv_gid *gid)
-    {
-        if (fake().fail.queryGid) {
-            return -1;
-        }
-        if (gid) {
-            hipObj::zeroObject(*gid);
-        }
-        return 0;
-    }
-
-    struct ibv_pd *fakeAllocPd(struct ibv_context *)
-    {
-        if (fake().fail.allocPd) {
-            return nullptr;
-        }
-        ++fake().log.allocPd;
-        return reinterpret_cast<struct ibv_pd *>(0x3);
-    }
-
-    int fakeDeallocPd(struct ibv_pd *)
-    {
-        ++fake().log.deallocPd;
-        return 0;
-    }
-
-    struct ibv_mr *fakeRegisterMr(struct ibv_pd *, void *addr, size_t, int access)
-    {
-        FakeDevice &f = fake();
-        ++f.log.registerMr;
-        f.log.mrAccess = access;
-        if (f.fail.registerAll || addr == f.fail.registerAddr) {
-            return nullptr;
-        }
-        auto *mr = static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
-        if (mr) {
-            mr->addr = addr;
-            mr->rkey = 0x1234;
-        }
-        return mr;
-    }
-
-    struct ibv_mr *fakeRegisterMrIova2(struct ibv_pd *pd, void *addr, size_t size, uintptr_t, int access)
-    {
-        return fakeRegisterMr(pd, addr, size, access);
-    }
-
-    int fakeDeregisterMr(struct ibv_mr *mr)
-    {
-        std::free(mr);
-        return 0;
-    }
-
-    struct ibv_cq *fakeCreateCq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int)
-    {
-        if (fake().fail.createCq) {
-            return nullptr;
-        }
-        ++fake().log.createCq;
-        return reinterpret_cast<struct ibv_cq *>(0x4);
-    }
-
-    int fakeDestroyCq(struct ibv_cq *)
-    {
-        ++fake().log.destroyCq;
-        return 0;
-    }
-
-    struct ibv_qp *fakeCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-    {
-        if (fake().fail.createQp) {
-            return nullptr;
-        }
-        auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
-        if (qp) {
-            ++fake().log.createQp;
-            qp->qp_num = 0x55;
-        }
-        return qp;
-    }
-
-    int fakeModifyQp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask)
-    {
-        FakeDevice &f = fake();
-        if (f.modifyQpCount < f.modifyQp.size()) {
-            f.modifyQp[f.modifyQpCount++] = {*attr, mask};
-        }
-        return static_cast<int>(attr->qp_state) == f.fail.modifyQpToState ? -1 : 0;
-    }
-
-    int fakeDestroyQp(struct ibv_qp *qp)
-    {
-        ++fake().log.destroyQp;
-        std::free(qp);
-        return 0;
-    }
-
-    int fakePollCq(struct ibv_cq *, int, struct ibv_wc *wc)
-    {
-        const FakeDevice &f = fake();
-        if (f.pollResult <= 0) {
-            return f.pollResult;
-        }
-        hipObj::zeroObject(*wc);
-        wc->status = f.pollStatus;
-        wc->opcode = f.pollOpcode;
-        return 1;
-    }
+    std::array<struct ibv_device *, 2> g_devices = {{reinterpret_cast<struct ibv_device *>(0x1), nullptr}};
 
 } // namespace
+
+struct ibv_device **
+FakeVerbs::get_device_list(int *num_devices) const
+{
+    if (device_->fail.getDeviceList) {
+        return nullptr;
+    }
+    if (num_devices) {
+        *num_devices = 1;
+    }
+    return g_devices.data();
+}
+
+void
+FakeVerbs::free_device_list(struct ibv_device **) const
+{
+}
+
+struct ibv_context *
+FakeVerbs::open_device(struct ibv_device *) const
+{
+    if (device_->fail.openDevice) {
+        return nullptr;
+    }
+    ++device_->log.openDevice;
+    return reinterpret_cast<struct ibv_context *>(0x2);
+}
+
+int
+FakeVerbs::close_device(struct ibv_context *) const
+{
+    ++device_->log.closeDevice;
+    return 0;
+}
+
+const char *
+FakeVerbs::get_device_name(struct ibv_device *) const
+{
+    return "mlx5_0";
+}
+
+int
+FakeVerbs::query_device(struct ibv_context *, struct ibv_device_attr *attr) const
+{
+    if (device_->fail.queryDevice) {
+        return -1;
+    }
+    hipObj::zeroObject(*attr);
+    attr->vendor_id = device_->vendorId;
+    return 0;
+}
+
+/* An empty GID table, so GID selection never looks at the device */
+int
+FakeVerbs::query_port(struct ibv_context *, uint8_t, struct ibv_port_attr *attr) const
+{
+    if (device_->fail.queryPort) {
+        return -1;
+    }
+    if (attr) {
+        hipObj::zeroObject(*attr);
+    }
+    return 0;
+}
+
+int
+FakeVerbs::query_gid(struct ibv_context *, uint8_t, int, union ibv_gid *gid) const
+{
+    if (device_->fail.queryGid) {
+        return -1;
+    }
+    if (gid) {
+        hipObj::zeroObject(*gid);
+    }
+    return 0;
+}
+
+struct ibv_pd *
+FakeVerbs::alloc_pd(struct ibv_context *) const
+{
+    if (device_->fail.allocPd) {
+        return nullptr;
+    }
+    ++device_->log.allocPd;
+    return reinterpret_cast<struct ibv_pd *>(0x3);
+}
+
+int
+FakeVerbs::dealloc_pd(struct ibv_pd *) const
+{
+    ++device_->log.deallocPd;
+    return 0;
+}
+
+struct ibv_mr *
+FakeVerbs::reg_mr(struct ibv_pd *, void *addr, size_t, int access) const
+{
+    ++device_->log.registerMr;
+    device_->log.mrAccess = access;
+    if (device_->fail.registerAll || addr == device_->fail.registerAddr) {
+        return nullptr;
+    }
+    auto *mr = static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
+    if (mr) {
+        mr->addr = addr;
+        mr->rkey = 0x1234;
+    }
+    return mr;
+}
+
+bool
+FakeVerbs::supportsDmabuf() const
+{
+    return false;
+}
+
+struct ibv_mr *
+FakeVerbs::reg_dmabuf_mr(struct ibv_pd *, uint64_t, size_t, uint64_t, int, int) const
+{
+    errno = EOPNOTSUPP;
+    return nullptr;
+}
+
+int
+FakeVerbs::dereg_mr(struct ibv_mr *mr) const
+{
+    ++device_->log.deregMr;
+    std::free(mr);
+    return 0;
+}
+
+struct ibv_cq *
+FakeVerbs::create_cq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int) const
+{
+    if (device_->fail.createCq) {
+        return nullptr;
+    }
+    ++device_->log.createCq;
+    return reinterpret_cast<struct ibv_cq *>(0x4);
+}
+
+int
+FakeVerbs::destroy_cq(struct ibv_cq *) const
+{
+    ++device_->log.destroyCq;
+    return 0;
+}
+
+struct ibv_qp *
+FakeVerbs::create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const
+{
+    if (device_->fail.createQp) {
+        return nullptr;
+    }
+    auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
+    if (qp) {
+        ++device_->log.createQp;
+        qp->qp_num = 0x55;
+    }
+    return qp;
+}
+
+int
+FakeVerbs::modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask) const
+{
+    if (device_->modifyQpCount < device_->modifyQp.size()) {
+        device_->modifyQp[device_->modifyQpCount++] = {*attr, mask};
+    }
+    return static_cast<int>(attr->qp_state) == device_->fail.modifyQpToState ? -1 : 0;
+}
+
+int
+FakeVerbs::destroy_qp(struct ibv_qp *qp) const
+{
+    ++device_->log.destroyQp;
+    std::free(qp);
+    return 0;
+}
+
+int
+FakeVerbs::poll_cq(struct ibv_cq *, int, struct ibv_wc *wc) const
+{
+    if (device_->pollResult <= 0) {
+        return device_->pollResult;
+    }
+    hipObj::zeroObject(*wc);
+    wc->status = device_->pollStatus;
+    wc->opcode = device_->pollOpcode;
+    return 1;
+}
+
+int
+FakeVerbs::post_send(struct ibv_qp *, struct ibv_send_wr *, struct ibv_send_wr **) const
+{
+    ++device_->log.postSend;
+    return 0;
+}
+
+int
+FakeVerbs::post_recv(struct ibv_qp *, struct ibv_recv_wr *, struct ibv_recv_wr **) const
+{
+    ++device_->log.postRecv;
+    return 0;
+}
 
 // ---- HIP -------------------------------------------------------------
 
@@ -437,27 +476,7 @@ FakeDeviceTest::SetUp()
     savedEnumerator_ = hipObj::setNicEnumerator(&enumerator_);
 
     fakeHip_.emplace(hip_);
-
-    hipObj::IbvFuncs funcs{};
-    funcs.get_device_list  = &fakeGetDeviceList;
-    funcs.free_device_list = &fakeFreeDeviceList;
-    funcs.open_device      = &fakeOpenDevice;
-    funcs.close_device     = &fakeCloseDevice;
-    funcs.get_device_name  = &fakeGetDeviceName;
-    funcs.query_device     = &fakeQueryDevice;
-    funcs.query_port       = &fakeQueryPort;
-    funcs.query_gid        = &fakeQueryGid;
-    funcs.alloc_pd         = &fakeAllocPd;
-    funcs.dealloc_pd       = &fakeDeallocPd;
-    funcs.reg_mr_iova2     = &fakeRegisterMrIova2;
-    funcs.dereg_mr         = &fakeDeregisterMr;
-    funcs.create_cq        = &fakeCreateCq;
-    funcs.destroy_cq       = &fakeDestroyCq;
-    funcs.create_qp        = &fakeCreateQp;
-    funcs.modify_qp        = &fakeModifyQp;
-    funcs.destroy_qp       = &fakeDestroyQp;
-    funcs.poll_cq          = &fakePollCq;
-    fakeIbv_.emplace(funcs);
+    fakeIbv_.emplace(verbs_);
 
     fake() = FakeDevice{};
 }

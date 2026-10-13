@@ -25,6 +25,7 @@
 #include "hip-seam.h"
 #include "hipobj.h"
 #include "ibv-core.h"
+#include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "state.h"
 #include "token.h"
@@ -39,6 +40,7 @@ struct CallLog {
     int recvReply   = 0;
     int registerMr  = 0;
     int mrAccess    = 0; /* the access flags of the last reg_mr */
+    int deregMr     = 0;
     int openDevice  = 0;
     int closeDevice = 0;
     int allocPd     = 0;
@@ -47,6 +49,8 @@ struct CallLog {
     int destroyCq   = 0;
     int createQp    = 0;
     int destroyQp   = 0;
+    int postSend    = 0;
+    int postRecv    = 0;
 
     /* HIP and HSA */
     int memcpy            = 0; /* memcpyAsync() */
@@ -206,6 +210,55 @@ private:
     FakeDevice *device_;
 };
 
+/* A libibverbs that answers from a FakeDevice and records its calls there.
+ * It has one device, and no ibv_reg_dmabuf_mr(). reg_mr() and create_qp()
+ * allocate real objects, which dereg_mr() and destroy_qp() free; the
+ * other objects are made-up addresses. A test can derive from it to
+ * change some of its methods. */
+class FakeVerbs : public hipObj::Verbs {
+public:
+    explicit FakeVerbs(FakeDevice &device) noexcept : device_(&device)
+    {
+    }
+    ~FakeVerbs() override = default;
+
+    FakeVerbs(const FakeVerbs &)            = delete;
+    FakeVerbs &operator=(const FakeVerbs &) = delete;
+    FakeVerbs(FakeVerbs &&)                 = delete;
+    FakeVerbs &operator=(FakeVerbs &&)      = delete;
+
+    struct ibv_device **get_device_list(int *num_devices) const override;
+    void                free_device_list(struct ibv_device **list) const override;
+    struct ibv_context *open_device(struct ibv_device *device) const override;
+    int                 close_device(struct ibv_context *context) const override;
+    const char         *get_device_name(struct ibv_device *device) const override;
+    int query_device(struct ibv_context *context, struct ibv_device_attr *device_attr) const override;
+    int query_port(struct ibv_context *context, uint8_t port_num,
+                   struct ibv_port_attr *port_attr) const override;
+    int query_gid(struct ibv_context *context, uint8_t port_num, int index,
+                  union ibv_gid *gid) const override;
+    struct ibv_pd *alloc_pd(struct ibv_context *context) const override;
+    int            dealloc_pd(struct ibv_pd *pd) const override;
+    struct ibv_mr *reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const override;
+    bool           supportsDmabuf() const override;
+    struct ibv_mr *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                                 int access) const override;
+    int            dereg_mr(struct ibv_mr *mr) const override;
+    struct ibv_cq *create_cq(struct ibv_context *context, int cqe, void *cq_context,
+                             struct ibv_comp_channel *channel, int comp_vector) const override;
+    int            destroy_cq(struct ibv_cq *cq) const override;
+    struct ibv_qp *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const override;
+    int            modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const override;
+    int            destroy_qp(struct ibv_qp *qp) const override;
+    int            poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
+    int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const override;
+    int post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr) const override;
+
+private:
+    /* A pointer, so the const methods can change what it points to */
+    FakeDevice *device_;
+};
+
 /* Makes hip() return runtime for as long as it lives, and puts the
  * previous runtime back when it's destroyed. runtime has to outlive it.
  * Create and destroy it only while no other thread is calling hip(). */
@@ -280,6 +333,7 @@ protected:
     hipObj::DriverState         *savedState_ = nullptr;
     EmptyNicEnumerator           enumerator_{};
     hipObj::NicEnumerator       *savedEnumerator_ = nullptr;
+    FakeVerbs                    verbs_{fake()};
     std::optional<ScopedFakeIbv> fakeIbv_{};
     FakeHip                      hip_{fake()};
     std::optional<ScopedFakeHip> fakeHip_{};

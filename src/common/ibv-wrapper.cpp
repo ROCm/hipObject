@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * IBV wrapper implementation. Derived from ROCm/rocSHMEM
+ * libibverbs seam implementation. Derived from ROCm/rocSHMEM
  * src/gda/ibv_wrapper.cpp via rocm-xio src/common/ibv-wrapper.cpp.
  * Loads libibverbs via dlopen; no link dependency.
  */
@@ -12,13 +12,12 @@
 #include <bit>
 #include <cerrno>
 #include <cstdio>
-#include <cstdlib>
+#include <memory>
 #include <string>
-#include <system_error>
+#include <utility>
 
 #include <dlfcn.h>
 
-#include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
@@ -26,11 +25,30 @@
 
 namespace hipObj {
 
-// Wrapper installed by tests; null means the library's own is active.
+// Verbs installed by tests; null means the library's own are active.
 // The library itself never swaps the pointer.
-static IBVWrapper *g_ibv_override = nullptr;
+static const Verbs *g_ibv_override = nullptr;
 
-IBVWrapper &
+namespace {
+
+    /* The library's own verbs, or null when libibverbs couldn't be
+     * loaded. Loaded on the first call, not when the library loads, so
+     * an application that never initializes hipObject never loads
+     * libibverbs. Never destroyed, so libibverbs stays loaded until exit:
+     * a global holding verbs objects can outlive verbs that were loaded
+     * after it. Clang still warns, since NoDestructor's empty destructor
+     * isn't trivial. */
+    const Verbs *libraryVerbs()
+    {
+        HIPOBJ_WARN_NO_EXIT_DTOR_OFF
+        static NoDestructor<std::unique_ptr<LoadedVerbs>> verbs(loadLibibverbs());
+        HIPOBJ_WARN_NO_EXIT_DTOR_ON
+        return verbs->get();
+    }
+
+} // anonymous namespace
+
+const Verbs &
 ibv()
 {
     /* Checked first, so a test that installs fakes never loads
@@ -38,24 +56,20 @@ ibv()
     if (g_ibv_override) {
         return *g_ibv_override;
     }
-
-    /* Created on the first call, not when the library loads, so an
-     * application that never initializes hipObject never loads
-     * libibverbs. Never destroyed, so libibverbs stays loaded until
-     * exit: a global holding verbs objects can outlive a wrapper that
-     * was created after it. Clang still warns, since NoDestructor's
-     * empty destructor isn't trivial. */
-    HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-    static NoDestructor<IBVWrapper> wrapper;
-    HIPOBJ_WARN_NO_EXIT_DTOR_ON
-    return *wrapper;
+    return *libraryVerbs();
 }
 
-IBVWrapper *
-setIbvForTest(IBVWrapper *wrapper)
+bool
+ibvAvailable()
 {
-    IBVWrapper *previous = g_ibv_override;
-    g_ibv_override       = wrapper;
+    return g_ibv_override || libraryVerbs();
+}
+
+const Verbs *
+setIbvForTest(const Verbs *verbs)
+{
+    const Verbs *previous = g_ibv_override;
+    g_ibv_override        = verbs;
     return previous;
 }
 
@@ -98,220 +112,126 @@ namespace {
         return handle;
     }
 
-    /* Owns a dmabuf fd from HipRuntime::exportDmabuf(), and closes it
-     * with the same runtime's closeDmabuf(). Only the registration needs
-     * it: ibv_reg_dmabuf_mr() takes its own reference to the dma-buf,
-     * which the MR keeps until it's deregistered, so the fd is closed as
-     * soon as the registration call returns, whether or not it
-     * succeeded. */
-    class DmabufFd {
-    public:
-        DmabufFd(int fd, const HipRuntime &runtime) noexcept : fd_(fd), runtime_(&runtime)
-        {
-        }
-        ~DmabufFd()
-        {
-            (void)runtime_->closeDmabuf(fd_);
-        }
+    /* Fills in funcs from libibverbs. False when a function that has to be
+     * there is missing. */
+    bool load_functions(LoadedVerbs::Funcs &funcs, void *handle)
+    {
+        dlsym_load_optional(funcs.reg_dmabuf_mr, handle, "ibv_reg_dmabuf_mr");
+        // poll_cq / post_send / post_recv are static inline helpers in verbs.h
+        // that delegate to the per-context ops table; depending on the
+        // rdma-core build they may not exist as dynamic symbols. Load them
+        // optionally and fall back to the context ops entries, which is what
+        // the inline functions themselves call.
+        dlsym_load_optional(funcs.poll_cq, handle, "ibv_poll_cq");
+        dlsym_load_optional(funcs.post_send, handle, "ibv_post_send");
+        dlsym_load_optional(funcs.post_recv, handle, "ibv_post_recv");
 
-        DmabufFd(const DmabufFd &)            = delete;
-        DmabufFd &operator=(const DmabufFd &) = delete;
-        DmabufFd(DmabufFd &&)                 = delete;
-        DmabufFd &operator=(DmabufFd &&)      = delete;
-
-        int get() const noexcept
-        {
-            return fd_;
-        }
-
-    private:
-        int               fd_;
-        const HipRuntime *runtime_;
-    };
+        // && stops at the first symbol that's missing
+        return dlsym_load(funcs.get_device_list, handle, "ibv_get_device_list") &&
+               dlsym_load(funcs.free_device_list, handle, "ibv_free_device_list") &&
+               dlsym_load(funcs.open_device, handle, "ibv_open_device") &&
+               dlsym_load(funcs.close_device, handle, "ibv_close_device") &&
+               dlsym_load(funcs.get_device_name, handle, "ibv_get_device_name") &&
+               dlsym_load(funcs.query_device, handle, "ibv_query_device") &&
+               dlsym_load(funcs.query_port, handle, "ibv_query_port") &&
+               dlsym_load(funcs.query_gid, handle, "ibv_query_gid") &&
+               dlsym_load(funcs.alloc_pd, handle, "ibv_alloc_pd") &&
+               dlsym_load(funcs.dealloc_pd, handle, "ibv_dealloc_pd") &&
+               dlsym_load(funcs.reg_mr_iova2, handle, "ibv_reg_mr_iova2") &&
+               dlsym_load(funcs.dereg_mr, handle, "ibv_dereg_mr") &&
+               dlsym_load(funcs.create_cq, handle, "ibv_create_cq") &&
+               dlsym_load(funcs.destroy_cq, handle, "ibv_destroy_cq") &&
+               dlsym_load(funcs.create_qp, handle, "ibv_create_qp") &&
+               dlsym_load(funcs.modify_qp, handle, "ibv_modify_qp") &&
+               dlsym_load(funcs.destroy_qp, handle, "ibv_destroy_qp");
+    }
 
 } // anonymous namespace
 
-IBVWrapper::IBVWrapper() : ibv_handle_(open_libibverbs())
+std::unique_ptr<LoadedVerbs>
+loadLibibverbs()
 {
-    init_dmabuf_settings();
-
-    if (!ibv_handle_) {
+    DlHandle library = open_libibverbs();
+    if (!library) {
         fprintf(stderr, "hipObj: Could not open libibverbs.so. RDMA disabled.\n");
-        return;
+        return nullptr;
     }
 
-    if (!init_function_table()) {
+    LoadedVerbs::Funcs funcs{};
+    if (!load_functions(funcs, library.get())) {
         fprintf(stderr, "hipObj: Could not init IBV function table. RDMA disabled.\n");
-        return;
+        return nullptr;
     }
 
-    initialized_ = true;
+    return std::make_unique<LoadedVerbs>(funcs, std::move(library));
 }
 
-IBVWrapper::IBVWrapper(const IbvFuncs &funcs) : funcs_(funcs), initialized_(true)
+LoadedVerbs::LoadedVerbs(const Funcs &funcs, DlHandle library) : library_(std::move(library)), funcs_(funcs)
 {
-    init_dmabuf_settings();
-}
-
-void
-IBVWrapper::init_dmabuf_settings()
-{
-    const char *dbg = getenv("HIPOBJ_RDMA_DEBUG");
-    dmabuf_debug_   = dbg && *dbg && dbg[0] != '0';
-
-    const char *env = getenv("HIPOBJ_DMABUF");
-    if (env && (env[0] == '0' || env[0] == 'n' || env[0] == 'N')) {
-        dmabuf_enabled_ = false;
-    }
-}
-
-bool
-IBVWrapper::is_dmabuf_supported()
-{
-    /* The only gate that can be answered here. Whether a given GPU can export
-     * a dmabuf and a given NIC can register it is answered by trying, in
-     * reg_mr(): both calls report their own failure and fall through. This
-     * used to additionally require CONFIG_DMABUF_MOVE_NOTIFY=y and
-     * CONFIG_PCI_P2PDMA=y from /boot/config-$(uname -r), which is a false
-     * negative on any kernel that registers dmabuf MRs without move-notify --
-     * the mainline builds the emulated-hardware CI lanes run on do exactly
-     * that, and lost GPU-direct to a grep. A config file is a prediction; the
-     * registration call is the fact. */
-    return dmabuf_enabled_ && funcs_.reg_dmabuf_mr != nullptr;
-}
-
-bool
-IBVWrapper::init_function_table()
-{
-    void *const handle = ibv_handle_.get();
-
-    dlsym_load_optional(funcs_.reg_dmabuf_mr, handle, "ibv_reg_dmabuf_mr");
-    // poll_cq / post_send / post_recv are static inline helpers in verbs.h
-    // that delegate to the per-context ops table; depending on the
-    // rdma-core build they may not exist as dynamic symbols. Load them
-    // optionally and fall back to the context ops entries, which is what
-    // the inline functions themselves call.
-    dlsym_load_optional(funcs_.poll_cq, handle, "ibv_poll_cq");
-    dlsym_load_optional(funcs_.post_send, handle, "ibv_post_send");
-    dlsym_load_optional(funcs_.post_recv, handle, "ibv_post_recv");
-
-    // && stops at the first symbol that's missing
-    return dlsym_load(funcs_.get_device_list, handle, "ibv_get_device_list") &&
-           dlsym_load(funcs_.free_device_list, handle, "ibv_free_device_list") &&
-           dlsym_load(funcs_.open_device, handle, "ibv_open_device") &&
-           dlsym_load(funcs_.close_device, handle, "ibv_close_device") &&
-           dlsym_load(funcs_.get_device_name, handle, "ibv_get_device_name") &&
-           dlsym_load(funcs_.query_device, handle, "ibv_query_device") &&
-           dlsym_load(funcs_.query_port, handle, "ibv_query_port") &&
-           dlsym_load(funcs_.query_gid, handle, "ibv_query_gid") &&
-           dlsym_load(funcs_.alloc_pd, handle, "ibv_alloc_pd") &&
-           dlsym_load(funcs_.dealloc_pd, handle, "ibv_dealloc_pd") &&
-           dlsym_load(funcs_.reg_mr_iova2, handle, "ibv_reg_mr_iova2") &&
-           dlsym_load(funcs_.dereg_mr, handle, "ibv_dereg_mr") &&
-           dlsym_load(funcs_.create_cq, handle, "ibv_create_cq") &&
-           dlsym_load(funcs_.destroy_cq, handle, "ibv_destroy_cq") &&
-           dlsym_load(funcs_.create_qp, handle, "ibv_create_qp") &&
-           dlsym_load(funcs_.modify_qp, handle, "ibv_modify_qp") &&
-           dlsym_load(funcs_.destroy_qp, handle, "ibv_destroy_qp");
 }
 
 struct ibv_device **
-IBVWrapper::get_device_list(int *num_devices)
+LoadedVerbs::get_device_list(int *num_devices) const
 {
     return funcs_.get_device_list(num_devices);
 }
 
 void
-IBVWrapper::free_device_list(struct ibv_device **list)
+LoadedVerbs::free_device_list(struct ibv_device **list) const
 {
     funcs_.free_device_list(list);
 }
 
 struct ibv_context *
-IBVWrapper::open_device(struct ibv_device *device)
+LoadedVerbs::open_device(struct ibv_device *device) const
 {
     return funcs_.open_device(device);
 }
 
 int
-IBVWrapper::close_device(struct ibv_context *context)
+LoadedVerbs::close_device(struct ibv_context *context) const
 {
     return funcs_.close_device(context);
 }
 
 const char *
-IBVWrapper::get_device_name(struct ibv_device *device)
+LoadedVerbs::get_device_name(struct ibv_device *device) const
 {
     return funcs_.get_device_name(device);
 }
 
 int
-IBVWrapper::query_device(struct ibv_context *context, struct ibv_device_attr *device_attr)
+LoadedVerbs::query_device(struct ibv_context *context, struct ibv_device_attr *device_attr) const
 {
     return funcs_.query_device(context, device_attr);
 }
 
 int
-IBVWrapper::query_port(struct ibv_context *context, uint8_t port_num, struct ibv_port_attr *port_attr)
+LoadedVerbs::query_port(struct ibv_context *context, uint8_t port_num, struct ibv_port_attr *port_attr) const
 {
     return funcs_.query_port(context, port_num, port_attr);
 }
 
 int
-IBVWrapper::query_gid(struct ibv_context *context, uint8_t port_num, int index, union ibv_gid *gid)
+LoadedVerbs::query_gid(struct ibv_context *context, uint8_t port_num, int index, union ibv_gid *gid) const
 {
     return funcs_.query_gid(context, port_num, index, gid);
 }
 
 struct ibv_pd *
-IBVWrapper::alloc_pd(struct ibv_context *context)
+LoadedVerbs::alloc_pd(struct ibv_context *context) const
 {
     return funcs_.alloc_pd(context);
 }
 
 int
-IBVWrapper::dealloc_pd(struct ibv_pd *pd)
+LoadedVerbs::dealloc_pd(struct ibv_pd *pd) const
 {
     return funcs_.dealloc_pd(pd);
 }
 
 struct ibv_mr *
-IBVWrapper::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
-{
-    if (is_dmabuf_supported()) {
-        const HipRuntime &runtime = hip();
-        uint64_t          offset  = 0;
-        int               fd      = -1;
-
-        const int status = runtime.exportDmabuf(addr, length, &fd, &offset);
-        if (status != 0) {
-            /* Not an error worth a line on stderr by default: this is also the
-             * answer for a host pointer, and the host-buffer paths register far
-             * more often than the device ones. The plain path below handles it. */
-            if (dmabuf_debug_) {
-                fprintf(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: %d\n", status);
-            }
-        }
-        else {
-            const DmabufFd dmabuf(fd, runtime);
-            struct ibv_mr *mr = funcs_.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr),
-                                                     dmabuf.get(), access);
-            if (mr) {
-                return mr;
-            }
-            const std::string reason = std::generic_category().message(errno);
-            fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n", reason.c_str());
-        }
-        // Fall through to the plain path: it fails too for device memory, but
-        // the caller distinguishes "no MR" from "wrong MR" and we must not
-        // invent a registration here.
-    }
-
-    return reg_mr_host(pd, addr, length, access);
-}
-
-struct ibv_mr *
-IBVWrapper::reg_mr_host(struct ibv_pd *pd, void *addr, size_t length, int access)
+LoadedVerbs::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const
 {
     /* What the ibv_reg_mr() macro in verbs.h does with an access value that
      * isn't a compile-time constant. ibv_reg_mr_iova2() with the address as
@@ -320,45 +240,62 @@ IBVWrapper::reg_mr_host(struct ibv_pd *pd, void *addr, size_t length, int access
     return funcs_.reg_mr_iova2(pd, addr, length, reinterpret_cast<uintptr_t>(addr), access);
 }
 
+bool
+LoadedVerbs::supportsDmabuf() const
+{
+    return funcs_.reg_dmabuf_mr != nullptr;
+}
+
+struct ibv_mr *
+LoadedVerbs::reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                           int access) const
+{
+    if (!funcs_.reg_dmabuf_mr) {
+        errno = EOPNOTSUPP;
+        return nullptr;
+    }
+    return funcs_.reg_dmabuf_mr(pd, offset, length, iova, fd, access);
+}
+
 int
-IBVWrapper::dereg_mr(struct ibv_mr *mr)
+LoadedVerbs::dereg_mr(struct ibv_mr *mr) const
 {
     return funcs_.dereg_mr(mr);
 }
 
 struct ibv_cq *
-IBVWrapper::create_cq(struct ibv_context *context, int cqe, void *cq_context,
-                      struct ibv_comp_channel *channel, int comp_vector)
+LoadedVerbs::create_cq(struct ibv_context *context, int cqe, void *cq_context,
+                       struct ibv_comp_channel *channel, int comp_vector) const
 {
     return funcs_.create_cq(context, cqe, cq_context, channel, comp_vector);
 }
 
 int
-IBVWrapper::destroy_cq(struct ibv_cq *cq)
+LoadedVerbs::destroy_cq(struct ibv_cq *cq) const
 {
     return funcs_.destroy_cq(cq);
 }
 
 struct ibv_qp *
-IBVWrapper::create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
+LoadedVerbs::create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const
 {
     return funcs_.create_qp(pd, qp_init_attr);
 }
 
 int
-IBVWrapper::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask)
+LoadedVerbs::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const
 {
     return funcs_.modify_qp(qp, attr, attr_mask);
 }
 
 int
-IBVWrapper::destroy_qp(struct ibv_qp *qp)
+LoadedVerbs::destroy_qp(struct ibv_qp *qp) const
 {
     return funcs_.destroy_qp(qp);
 }
 
 int
-IBVWrapper::poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc)
+LoadedVerbs::poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const
 {
     if (funcs_.poll_cq) {
         return funcs_.poll_cq(cq, num_entries, wc);
@@ -368,7 +305,7 @@ IBVWrapper::poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc)
 }
 
 int
-IBVWrapper::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr)
+LoadedVerbs::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const
 {
     if (funcs_.post_send) {
         return funcs_.post_send(qp, wr, bad_wr);
@@ -377,7 +314,7 @@ IBVWrapper::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send
 }
 
 int
-IBVWrapper::post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr)
+LoadedVerbs::post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr) const
 {
     if (funcs_.post_recv) {
         return funcs_.post_recv(qp, wr, bad_wr);

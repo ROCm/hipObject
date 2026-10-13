@@ -53,6 +53,9 @@ namespace v2 {
             static hipObj::DeviceHandle *dh = nullptr;
             static std::once_flag        once;
             std::call_once(once, [] {
+                if (!hipObj::ibvAvailable()) {
+                    return;
+                }
                 int                      n = 0;
                 hipObj::IbvDeviceListPtr devs(hipObj::ibv().get_device_list(&n));
                 if (devs != nullptr && n > 0) {

@@ -14,8 +14,6 @@
  */
 
 #include <cstddef>
-#include <cstdint>
-#include <optional>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
@@ -26,7 +24,6 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
-#include "ibv-wrapper.h"
 #include "state.h"
 
 /* Google Test registers each test with a global constructor */
@@ -72,17 +69,27 @@ public:
     }
 };
 
-struct ibv_qp *
-throwingCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
-{
-    throwIt();
-}
+/* The fake verbs, with creating a QP throwing */
+class ThrowingCreateQpVerbs : public hipObjTest::FakeVerbs {
+public:
+    using FakeVerbs::FakeVerbs;
 
-struct ibv_mr *
-throwingRegisterMrIova2(struct ibv_pd *, void *, size_t, uintptr_t, int)
-{
-    throwIt();
-}
+    struct ibv_qp *create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const override
+    {
+        throwIt();
+    }
+};
+
+/* The fake verbs, with registering memory throwing */
+class ThrowingRegMrVerbs : public hipObjTest::FakeVerbs {
+public:
+    using FakeVerbs::FakeVerbs;
+
+    struct ibv_mr *reg_mr(struct ibv_pd *, void *, size_t, int) const override
+    {
+        throwIt();
+    }
+};
 
 int
 throwingSendRequest(void *, const char *, size_t)
@@ -103,13 +110,6 @@ protected:
         FakeDeviceTest::SetUp();
         g_thrown = GetParam();
     }
-
-    void throwFromRegisterMr()
-    {
-        hipObj::IbvFuncs funcs = fakeIbv_->funcs();
-        funcs.reg_mr_iova2     = &throwingRegisterMrIova2;
-        fakeIbv_->replace(funcs);
-    }
 };
 
 TEST_P(ApiExceptionTest, Init)
@@ -123,14 +123,13 @@ TEST_P(ApiExceptionTest, Init)
 
 TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
 {
-    const hipObj::IbvFuncs fakes = fakeIbv_->funcs();
-    hipObj::IbvFuncs       funcs = fakes;
-    funcs.create_qp              = &throwingCreateQp;
-    fakeIbv_->replace(funcs);
-
-    hipObjConfig_t config = makeConfig();
-    EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
-    EXPECT_FALSE(state_.initialized);
+    {
+        const ThrowingCreateQpVerbs     throwing(fake());
+        const hipObjTest::ScopedFakeIbv installed(throwing);
+        hipObjConfig_t                  config = makeConfig();
+        EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
+        EXPECT_FALSE(state_.initialized);
+    }
 
     /* The device, PD, and CQ opened before the throw are released */
     const hipObjTest::CallLog &log = fake().log;
@@ -142,14 +141,14 @@ TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
     EXPECT_EQ(log.destroyCq, 1);
 
     /* The library still works */
-    fakeIbv_->replace(fakes);
     ASSERT_NO_FATAL_FAILURE(init());
 }
 
 TEST_P(ApiExceptionTest, BufRegister)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    throwFromRegisterMr();
+    const ThrowingRegMrVerbs        throwing(fake());
+    const hipObjTest::ScopedFakeIbv installed(throwing);
     EXPECT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
 }
@@ -157,7 +156,8 @@ TEST_P(ApiExceptionTest, BufRegister)
 TEST_P(ApiExceptionTest, BufRegisterHost)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    throwFromRegisterMr();
+    const ThrowingRegMrVerbs        throwing(fake());
+    const hipObjTest::ScopedFakeIbv installed(throwing);
     EXPECT_EQ(hipObjBufRegisterHost(kDevBuf, kBufSize).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
 }

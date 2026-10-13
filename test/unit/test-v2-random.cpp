@@ -16,12 +16,12 @@
 
 #include <gtest/gtest.h>
 
+#include "fake-device.h"
 #include "fake-ibv.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
-#include "ibv-wrapper.h"
 #include "v2-random.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
@@ -101,10 +101,13 @@ TEST_F(V2RandomTest, CookiePassThrough)
 /* PSNs reach the RTR/RTS attributes (modify_qp spy). */
 class V2PsnDeliveryTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        hipObj::IbvFuncs funcs{};
-        funcs.modify_qp = [](struct ibv_qp *, struct ibv_qp_attr *attr, int) -> int {
+    /* Records the PSNs, and leaves the test's made-up QP alone */
+    class PsnVerbs : public hipObjTest::FakeVerbs {
+    public:
+        using FakeVerbs::FakeVerbs;
+
+        int modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int) const override
+        {
             if (attr->qp_state == 3) { /* RTS */
                 g_sqPsn.push_back(attr->sq_psn);
             }
@@ -112,16 +115,26 @@ protected:
                 g_rqPsn.push_back(attr->rq_psn);
             }
             return 0;
-        };
-        funcs.query_port = [](struct ibv_context *, uint8_t, struct ibv_port_attr *a) -> int {
+        }
+
+        int query_port(struct ibv_context *, uint8_t, struct ibv_port_attr *a) const override
+        {
             hipObj::zeroObject(*a);
             a->active_mtu = IBV_MTU_4096;
             return 0;
-        };
+        }
+
         /* The test's RcConnV2 owns a fake QP and destroys it when the
          * test body ends, before TearDown() removes the fakes. */
-        funcs.destroy_qp = [](struct ibv_qp *) -> int { return 0; };
-        fakeIbv_.emplace(funcs);
+        int destroy_qp(struct ibv_qp *) const override
+        {
+            return 0;
+        }
+    };
+
+    void SetUp() override
+    {
+        fakeIbv_.emplace(verbs_);
         g_rqPsn.clear();
         g_sqPsn.clear();
     }
@@ -130,6 +143,8 @@ protected:
         fakeIbv_.reset();
     }
 
+    hipObjTest::FakeDevice                   device_{};
+    PsnVerbs                                 verbs_{device_};
     std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
     static std::vector<uint32_t>             g_rqPsn;
     static std::vector<uint32_t>             g_sqPsn;
