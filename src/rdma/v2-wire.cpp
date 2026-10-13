@@ -9,7 +9,6 @@
 #include "v2-wire.h"
 
 #include <algorithm>
-#include <cctype>
 #include <optional>
 
 #include "hipobj-format.h"
@@ -107,13 +106,19 @@ namespace v2 {
             return s.substr(b, e - b);
         }
 
-        /* Header names are case-insensitive */
+        /* Folds ASCII uppercase only. std::tolower() depends on the
+         * application's locale: in a Turkish one, 'I' doesn't fold to 'i',
+         * and in an 8-bit one, non-ASCII bytes can fold to ASCII letters. */
+        char asciiLower(char c)
+        {
+            return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+        }
+
+        /* Header names are ASCII and case-insensitive (RFC 9110) */
         bool headerNameIs(std::string_view name, std::string_view expected)
         {
-            return std::ranges::equal(name, expected, [](char a, char b) {
-                return std::tolower(static_cast<unsigned char>(a)) ==
-                       std::tolower(static_cast<unsigned char>(b));
-            });
+            return std::ranges::equal(name, expected,
+                                      [](char a, char b) { return asciiLower(a) == asciiLower(b); });
         }
 
     } // namespace
