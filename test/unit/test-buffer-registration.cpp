@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <atomic>
 #include <cstdint>
 #include <optional>
 
@@ -88,7 +89,7 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
     ASSERT_NE(entry->mr, nullptr);
     EXPECT_EQ(entry->mr->addr, hipDevice_.lastHostMalloc);
     EXPECT_EQ(entry->hostBuf.get(), hipDevice_.lastHostMalloc);
-    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(hipDevice_.lastHostMalloc));
+    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(hipDevice_.lastHostMalloc.load()));
     EXPECT_FALSE(entry->isDmabuf);
     EXPECT_EQ(hipDevice_.log.hostMalloc, 1);
 

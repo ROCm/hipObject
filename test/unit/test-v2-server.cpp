@@ -36,7 +36,7 @@ using hipObj::v2::SessState;
 class FakeClock : public hipObj::v2::ClockSource {
 public:
     hipObj::v2::TimePoint current{std::chrono::seconds(1)};
-    hipObj::v2::TimePoint now() override
+    hipObj::v2::TimePoint now() const override
     {
         return current;
     }
@@ -87,8 +87,8 @@ protected:
         return s;
     }
 
-    std::unique_ptr<FakeClock> clock_{};
-    hipObj::v2::ClockSource   *prevClock_ = nullptr;
+    std::unique_ptr<FakeClock>     clock_{};
+    const hipObj::v2::ClockSource *prevClock_ = nullptr;
 
 private:
     /* Declared before table_ so the fakes outlive it (members are

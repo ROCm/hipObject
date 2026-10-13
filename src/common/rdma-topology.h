@@ -29,8 +29,8 @@ enum class GidPriority {
 };
 
 /* One GID table entry as read from the device: its index, GID, and
- * RoCE version from sysfs gid_attrs/types (1, 2, or anything else for
- * unknown). */
+ * RoCE version from NicTopology::roceVersion() (1, 2, or anything else
+ * for unknown). */
 struct GidCandidate {
     int index;
     Gid gid;
@@ -43,8 +43,8 @@ struct GidCandidate {
  * qualifies. */
 int PickBestGid(std::span<const GidCandidate> candidates);
 
-/* An RDMA NIC: its index in the NIC enumerator's list, and its device
- * name */
+/* An RDMA NIC: its index in the list NicTopology::enumerate() returned,
+ * and its device name */
 struct RdmaNic {
     int         index;
     std::string name;
@@ -56,6 +56,9 @@ struct RdmaNic {
  * such NIC or the GPU's bus id can't be found. */
 std::optional<RdmaNic> GetClosestNicToGpu(int gpuIndex, const char *hca_list);
 
+/* PickBestGid() over the GID table of port_num on ctx's device, with each
+ * entry's RoCE version from the NIC topology. -1 when the port can't be
+ * queried or no entry qualifies. */
 int SelectBestGid(ibv_context *ctx, uint8_t port_num);
 
 } // namespace hipObj

@@ -20,28 +20,30 @@ namespace v2 {
      * steady clock (a condition variable, a CQ poll). */
     using TimePoint = std::chrono::steady_clock::time_point;
 
+    /* The methods are const, so one clock can be shared by everything
+     * that uses it */
     class ClockSource {
     public:
         ClockSource()          = default;
         virtual ~ClockSource() = default;
 
-        /* Copying through a base reference would copy only the base part */
+        /* Copying through a reference to the base would slice */
         ClockSource(const ClockSource &)            = delete;
         ClockSource &operator=(const ClockSource &) = delete;
         ClockSource(ClockSource &&)                 = delete;
         ClockSource &operator=(ClockSource &&)      = delete;
 
-        virtual TimePoint now() = 0;
+        virtual TimePoint now() const = 0;
     };
 
     /* Returns the active clock. Production default unless a test
      * override is installed. */
-    ClockSource &clockSource();
+    const ClockSource &clockSource();
 
     /* Installs a test clock and returns the previously active source
      * (nullptr when the production default was active). Passing nullptr
      * restores the default. Unit tests only. */
-    ClockSource *setClockSourceForTest(ClockSource *source);
+    const ClockSource *setClockSourceForTest(const ClockSource *source);
 
 } // namespace v2
 } // namespace hipObj

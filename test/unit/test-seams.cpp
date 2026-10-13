@@ -10,11 +10,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -144,23 +146,53 @@ TEST(HipSeamTest, SystemHipForwardsEachCall)
 
 // ---- NIC topology seam -------------------------------------------
 
-class FakeNicEnumerator : public hipObj::NicEnumerator {
+/* What a FakeNicTopology answers with, and what it was asked */
+struct TopologyState {
+    std::vector<hipObj::NicInfo> nics{};
+    std::vector<int>             roceVersions{}; /* by GID index; -1 past the end */
+    std::string                  lastHcaList{};
+    std::string                  lastDevName{};
+    int                          lastPortNum = -1;
+};
+
+class FakeNicTopology : public hipObj::NicTopology {
 public:
-    std::vector<hipObj::NicInfo> Enumerate(const char *hca_list) override
+    explicit FakeNicTopology(TopologyState &state) noexcept : state_(&state)
     {
-        last_hca_list_ = hca_list ? hca_list : "";
-        return nics_;
+    }
+    ~FakeNicTopology() override = default;
+
+    FakeNicTopology(const FakeNicTopology &)            = delete;
+    FakeNicTopology &operator=(const FakeNicTopology &) = delete;
+    FakeNicTopology(FakeNicTopology &&)                 = delete;
+    FakeNicTopology &operator=(FakeNicTopology &&)      = delete;
+
+    std::vector<hipObj::NicInfo> enumerate(const char *hca_list) const override
+    {
+        state_->lastHcaList = hca_list ? hca_list : "";
+        return state_->nics;
     }
 
-    std::vector<hipObj::NicInfo> nics_{};
-    std::string                  last_hca_list_{};
+    int roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override
+    {
+        state_->lastDevName = devName;
+        state_->lastPortNum = portNum;
+        if (gidIndex < 0 || std::cmp_greater_equal(gidIndex, state_->roceVersions.size())) {
+            return -1;
+        }
+        return state_->roceVersions[static_cast<size_t>(gidIndex)];
+    }
+
+private:
+    /* A pointer, so the const methods can change what it points to */
+    TopologyState *state_;
 };
 
 class NicSeamTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        previous_        = hipObj::setNicEnumerator(&fake_);
+        fakeTopology_.emplace(topology_);
         device_.gpuBusId = kGpuBusId;
         fakeHip_.emplace(hip_);
     }
@@ -168,19 +200,20 @@ protected:
     void TearDown() override
     {
         fakeHip_.reset();
-        hipObj::setNicEnumerator(previous_);
+        fakeTopology_.reset();
     }
 
-    FakeNicEnumerator                        fake_{};
-    hipObj::NicEnumerator                   *previous_ = nullptr;
-    hipObjTest::FakeDevice                   device_{};
-    hipObjTest::FakeHip                      hip_{device_};
-    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
+    TopologyState                                 state_{};
+    FakeNicTopology                               topology_{state_};
+    std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
+    hipObjTest::FakeDevice                        device_{};
+    hipObjTest::FakeHip                           hip_{device_};
+    std::optional<hipObjTest::ScopedFakeHip>      fakeHip_{};
 };
 
 TEST_F(NicSeamTest, ClosestBusIdWins)
 {
-    fake_.nics_ = {
+    state_.nics = {
         {"mlx5_0", "0000:18:00.0", 0, 1},
         {"mlx5_1", "0000:43:00.0", 1, 1},
         {"mlx5_2", "0000:11:00.0", 0, 1},
@@ -200,7 +233,7 @@ TEST_F(NicSeamTest, EmptyEnumerationFails)
 
 TEST_F(NicSeamTest, NoKnownBusIdFails)
 {
-    fake_.nics_ = {
+    state_.nics = {
         {"mlx5_0", "", 0, 1},
         {"mlx5_1", "", 1, 1},
     };
@@ -210,7 +243,7 @@ TEST_F(NicSeamTest, NoKnownBusIdFails)
 
 TEST_F(NicSeamTest, FirstOfClosestWins)
 {
-    fake_.nics_ = {
+    state_.nics = {
         {"mlx5_0", "", 0, 1},
         {"mlx5_1", "0000:43:00.0", 1, 1},
         {"mlx5_2", "0000:43:00.1", 1, 1},
@@ -224,9 +257,230 @@ TEST_F(NicSeamTest, FirstOfClosestWins)
 
 TEST_F(NicSeamTest, HcaFilterIsForwarded)
 {
-    fake_.nics_ = {{"mlx5_0", "0000:18:00.0", 0, 1}};
+    state_.nics = {{"mlx5_0", "0000:18:00.0", 0, 1}};
     hipObj::GetClosestNicToGpu(0, "mlx5_0,mlx5_1");
-    EXPECT_EQ(fake_.last_hca_list_, "mlx5_0,mlx5_1");
+    EXPECT_EQ(state_.lastHcaList, "mlx5_0,mlx5_1");
+}
+
+/* A device name that /sys/class/infiniband doesn't have, so SysfsTopology
+ * finds no bus id, NUMA node, or GID type for it */
+constexpr std::string_view kFakeDevName = "hipobj_fake0";
+
+/* Verbs whose one device has a three-entry GID table on each port: a
+ * link-local GID, an IPv4-mapped one, and an unconfigured (all-zero) one.
+ * Port 1 is down and port 2 is active. */
+class TopologyVerbs : public hipObjTest::FakeVerbs {
+public:
+    using FakeVerbs::FakeVerbs;
+
+    const char *get_device_name(struct ibv_device *) const override
+    {
+        return kFakeDevName.data();
+    }
+
+    int query_device(struct ibv_context *context, struct ibv_device_attr *attr) const override
+    {
+        const int result = FakeVerbs::query_device(context, attr);
+        if (result == 0) {
+            attr->phys_port_cnt = 2;
+        }
+        return result;
+    }
+
+    int query_port(struct ibv_context *context, uint8_t portNum, struct ibv_port_attr *attr) const override
+    {
+        const int result = FakeVerbs::query_port(context, portNum, attr);
+        if (result == 0) {
+            attr->state       = portNum == 2 ? IBV_PORT_ACTIVE : IBV_PORT_DOWN;
+            attr->gid_tbl_len = 3;
+        }
+        return result;
+    }
+
+    int query_gid(struct ibv_context *context, uint8_t portNum, int index, union ibv_gid *gid) const override
+    {
+        const int result = FakeVerbs::query_gid(context, portNum, index, gid);
+        if (result != 0) {
+            return result;
+        }
+        const std::span<uint8_t> raw(gid->raw);
+        if (index == 0) {
+            raw[0]  = 0xfe;
+            raw[1]  = 0x80;
+            raw[15] = 0x01;
+        }
+        else if (index == 1) {
+            raw[10] = 0xff;
+            raw[11] = 0xff;
+            raw[12] = 192;
+            raw[13] = 0;
+            raw[14] = 2;
+            raw[15] = 1;
+        }
+        return 0;
+    }
+};
+
+/* The fake verbs, and a context for the device they have, whose name
+ * SelectBestGid() reads */
+class GidSeamTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        std::ranges::copy(kFakeDevName, std::span(device_.name).begin());
+        context_.device = &device_;
+        fakeTopology_.emplace(topology_);
+        fakeIbv_.emplace(verbs_);
+    }
+
+    void TearDown() override
+    {
+        fakeIbv_.reset();
+        fakeTopology_.reset();
+    }
+
+    struct ibv_device                             device_ {};
+    struct ibv_context                            context_ {};
+    TopologyState                                 state_{};
+    FakeNicTopology                               topology_{state_};
+    std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
+    hipObjTest::FakeDevice                        fakeDevice_{};
+    TopologyVerbs                                 verbs_{fakeDevice_};
+    std::optional<hipObjTest::ScopedFakeIbv>      fakeIbv_{};
+};
+
+TEST_F(GidSeamTest, RoceVersionsComeFromTheTopology)
+{
+    /* As RoCE v2 GIDs, the IPv4-mapped one is preferred */
+    state_.roceVersions = {2, 2, 2};
+    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), 1);
+    EXPECT_EQ(state_.lastDevName, kFakeDevName);
+    EXPECT_EQ(state_.lastPortNum, 2);
+
+    /* A RoCE v2 GID is preferred to a RoCE v1 one */
+    state_.roceVersions = {2, 1, 2};
+    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), 0);
+}
+
+TEST_F(GidSeamTest, NoGidWithAKnownRoceVersion)
+{
+    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+
+    state_.roceVersions = {0, 0, 0};
+    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+}
+
+TEST_F(GidSeamTest, PortQueryFails)
+{
+    fakeDevice_.fail.queryPort = true;
+    state_.roceVersions        = {2, 2, 2};
+    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+}
+
+TEST_F(GidSeamTest, UnreadableGidsAreSkipped)
+{
+    fakeDevice_.fail.queryGid = true;
+    state_.roceVersions       = {2, 2, 2};
+    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+}
+
+/* SysfsTopology over the fake verbs. The owning pointers it uses release
+ * what it opens through ibv(), so the fake verbs are installed too. */
+class SysfsTopologyTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        fakeIbv_.emplace(verbs_);
+    }
+
+    void TearDown() override
+    {
+        fakeIbv_.reset();
+    }
+
+    /* The NIC SysfsTopology reports for the fake device */
+    static hipObj::NicInfo fakeNic()
+    {
+        hipObj::NicInfo nic;
+        nic.dev_name = kFakeDevName;
+        nic.port_num = 2;
+        return nic;
+    }
+
+    static void expectFakeNic(const std::vector<hipObj::NicInfo> &nics)
+    {
+        ASSERT_EQ(nics.size(), 1U);
+        const hipObj::NicInfo expected = fakeNic();
+        EXPECT_EQ(nics[0].dev_name, expected.dev_name);
+        EXPECT_EQ(nics[0].pcie_bus_id, expected.pcie_bus_id);
+        EXPECT_EQ(nics[0].numa_node, expected.numa_node);
+        EXPECT_EQ(nics[0].port_num, expected.port_num);
+    }
+
+    hipObjTest::FakeDevice                   device_{};
+    TopologyVerbs                            verbs_{device_};
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
+    const hipObj::SysfsTopology              topology_{verbs_};
+};
+
+TEST_F(SysfsTopologyTest, ListsTheFirstActivePort)
+{
+    expectFakeNic(topology_.enumerate(nullptr));
+    EXPECT_EQ(device_.log.openDevice, 1);
+    EXPECT_EQ(device_.log.closeDevice, 1);
+}
+
+TEST_F(SysfsTopologyTest, FiltersByHcaList)
+{
+    expectFakeNic(topology_.enumerate(""));
+    expectFakeNic(topology_.enumerate("mlx5_0, \thipobj_fake0"));
+    EXPECT_TRUE(topology_.enumerate("mlx5_0,mlx5_1").empty());
+    EXPECT_TRUE(topology_.enumerate("hipobj_fake").empty());
+
+    /* The filtered-out devices weren't opened */
+    EXPECT_EQ(device_.log.openDevice, 2);
+    EXPECT_EQ(device_.log.closeDevice, 2);
+}
+
+TEST_F(SysfsTopologyTest, SkipsDevicesItCantQuery)
+{
+    device_.fail.getDeviceList = true;
+    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+    device_.fail.getDeviceList = false;
+
+    device_.fail.openDevice = true;
+    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+    device_.fail.openDevice = false;
+
+    device_.fail.queryDevice = true;
+    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+    device_.fail.queryDevice = false;
+
+    device_.fail.queryPort = true;
+    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+
+    /* Every device that was opened was closed */
+    EXPECT_EQ(device_.log.openDevice, 2);
+    EXPECT_EQ(device_.log.closeDevice, 2);
+}
+
+TEST_F(SysfsTopologyTest, NoRoceVersionWithoutASysfsEntry)
+{
+    EXPECT_EQ(topology_.roceVersion(kFakeDevName.data(), 2, 0), -1);
+}
+
+/* Without a topology installed, NIC selection uses a SysfsTopology over
+ * ibv() */
+TEST_F(SysfsTopologyTest, NicSelectionDefaultsToSysfs)
+{
+    hipObjTest::FakeDevice    hipDevice{};
+    const hipObjTest::FakeHip hip(hipDevice);
+    hipDevice.gpuBusId = kGpuBusId;
+    const hipObjTest::ScopedFakeHip fakeHip(hip);
+
+    /* The fake device has no bus id, so it's not chosen */
+    EXPECT_FALSE(hipObj::GetClosestNicToGpu(0, nullptr));
+    EXPECT_EQ(device_.log.openDevice, 1);
 }
 
 // ---- Driver state seam -------------------------------------------
@@ -374,9 +628,8 @@ namespace {
     protected:
         void SetUp() override
         {
-            savedState_      = hipObj::setStateForTest(&state_);
-            savedEnumerator_ = hipObj::setNicEnumerator(&enumerator_);
-            enumerator_.nics_.clear();
+            savedState_ = hipObj::setStateForTest(&state_);
+            fakeTopology_.emplace(topology_);
 
             hipDevice_.deviceSyncErr = hipErrorNoDevice;
             fakeHip_.emplace(hip_);
@@ -391,7 +644,7 @@ namespace {
             (void)hipObjShutdown();
             fakeIbv_.reset();
             fakeHip_.reset();
-            hipObj::setNicEnumerator(savedEnumerator_);
+            fakeTopology_.reset();
             hipObj::setStateForTest(savedState_);
         }
 
@@ -403,15 +656,16 @@ namespace {
             return config;
         }
 
-        hipObj::DriverState                      state_{};
-        hipObj::DriverState                     *savedState_ = nullptr;
-        FakeNicEnumerator                        enumerator_{};
-        hipObj::NicEnumerator                   *savedEnumerator_ = nullptr;
-        hipObjTest::FakeDevice                   hipDevice_{};
-        hipObjTest::FakeVerbs                    verbs_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-        hipObjTest::FakeHip                      hip_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
+        hipObj::DriverState                           state_{};
+        hipObj::DriverState                          *savedState_ = nullptr;
+        TopologyState                                 topologyState_{};
+        FakeNicTopology                               topology_{topologyState_};
+        std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
+        hipObjTest::FakeDevice                        hipDevice_{};
+        hipObjTest::FakeVerbs                         verbs_{hipDevice_};
+        std::optional<hipObjTest::ScopedFakeIbv>      fakeIbv_{};
+        hipObjTest::FakeHip                           hip_{hipDevice_};
+        std::optional<hipObjTest::ScopedFakeHip>      fakeHip_{};
     };
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)

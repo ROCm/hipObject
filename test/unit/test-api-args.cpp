@@ -9,6 +9,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cstdint>
 #include <initializer_list>

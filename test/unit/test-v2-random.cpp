@@ -7,8 +7,8 @@
  * delivery into QP transitions, and the public cookie-present
  * plumbing. */
 
+#include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -32,9 +32,9 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
-/* Deterministic random source with a scriptable draw sequence. */
-class ScriptedRandom : public hipObj::v2::RandomSource {
-public:
+/* The draws a ScriptedRandom returns, in order, and whether it fails
+ * every draw instead */
+struct Script {
     std::vector<uint32_t> draws{};
     size_t                next    = 0;
     bool                  failAll = false;
@@ -44,57 +44,75 @@ public:
         draws = std::move(values);
         next  = 0;
     }
+};
 
-    std::optional<uint32_t> next32() override
+/* Deterministic random source with a scriptable draw sequence. */
+class ScriptedRandom : public hipObj::v2::RandomSource {
+public:
+    explicit ScriptedRandom(Script &script) noexcept : script_(&script)
     {
-        if (failAll || next >= draws.size()) {
+    }
+    ~ScriptedRandom() override = default;
+
+    ScriptedRandom(const ScriptedRandom &)            = delete;
+    ScriptedRandom &operator=(const ScriptedRandom &) = delete;
+    ScriptedRandom(ScriptedRandom &&)                 = delete;
+    ScriptedRandom &operator=(ScriptedRandom &&)      = delete;
+
+    std::optional<uint32_t> next32() const override
+    {
+        if (script_->failAll || script_->next >= script_->draws.size()) {
             return std::nullopt;
         }
-        return draws[next++];
+        return script_->draws[script_->next++];
     }
+
+private:
+    /* A pointer, so the const next32() can change what it points to */
+    Script *script_;
 };
 
 class V2RandomTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        scripted_ = std::make_unique<ScriptedRandom>();
-        prev_     = hipObj::v2::setRandomSourceForTest(scripted_.get());
+        prev_ = hipObj::v2::setRandomSourceForTest(&random_);
     }
     void TearDown() override
     {
         hipObj::v2::setRandomSourceForTest(prev_);
     }
 
-    std::unique_ptr<ScriptedRandom> scripted_{};
-    hipObj::v2::RandomSource       *prev_ = nullptr;
+    Script                          script_{};
+    ScriptedRandom                  random_{script_};
+    const hipObj::v2::RandomSource *prev_ = nullptr;
 };
 
 /* PSN generation: non-zero 24-bit after masking, retry on
  * zero draws, failure on exhausted source. */
 TEST_F(V2RandomTest, PsnGeneration)
 {
-    scripted_->setDraws({0x00000000U, 0x00abcdefU});
+    script_.setDraws({0x00000000U, 0x00abcdefU});
     EXPECT_EQ(hipObj::v2::nextClientPsn(), 0x00abcdefU); /* zero draw retried, then accepted */
 
-    scripted_->setDraws({0xffffffffU});
+    script_.setDraws({0xffffffffU});
     EXPECT_EQ(hipObj::v2::nextClientPsn(), 0x00ffffffU); /* masked to 24 bits */
 
-    scripted_->setDraws({0U, 0U, 0U});
+    script_.setDraws({0U, 0U, 0U});
     EXPECT_FALSE(hipObj::v2::nextClientPsn()); /* all-zero: fail */
 
-    scripted_->failAll = true;
+    script_.failAll = true;
     EXPECT_FALSE(hipObj::v2::nextClientPsn()); /* source failure */
 }
 
 /* Cookies pass through unmasked (0 is a valid cookie). */
 TEST_F(V2RandomTest, CookiePassThrough)
 {
-    scripted_->setDraws({0U});
+    script_.setDraws({0U});
     EXPECT_EQ(hipObj::v2::nextCookie(), 0U);
-    scripted_->setDraws({0xdeadbeefU});
+    script_.setDraws({0xdeadbeefU});
     EXPECT_EQ(hipObj::v2::nextCookie(), 0xdeadbeefU);
-    scripted_->failAll = true;
+    script_.failAll = true;
     EXPECT_FALSE(hipObj::v2::nextCookie());
 }
 

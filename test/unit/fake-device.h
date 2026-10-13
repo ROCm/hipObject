@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: MIT
  *
  * A fake RDMA device and HIP runtime for tests of the public API. The
- * fixture substitutes fakes for libibverbs, the HIP runtime, NIC
- * enumeration, and the driver state, so hipObjInit() and transfers run
+ * fixture substitutes fakes for libibverbs, the HIP runtime, the NIC
+ * topology, and the driver state, so hipObjInit() and transfers run
  * without GPU or RDMA hardware. The fakes record their calls and can be
  * told to fail (see FakeDevice).
  */
@@ -12,6 +12,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -34,35 +35,36 @@ namespace hipObjTest {
 
 /* The calls the fakes have seen. The verbs objects are counted as they're
  * created (successfully) and destroyed, so a test can check that none
- * leaked. */
+ * leaked. The counters are atomic, so the fakes can be called from
+ * several threads at once. */
 struct CallLog {
-    int sendRequest = 0;
-    int recvReply   = 0;
-    int registerMr  = 0;
-    int mrAccess    = 0; /* the access flags of the last reg_mr */
-    int deregMr     = 0;
-    int openDevice  = 0;
-    int closeDevice = 0;
-    int allocPd     = 0;
-    int deallocPd   = 0;
-    int createCq    = 0;
-    int destroyCq   = 0;
-    int createQp    = 0;
-    int destroyQp   = 0;
-    int postSend    = 0;
-    int postRecv    = 0;
+    std::atomic<int> sendRequest{0};
+    std::atomic<int> recvReply{0};
+    std::atomic<int> registerMr{0};
+    std::atomic<int> mrAccess{0}; /* the access flags of the last reg_mr */
+    std::atomic<int> deregMr{0};
+    std::atomic<int> openDevice{0};
+    std::atomic<int> closeDevice{0};
+    std::atomic<int> allocPd{0};
+    std::atomic<int> deallocPd{0};
+    std::atomic<int> createCq{0};
+    std::atomic<int> destroyCq{0};
+    std::atomic<int> createQp{0};
+    std::atomic<int> destroyQp{0};
+    std::atomic<int> postSend{0};
+    std::atomic<int> postRecv{0};
 
     /* HIP and HSA */
-    int memcpy            = 0; /* memcpyAsync() */
-    int eventCreate       = 0;
-    int eventRecord       = 0;
-    int eventQuery        = 0;
-    int eventDestroy      = 0;
-    int hostMalloc        = 0;
-    int hostFree          = 0;
-    int deviceSynchronize = 0;
-    int exportDmabuf      = 0;
-    int closeDmabuf       = 0;
+    std::atomic<int> memcpy{0}; /* memcpyAsync() */
+    std::atomic<int> eventCreate{0};
+    std::atomic<int> eventRecord{0};
+    std::atomic<int> eventQuery{0};
+    std::atomic<int> eventDestroy{0};
+    std::atomic<int> hostMalloc{0};
+    std::atomic<int> hostFree{0};
+    std::atomic<int> deviceSynchronize{0};
+    std::atomic<int> exportDmabuf{0};
+    std::atomic<int> closeDmabuf{0};
 };
 
 /* Which fakes fail */
@@ -93,7 +95,12 @@ struct ModifyQpCall {
 };
 
 /* What the fakes return, and what they record. The fixture resets it before
- * each test. Trivially destructible, so it can live in a static. */
+ * each test (see resetFake()). Trivially destructible, so it can live in a
+ * static.
+ *
+ * The fields the fakes write are atomic, and the fakes only read the
+ * others, which a test sets before it starts any threads, so the fakes can
+ * be called from several threads at once. */
 struct FakeDevice {
     CallLog log{};
     Faults  fail{};
@@ -103,46 +110,49 @@ struct FakeDevice {
      * and no GPU's bus ID is known, so hipObjInit() opens the hinted NIC.
      * Every pointer is host memory, so registration doesn't look for the
      * allocation. */
-    hipError_t       getDeviceErr      = hipErrorNoDevice;
-    int              device            = 0;
-    int              deviceCount       = 1;
-    hipError_t       deviceCountErr    = hipSuccess;
-    std::string_view gpuBusId          = {};
-    hipError_t       deviceSyncErr     = hipSuccess;
-    hipMemoryType    memoryType        = hipMemoryTypeHost;
-    uintptr_t        allocBase         = 0;
-    size_t           allocSize         = 0;
-    hipError_t       addressRangeErr   = hipSuccess;
-    int              addressRangeCalls = 0;
-    void            *lastHostMalloc    = nullptr;
-    void            *lastHostFree      = nullptr;
+    hipError_t          getDeviceErr    = hipErrorNoDevice;
+    int                 device          = 0;
+    int                 deviceCount     = 1;
+    hipError_t          deviceCountErr  = hipSuccess;
+    std::string_view    gpuBusId        = {};
+    hipError_t          deviceSyncErr   = hipSuccess;
+    hipMemoryType       memoryType      = hipMemoryTypeHost;
+    uintptr_t           allocBase       = 0;
+    size_t              allocSize       = 0;
+    hipError_t          addressRangeErr = hipSuccess;
+    std::atomic<int>    addressRangeCalls{0};
+    std::atomic<void *> lastHostMalloc{nullptr};
+    std::atomic<void *> lastHostFree{nullptr};
 
     /* HIP staging copies: memcpyAsync() and the event that tracks it.
      * eventQuery() reports hipErrorNotReady for the first
      * eventNotReadyCount queries of each event, and then
      * eventQueryResult; with eventNeverCompletes, it reports
      * hipErrorNotReady forever. */
-    hipError_t    memcpyErr            = hipSuccess;
-    hipMemcpyKind lastMemcpyKind       = hipMemcpyDefault;
-    hipError_t    eventCreateErr       = hipSuccess;
-    hipError_t    eventRecordErr       = hipSuccess;
-    hipError_t    eventQueryResult     = hipSuccess;
-    int           eventNotReadyCount   = 0;
-    bool          eventNeverCompletes  = false;
-    int           eventQueriesAtCreate = 0; /* log.eventQuery when the last event was created */
+    hipError_t                 memcpyErr = hipSuccess;
+    std::atomic<hipMemcpyKind> lastMemcpyKind{hipMemcpyDefault};
+    hipError_t                 eventCreateErr      = hipSuccess;
+    hipError_t                 eventRecordErr      = hipSuccess;
+    hipError_t                 eventQueryResult    = hipSuccess;
+    int                        eventNotReadyCount  = 0;
+    bool                       eventNeverCompletes = false;
+    std::atomic<int>           eventQueriesAtCreate{0}; /* log.eventQuery when the last event was created */
 
-    /* HSA: the dma-buf exportDmabuf() returns, and the fd closeDmabuf()
-     * was last given */
-    int closedDmabufFd = -1;
+    /* HSA: the fd closeDmabuf() was last given */
+    std::atomic<int> closedDmabufFd{-1};
 
     /* ibverbs: the vendor query_device() reports, what poll_cq() returns,
-     * and the QP transitions */
+     * and the QP transitions. modifyQpCount counts the modify_qp() calls,
+     * and modifyQp holds the first ones; read it only once no thread is
+     * calling modify_qp(). Each QP create_qp() makes gets the next
+     * nextQpNum. */
     uint32_t                    vendorId   = 0;
     int                         pollResult = 1;
     enum ibv_wc_status          pollStatus = IBV_WC_SUCCESS;
     enum ibv_wc_opcode          pollOpcode = IBV_WC_SEND;
     std::array<ModifyQpCall, 8> modifyQp{};
-    size_t                      modifyQpCount = 0;
+    std::atomic<size_t>         modifyQpCount{0};
+    std::atomic<uint32_t>       nextQpNum{0x55};
 
     /* The S3 server's reply to a transfer (see setReply()) */
     std::array<char, 128> reply    = {{'2', '0', '0', '\0'}};
@@ -150,6 +160,9 @@ struct FakeDevice {
 };
 
 FakeDevice &fake();
+
+/* Puts fake() back the way a new FakeDevice is */
+void resetFake();
 
 /* Sets the reply the fake S3 server sends, with its NUL, as the default "200"
  * is sent */
@@ -160,7 +173,7 @@ void setReply(std::string_view reply);
 hipObj::RdmaToken peerToken(hipObj::TransportType transport = hipObj::TransportType::RC);
 void              setReplyWithPeerToken(const hipObj::RdmaToken &token);
 
-/* The modify_qp() calls so far */
+/* The modify_qp() calls so far, up to the number modifyQp holds */
 std::vector<ModifyQpCall> modifyQpCalls();
 
 /* The event FakeHip creates, and the dma-buf it exports */
@@ -211,10 +224,10 @@ private:
 };
 
 /* A libibverbs that answers from a FakeDevice and records its calls there.
- * It has one device, and no ibv_reg_dmabuf_mr(). reg_mr() and create_qp()
- * allocate real objects, which dereg_mr() and destroy_qp() free; the
- * other objects are made-up addresses. A test can derive from it to
- * change some of its methods. */
+ * It has one device, and no ibv_reg_dmabuf_mr(). reg_mr(), create_cq(),
+ * and create_qp() allocate real objects, each distinct, which dereg_mr(),
+ * destroy_cq(), and destroy_qp() free; the other objects are made-up
+ * addresses. A test can derive from it to change some of its methods. */
 class FakeVerbs : public hipObj::Verbs {
 public:
     explicit FakeVerbs(FakeDevice &device) noexcept : device_(&device)
@@ -310,9 +323,38 @@ fakeDevBufPlusOne()
 
 constexpr size_t kFakeBufSize = 64;
 
-class EmptyNicEnumerator : public hipObj::NicEnumerator {
+/* A NIC topology with no NICs, and no RoCE version for any GID */
+class EmptyNicTopology : public hipObj::NicTopology {
 public:
-    std::vector<hipObj::NicInfo> Enumerate(const char *) override;
+    std::vector<hipObj::NicInfo> enumerate(const char *hca_list) const override;
+    int roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
+};
+
+/* Makes NIC and GID selection use topology for as long as it lives, and
+ * puts the previous topology back when it's destroyed. topology has to
+ * outlive it. Create and destroy it only while no other thread can be
+ * selecting a NIC or GID. */
+class ScopedFakeTopology {
+public:
+    explicit ScopedFakeTopology(const hipObj::NicTopology &topology)
+        : topology_(&topology), previous_(hipObj::setNicTopologyForTest(&topology))
+    {
+    }
+
+    ~ScopedFakeTopology()
+    {
+        /* Restored in the reverse order they were installed */
+        EXPECT_EQ(hipObj::setNicTopologyForTest(previous_), topology_);
+    }
+
+    ScopedFakeTopology(const ScopedFakeTopology &)            = delete;
+    ScopedFakeTopology &operator=(const ScopedFakeTopology &) = delete;
+    ScopedFakeTopology(ScopedFakeTopology &&)                 = delete;
+    ScopedFakeTopology &operator=(ScopedFakeTopology &&)      = delete;
+
+private:
+    const hipObj::NicTopology *topology_;
+    const hipObj::NicTopology *previous_;
 };
 
 /* Installs the fakes for each test, and restores the real functions after */
@@ -329,14 +371,14 @@ protected:
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
     static void initAndRegister();
 
-    hipObj::DriverState          state_{};
-    hipObj::DriverState         *savedState_ = nullptr;
-    EmptyNicEnumerator           enumerator_{};
-    hipObj::NicEnumerator       *savedEnumerator_ = nullptr;
-    FakeVerbs                    verbs_{fake()};
-    std::optional<ScopedFakeIbv> fakeIbv_{};
-    FakeHip                      hip_{fake()};
-    std::optional<ScopedFakeHip> fakeHip_{};
+    hipObj::DriverState               state_{};
+    hipObj::DriverState              *savedState_ = nullptr;
+    EmptyNicTopology                  topology_{};
+    std::optional<ScopedFakeTopology> fakeTopology_{};
+    FakeVerbs                         verbs_{fake()};
+    std::optional<ScopedFakeIbv>      fakeIbv_{};
+    FakeHip                           hip_{fake()};
+    std::optional<ScopedFakeHip>      fakeHip_{};
 };
 
 } // namespace hipObjTest

@@ -50,24 +50,6 @@ namespace {
                gid[6] == 0 && gid[7] == 0 && gid[8] == 0 && gid[9] == 0 && gid[10] == 0xff && gid[11] == 0xff;
     }
 
-    int GetRoceVersionNumber(const char *dev_name, int port_num, int gid_idx)
-    {
-        const std::filesystem::path path = std::filesystem::path("/sys/class/infiniband") / dev_name /
-                                           "ports" / std::to_string(port_num) / "gid_attrs/types" /
-                                           std::to_string(gid_idx);
-        std::ifstream f(path);
-        if (!f)
-            return -1;
-        std::string line;
-        if (!std::getline(f, line))
-            return -1;
-        if (line.find("RoCE v2") != std::string::npos)
-            return 2;
-        if (line.find("IB/RoCE v1") != std::string::npos || line.find("RoCE v1") != std::string::npos)
-            return 1;
-        return 0;
-    }
-
     GidPriority ClassifyGid(const Gid &gid, int roce_ver)
     {
         if (roce_ver == 2) {
@@ -82,8 +64,24 @@ namespace {
         return GidPriority::Unknown;
     }
 
+    /* The topology installed with setNicTopologyForTest(), or null */
+    const NicTopology *g_topology_override = nullptr;
+
+    /* The topology NIC and GID selection use: the one installed with
+     * setNicTopologyForTest(), or otherwise a SysfsTopology over ibv(),
+     * built in storage */
+    const NicTopology &currentTopology(std::optional<SysfsTopology> &storage)
+    {
+        if (g_topology_override)
+            return *g_topology_override;
+        return storage.emplace(ibv());
+    }
+
     int AutoSelectGidIndex(ibv_context *ctx, uint8_t port_num)
     {
+        std::optional<SysfsTopology> sysfs;
+        const NicTopology           &topology = currentTopology(sysfs);
+
         ibv_port_attr port_attr;
         if (ibv().query_port(ctx, port_num, &port_attr) != 0)
             return -1;
@@ -98,7 +96,7 @@ namespace {
             c.gid   = toGid(gid);
             if (!IsConfiguredGid(c.gid))
                 continue;
-            c.roceVersion = GetRoceVersionNumber(ctx->device->name, port_num, i);
+            c.roceVersion = topology.roceVersion(ctx->device->name, port_num, i);
             candidates.push_back(c);
         }
         return PickBestGid(candidates);
@@ -126,104 +124,107 @@ namespace {
         return static_cast<int>(a.size() - i) + static_cast<int>(b.size() - i);
     }
 
-    // Production NIC enumerator: ibverbs device list filtered by the
-    // optional HCA list, with PCIe bus id and NUMA node read from sysfs.
-    class SysfsNicEnumerator : public NicEnumerator {
-    public:
-        std::vector<NicInfo> Enumerate(const char *hca_list) override
-        {
-            std::vector<NicInfo> result;
-            int                  num_devs = 0;
-            IbvDeviceListPtr     dev_list(ibv().get_device_list(&num_devs));
-            if (!dev_list || num_devs <= 0)
-                return result;
+} // namespace
 
-            for (ibv_device *dev : deviceSpan(dev_list, num_devs)) {
-                if (!dev)
-                    break;
-                const char *dev_name = ibv().get_device_name(dev);
-                if (!dev_name)
-                    continue;
-                if (hca_list && *hca_list) {
-                    bool               match = false;
-                    std::istringstream iss(hca_list);
-                    std::string        hca;
-                    while (std::getline(iss, hca, ',')) {
-                        size_t pos = hca.find_first_not_of(" \t");
-                        if (pos != std::string::npos)
-                            hca = hca.substr(pos);
-                        if (hca == dev_name) {
-                            match = true;
-                            break;
-                        }
-                    }
-                    if (!match)
-                        continue;
-                }
+std::vector<NicInfo>
+SysfsTopology::enumerate(const char *hca_list) const
+{
+    std::vector<NicInfo> result;
+    int                  num_devs = 0;
+    IbvDeviceListPtr     dev_list(verbs_->get_device_list(&num_devs));
+    if (!dev_list || num_devs <= 0)
+        return result;
 
-                IbvContextPtr ctx(ibv().open_device(dev));
-                if (!ctx)
-                    continue;
-
-                ibv_device_attr attr;
-                if (ibv().query_device(ctx.get(), &attr) != 0) {
-                    continue;
-                }
-
-                for (uint8_t p = 1; p <= attr.phys_port_cnt; ++p) {
-                    ibv_port_attr port_attr;
-                    if (ibv().query_port(ctx.get(), p, &port_attr) != 0)
-                        continue;
-                    if (port_attr.state != IBV_PORT_ACTIVE && port_attr.state != IBV_PORT_ACTIVE_DEFER)
-                        continue;
-
-                    NicInfo info;
-                    info.dev_name = dev_name;
-                    info.port_num = static_cast<int>(p);
-
-                    const std::filesystem::path device_path =
-                        std::filesystem::path("/sys/class/infiniband") / dev_name / "device";
-                    /* The device link resolves to the PCI device's directory,
-                     * which is named after its bus id */
-                    std::error_code             ec;
-                    const std::filesystem::path resolved = std::filesystem::canonical(device_path, ec);
-                    if (!ec)
-                        info.pcie_bus_id = resolved.filename().string();
-
-                    std::ifstream numa_file(device_path / "numa_node");
-                    if (numa_file) {
-                        numa_file >> info.numa_node;
-                        if (info.numa_node < 0)
-                            info.numa_node = 0;
-                    }
-
-                    result.push_back(info);
+    for (ibv_device *dev : deviceSpan(dev_list, num_devs)) {
+        if (!dev)
+            break;
+        const char *dev_name = verbs_->get_device_name(dev);
+        if (!dev_name)
+            continue;
+        if (hca_list && *hca_list) {
+            bool               match = false;
+            std::istringstream iss(hca_list);
+            std::string        hca;
+            while (std::getline(iss, hca, ',')) {
+                size_t pos = hca.find_first_not_of(" \t");
+                if (pos != std::string::npos)
+                    hca = hca.substr(pos);
+                if (hca == dev_name) {
+                    match = true;
                     break;
                 }
             }
-            return result;
+            if (!match)
+                continue;
         }
-    };
 
-} // namespace
+        IbvContextPtr ctx(verbs_->open_device(dev));
+        if (!ctx)
+            continue;
 
-// Override installed by tests via setNicEnumerator(); null means the
-// production sysfs walker is active. The library has a single global
-// topology and no threads install overrides (tests do, single-threaded).
-static NicEnumerator *g_nic_override = nullptr;
+        ibv_device_attr attr;
+        if (verbs_->query_device(ctx.get(), &attr) != 0) {
+            continue;
+        }
 
-NicEnumerator &
-nicEnumerator()
-{
-    static SysfsNicEnumerator default_enumerator;
-    return g_nic_override ? *g_nic_override : default_enumerator;
+        for (uint8_t p = 1; p <= attr.phys_port_cnt; ++p) {
+            ibv_port_attr port_attr;
+            if (verbs_->query_port(ctx.get(), p, &port_attr) != 0)
+                continue;
+            if (port_attr.state != IBV_PORT_ACTIVE && port_attr.state != IBV_PORT_ACTIVE_DEFER)
+                continue;
+
+            NicInfo info;
+            info.dev_name = dev_name;
+            info.port_num = static_cast<int>(p);
+
+            const std::filesystem::path device_path =
+                std::filesystem::path("/sys/class/infiniband") / dev_name / "device";
+            /* The device link resolves to the PCI device's directory,
+             * which is named after its bus id */
+            std::error_code             ec;
+            const std::filesystem::path resolved = std::filesystem::canonical(device_path, ec);
+            if (!ec)
+                info.pcie_bus_id = resolved.filename().string();
+
+            std::ifstream numa_file(device_path / "numa_node");
+            if (numa_file) {
+                numa_file >> info.numa_node;
+                if (info.numa_node < 0)
+                    info.numa_node = 0;
+            }
+
+            result.push_back(info);
+            break;
+        }
+    }
+    return result;
 }
 
-NicEnumerator *
-setNicEnumerator(NicEnumerator *enumerator)
+int
+SysfsTopology::roceVersion(const char *devName, uint8_t portNum, int gidIndex) const
 {
-    NicEnumerator *previous = g_nic_override;
-    g_nic_override          = enumerator;
+    const std::filesystem::path path = std::filesystem::path("/sys/class/infiniband") / devName / "ports" /
+                                       std::to_string(static_cast<unsigned int>(portNum)) /
+                                       "gid_attrs/types" / std::to_string(gidIndex);
+    std::ifstream f(path);
+    if (!f)
+        return -1;
+    std::string line;
+    if (!std::getline(f, line))
+        return -1;
+    if (line.find("RoCE v2") != std::string::npos)
+        return 2;
+    if (line.find("IB/RoCE v1") != std::string::npos || line.find("RoCE v1") != std::string::npos)
+        return 1;
+    return 0;
+}
+
+const NicTopology *
+setNicTopologyForTest(const NicTopology *topology)
+{
+    const NicTopology *previous = g_topology_override;
+    g_topology_override         = topology;
     return previous;
 }
 
@@ -235,8 +236,9 @@ GetClosestNicToGpu(int gpuIndex, const char *hca_list)
     if (err != hipSuccess)
         return std::nullopt;
 
-    std::string gpu_bus(gpu_bus_id);
-    auto        devices = nicEnumerator().Enumerate(hca_list);
+    std::string                  gpu_bus(gpu_bus_id);
+    std::optional<SysfsTopology> sysfs;
+    auto                         devices = currentTopology(sysfs).enumerate(hca_list);
     if (devices.empty())
         return std::nullopt;
 
