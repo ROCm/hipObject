@@ -10,9 +10,12 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
+
+#include "unique-fd.h"
 
 namespace hipobj::test {
 
@@ -63,14 +66,44 @@ public:
 
     int fd() const
     {
-        return listen_fd_;
+        return listen_fd_.get();
     }
 
 private:
-    void runThreaded();
-    void handleConnection(int client, bool closeFd);
+    /* A client connection handed to a worker thread. While it exists,
+     * its fd is in activeFds_ and counted in liveWorkers_, so stop() can
+     * shut the connection down and wait for the worker. The destructor
+     * unregisters the fd before closing it, so accept() can't hand out
+     * the same number while it's still registered. */
+    class Worker {
+    public:
+        /* The caller must already have registered client */
+        Worker(HttpServer &server, hipObj::UniqueFd client) noexcept;
+        ~Worker();
 
-    int               listen_fd_ = -1;
+        Worker(const Worker &)            = delete;
+        Worker &operator=(const Worker &) = delete;
+        Worker(Worker &&other) noexcept;
+        Worker &operator=(Worker &&) = delete;
+
+        int fd() const
+        {
+            return client_.get();
+        }
+
+    private:
+        HttpServer      *server_; /* nullptr once moved from */
+        hipObj::UniqueFd client_;
+    };
+
+    void runThreaded();
+    /* Registers client for a worker, or returns nothing (closing client)
+     * once stop() has begun */
+    std::optional<Worker> registerWorker(hipObj::UniqueFd client);
+    /* Serves one request on client, which the caller owns and closes */
+    void handleConnection(int client);
+
+    hipObj::UniqueFd  listen_fd_;
     HttpHandler       handler_;
     std::atomic<bool> stopping_{false};
     /* The accept loop runs on its own thread when started via
