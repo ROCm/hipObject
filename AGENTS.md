@@ -90,6 +90,10 @@ Notes:
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON`, plus the system
   packages listed in [docs/building.rst](docs/building.rst); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
+  The default configuration leaves the bridge out, so turn it on when you run
+  the [checks](#linters-warnings-and-sanitizers-mandatory) on a change to
+  `integrations/` or to anything it uses. CI's Build (all but the coverage
+  job), clang-tidy, and IWYU workflows build it.
 
 ## Tests
 

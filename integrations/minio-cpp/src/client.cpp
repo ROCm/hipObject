@@ -102,7 +102,7 @@ namespace {
             return inst;
         }
 
-        hipObjError_t EnsureInit(minio::s3::BaseUrl base_url)
+        hipObjError_t EnsureInit(const minio::s3::BaseUrl &base_url)
         {
             std::scoped_lock<std::mutex> lock(mutex_);
             std::string                  key = base_url.host + ":" + base_url.region;
@@ -148,11 +148,11 @@ namespace {
     private:
         HipObjRuntime() = default;
 
-        mutable std::mutex mutex_;
+        mutable std::mutex mutex_{};
         bool               initialized_ = false;
-        std::string        active_key_;
-        std::string        endpoint_storage_;
-        std::string        nic_hint_storage_;
+        std::string        active_key_{};
+        std::string        endpoint_storage_{};
+        std::string        nic_hint_storage_{};
     };
 
     struct ScopedBufRegistration {
@@ -194,7 +194,7 @@ namespace {
         std::string received;
         received.reserve(size);
         minio::s3::GetObjectArgs http_args = args;
-        http_args.datafunc                 = [&](minio::http::DataFunctionArgs chunk) -> bool {
+        http_args.datafunc                 = [&](const minio::http::DataFunctionArgs &chunk) -> bool {
             received.append(chunk.datachunk);
             return true;
         };
@@ -334,8 +334,7 @@ Client::PutObject(minio::s3::PutObjectArgs args)
             minio::error::Error("RDMA PUT failed (" + std::string(DescribeFailure(ret)) +
                                 ") and the payload is device memory; no HTTP fallback is possible"));
     }
-    std::cerr << "hipobj: RDMA PUT failed (" << DescribeFailure(ret) << "); falling back to HTTP"
-              << std::endl;
+    std::cerr << "hipobj: RDMA PUT failed (" << DescribeFailure(ret) << "); falling back to HTTP\n";
 
     minio::s3::PutObjectArgs http_args = args;
     std::stringstream        ss(std::ios_base::in | std::ios_base::out | std::ios_base::binary);
@@ -409,8 +408,7 @@ Client::GetObject(minio::s3::GetObjectArgs args)
             minio::error::Error("RDMA GET failed (" + std::string(DescribeFailure(ret)) +
                                 ") and the destination is device memory; no HTTP fallback is possible"));
     }
-    std::cerr << "hipobj: RDMA GET failed (" << DescribeFailure(ret) << "); falling back to HTTP"
-              << std::endl;
+    std::cerr << "hipobj: RDMA GET failed (" << DescribeFailure(ret) << "); falling back to HTTP\n";
 
     minio::s3::GetObjectArgs http_args = args;
     const std::span<char>    dst       = hipObj::spanFromPointer(args.buf, size);

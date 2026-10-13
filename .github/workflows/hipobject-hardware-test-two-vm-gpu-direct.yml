@@ -213,8 +213,7 @@ jobs:
                 -DHIPOBJ_BNXT=OFF \
                 -DHIPOBJ_INTEGRATION_TESTS=ON \
                 -DHIPOBJ_MINIO_CLIENT=ON \
-                -DHIPOBJ_BUILD_DOCS=OFF \
-                -DCMAKE_SKIP_INSTALL_RULES=ON && \
+                -DHIPOBJ_BUILD_DOCS=OFF && \
               cmake --build /hipobject-build --parallel \$(nproc) \
                 --target hipobj-rdma-test-server minio-getput-rdma && \
               mkdir -p /hipobject-build/rocm-libs && \
