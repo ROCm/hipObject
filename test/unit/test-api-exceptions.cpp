@@ -66,6 +66,12 @@ throwingMemcpy(void *, const void *, size_t, hipMemcpyKind)
     throwIt();
 }
 
+struct ibv_qp *
+throwingCreateQp(struct ibv_pd *, struct ibv_qp_init_attr *)
+{
+    throwIt();
+}
+
 struct ibv_mr *
 throwingRegisterMrIova2(struct ibv_pd *, void *, size_t, uintptr_t, int)
 {
@@ -105,6 +111,30 @@ TEST_P(ApiExceptionTest, Init)
     hipObjConfig_t config         = makeConfig();
     EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
     EXPECT_FALSE(state_.initialized);
+}
+
+TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
+{
+    auto      &funcs    = hipObj::ibv.funcsForTest();
+    const auto createQp = funcs.create_qp;
+    funcs.create_qp     = &throwingCreateQp;
+
+    hipObjConfig_t config = makeConfig();
+    EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
+    EXPECT_FALSE(state_.initialized);
+
+    /* The device, PD, and CQ opened before the throw are released */
+    const hipObjTest::CallLog &log = fake().log;
+    EXPECT_EQ(log.openDevice, 1);
+    EXPECT_EQ(log.closeDevice, 1);
+    EXPECT_EQ(log.allocPd, 1);
+    EXPECT_EQ(log.deallocPd, 1);
+    EXPECT_EQ(log.createCq, 1);
+    EXPECT_EQ(log.destroyCq, 1);
+
+    /* The library still works */
+    funcs.create_qp = createQp;
+    ASSERT_NO_FATAL_FAILURE(init());
 }
 
 TEST_P(ApiExceptionTest, BufRegister)

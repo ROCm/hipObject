@@ -33,6 +33,7 @@
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
+#include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "no-destructor.h"
 #include "rdma-topology.h"
@@ -224,33 +225,34 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
         return blockingCopy();
     }
 
-    hipEvent_t done = nullptr;
-    if (ops.hipEventCreate(&done) != hipSuccess) {
+    hipEvent_t rawDone = nullptr;
+    if (ops.hipEventCreate(&rawDone) != hipSuccess) {
         return blockingCopy();
     }
+    HipEventPtr done(rawDone, HipEventDeleter{ops.hipEventDestroy});
 
     hipError_t err = ops.hipMemcpyAsync(dst, src, size, kind, nullptr);
     if (err == hipSuccess) {
-        err = ops.hipEventRecord(done, nullptr);
+        err = ops.hipEventRecord(done.get(), nullptr);
     }
     if (err != hipSuccess) {
-        (void)ops.hipEventDestroy(done);
         return {hipObjInternalError, 0};
     }
 
     const std::chrono::milliseconds timeout  = stageTimeout();
     const auto                      deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
-        hipError_t q = ops.hipEventQuery(done);
+        hipError_t q = ops.hipEventQuery(done.get());
         if (q == hipSuccess) {
-            (void)ops.hipEventDestroy(done);
             return {hipObjSuccess, 0};
         }
         if (q != hipErrorNotReady) {
-            (void)ops.hipEventDestroy(done);
             return {hipObjInternalError, 0};
         }
         if (std::chrono::steady_clock::now() >= deadline) {
+            /* The copy may still signal the event, so it's leaked rather
+             * than destroyed */
+            dropOwnership(done);
             const int64_t timeoutMs = timeout.count();
             fprintf(stderr,
                     "hipObj: staging %s copy of %zu bytes did not complete within "
@@ -537,27 +539,27 @@ try {
             return {hipObjNicNotFound, 0};
         }
     }
-    int ret = hipObj::openRdmaDeviceByName(nic->name.c_str(), *hipObj::g_conn);
-    if (ret != 0) {
+    /* Everything that can fail or throw builds into locals, which release
+     * what they hold on the way out. The library state only changes once
+     * nothing else can fail. */
+    hipObj::RcConnection conn;
+    if (hipObj::openRdmaDeviceByName(nic->name.c_str(), conn) != 0 ||
+        hipObj::createRcQp(conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(conn) != 0) {
         return {hipObjRdmaError, 0};
     }
-    ret = hipObj::createRcQp(*hipObj::g_conn, 256, 128, 128);
-    if (ret != 0) {
-        hipObj::closeRdmaDevice(*hipObj::g_conn);
-        return {hipObjRdmaError, 0};
-    }
-    ret = hipObj::transitionQpToInit(*hipObj::g_conn);
-    if (ret != 0) {
-        hipObj::closeRdmaDevice(*hipObj::g_conn);
-        return {hipObjRdmaError, 0};
-    }
-    state.initialized = true;
+    std::string endpoint = config->endpoint ? config->endpoint : "";
+    std::string region   = config->region ? config->region : "";
+    std::string nicHint  = config->nicHint ? config->nicHint : "";
+
+    /* None of these can throw */
+    *hipObj::g_conn   = std::move(conn);
     state.gpuDevice   = gpuDevice;
-    state.endpoint    = config->endpoint ? config->endpoint : "";
-    state.region      = config->region ? config->region : "";
-    state.nicHint     = config->nicHint ? config->nicHint : "";
+    state.endpoint    = std::move(endpoint);
+    state.region      = std::move(region);
+    state.nicHint     = std::move(nicHint);
     state.nicIndex    = nic->index;
     state.flags       = config->flags;
+    state.initialized = true;
     return {hipObjSuccess, 0};
 }
 catch (...) {
