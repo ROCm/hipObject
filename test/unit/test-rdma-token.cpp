@@ -5,9 +5,11 @@
 
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <gtest/gtest.h>
 
@@ -66,6 +68,61 @@ TEST(RdmaToken, EncodeHexIsNulTerminatedAndMatchesString)
     EXPECT_EQ(decoded->length, token.length);
     EXPECT_EQ(decoded->portNum, token.portNum);
     EXPECT_EQ(decoded->lid, token.lid);
+}
+
+namespace {
+
+/* A token with a different value in every byte, and its encoding, in the
+ * layout docs/interop.rst gives. A round trip passes with any layout that
+ * agrees with itself, so these catch swapped fields, changed widths, and
+ * the wrong byte order. */
+hipObj::RdmaToken
+goldenToken()
+{
+    hipObj::RdmaToken token;
+    token.transport = hipObj::TransportType::RC;
+    token.qpNum     = 0x01020304;
+    for (size_t i = 0; i < token.gid.size(); ++i) {
+        token.gid[i] = static_cast<uint8_t>(0x10 + i);
+    }
+    token.rkey       = 0x21222324;
+    token.remoteAddr = 0x3132333435363738ULL;
+    token.length     = 0x4142434445464748ULL;
+    token.portNum    = 0x51;
+    token.lid        = 0x6162;
+    return token;
+}
+
+constexpr std::string_view kGoldenTokenHex = "01"                               /* transport: RC */
+                                             "04030201"                         /* QP number */
+                                             "101112131415161718191a1b1c1d1e1f" /* GID */
+                                             "24232221"                         /* rkey */
+                                             "3837363534333231"                 /* remote address */
+                                             "4847464544434241"                 /* length */
+                                             "51"                               /* port number */
+                                             "6261";                            /* LID */
+
+} // namespace
+
+TEST(RdmaToken, EncodeMatchesWireLayout)
+{
+    static_assert(kGoldenTokenHex.size() == hipObj::kRdmaTokenHexLen);
+    EXPECT_EQ(hipObj::encodeRdmaToken(goldenToken()), kGoldenTokenHex);
+}
+
+TEST(RdmaToken, DecodeMatchesWireLayout)
+{
+    const hipObj::RdmaToken expected = goldenToken();
+    const auto              decoded  = hipObj::decodeRdmaTokenHex(kGoldenTokenHex);
+    ASSERT_TRUE(decoded);
+    EXPECT_EQ(decoded->transport, expected.transport);
+    EXPECT_EQ(decoded->qpNum, expected.qpNum);
+    EXPECT_EQ(decoded->gid, expected.gid);
+    EXPECT_EQ(decoded->rkey, expected.rkey);
+    EXPECT_EQ(decoded->remoteAddr, expected.remoteAddr);
+    EXPECT_EQ(decoded->length, expected.length);
+    EXPECT_EQ(decoded->portNum, expected.portNum);
+    EXPECT_EQ(decoded->lid, expected.lid);
 }
 
 TEST(RdmaToken, EncodeReplyWithPeerToken)
