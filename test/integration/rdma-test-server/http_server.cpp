@@ -9,7 +9,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <optional>
@@ -25,6 +24,8 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "hipobj-parse.h"
 
 namespace hipobj::test {
 
@@ -347,10 +348,11 @@ HttpServer::handleConnection(int client)
         HttpRequest head = parseRequest(raw.substr(0, headerLen));
         auto        it   = head.headers.find("content-length");
         if (it != head.headers.end()) {
-            contentLen = static_cast<size_t>(strtoull(it->second.c_str(), nullptr, 10));
-            if (contentLen > kMaxBodyBytes) {
+            const std::optional<size_t> len = hipObj::parseNumber<size_t>(it->second);
+            if (!len || *len > kMaxBodyBytes) {
                 return;
             }
+            contentLen = *len;
         }
     }
     /* Body receive honors the same absolute deadline as the header:
@@ -377,6 +379,7 @@ HttpServer::handleConnection(int client)
 
     HttpRequest req   = parseRequest(raw.substr(0, headerLen));
     req.body          = raw.substr(headerLen);
+    req.contentLength = contentLen;
     HttpResponse resp = handler_(req);
 
     /* Response transmission deadline: 5s from handler completion. */

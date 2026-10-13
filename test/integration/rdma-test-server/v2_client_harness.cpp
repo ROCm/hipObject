@@ -17,16 +17,16 @@
 
 #include <cctype>
 #include <cerrno>
-#include <charconv>
+#include <concepts>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 
 #include <arpa/inet.h>
@@ -36,6 +36,8 @@
 
 #include "../../../src/rdma/token.h"
 #include "hipobj-format.h"
+#include "hipobj-parse.h"
+#include "http_status.h"
 #include "unique-fd.h"
 #include "v2_sigv4.h"
 
@@ -96,12 +98,7 @@ readResponse(int fd)
 int
 statusOf(const std::string &raw)
 {
-    /* "HTTP/1.1 NNN ..." */
-    size_t sp = raw.find(' ');
-    if (sp == std::string::npos) {
-        return -1;
-    }
-    return std::atoi(raw.c_str() + sp + 1);
+    return hipobj::test::parseStatusCode(raw).value_or(-1);
 }
 
 static std::string
@@ -177,23 +174,25 @@ optionValue(int argc, char *argv[], int &i)
     return argv[++i];
 }
 
-/* Parses all of str as a number in the given base. Fails on an empty
- * string, trailing characters, or a value that does not fit in T. */
-template <typename T>
-bool
-parseNumber(std::string_view str, T &out, int base = 10)
-{
-    const char *end = str.data() + str.size();
-    auto [ptr, ec]  = std::from_chars(str.data(), end, out, base);
-    return ec == std::errc() && ptr == end;
-}
-
 [[noreturn]] void
 invalidValue(const char *prog, const char *what, const char *value)
 {
     fprintf(stderr, "harness: invalid %s %s\n", what, value);
     usage(prog);
     std::exit(2);
+}
+
+/* Returns all of text parsed as a T in the given base, or exits with a
+ * usage error naming what was being parsed. */
+template <std::integral T>
+T
+numberArg(const char *prog, const char *what, const char *text, int base = 10)
+{
+    const std::optional<T> value = hipObj::parseNumber<T>(text, base);
+    if (!value) {
+        invalidValue(prog, what, text);
+    }
+    return *value;
 }
 
 } // namespace
@@ -206,39 +205,33 @@ main(int argc, char *argv[])
         return 2;
     }
     const std::string host                = argv[1];
-    uint16_t          port                = 0;
+    const uint16_t    port                = numberArg<uint16_t>(argv[0], "port", argv[2]);
     const std::string op                  = argv[3];
     const std::string target              = argv[4];
-    uint64_t          size                = 0;
+    const uint64_t    size                = numberArg<uint64_t>(argv[0], "size", argv[5]);
     int               expect              = 200;
     uint32_t          cookie              = 0x11223344;
     uint32_t          readyCookie         = 0;
     bool              overrideReadyCookie = false;
     bool              doCancel            = false;
-    if (!parseNumber(argv[2], port) || port == 0) {
+    if (port == 0) {
         invalidValue(argv[0], "port", argv[2]);
-    }
-    if (!parseNumber(argv[5], size)) {
-        invalidValue(argv[0], "size", argv[5]);
     }
     for (int i = 6; i < argc; ++i) {
         if (std::strcmp(argv[i], "--expect") == 0) {
             const char *value = optionValue(argc, argv, i);
-            if (!parseNumber(value, expect) || expect < 100 || expect > 599) {
+            expect            = numberArg<int>(argv[0], "HTTP status", value);
+            if (expect < 100 || expect > 599) {
                 invalidValue(argv[0], "HTTP status", value);
             }
         }
         else if (std::strcmp(argv[i], "--cookie-hex") == 0) {
             const char *value = optionValue(argc, argv, i);
-            if (!parseNumber(value, cookie, 16)) {
-                invalidValue(argv[0], "cookie", value);
-            }
+            cookie            = numberArg<uint32_t>(argv[0], "cookie", value, 16);
         }
         else if (std::strcmp(argv[i], "--ready-cookie-hex") == 0) {
-            const char *value = optionValue(argc, argv, i);
-            if (!parseNumber(value, readyCookie, 16)) {
-                invalidValue(argv[0], "cookie", value);
-            }
+            const char *value   = optionValue(argc, argv, i);
+            readyCookie         = numberArg<uint32_t>(argv[0], "cookie", value, 16);
             overrideReadyCookie = true;
         }
         else if (std::strcmp(argv[i], "--cancel") == 0) {

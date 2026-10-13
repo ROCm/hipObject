@@ -139,6 +139,18 @@ if(CURL_FOUND)
   set_tests_properties(test-s3-curl-ops PROPERTIES TIMEOUT 60)
 endif()
 
+# The RDMA test server's HTTP framing, and the status-line parser its
+# clients use
+hipobj_add_test(test-http-server
+  test-http-server.cpp)
+target_sources(test-http-server PRIVATE
+  ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/http_server.cpp)
+set_tests_properties(test-http-server PROPERTIES TIMEOUT 60)
+
+# The RDMA test server's x-amz-rdma-token parsing
+hipobj_add_test(test-token-header
+  test-token-header.cpp)
+
 if(HIPOBJECT_V2_API)
   hipobj_add_test(test-v2-wire
     test-v2-wire.cpp)

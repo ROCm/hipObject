@@ -10,7 +10,6 @@
  * client-side RC handshake.
  */
 
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -21,15 +20,16 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include <unistd.h>
 
+#include "hipobj-parse.h"
 #include "http_server.h"
 #include "rdma_server.h"
+#include "token_header.h"
 #ifdef HIPOBJECT_V2_API
 #include "v2_backend.h"
 #include "v2_handlers.h"
@@ -71,17 +71,6 @@ optionValue(int argc, char *argv[], int &i)
     return argv[++i];
 }
 
-/* Parses all of str as a number in the given base. Fails on an empty
- * string, trailing characters, or a value that does not fit in T. */
-template <typename T>
-bool
-parseNumber(std::string_view str, T &out, int base = 10)
-{
-    const char *end = str.data() + str.size();
-    auto [ptr, ec]  = std::from_chars(str.data(), end, out, base);
-    return ec == std::errc() && ptr == end;
-}
-
 } // namespace
 
 int
@@ -116,13 +105,13 @@ main(int argc, char *argv[])
             return 2;
         }
         else {
-            uint16_t value = 0;
-            if (!parseNumber(arg, value) || value == 0) {
+            const std::optional<uint16_t> value = hipObj::parseNumber<uint16_t>(arg);
+            if (!value || *value == 0) {
                 fprintf(stderr, "hipobj-rdma-test-server: invalid port %s\n", arg.c_str());
                 usage(argv[0]);
                 return 2;
             }
-            port = value;
+            port = *value;
         }
     }
 
@@ -278,15 +267,17 @@ main(int argc, char *argv[])
         }
 
         // Reaching here: token present and RDMA ready — use RDMA path.
+        const std::optional<hipobj::test::TokenHeader> token =
+            hipobj::test::parseTokenHeader(tokenIt->second);
+        if (!token) {
+            resp.status = 400;
+            resp.body   = "malformed x-amz-rdma-token";
+            return resp;
+        }
         if (req.method == "PUT") {
             std::vector<uint8_t> payload;
             std::string          replyHeader;
-            size_t               contentLen = 0;
-            auto                 clIt       = req.headers.find("content-length");
-            if (clIt != req.headers.end()) {
-                contentLen = static_cast<size_t>(std::strtoull(clIt->second.c_str(), nullptr, 10));
-            }
-            if (rdma.rdmaReadFromClient(tokenIt->second, contentLen, payload, replyHeader) != 0) {
+            if (rdma.rdmaReadFromClient(*token, req.contentLength, payload, replyHeader) != 0) {
                 resp.status = 500;
                 resp.body   = "RDMA PUT failed";
                 return resp;
@@ -314,7 +305,7 @@ main(int argc, char *argv[])
                 data = it->second;
             }
             std::string replyHeader;
-            if (rdma.rdmaWriteToClient(tokenIt->second, data, replyHeader) != 0) {
+            if (rdma.rdmaWriteToClient(*token, data, replyHeader) != 0) {
                 resp.status = 500;
                 resp.body   = "RDMA GET failed";
                 return resp;

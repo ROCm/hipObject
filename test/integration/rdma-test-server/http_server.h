@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -25,6 +26,7 @@ struct HttpRequest {
     std::map<std::string, std::string> headers;    /* lower-case names */
     std::string                        rawHeaders; /* original header block (credentials) */
     std::string                        body;
+    size_t contentLength = 0; /* Content-Length, which HttpServer validates; 0 if absent */
 };
 
 struct HttpResponse {

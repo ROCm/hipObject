@@ -8,6 +8,7 @@
  * and performs the actual RDMA transfer (WRITE_WITH_IMM for PUT,
  * READ pull for GET) so the server data phase runs for real. */
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cinttypes>
@@ -15,8 +16,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -30,11 +33,23 @@
 #include "../../../src/rdma/token.h"
 #include "gid.h"
 #include "hipobj-format.h"
+#include "hipobj-parse.h"
+#include "http_status.h"
 #include "malloc_ptr.h"
 #include "unique-fd.h"
 #include "v2_sigv4.h"
 
 namespace {
+
+/* QPNs and PSNs are 24-bit fields. QP 0 is reserved, and the protocol
+ * doesn't use PSN 0. */
+constexpr uint32_t kMax24Bit = 0xffffff;
+
+/* The protocol sends the server's PSN as exactly this many hex digits */
+constexpr size_t kPsnHexLen = 6;
+
+/* Size of the transfer buffer: one page */
+constexpr size_t kBufBytes = 4096;
 
 /* Owning pointers for verbs objects. This client calls libibverbs
  * directly rather than through the library's dlopen wrapper, so it
@@ -173,11 +188,7 @@ readResponse(int fd)
 int
 statusOf(const std::string &resp)
 {
-    size_t sp = resp.find(' ');
-    if (sp == std::string::npos) {
-        return 0;
-    }
-    return std::atoi(resp.c_str() + sp + 1);
+    return hipobj::test::parseStatusCode(resp).value_or(0);
 }
 
 std::string
@@ -251,19 +262,19 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
      * page by page and rejects a region whose chunk count does not
      * divide the length, which a stack buffer crossing a page
      * boundary triggers. */
-    verbs.buf.reset(std::aligned_alloc(4096, 4096));
+    verbs.buf.reset(std::aligned_alloc(kBufBytes, kBufBytes));
     char *buf = static_cast<char *>(verbs.buf.get());
     if (buf == nullptr) {
         std::fprintf(stderr, "dp: alloc failed\n");
         return 2;
     }
-    verbs.mr.reset(ibv_reg_mr(verbs.pd.get(), buf, 4096,
+    verbs.mr.reset(ibv_reg_mr(verbs.pd.get(), buf, kBufBytes,
                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!verbs.mr) {
         std::fprintf(stderr, "dp: reg_mr failed\n");
         return 2;
     }
-    std::memset(buf, 0, 4096);
+    std::memset(buf, 0, kBufBytes);
     if (std::strcmp(op, "PUT") == 0) {
         std::memcpy(buf, "dp-put-payload", 14);
     }
@@ -273,11 +284,17 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     attr.pkey_index      = 0;
     attr.port_num        = 1;
     attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-    ibv_modify_qp(verbs.qp.get(), &attr,
-                  IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
+    if (ibv_modify_qp(verbs.qp.get(), &attr,
+                      IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS) != 0) {
+        std::fprintf(stderr, "dp: QP to INIT failed\n");
+        return 2;
+    }
 
     ibv_gid gid{};
-    ibv_query_gid(verbs.ctx.get(), 1, 0, &gid);
+    if (ibv_query_gid(verbs.ctx.get(), 1, 0, &gid) != 0) {
+        std::fprintf(stderr, "dp: query_gid failed\n");
+        return 2;
+    }
 
     /* ---- PREPARE (control, over TCP) ---- */
     const std::string psnHex    = hipObj::formatHex(1U, 6);
@@ -351,12 +368,16 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         std::fprintf(stderr, "dp: no server qpn exposed - refusing\n");
         return 1;
     }
-    std::string spsnS = headerValue(presp, "x-amz-rdma-psn");
-    uint32_t    sqpn  = sqpnS.empty() ? 0 : static_cast<uint32_t>(std::strtoul(sqpnS.c_str(), nullptr, 16));
+    const std::optional<uint32_t> sqpnParsed = hipObj::parseNumber<uint32_t>(sqpnS, 16);
+    if (!sqpnParsed || *sqpnParsed == 0 || *sqpnParsed > kMax24Bit) {
+        std::fprintf(stderr, "dp: server qpn invalid\n");
+        return 1;
+    }
+    const uint32_t    sqpn  = *sqpnParsed;
+    const std::string spsnS = headerValue(presp, "x-amz-rdma-psn");
 
     hipObj::RdmaToken replyTok{};
     ibv_gid           serverGid{};
-    bool              haveServerGid = false;
     /* The reply token is mandatory: "200:" + exactly 88 hex that
      * decodes and carries the same server QPN as the dedicated
      * header. Its absence or any malformation fails the transfer. */
@@ -384,48 +405,53 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
             std::fprintf(stderr, "dp: reply token unusable endpoint\n");
             return 1;
         }
-        serverGid     = std::bit_cast<union ibv_gid>(replyTok.gid);
-        haveServerGid = true;
+        serverGid = std::bit_cast<union ibv_gid>(replyTok.gid);
     }
-    uint32_t spsn = spsnS.empty() ? 1 : static_cast<uint32_t>(std::strtoul(spsnS.c_str(), nullptr, 16));
+    const std::optional<uint32_t> spsnParsed =
+        spsnS.size() == kPsnHexLen ? hipObj::parseNumber<uint32_t>(spsnS, 16) : std::nullopt;
+    if (!spsnParsed || *spsnParsed == 0 || *spsnParsed > kMax24Bit) {
+        std::fprintf(stderr, "dp: server psn invalid\n");
+        return 1;
+    }
+    const uint32_t spsn = *spsnParsed;
     if (session.empty()) {
-        /* Server did not expose a QP: the data path stays a no-op on
-         * the server (no transport objects wired). Drive READY anyway
-         * so the control flow is exercised end to end. */
-        std::printf("dp: no server qpn - control-only transfer\n");
+        std::fprintf(stderr, "dp: no session in the PREPARE reply\n");
+        return 1;
     }
 
-    /* ---- QP to RTR/RTS against the server QP when exposed ---- */
-    if (sqpn != 0) {
-        attr                    = {};
-        attr.qp_state           = IBV_QPS_RTR;
-        attr.path_mtu           = IBV_MTU_1024;
-        attr.dest_qp_num        = sqpn;
-        attr.rq_psn             = spsn;
-        attr.max_dest_rd_atomic = 1;
-        attr.min_rnr_timer      = 12;
-        /* hipObject targets RoCEv2: the GRH with the peer GID is
-         * the only routing path - the server's GID from the reply
-         * token when it carries one, our own GID only for same-HCA
-         * loopback. */
-        attr.ah_attr.is_global      = 1;
-        attr.ah_attr.grh.dgid       = haveServerGid ? serverGid : gid;
-        attr.ah_attr.grh.sgid_index = 0;
-        attr.ah_attr.grh.hop_limit  = 1;
-        attr.ah_attr.port_num       = 1;
-        ibv_modify_qp(verbs.qp.get(), &attr,
+    /* ---- QP to RTR/RTS against the server QP ---- */
+    attr                    = {};
+    attr.qp_state           = IBV_QPS_RTR;
+    attr.path_mtu           = IBV_MTU_1024;
+    attr.dest_qp_num        = sqpn;
+    attr.rq_psn             = spsn;
+    attr.max_dest_rd_atomic = 1;
+    attr.min_rnr_timer      = 12;
+    /* hipObject targets RoCEv2: the GRH with the server's GID from
+     * the reply token is the only routing path. */
+    attr.ah_attr.is_global      = 1;
+    attr.ah_attr.grh.dgid       = serverGid;
+    attr.ah_attr.grh.sgid_index = 0;
+    attr.ah_attr.grh.hop_limit  = 1;
+    attr.ah_attr.port_num       = 1;
+    if (ibv_modify_qp(verbs.qp.get(), &attr,
                       IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
-                          IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
-        attr               = {};
-        attr.qp_state      = IBV_QPS_RTS;
-        attr.timeout       = 14;
-        attr.retry_cnt     = 7;
-        attr.rnr_retry     = 7;
-        attr.sq_psn        = 1;
-        attr.max_rd_atomic = 1;
-        ibv_modify_qp(verbs.qp.get(), &attr,
+                          IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER) != 0) {
+        std::fprintf(stderr, "dp: QP to RTR failed\n");
+        return 2;
+    }
+    attr               = {};
+    attr.qp_state      = IBV_QPS_RTS;
+    attr.timeout       = 14;
+    attr.retry_cnt     = 7;
+    attr.rnr_retry     = 7;
+    attr.sq_psn        = 1;
+    attr.max_rd_atomic = 1;
+    if (ibv_modify_qp(verbs.qp.get(), &attr,
                       IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
-                          IBV_QP_MAX_QP_RD_ATOMIC);
+                          IBV_QP_MAX_QP_RD_ATOMIC) != 0) {
+        std::fprintf(stderr, "dp: QP to RTS failed\n");
+        return 2;
     }
 
     /* ---- READY ---- */
@@ -453,20 +479,19 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     }
 
     /* ---- data plane while the server processes READY ---- */
-    if (sqpn != 0) {
-        if (std::strcmp(op, "GET") == 0) {
-            ibv_sge rsge{};
-            rsge.addr   = reinterpret_cast<uintptr_t>(buf);
-            rsge.length = static_cast<uint32_t>(size < sizeof(buf) ? size : sizeof(buf));
-            rsge.lkey   = verbs.mr->lkey;
-            ibv_recv_wr rwr{};
-            rwr.wr_id                = 0x47455452454356ULL; /* "GETRECV" */
-            rwr.sg_list              = &rsge;
-            rwr.num_sge              = 1;
-            struct ibv_recv_wr *rbad = nullptr;
-            if (ibv_post_recv(verbs.qp.get(), &rwr, &rbad) != 0) {
-                std::fprintf(stderr, "dp: GET post_recv failed\n");
-            }
+    if (std::strcmp(op, "GET") == 0) {
+        ibv_sge rsge{};
+        rsge.addr   = reinterpret_cast<uintptr_t>(buf);
+        rsge.length = static_cast<uint32_t>(std::min<uint64_t>(size, kBufBytes));
+        rsge.lkey   = verbs.mr->lkey;
+        ibv_recv_wr rwr{};
+        rwr.wr_id                = 0x47455452454356ULL; /* "GETRECV" */
+        rwr.sg_list              = &rsge;
+        rwr.num_sge              = 1;
+        struct ibv_recv_wr *rbad = nullptr;
+        if (ibv_post_recv(verbs.qp.get(), &rwr, &rbad) != 0) {
+            std::fprintf(stderr, "dp: GET post_recv failed\n");
+            return 1;
         }
     }
     /* PUT: the server posts its receive while handling the READY
@@ -474,11 +499,11 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
      * write must go out before waiting for the response. A short
      * grace keeps it clear of the receive-post race. */
     int rc = 0;
-    if (std::strcmp(op, "PUT") == 0 && sqpn != 0) {
+    if (std::strcmp(op, "PUT") == 0) {
         usleep(100 * 1000);
         ibv_sge sge{};
         sge.addr   = reinterpret_cast<uintptr_t>(buf);
-        sge.length = static_cast<uint32_t>(size < 4096 ? size : 4096);
+        sge.length = static_cast<uint32_t>(std::min<uint64_t>(size, kBufBytes));
         sge.lkey   = verbs.mr->lkey;
         ibv_send_wr wr{};
         wr.opcode     = IBV_WR_RDMA_WRITE_WITH_IMM;
@@ -486,11 +511,14 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         wr.imm_data   = htonl(cookie);
         /* Remote endpoint: the server staging MR from the PREPARE
          * reply. */
-        std::string saddrS = headerValue(presp, "x-amz-rdma-mr-addr");
-        std::string srkeyS = headerValue(presp, "x-amz-rdma-mr-rkey");
-        if (!saddrS.empty() && !srkeyS.empty()) {
-            wr.wr.rdma.remote_addr  = std::strtoull(saddrS.c_str(), nullptr, 16);
-            wr.wr.rdma.rkey         = static_cast<uint32_t>(std::strtoul(srkeyS.c_str(), nullptr, 16));
+        const std::optional<uint64_t> saddr =
+            hipObj::parseNumber<uint64_t>(headerValue(presp, "x-amz-rdma-mr-addr"), 16);
+        const std::optional<uint32_t> srkey =
+            hipObj::parseNumber<uint32_t>(headerValue(presp, "x-amz-rdma-mr-rkey"), 16);
+        /* The write must not run past the end of the address space */
+        if (saddr && srkey && *saddr <= std::numeric_limits<uint64_t>::max() - sge.length) {
+            wr.wr.rdma.remote_addr  = *saddr;
+            wr.wr.rdma.rkey         = *srkey;
             wr.sg_list              = &sge;
             wr.num_sge              = 1;
             struct ibv_send_wr *bad = nullptr;
@@ -516,7 +544,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
             }
         }
         else {
-            std::fprintf(stderr, "dp: server staging not exposed\n");
+            std::fprintf(stderr, "dp: server staging not exposed or invalid\n");
             rc = 1;
         }
     }
@@ -528,7 +556,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     if (rst != 200) {
         return 1;
     }
-    if (std::strcmp(op, "GET") == 0 && sqpn != 0 && rst == 200) {
+    if (std::strcmp(op, "GET") == 0) {
         ibv_wc wc{};
         for (int i = 0; i < 2000; ++i) {
             if (ibv_poll_cq(verbs.cq.get(), 1, &wc) > 0) {
@@ -570,7 +598,24 @@ main(int argc, char *argv[])
         std::fprintf(stderr, "usage: %s HOST PORT OP TARGET SIZE [COOKIE-HEX]\n", argv[0]);
         return 2;
     }
-    uint32_t cookie = argc > 6 ? static_cast<uint32_t>(std::strtoul(argv[6], nullptr, 16)) : 0x1a2b3c4d;
-    uint64_t size   = std::strtoull(argv[5], nullptr, 10);
-    return runTransfer(argv[1], std::atoi(argv[2]), argv[3], argv[4], size, cookie);
+    const std::optional<uint16_t> port = hipObj::parseNumber<uint16_t>(argv[2]);
+    if (!port || *port == 0) {
+        std::fprintf(stderr, "invalid port %s\n", argv[2]);
+        return 2;
+    }
+    const std::optional<uint64_t> size = hipObj::parseNumber<uint64_t>(argv[5]);
+    if (!size || *size == 0) {
+        std::fprintf(stderr, "invalid size %s\n", argv[5]);
+        return 2;
+    }
+    uint32_t cookie = 0x1a2b3c4d;
+    if (argc > 6) {
+        const std::optional<uint32_t> parsed = hipObj::parseNumber<uint32_t>(argv[6], 16);
+        if (!parsed) {
+            std::fprintf(stderr, "invalid cookie %s\n", argv[6]);
+            return 2;
+        }
+        cookie = *parsed;
+    }
+    return runTransfer(argv[1], *port, argv[3], argv[4], *size, cookie);
 }
