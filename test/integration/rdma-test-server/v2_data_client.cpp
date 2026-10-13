@@ -31,6 +31,7 @@
 #include "gid.h"
 #include "hipobj-format.h"
 #include "malloc_ptr.h"
+#include "unique-fd.h"
 #include "v2_sigv4.h"
 
 namespace {
@@ -102,26 +103,37 @@ struct ClientVerbs {
     ClientVerbs &operator=(ClientVerbs &&)      = delete;
 };
 
-int
+struct AddrInfoDeleter {
+    void operator()(struct addrinfo *ai) const noexcept
+    {
+        freeaddrinfo(ai);
+    }
+};
+
+using AddrInfoPtr = std::unique_ptr<struct addrinfo, AddrInfoDeleter>;
+
+/* Returns a connected socket, or an empty UniqueFd on failure. Every
+ * path returns fd, so the copy can be elided (-Wnrvo). */
+hipObj::UniqueFd
 connectTcp(const char *host, int port)
 {
+    hipObj::UniqueFd  fd;
     const std::string service = std::to_string(port);
     struct addrinfo   hints   = {};
     hints.ai_family           = AF_INET;
     hints.ai_socktype         = SOCK_STREAM;
-    struct addrinfo *res      = nullptr;
-    if (getaddrinfo(host, service.c_str(), &hints, &res) != 0 || res == nullptr) {
-        return -1;
+    struct addrinfo *rawRes   = nullptr;
+    /* getaddrinfo() leaves rawRes unspecified when it fails */
+    if (getaddrinfo(host, service.c_str(), &hints, &rawRes) != 0) {
+        return fd;
     }
-    int fd = socket(res->ai_family, res->ai_socktype, 0);
-    if (fd < 0 || connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
-        if (fd >= 0) {
-            close(fd);
+    const AddrInfoPtr res(rawRes);
+    if (res) {
+        fd.reset(socket(res->ai_family, res->ai_socktype, 0));
+        if (fd && connect(fd.get(), res->ai_addr, res->ai_addrlen) != 0) {
+            fd.reset();
         }
-        freeaddrinfo(res);
-        return -1;
     }
-    freeaddrinfo(res);
     return fd;
 }
 
@@ -318,13 +330,13 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     prep += "Authorization: " + pauth + "\r\n";
     prep += "content-length: 0\r\n\r\n";
 
-    int fd = connectTcp(host, port);
-    if (fd < 0 || !sendAll(fd, prep)) {
+    hipObj::UniqueFd fd = connectTcp(host, port);
+    if (!fd || !sendAll(fd.get(), prep)) {
         std::fprintf(stderr, "dp: prepare send failed\n");
         return 2;
     }
-    std::string presp = readResponse(fd);
-    close(fd);
+    std::string presp = readResponse(fd.get());
+    fd.reset();
     int st = statusOf(presp);
     if (st != 200) {
         std::fprintf(stderr, "dp: PREPARE status=%d\n", st);
@@ -435,7 +447,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     ready += "Authorization: " + rauth + "\r\n";
     ready += "content-length: 0\r\n\r\n";
     fd = connectTcp(host, port);
-    if (fd < 0 || !sendAll(fd, ready)) {
+    if (!fd || !sendAll(fd.get(), ready)) {
         std::fprintf(stderr, "dp: ready send failed\n");
         return 2;
     }
@@ -508,8 +520,8 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
             rc = 1;
         }
     }
-    std::string rresp = readResponse(fd);
-    close(fd);
+    std::string rresp = readResponse(fd.get());
+    fd.reset();
     int         rst    = statusOf(rresp);
     std::string bytesS = headerValue(rresp, "x-amz-rdma-bytes-transferred");
     std::printf("dp: READY status=%d bytes=%s\n", rst, bytesS.c_str());

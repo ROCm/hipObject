@@ -24,10 +24,11 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
-#include <unistd.h>
+#include <sys/types.h>
 
 #include "hipobj-warnings.h"
 #include "s3_curl_ops.h"
+#include "unique-fd.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -65,31 +66,27 @@ remainingMs(const std::chrono::steady_clock::time_point &deadline)
 // connects or disappears mid-transfer.
 class StubHttpServer {
 public:
-    explicit StubHttpServer(std::string response) : response_(std::move(response))
+    explicit StubHttpServer(std::string response)
+        : listenFd_(socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)), response_(std::move(response))
     {
-        listenFd_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-        if (listenFd_ < 0) {
+        if (!listenFd_) {
             throw std::runtime_error("socket() failed");
         }
         int one = 1;
-        setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        setsockopt(listenFd_.get(), SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
         addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port        = 0;
-        if (bind(listenFd_, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) != 0 ||
-            listen(listenFd_, 1) != 0) {
-            close(listenFd_);
-            listenFd_ = -1;
+        if (bind(listenFd_.get(), reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) != 0 ||
+            listen(listenFd_.get(), 1) != 0) {
             throw std::runtime_error("bind/listen failed");
         }
 
         socklen_t slen = sizeof(addr);
-        if (getsockname(listenFd_, reinterpret_cast<struct sockaddr *>(&addr), &slen) != 0) {
-            close(listenFd_);
-            listenFd_ = -1;
+        if (getsockname(listenFd_.get(), reinterpret_cast<struct sockaddr *>(&addr), &slen) != 0) {
             throw std::runtime_error("getsockname failed");
         }
         char url[64];
@@ -102,9 +99,6 @@ public:
     ~StubHttpServer()
     {
         joinWorker();
-        if (listenFd_ >= 0) {
-            close(listenFd_);
-        }
     }
 
     // The worker thread holds this
@@ -141,33 +135,25 @@ private:
         }
     }
 
-    void fail(int err, int fd)
-    {
-        result_.err = err;
-        if (fd >= 0) {
-            close(fd);
-        }
-    }
-
     // Runs the single-connection exchange against one absolute deadline:
     // accept a connection, read until the request headers are terminated
     // (or 8 KiB has been read), then write the canned response. Any poll
-    // timeout, I/O error, or the deadline expiring ends the exchange early
-    // via fail()/early return, leaving result_ to report what happened.
+    // timeout, I/O error, or the deadline expiring ends the exchange early,
+    // leaving result_ to report what happened.
     void serve()
     {
         const auto deadline = std::chrono::steady_clock::now() + kServeDeadline;
 
         // --- Accept phase: wait for a connection, retrying on EINTR and the
         // transient accept4() errors a nonblocking listen socket can produce.
-        int fd = -1;
+        hipObj::UniqueFd fd;
         for (;;) {
             if (remainingMs(deadline) == 0) {
                 result_.err = ETIMEDOUT;
                 return;
             }
             struct pollfd pfd;
-            pfd.fd      = listenFd_;
+            pfd.fd      = listenFd_.get();
             pfd.events  = POLLIN;
             pfd.revents = 0;
             int pr      = poll(&pfd, 1, remainingMs(deadline));
@@ -182,8 +168,8 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            fd = accept4(listenFd_, nullptr, nullptr, SOCK_NONBLOCK);
-            if (fd >= 0) {
+            fd.reset(accept4(listenFd_.get(), nullptr, nullptr, SOCK_NONBLOCK));
+            if (fd) {
                 break;
             }
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK || errno == EPROTO ||
@@ -203,11 +189,11 @@ private:
         char buf[4096];
         while (request_.find("\r\n\r\n") == std::string::npos && request_.size() < 8192) {
             if (remainingMs(deadline) == 0) {
-                fail(ETIMEDOUT, fd);
+                result_.err = ETIMEDOUT;
                 return;
             }
             struct pollfd pfd;
-            pfd.fd      = fd;
+            pfd.fd      = fd.get();
             pfd.events  = POLLIN;
             pfd.revents = 0;
             int pr      = poll(&pfd, 1, remainingMs(deadline));
@@ -215,19 +201,19 @@ private:
                 if (errno == EINTR) {
                     continue;
                 }
-                fail(errno, fd);
+                result_.err = errno;
                 return;
             }
             if (pr == 0) {
-                fail(ETIMEDOUT, fd);
+                result_.err = ETIMEDOUT;
                 return;
             }
-            ssize_t n = recv(fd, buf, sizeof(buf), 0);
+            ssize_t n = recv(fd.get(), buf, sizeof(buf), 0);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
                 }
-                fail(errno, fd);
+                result_.err = errno;
                 return;
             }
             if (n == 0) {
@@ -242,11 +228,11 @@ private:
         size_t sent = 0;
         while (sent < response_.size()) {
             if (remainingMs(deadline) == 0) {
-                fail(ETIMEDOUT, fd);
+                result_.err = ETIMEDOUT;
                 return;
             }
             struct pollfd pfd;
-            pfd.fd      = fd;
+            pfd.fd      = fd.get();
             pfd.events  = POLLOUT;
             pfd.revents = 0;
             int pr      = poll(&pfd, 1, remainingMs(deadline));
@@ -254,33 +240,32 @@ private:
                 if (errno == EINTR) {
                     continue;
                 }
-                fail(errno, fd);
+                result_.err = errno;
                 return;
             }
             if (pr == 0) {
-                fail(ETIMEDOUT, fd);
+                result_.err = ETIMEDOUT;
                 return;
             }
-            ssize_t n = send(fd, response_.data() + sent, response_.size() - sent, MSG_NOSIGNAL);
+            ssize_t n = send(fd.get(), response_.data() + sent, response_.size() - sent, MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
                 }
-                fail(errno, fd);
+                result_.err = errno;
                 return;
             }
             sent += static_cast<size_t>(n);
         }
         result_.responseSent = true;
-        close(fd); // close() is not retried on EINTR
     }
 
-    int         listenFd_ = -1;
-    std::string response_;
-    std::string endpoint_;
-    std::string request_;
-    ServeResult result_;
-    std::thread worker_;
+    hipObj::UniqueFd listenFd_;
+    std::string      response_;
+    std::string      endpoint_;
+    std::string      request_;
+    ServeResult      result_;
+    std::thread      worker_;
 };
 
 const char       kToken[]  = "0123456789abcdef";
@@ -449,16 +434,16 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     // Bind a socket without listening and hold it open for the duration
     // of the request so the port cannot be taken over; connections to it
     // are refused deterministically.
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    ASSERT_GE(fd, 0);
+    const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM, 0));
+    ASSERT_TRUE(fd);
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port        = 0;
-    ASSERT_EQ(0, bind(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)));
+    ASSERT_EQ(0, bind(fd.get(), reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)));
     socklen_t slen = sizeof(addr);
-    ASSERT_EQ(0, getsockname(fd, reinterpret_cast<struct sockaddr *>(&addr), &slen));
+    ASSERT_EQ(0, getsockname(fd.get(), reinterpret_cast<struct sockaddr *>(&addr), &slen));
     const std::string url = "http://127.0.0.1:" + std::to_string(ntohs(addr.sin_port));
 
     hipObjS3CurlCtx ctx;
@@ -466,7 +451,6 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     fillCtx(&ctx, url);
     int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
     EXPECT_EQ(-1, rc);
-    close(fd);
 }
 
 TEST(S3CurlOps, SendRequestNullCtx)

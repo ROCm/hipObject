@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <optional>
 #include <ratio>
 #include <sstream>
 #include <utility>
@@ -134,36 +136,52 @@ namespace {
 
 } // namespace
 
-HttpServer::HttpServer(int port)
+HttpServer::HttpServer(int port) : listen_fd_(socket(AF_INET, SOCK_STREAM, 0))
 {
-    listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_fd_ < 0) {
+    if (!listen_fd_) {
         return;
     }
     int opt = 1;
-    setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(listen_fd_.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port        = htons(static_cast<uint16_t>(port));
-    if (bind(listen_fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+    if (bind(listen_fd_.get(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
         /* Silence here is what made a busy port look like a crash: the object
          * went on being constructed, and the abort arrived later from select().
          * Say which port and why, once, where it happened. */
         fprintf(stderr, "hipobj-rdma-test-server: cannot bind port %d: %s\n", port, strerror(errno));
-        close(listen_fd_);
-        listen_fd_ = -1;
+        listen_fd_.reset();
         return;
     }
-    listen(listen_fd_, 64);
+    listen(listen_fd_.get(), 64);
 }
 
 HttpServer::~HttpServer()
 {
     stop();
-    if (listen_fd_ >= 0) {
-        close(listen_fd_);
+}
+
+HttpServer::Worker::Worker(HttpServer &server, hipObj::UniqueFd client) noexcept
+    : server_(&server), client_(std::move(client))
+{
+}
+
+HttpServer::Worker::Worker(Worker &&other) noexcept
+    : server_(std::exchange(other.server_, nullptr)), client_(std::move(other.client_))
+{
+}
+
+HttpServer::Worker::~Worker()
+{
+    if (server_ != nullptr) {
+        std::scoped_lock<std::mutex> guard(server_->workersMtx_);
+        server_->activeFds_.erase(client_.get());
+        server_->liveWorkers_--;
+        server_->workerDoneCv_.notify_all();
     }
+    /* client_ is closed after this, once it's no longer registered */
 }
 
 void
@@ -175,7 +193,7 @@ HttpServer::setHandler(HttpHandler handler)
 bool
 HttpServer::startThreaded()
 {
-    if (listen_fd_ < 0) {
+    if (!listen_fd_) {
         return false;
     }
     acceptLoop_ = std::thread([this] { runThreaded(); });
@@ -188,7 +206,7 @@ HttpServer::runThreaded()
     /* Accept loop; runs on the tracked thread created by
      * startThreaded() so stop() can join it as the production
      * barrier. */
-    if (listen_fd_ < 0) {
+    if (!listen_fd_) {
         /* FD_SET(-1) is a glibc fortify abort, so without this check a
          * failed bind killed the process with "bit out of range 0 -
          * FD_SETSIZE on fd_set" and no mention of a port. startThreaded()
@@ -199,16 +217,16 @@ HttpServer::runThreaded()
     while (!stopping_.load()) {
         fd_set fds;
         FD_ZERO(&fds);
-        FD_SET(listen_fd_, &fds);
+        FD_SET(listen_fd_.get(), &fds);
         timeval tv{};
         tv.tv_sec  = 0;
         tv.tv_usec = 200 * 1000; /* wake for stop checks */
-        int ready  = select(listen_fd_ + 1, &fds, nullptr, nullptr, &tv);
+        int ready  = select(listen_fd_.get() + 1, &fds, nullptr, nullptr, &tv);
         if (ready <= 0) {
             continue;
         }
-        int client = accept(listen_fd_, nullptr, nullptr);
-        if (client < 0) {
+        hipObj::UniqueFd client(accept(listen_fd_.get(), nullptr, nullptr));
+        if (!client) {
             continue;
         }
         /* Linger off is the server-wide invariant: close/shutdown never
@@ -216,47 +234,38 @@ HttpServer::runThreaded()
         linger ling{};
         ling.l_onoff  = 0;
         ling.l_linger = 0;
-        if (setsockopt(client, SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) != 0) {
-            close(client);
+        if (setsockopt(client.get(), SOL_SOCKET, SO_LINGER, &ling, sizeof(ling)) != 0) {
             continue;
         }
-        /* Detached workers: each owns its lifetime and unregisters
-         * its fd before closing it, so accept never recycles a live
-         * registration. stop() waits on the live count (the join
-         * barrier above guarantees no late registration follows). */
-        {
-            std::scoped_lock<std::mutex> guard(workersMtx_);
-            if (stopping_.load()) {
-                ::close(client);
-                break;
-            }
-            activeFds_.insert(client);
-            liveWorkers_++;
+        /* Detached workers: each owns its lifetime through its Worker,
+         * which unregisters the fd before closing it. stop() waits on the
+         * live count (the join barrier above guarantees no late
+         * registration follows). */
+        std::optional<Worker> worker = registerWorker(std::move(client));
+        if (!worker) {
+            break;
         }
         try {
-            std::thread([this, client] {
-                handleConnection(client, /*closeFd=*/false);
-                {
-                    std::scoped_lock<std::mutex> guard(workersMtx_);
-                    activeFds_.erase(client);
-                    liveWorkers_--;
-                    workerDoneCv_.notify_all();
-                }
-                ::close(client);
-            }).detach();
+            std::thread([this, conn = std::move(*worker)] { handleConnection(conn.fd()); }).detach();
         }
         catch (...) {
-            /* Thread creation failed: roll the registration back so
-             * stop()'s live-count wait never blocks on a ghost. */
-            {
-                std::scoped_lock<std::mutex> guard(workersMtx_);
-                activeFds_.erase(client);
-                liveWorkers_--;
-                workerDoneCv_.notify_all();
-            }
-            ::close(client);
+            /* Thread creation failed. The Worker the lambda held has
+             * already rolled the registration back, so stop()'s
+             * live-count wait never blocks on a ghost. */
         }
     }
+}
+
+std::optional<HttpServer::Worker>
+HttpServer::registerWorker(hipObj::UniqueFd client)
+{
+    std::scoped_lock<std::mutex> guard(workersMtx_);
+    if (stopping_.load()) {
+        return std::nullopt;
+    }
+    activeFds_.insert(client.get());
+    liveWorkers_++;
+    return std::optional<Worker>(std::in_place, *this, std::move(client));
 }
 
 void
@@ -265,28 +274,29 @@ HttpServer::stop()
     if (stopping_.exchange(true)) {
         return;
     }
-    if (listen_fd_ >= 0) {
-        shutdown(listen_fd_, SHUT_RDWR);
+    if (listen_fd_) {
+        shutdown(listen_fd_.get(), SHUT_RDWR);
     }
     /* Wake every blocked worker: a dup'd handle stays valid even if
      * the worker closes the original first, so shutdown cannot hit
      * a recycled fd. */
-    std::vector<int> dups;
     {
-        std::scoped_lock<std::mutex> guard(workersMtx_);
-        for (int fd : activeFds_) {
-            int d = dup(fd);
-            if (d >= 0) {
-                dups.push_back(d);
-            }
-            else {
-                shutdown(fd, SHUT_RDWR); /* linger-off: never blocks */
+        std::vector<hipObj::UniqueFd> dups;
+        {
+            std::scoped_lock<std::mutex> guard(workersMtx_);
+            for (int fd : activeFds_) {
+                hipObj::UniqueFd d(dup(fd));
+                if (d) {
+                    dups.push_back(std::move(d));
+                }
+                else {
+                    shutdown(fd, SHUT_RDWR); /* linger-off: never blocks */
+                }
             }
         }
-    }
-    for (int d : dups) {
-        shutdown(d, SHUT_RDWR);
-        close(d);
+        for (const hipObj::UniqueFd &d : dups) {
+            shutdown(d.get(), SHUT_RDWR);
+        }
     }
     /* Worker production barrier: joining the accept-loop thread
      * guarantees no registration can follow the live-count wait
@@ -306,7 +316,7 @@ HttpServer::stop()
 }
 
 void
-HttpServer::handleConnection(int client, bool closeFd)
+HttpServer::handleConnection(int client)
 {
     /* Absolute receive deadline (request bytes only). */
     const auto  deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -315,9 +325,6 @@ HttpServer::handleConnection(int client, bool closeFd)
     size_t      headerEnd = std::string::npos;
     while (headerEnd == std::string::npos) {
         if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
-            if (closeFd) {
-                close(client);
-            }
             return;
         }
         ssize_t n = recv(client, buf, sizeof(buf), 0);
@@ -325,16 +332,10 @@ HttpServer::handleConnection(int client, bool closeFd)
             if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
                 continue;
             }
-            if (closeFd) {
-                close(client);
-            }
             return;
         }
         raw.append(buf, static_cast<size_t>(n));
         if (raw.size() > kMaxHeaderBytes) {
-            if (closeFd) {
-                close(client);
-            }
             return;
         }
         headerEnd = raw.find("\r\n\r\n");
@@ -348,9 +349,6 @@ HttpServer::handleConnection(int client, bool closeFd)
         if (it != head.headers.end()) {
             contentLen = static_cast<size_t>(strtoull(it->second.c_str(), nullptr, 10));
             if (contentLen > kMaxBodyBytes) {
-                if (closeFd) {
-                    close(client);
-                }
                 return;
             }
         }
@@ -374,9 +372,6 @@ HttpServer::handleConnection(int client, bool closeFd)
     }
     bodyComplete = raw.size() - headerLen >= contentLen;
     if (!bodyComplete) {
-        if (closeFd) {
-            close(client);
-        }
         return;
     }
 
@@ -404,9 +399,6 @@ HttpServer::handleConnection(int client, bool closeFd)
         catch (...) {
             /* logged upstream if needed */
         }
-    }
-    if (closeFd) {
-        close(client);
     }
 }
 

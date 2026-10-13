@@ -32,31 +32,27 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>
+#include <sys/types.h>
 
 #include "../../../src/rdma/token.h"
 #include "hipobj-format.h"
+#include "unique-fd.h"
 #include "v2_sigv4.h"
 
 namespace {
 
-int
+/* Returns a connected socket, or an empty UniqueFd on failure. Every
+ * path returns fd, so the copy can be elided (-Wnrvo). */
+hipObj::UniqueFd
 connectTo(const std::string &host, int port)
 {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) {
-        return -1;
-    }
-    sockaddr_in addr{};
+    hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM, 0));
+    sockaddr_in      addr{};
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(static_cast<uint16_t>(port));
-    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
-        close(fd);
-        return -1;
-    }
-    if (connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-        close(fd);
-        return -1;
+    if (fd && (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1 ||
+               connect(fd.get(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0)) {
+        fd.reset();
     }
     return fd;
 }
@@ -281,18 +277,17 @@ main(int argc, char *argv[])
     req += "Authorization: " + auth + "\r\n";
     req += "Content-Length: 0\r\n\r\n";
 
-    int fd = connectTo(host, port);
-    if (fd < 0) {
+    hipObj::UniqueFd fd = connectTo(host, port);
+    if (!fd) {
         fprintf(stderr, "harness: connect failed\n");
         return 2;
     }
-    if (!sendAll(fd, req)) {
+    if (!sendAll(fd.get(), req)) {
         fprintf(stderr, "harness: prepare send failed\n");
-        close(fd);
         return 2;
     }
-    std::string resp = readResponse(fd);
-    close(fd);
+    std::string resp = readResponse(fd.get());
+    fd.reset();
     int prepStatus = statusOf(resp);
     if (prepStatus != 200) {
         fprintf(stdout, "PREPARE status=%d\n", prepStatus);
@@ -323,12 +318,12 @@ main(int argc, char *argv[])
     rreq += "Content-Length: 0\r\n\r\n";
 
     fd = connectTo(host, port);
-    if (fd < 0 || !sendAll(fd, rreq)) {
+    if (!fd || !sendAll(fd.get(), rreq)) {
         fprintf(stderr, "harness: ready send failed\n");
         return 2;
     }
-    resp = readResponse(fd);
-    close(fd);
+    resp = readResponse(fd.get());
+    fd.reset();
     int readyStatus = statusOf(resp);
     fprintf(stdout, "READY status=%d session=%.8s..\n", readyStatus, session.c_str());
     if (readyStatus != expect) {
@@ -359,15 +354,15 @@ main(int argc, char *argv[])
         creq += "Authorization: " + cauth + "\r\n";
         creq += "Content-Length: 0\r\n\r\n";
         fd = connectTo(host, port);
-        if (fd >= 0 && sendAll(fd, creq)) {
-            resp = readResponse(fd);
-            close(fd);
+        if (fd && sendAll(fd.get(), creq)) {
+            resp = readResponse(fd.get());
+            fd.reset();
             int c1 = statusOf(resp);
             /* second cancel must also be 204 (idempotent) */
             fd = connectTo(host, port);
-            if (fd >= 0 && sendAll(fd, creq)) {
-                resp = readResponse(fd);
-                close(fd);
+            if (fd && sendAll(fd.get(), creq)) {
+                resp = readResponse(fd.get());
+                fd.reset();
                 int c2 = statusOf(resp);
                 fprintf(stdout, "CANCEL %d %d\n", c1, c2);
                 if (c1 != 204 || c2 != 204) {

@@ -167,6 +167,9 @@ hipobj_add_test(test-seams
 hipobj_add_test(test-replace-by-move
   test-replace-by-move.cpp)
 
+hipobj_add_test(test-unique-fd
+  test-unique-fd.cpp)
+
 hipobj_add_test(test-gid-select
   test-gid-select.cpp)
 
