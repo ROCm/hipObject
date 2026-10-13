@@ -454,7 +454,7 @@ hipObjGetErrorString(hipObjOpError_t err)
                 return "Internal error";
 #ifdef HIPOBJECT_V2_API
             case hipObjNotSupported:
-                return "hipobj-rc-v2 not supported by server";
+                return "hipobj-rc-v2 not supported by server, or V2 function not implemented";
             case hipObjBusy:
                 return "Server busy (backpressure)";
 #endif /* HIPOBJECT_V2_API */

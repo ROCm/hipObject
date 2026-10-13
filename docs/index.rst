@@ -28,6 +28,11 @@ hipObject separates control and data planes:
   transport directly between GPU VRAM and storage server
   buffers.
 
+The experimental V2 API replaces the control plane with
+hipObject's own protocol, hipobj-rc-v2, on a dedicated
+control endpoint. It uses the same RC data plane, and
+isn't implemented yet. See :doc:`protocols`.
+
 Supported S3 Operations
 -----------------------
 
@@ -45,6 +50,7 @@ Operation     Description
    :caption: User Guide
 
    building
+   protocols
    interop
 
 .. toctree::

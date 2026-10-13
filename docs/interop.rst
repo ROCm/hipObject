@@ -9,6 +9,10 @@ documents how to test hipObject on lab hardware.
 Compatibility matrix
 --------------------
 
+cuObject compatibility covers ``hipObjGet()`` and ``hipObjPut()``. The
+experimental V2 API uses hipObject's own protocol, hipobj-rc-v2, which
+cuObject servers don't speak (see :doc:`protocols`).
+
 +---------------------------+------------------+------------------+
 | Feature                   | cuObject v1.2.0  | hipObject        |
 +===========================+==================+==================+
@@ -21,6 +25,9 @@ Compatibility matrix
 | RDMA transport            | DC (ConnectX)    | RC (bnxt/ionic)  |
 +---------------------------+------------------+------------------+
 | Direct cuObject server    | N/A              | adapter_         |
++---------------------------+------------------+------------------+
+| hipobj-rc-v2 protocol     | No               | Experimental,    |
+|                           |                  | not implemented  |
 +---------------------------+------------------+------------------+
 
 Control plane
@@ -65,6 +72,10 @@ read ``x-amz-rdma-reply`` from the HTTP response.
 
   * ``transport = 0x00``: DC
   * ``transport = 0x01``: RC
+
+  hipObject only implements RC, so the tokens it creates always carry
+  ``0x01``. The DC value is part of the token format because cuObject
+  servers use DC.
 
   ``encodeRdmaToken()`` emits lowercase hex, but receivers accept either hex
   case. A peer that validates the token as a fixed-length hex string will

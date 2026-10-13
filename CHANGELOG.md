@@ -106,15 +106,36 @@
     characters or a key longer than 1024 bytes, a NULL pointer, a size of
     0, an offset and size whose sum wraps, a query string that isn't
     canonical, and a `hipObjOpsV2_t` without all three callbacks. A
-    canonical query is a list of `key=value` parameters, sorted by key and
-    then by value, in which every character except the RFC 3986
-    unreserved ones is percent-encoded with uppercase hex digits. A size
-    above 2^31-1 bytes returns `hipObjSizeTooLarge`.
+    canonical query is a list of `key=value` parameters separated by `&`,
+    sorted by key and then by value. In each key and value, every
+    character except the RFC 3986 unreserved ones is percent-encoded with
+    uppercase hex digits. A size above 2^31-1 bytes returns
+    `hipObjSizeTooLarge`.
+  - `hipObjGetErrorString()` describes `hipObjNotSupported` as the server
+    not supporting hipobj-rc-v2 or the V2 function not being implemented,
+    since the unimplemented `hipObjGetV2()` and `hipObjPutV2()` return it.
+    It used to blame only the server.
 - The `hipobj.h` documentation of `hipObjGet()` and `hipObjPut()` now
   says that `offset` is a byte offset into the registered buffer. It
   used to describe it as an offset into the S3 object, but it has always
   been used as a buffer offset. The request your callbacks make selects
   the part of the object to transfer.
+- The documentation explains how `hipObjGet()` and `hipObjPut()` relate
+  to the experimental V2 API, in a new Transfer Protocols page and in the
+  `hipobj.h` comments. The two are different control protocols over the
+  same RDMA transport, Reliable Connection (RC): `hipObjGet()` and
+  `hipObjPut()` exchange cuObject-compatible headers in your own S3
+  request and its response, and the V2 functions run hipObject's own
+  hipobj-rc-v2 protocol on a separate control endpoint. V2 isn't a newer
+  version of the other API, and it isn't what makes transfers use RC.
+  hipObject doesn't implement Dynamic Connection (DC) transport; the DC
+  value of a token's transport byte comes from cuObject's token format.
+  The documentation also says that the `offset` argument of
+  `hipObjGetV2()` and `hipObjPutV2()` is a byte offset into the object,
+  not into the buffer, and that the V2 API can't be used yet: its
+  functions return `hipObjNotSupported`, and no function accepts a
+  `hipObjConfigV2_t` or `hipObjControlEndpointV2_t`. None of the
+  declarations changed.
 - The example programs, including the MinIO bridge's `minio-getput-rdma`,
   include `<hip/hip_runtime_api.h>` instead of `<hip/hip_runtime.h>`. They
   only call the HIP runtime API, so they don't need the kernel-language

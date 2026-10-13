@@ -36,12 +36,19 @@ Buffer Registration
 Data Transfer (GET / PUT)
 -------------------------
 
+.. The description comes from the header, in its own
+   directive, since :content-only: leaves it out.
+
+.. doxygengroup:: io
+   :desc-only:
+   :no-title:
+
 .. doxygengroup:: io
    :content-only:
    :members:
 
-Experimental V2 API (hipobj-rc-v2)
-----------------------------------
+Experimental V2 Control Protocol (hipobj-rc-v2)
+-----------------------------------------------
 
 .. warning::
 

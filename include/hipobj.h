@@ -38,7 +38,41 @@ extern "C" {
  * @defgroup core Core Functionality
  * @defgroup error Errors and Error Handling
  * @defgroup buffer Buffer Registration
+ */
+
+/*!
  * @defgroup io Data Transfer (GET / PUT)
+ *
+ * hipObjGet() and hipObjPut() use the cuObject-compatible protocol, which
+ * exchanges RDMA tokens in headers of the application's own S3 request
+ * and its response. The server moves the data with RDMA, writing the
+ * buffer for a GET and reading it for a PUT. On the client, hipObject:
+ *
+ * 1. passes an RDMA token that describes the buffer to the hipObjOps_t
+ *    sendRequest callback, which sends it in the request's
+ *    x-amz-rdma-token header;
+ * 2. gets the response's x-amz-rdma-reply header from the recvReply
+ *    callback;
+ * 3. connects its queue pair to the server's token, when the reply
+ *    carries one; and
+ * 4. waits for the transfer's completion.
+ *
+ * The application's S3 client chooses the object, the range of it, and
+ * the endpoint; hipObject only sees the buffer.
+ *
+ * Every transfer uses RDMA Reliable Connection (RC) transport, over the
+ * one queue pair that hipObjInit() creates. hipObject doesn't implement
+ * Dynamic Connection (DC) transport. A token's transport byte has a DC
+ * value only because the token format comes from cuObject, whose servers
+ * use DC on NVIDIA ConnectX NICs; an RC-to-DC adapter on the server
+ * bridges the two (see the interoperability guide, docs/interop.rst).
+ *
+ * hipObjGetRdmaToken(), hipObjBufSync(), hipObjParseRdmaReply(), and
+ * hipObjTokenClientNic() are for applications that drive the exchange
+ * themselves instead of through callbacks.
+ *
+ * The experimental V2 API (@ref v2) is a different control protocol over
+ * the same RC transport, not a newer version of these functions.
  */
 
 /*!
@@ -96,7 +130,7 @@ extern "C" {
  * at the top of the section instead. Breathe would move this one to the
  * end of the description. */
 /*!
- * @defgroup v2 Experimental V2 API (hipobj-rc-v2)
+ * @defgroup v2 Experimental V2 Control Protocol (hipobj-rc-v2)
  *
  * @if HIPOBJ_HEADER_ONLY
  * @warning The V2 API is experimental. It may change incompatibly or be
@@ -104,9 +138,37 @@ extern "C" {
  * implemented yet and return hipObjNotSupported.
  * @endif
  *
- * The V2 API runs each transfer over the hipobj-rc-v2 control protocol:
- * two round trips on a dedicated control endpoint, PREPARE and then READY,
- * whose response is FINAL. CANCEL abandons a prepared transfer.
+ * The V2 API runs a transfer with a different control protocol,
+ * hipobj-rc-v2. It isn't a newer version of hipObjGet() and hipObjPut(),
+ * and it isn't what makes transfers use RC: both APIs move the data with
+ * RDMA over RC (see @ref io). The "rc" in the protocol's name is the
+ * transport it sets up, not a difference from the other API. What
+ * differs is how the client and the server agree on a transfer:
+ *
+ * - **Control channel.** hipObjGet() and hipObjPut() exchange headers in
+ *   the application's S3 request and its response, in one round trip.
+ *   hipobj-rc-v2 is hipObject's own protocol, which cuObject servers
+ *   don't speak. It runs in two round trips on a dedicated control
+ *   endpoint, separate from the S3 endpoint. PREPARE exchanges the two
+ *   sides' tokens and starting packet sequence numbers and opens a
+ *   session, and the response to READY, called FINAL, reports the outcome
+ *   of the transfer: the bytes transferred, and the object's ETag, version
+ *   ID, and checksum. CANCEL abandons a prepared transfer.
+ * - **Object and offset.** The V2 functions name the object (bucket, key,
+ *   and an optional query string), and their offset is a byte offset into
+ *   the object. hipObjGet() and hipObjPut() leave the object to the
+ *   application's request, and their offset is into the buffer.
+ * - **Connection.** A V2 transfer is designed to use its own queue pair,
+ *   for a session that ends when the call returns, instead of the one
+ *   that hipObjInit() creates for hipObjGet() and hipObjPut().
+ *
+ * The V2 API can't transfer data yet. hipObjGetV2() and hipObjPutV2()
+ * check their arguments and then return hipObjNotSupported, the error
+ * that also means a server doesn't support hipobj-rc-v2, so an
+ * application falls back to hipObjGet() and hipObjPut() in either case.
+ * There is also no way to give the library the control endpoint:
+ * hipObjInitV2() isn't available, so no function accepts a
+ * hipObjConfigV2_t or a hipObjControlEndpointV2_t.
  *
  * These declarations, and the hipObjNotSupported and hipObjBusy error
  * codes, only exist when HIPOBJECT_V2_API is defined. The
@@ -150,7 +212,8 @@ typedef enum {
     hipObjSizeTooLarge,
     hipObjInternalError,
 #ifdef HIPOBJECT_V2_API
-    hipObjNotSupported, /*!< V2 API: server explicitly does not support hipobj-rc-v2 */
+    hipObjNotSupported, /*!< V2 API: server explicitly does not support hipobj-rc-v2, or the
+                             V2 function isn't implemented yet */
     hipObjBusy,         /*!< V2 API: server backpressure (503) and retries exhausted */
 #endif
 } hipObjOpError_t;
@@ -338,6 +401,9 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * offset; the request the callbacks make selects the
  * part of the object to fetch.
  *
+ * The transfer uses the cuObject-compatible protocol
+ * over RC; see @ref io.
+ *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
  * @param size    Number of bytes to transfer
@@ -361,6 +427,9 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * inside the buffer. hipObject doesn't send an object
  * offset; the request the callbacks make selects where
  * the data goes in the object.
+ *
+ * The transfer uses the cuObject-compatible protocol
+ * over RC; see @ref io.
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
@@ -387,6 +456,8 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
  *
  * The v2 protocol runs its prepare/ready/cancel exchange on a dedicated
  * control endpoint; there is no default port, the caller must supply one.
+ *
+ * No function accepts this yet; see hipObjConfigV2_t.
  */
 typedef struct {
     const char *controlEndpoint; /*!< Required "http(s)://host:port" URI;
@@ -396,6 +467,9 @@ typedef struct {
 /*!
  * @brief V2 initialization configuration
  * @ingroup v2
+ *
+ * This is the configuration for hipObjInitV2(), which isn't available
+ * yet, so no function accepts it.
  */
 typedef struct {
     hipObjConfig_t            v1;      /*!< All v1 fields */
@@ -423,7 +497,7 @@ typedef struct {
     const char                      *session;   /*!< READY/cancel: session id (library sets) */
     const char                      *target;    /*!< Canonical rdma-target value (library sets) */
     uint64_t                         size;      /*!< Transfer size in bytes */
-    uint64_t                         offset;    /*!< Byte offset into the object */
+    uint64_t                         offset;    /*!< Byte offset into the object, not the buffer */
     uint32_t                         cookie;    /*!< Client cookie (library generates) */
     uint32_t                         clientPsn; /*!< Client PSN, 1..0xffffff (library generates) */
     const hipObjControlEndpointV2_t *endpoint;  /*!< Control endpoint (library sets
@@ -465,7 +539,7 @@ typedef struct {
  * call serialized functions; see @ref threads.
  */
 typedef struct hipObjOpsV2 {
-    hipObjOps_t v1;
+    hipObjOps_t v1; /*!< Unused by hipObjGetV2() and hipObjPutV2() */
 
     /*! Issue PREPARE; out is filled from the response headers. */
     int (*sendPrepare)(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out);
@@ -507,6 +581,28 @@ HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
  * scope: on return the session is terminated and the connection
  * quiesced.
  *
+ * Unlike hipObjGet(), this function names the object itself, and
+ * @p offset is a byte offset into the object, not into the buffer. The
+ * data lands at the start of @p devPtr.
+ *
+ * Not implemented yet: after checking its arguments, it returns
+ * hipObjNotSupported.
+ *
+ * @param bucket  Bucket name, 1 to 255 bytes
+ * @param key     Object key, 1 to 1024 bytes
+ * @param devPtr  Registered GPU or host buffer
+ * @param size    Number of bytes to transfer, at most 2^31-1
+ * @param offset  Byte offset into the object
+ * @param query   Canonical S3 query string, or NULL or "" for none:
+ *                key=value parameters separated by '&', sorted by key
+ *                and then by value, with the '=' present even when the
+ *                value is empty. In each key and value, the RFC 3986
+ *                unreserved characters are written as is and every
+ *                other character is percent-encoded with uppercase hex
+ *                digits.
+ * @param ops     Phase callbacks; all three send* callbacks are required
+ * @param ctx     User context passed to callbacks
+ * @return hipObjError_t
  * @serialized
  */
 HIPOBJ_API hipObjError_t hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size,
@@ -514,6 +610,10 @@ HIPOBJ_API hipObjError_t hipObjGetV2(const char *bucket, const char *key, void *
 
 /*!
  * @brief V2 PUT, same contract as hipObjGetV2
+ *
+ * As with hipObjGetV2(), @p offset is a byte offset into the object, not
+ * into the buffer, and the data comes from the start of @p devPtr.
+ *
  * @serialized
  * @ingroup v2
  */
@@ -548,8 +648,12 @@ HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, 
 /*!
  * @brief Mint a hex-encoded RC RDMA token for a registered buffer
  *
- * The caller must release @p *outToken with hipObjPutRdmaToken().
- * @p op is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved).
+ * The token covers the first @p size bytes of the buffer, and is what
+ * hipObjGet() and hipObjPut() send in the x-amz-rdma-token header. The
+ * caller must release @p *outToken with hipObjPutRdmaToken(). "Get" and
+ * "Put" in these two names mean create and release, not S3 GET and PUT.
+ * @p op must be HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET. It's reserved:
+ * the token is the same for either.
  *
  * @serialized
  * @ingroup io
