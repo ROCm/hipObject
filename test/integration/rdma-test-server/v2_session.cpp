@@ -44,12 +44,12 @@ namespace v2 {
         }
         it->second.state = SessState::Publishing;
         /* Response transmission bound: 5s from confirmation. */
-        it->second.txDeadlineAt = clockSource().nowMs() + 5000;
+        it->second.txDeadlineAt = clockSource().now() + std::chrono::seconds(5);
         notifyAll(cv_);
         return true;
     }
 
-    bool SessionTable::finishPublishing(const std::string &id, uint64_t tPrepMs)
+    bool SessionTable::finishPublishing(const std::string &id, std::chrono::milliseconds tPrep)
     {
         std::scoped_lock<std::mutex> guard(mtx_);
         auto                         it = entries_.find(id);
@@ -57,16 +57,16 @@ namespace v2 {
             return false;
         }
         it->second.state            = SessState::Prepared;
-        it->second.clientDeadlineAt = clockSource().nowMs() + tPrepMs;
+        it->second.clientDeadlineAt = clockSource().now() + tPrep;
         /* The PREPARE response left: its bound must stop applying so a
          * READY acquiring a reference afterwards can never be hit by a
          * stale forced release. */
-        it->second.txDeadlineAt = 0;
+        it->second.txDeadlineAt.reset();
         notifyAll(cv_);
         return true;
     }
 
-    bool SessionTable::beginTransferring(const std::string &id, uint64_t tExecMs)
+    bool SessionTable::beginTransferring(const std::string &id, std::chrono::milliseconds tExec)
     {
         std::scoped_lock<std::mutex> guard(mtx_);
         auto                         it = entries_.find(id);
@@ -75,18 +75,18 @@ namespace v2 {
         }
         /* Expiry check shares the lock: a deadline-passed session cannot
          * be revived by a READY (single source of truth). */
-        if (clockSource().nowMs() > it->second.clientDeadlineAt) {
+        if (clockSource().now() > it->second.clientDeadlineAt) {
             it->second.state = SessState::Reaping;
             notifyAll(cv_);
             return false;
         }
         it->second.state            = SessState::Transferring;
-        it->second.clientDeadlineAt = clockSource().nowMs() + tExecMs;
+        it->second.clientDeadlineAt = clockSource().now() + tExec;
         /* The PREPARE response bound no longer applies; the FINAL
          * response arms a fresh one at beginCompleting. Clearing here
          * keeps the reaper's forced release from firing on a stale
          * bound during the data phase. */
-        it->second.txDeadlineAt = 0;
+        it->second.txDeadlineAt.reset();
         notifyAll(cv_);
         return true;
     }
@@ -97,7 +97,7 @@ namespace v2 {
         auto                         it = entries_.find(id);
         if (it != entries_.end() && it->second.state == SessState::Transferring) {
             /* Fresh response bound for the FINAL transmission. */
-            it->second.txDeadlineAt = clockSource().nowMs() + 5000;
+            it->second.txDeadlineAt = clockSource().now() + std::chrono::seconds(5);
         }
         if (it == entries_.end() || it->second.state != SessState::Transferring) {
             return false;
@@ -125,12 +125,10 @@ namespace v2 {
         return true;
     }
 
-    SessState SessionTable::awaitNotPublishing(const std::string &id, uint64_t waitDeadlineMs)
+    SessState SessionTable::awaitNotPublishing(const std::string &id, TimePoint waitDeadline)
     {
         std::unique_lock<std::mutex> lock(mtx_);
-        const auto                   deadline =
-            std::chrono::steady_clock::time_point(std::chrono::milliseconds(waitDeadlineMs));
-        cv_.wait_until(lock, deadline, [&] {
+        cv_.wait_until(lock, waitDeadline, [&] {
             auto it = entries_.find(id);
             return it == entries_.end() || it->second.state != SessState::Publishing;
         });
@@ -244,10 +242,10 @@ namespace v2 {
         ring_.record(reservationId, qpn, psn);
     }
 
-    void SessionTable::ringCollectExpired(uint64_t nowMs)
+    void SessionTable::ringCollectExpired(TimePoint now)
     {
         std::scoped_lock<std::mutex> guard(mtx_);
-        ring_.collectExpired(nowMs);
+        ring_.collectExpired(now);
     }
 
     bool SessionTable::acquireIo(const std::string &id)

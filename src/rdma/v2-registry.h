@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -40,6 +41,7 @@
 
 #include "ibv-ptr.h"
 #include "replace-by-move.h"
+#include "v2-clock.h"
 
 namespace hipObj {
 
@@ -93,11 +95,11 @@ namespace v2 {
     /* Retired (qpn, psn) reuse guard ring. */
     class RetiredRing {
     public:
-        static constexpr size_t   kCapacity = 4096;
-        static constexpr uint64_t kExpiryMs = 60'000;
+        static constexpr size_t               kCapacity = 4096;
+        static constexpr std::chrono::seconds kExpiry{60};
 
         /* Collects expired Recorded slots; returns slots collected. */
-        size_t collectExpired(uint64_t nowMs);
+        size_t collectExpired(TimePoint now);
 
         /* Reserves a slot; 0 when the ring is full after collection. */
         uint64_t reserve();
@@ -119,11 +121,11 @@ namespace v2 {
 
     private:
         struct Slot {
-            uint64_t reservationId = 0; /* 0 = free */
-            bool     recorded      = false;
-            uint64_t expireAtMs    = 0;
-            uint32_t qpn           = 0;
-            uint32_t psn           = 0;
+            uint64_t  reservationId = 0; /* 0 = free */
+            bool      recorded      = false;
+            TimePoint expireAt{};
+            uint32_t  qpn = 0;
+            uint32_t  psn = 0;
         };
 
         std::vector<Slot> slots_             = std::vector<Slot>(kCapacity);

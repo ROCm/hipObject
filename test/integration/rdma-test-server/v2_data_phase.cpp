@@ -6,12 +6,13 @@
 
 #include "v2_data_phase.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include <arpa/inet.h>
@@ -32,13 +33,6 @@ namespace v2 {
         /* Completion markers posted with every work request. */
         constexpr uint64_t kWrRecv  = 0x5245435632494d4dULL; /* RECV2IMM */
         constexpr uint64_t kWrWrite = 0x57524954454d4d47ULL; /* WRITEMM */
-
-        uint64_t clockNowMs()
-        {
-            struct timespec ts;
-            clock_gettime(CLOCK_MONOTONIC, &ts);
-            return static_cast<uint64_t>(ts.tv_sec) * 1000 + static_cast<uint64_t>(ts.tv_nsec) / 1000000;
-        }
 
     } // namespace
 
@@ -137,9 +131,9 @@ namespace v2 {
     namespace {
 
         /* Polls the CQ for one completion matching `expectWr`, bounded by
-         * an absolute deadline on the monotonic clock. */
+         * an absolute deadline on the steady clock. */
         enum class PollOutcome { Ok, Timeout, Error, Mismatch };
-        PollOutcome pollCqUntil(struct ibv_cq *cq, uint64_t deadlineMs, uint64_t expectWr, struct ibv_wc *out)
+        PollOutcome pollCqUntil(struct ibv_cq *cq, TimePoint deadline, uint64_t expectWr, struct ibv_wc *out)
         {
             for (;;) {
                 int n = ibv.poll_cq(cq, 1, out);
@@ -152,17 +146,16 @@ namespace v2 {
                 if (n < 0) {
                     return PollOutcome::Error;
                 }
-                if (clockNowMs() >= deadlineMs) {
+                if (std::chrono::steady_clock::now() >= deadline) {
                     return PollOutcome::Timeout;
                 }
-                struct timespec ts = {0, 2 * 1000 * 1000};
-                nanosleep(&ts, nullptr);
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
         }
 
     } // namespace
 
-    DataPhaseResult runDataPhase(const DataPhaseView &s, uint64_t deadlineMs, DataPhaseStats &stats)
+    DataPhaseResult runDataPhase(const DataPhaseView &s, TimePoint deadline, DataPhaseStats &stats)
     {
         const bool noTransport = s.qp == nullptr && s.cq == nullptr;
         if (noTransport || s.clientQpn == 0) {
@@ -186,7 +179,7 @@ namespace v2 {
             if (!postRecvForImm(s.qp, s.stagingMr, s.size)) {
                 return DataPhaseResult::WireFail;
             }
-            po = pollCqUntil(s.cq, deadlineMs, kWrRecv, &wc);
+            po = pollCqUntil(s.cq, deadline, kWrRecv, &wc);
             if (po == PollOutcome::Timeout) {
                 return DataPhaseResult::Timeout;
             }
@@ -208,7 +201,7 @@ namespace v2 {
         if (!postWriteWithImm(s.qp, s.stagingMr, s.clientMrAddr, s.clientMrRkey, s.size, s.cookie)) {
             return DataPhaseResult::WireFail;
         }
-        po = pollCqUntil(s.cq, deadlineMs, kWrWrite, &wc);
+        po = pollCqUntil(s.cq, deadline, kWrWrite, &wc);
         if (po == PollOutcome::Timeout) {
             return DataPhaseResult::Timeout;
         }

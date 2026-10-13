@@ -24,6 +24,7 @@
 #include <string>
 
 #include "../../../src/common/ibv-core.h"
+#include "v2-clock.h"
 
 namespace hipObj {
 namespace v2 {
@@ -61,10 +62,10 @@ namespace v2 {
     };
 
     /* Runs the data phase for a session that is already in the
-     * Transferring state. `deadlineMs` bounds the completion poll on
-     * the monotonic clock. Returns the outcome and fills `stats` on
+     * Transferring state. `deadline` bounds the completion poll on
+     * the steady clock. Returns the outcome and fills `stats` on
      * success. */
-    DataPhaseResult runDataPhase(const DataPhaseView &s, uint64_t deadlineMs, DataPhaseStats &stats);
+    DataPhaseResult runDataPhase(const DataPhaseView &s, TimePoint deadline, DataPhaseStats &stats);
 
     /* Registers the staging buffer for PUT objects of the given size
      * and records the MR on the session. Returns false when the

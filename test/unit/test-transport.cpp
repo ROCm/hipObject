@@ -8,9 +8,12 @@
  */
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -333,15 +336,15 @@ TEST_F(TransportTest, PollReturnsOnCompletion)
 {
     hipObj::RcConnection conn;
     ASSERT_NO_FATAL_FAILURE(open(conn));
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, 1000), 0);
+    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), 0);
     fake().pollOpcode = IBV_WC_RDMA_READ;
-    EXPECT_EQ(hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, 1000), 0);
+    EXPECT_EQ(hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::seconds(1)), 0);
 }
 
 TEST_F(TransportTest, PollNeedsCq)
 {
     hipObj::RcConnection conn;
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, 1000), -1);
+    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), -1);
 }
 
 TEST_F(TransportTest, PollFailsOnErrorCompletion)
@@ -349,7 +352,7 @@ TEST_F(TransportTest, PollFailsOnErrorCompletion)
     hipObj::RcConnection conn;
     ASSERT_NO_FATAL_FAILURE(open(conn));
     fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, 1000), -1);
+    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), -1);
 }
 
 TEST_F(TransportTest, PollFailsWhenPollingFails)
@@ -357,7 +360,7 @@ TEST_F(TransportTest, PollFailsWhenPollingFails)
     hipObj::RcConnection conn;
     ASSERT_NO_FATAL_FAILURE(open(conn));
     fake().pollResult = -1;
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, 1000), -1);
+    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), -1);
 }
 
 TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
@@ -366,11 +369,11 @@ TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
     ASSERT_NO_FATAL_FAILURE(open(conn));
     /* Nothing completes */
     fake().pollResult = 0;
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, 10), -1);
+    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::milliseconds(10)), -1);
     /* Only other work completes */
     fake().pollResult = 1;
     fake().pollOpcode = IBV_WC_SEND;
-    EXPECT_EQ(hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, 10), -1);
+    EXPECT_EQ(hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::milliseconds(10)), -1);
 }
 
 // ---- hipObjInit --------------------------------------------------

@@ -152,7 +152,7 @@ finishTransferAfterReply(std::string_view reply, bool requiresDeviceSync)
     // is unknown. With the current one-sided protocol the responder side
     // may not observe a completion at all (see issue #22), so this check
     // reports "no evidence of failure" rather than "transfer verified".
-    if (pollCompletion(*g_conn, -1, 5000) != 0) {
+    if (pollCompletion(*g_conn, -1, std::chrono::seconds(5)) != 0) {
         return -1;
     }
     if (!requiresDeviceSync) {
