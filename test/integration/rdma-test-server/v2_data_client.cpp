@@ -119,10 +119,10 @@ connectTcp(const char *host, int port)
 {
     hipObj::UniqueFd  fd;
     const std::string service = std::to_string(port);
-    struct addrinfo   hints   = {};
-    hints.ai_family           = AF_INET;
-    hints.ai_socktype         = SOCK_STREAM;
-    struct addrinfo *rawRes   = nullptr;
+    addrinfo          hints{};
+    hints.ai_family         = AF_INET;
+    hints.ai_socktype       = SOCK_STREAM;
+    struct addrinfo *rawRes = nullptr;
     /* getaddrinfo() leaves rawRes unspecified when it fails */
     if (getaddrinfo(host, service.c_str(), &hints, &rawRes) != 0) {
         return fd;
@@ -233,14 +233,14 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     verbs.ctx.reset(ibv_open_device(verbs.devs[0]));
     verbs.pd.reset(ibv_alloc_pd(verbs.ctx.get()));
     verbs.cq.reset(ibv_create_cq(verbs.ctx.get(), 16, nullptr, nullptr, 0));
-    struct ibv_qp_init_attr init = {};
-    init.qp_type                 = IBV_QPT_RC;
-    init.send_cq                 = verbs.cq.get();
-    init.recv_cq                 = verbs.cq.get();
-    init.cap.max_send_wr         = 8;
-    init.cap.max_recv_wr         = 8;
-    init.cap.max_send_sge        = 1;
-    init.cap.max_recv_sge        = 1;
+    ibv_qp_init_attr init{};
+    init.qp_type          = IBV_QPT_RC;
+    init.send_cq          = verbs.cq.get();
+    init.recv_cq          = verbs.cq.get();
+    init.cap.max_send_wr  = 8;
+    init.cap.max_recv_wr  = 8;
+    init.cap.max_send_sge = 1;
+    init.cap.max_recv_sge = 1;
     verbs.qp.reset(ibv_create_qp(verbs.pd.get(), &init));
     if (!verbs.ctx || !verbs.pd || !verbs.cq || !verbs.qp) {
         std::fprintf(stderr, "dp: verbs setup failed\n");
@@ -268,15 +268,15 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         std::memcpy(buf, "dp-put-payload", 14);
     }
 
-    struct ibv_qp_attr attr = {};
-    attr.qp_state           = IBV_QPS_INIT;
-    attr.pkey_index         = 0;
-    attr.port_num           = 1;
-    attr.qp_access_flags    = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+    ibv_qp_attr attr{};
+    attr.qp_state        = IBV_QPS_INIT;
+    attr.pkey_index      = 0;
+    attr.port_num        = 1;
+    attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
     ibv_modify_qp(verbs.qp.get(), &attr,
                   IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
 
-    union ibv_gid gid = {};
+    ibv_gid gid{};
     ibv_query_gid(verbs.ctx.get(), 1, 0, &gid);
 
     /* ---- PREPARE (control, over TCP) ---- */
@@ -355,7 +355,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     uint32_t    sqpn  = sqpnS.empty() ? 0 : static_cast<uint32_t>(std::strtoul(sqpnS.c_str(), nullptr, 16));
 
     hipObj::RdmaToken replyTok{};
-    union ibv_gid     serverGid     = {};
+    ibv_gid           serverGid{};
     bool              haveServerGid = false;
     /* The reply token is mandatory: "200:" + exactly 88 hex that
      * decodes and carries the same server QPN as the dedicated
@@ -455,11 +455,11 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     /* ---- data plane while the server processes READY ---- */
     if (sqpn != 0) {
         if (std::strcmp(op, "GET") == 0) {
-            struct ibv_sge rsge      = {};
-            rsge.addr                = reinterpret_cast<uintptr_t>(buf);
-            rsge.length              = static_cast<uint32_t>(size < sizeof(buf) ? size : sizeof(buf));
-            rsge.lkey                = verbs.mr->lkey;
-            struct ibv_recv_wr rwr   = {};
+            ibv_sge rsge{};
+            rsge.addr   = reinterpret_cast<uintptr_t>(buf);
+            rsge.length = static_cast<uint32_t>(size < sizeof(buf) ? size : sizeof(buf));
+            rsge.lkey   = verbs.mr->lkey;
+            ibv_recv_wr rwr{};
             rwr.wr_id                = 0x47455452454356ULL; /* "GETRECV" */
             rwr.sg_list              = &rsge;
             rwr.num_sge              = 1;
@@ -476,14 +476,14 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
     int rc = 0;
     if (std::strcmp(op, "PUT") == 0 && sqpn != 0) {
         usleep(100 * 1000);
-        struct ibv_sge sge    = {};
-        sge.addr              = reinterpret_cast<uintptr_t>(buf);
-        sge.length            = static_cast<uint32_t>(size < 4096 ? size : 4096);
-        sge.lkey              = verbs.mr->lkey;
-        struct ibv_send_wr wr = {};
-        wr.opcode             = IBV_WR_RDMA_WRITE_WITH_IMM;
-        wr.send_flags         = IBV_SEND_SIGNALED;
-        wr.imm_data           = htonl(cookie);
+        ibv_sge sge{};
+        sge.addr   = reinterpret_cast<uintptr_t>(buf);
+        sge.length = static_cast<uint32_t>(size < 4096 ? size : 4096);
+        sge.lkey   = verbs.mr->lkey;
+        ibv_send_wr wr{};
+        wr.opcode     = IBV_WR_RDMA_WRITE_WITH_IMM;
+        wr.send_flags = IBV_SEND_SIGNALED;
+        wr.imm_data   = htonl(cookie);
         /* Remote endpoint: the server staging MR from the PREPARE
          * reply. */
         std::string saddrS = headerValue(presp, "x-amz-rdma-mr-addr");
@@ -499,7 +499,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
                 rc = 1;
             }
             else {
-                struct ibv_wc wc = {};
+                ibv_wc wc{};
                 for (int i = 0; i < 2000; ++i) {
                     if (ibv_poll_cq(verbs.cq.get(), 1, &wc) > 0) {
                         break;
@@ -529,7 +529,7 @@ runTransfer(const char *host, int port, const char *op, const char *target, uint
         return 1;
     }
     if (std::strcmp(op, "GET") == 0 && sqpn != 0 && rst == 200) {
-        struct ibv_wc wc = {};
+        ibv_wc wc{};
         for (int i = 0; i < 2000; ++i) {
             if (ibv_poll_cq(verbs.cq.get(), 1, &wc) > 0) {
                 break;

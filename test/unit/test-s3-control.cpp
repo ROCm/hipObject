@@ -75,9 +75,9 @@ protected:
         return hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_);
     }
 
-    hipObjOps_t           ops_ = {};
+    hipObjOps_t           ops_{};
     int                   ctx_ = 0;
-    std::array<char, 512> buf_ = {};
+    std::array<char, 512> buf_{};
 };
 
 TEST_F(S3ControlTest, SendsTokenToCallback)

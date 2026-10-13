@@ -33,8 +33,8 @@ enum class TransportType : uint8_t {
 /* An RDMA token. Its wire layout, in docs/interop.rst, follows the sizes of
  * these fields, so changing one changes the wire format. */
 struct RdmaToken {
-    uint32_t      qpNum      = 0;
-    Gid           gid        = {};
+    uint32_t      qpNum = 0;
+    Gid           gid{};
     uint32_t      rkey       = 0;
     uint64_t      remoteAddr = 0;
     uint64_t      length     = 0;

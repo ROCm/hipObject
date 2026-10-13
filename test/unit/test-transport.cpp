@@ -257,7 +257,7 @@ TEST_F(TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
      * outside [0, 255] must be refused, not truncated */
     hipObj::RcConnection conn;
     ASSERT_NO_FATAL_FAILURE(open(conn));
-    union ibv_gid gid = {};
+    ibv_gid gid{};
     for (int index : {-1, 256, 0x10000}) {
         conn.gidIndex = index;
         EXPECT_EQ(hipObj::transitionQpToRtr(conn, 1, 0, gid), -1) << "index " << index;

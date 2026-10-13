@@ -92,9 +92,9 @@ class BufferRegistrationTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs funcs = {};
-        funcs.reg_mr_iova2     = &fakeRegisterMrIova2;
-        funcs.dereg_mr         = &fakeDeregisterMr;
+        hipObj::IbvFuncs funcs{};
+        funcs.reg_mr_iova2 = &fakeRegisterMrIova2;
+        funcs.dereg_mr     = &fakeDeregisterMr;
         fakeIbv_.emplace(funcs);
 
         savedHipOps_       = hipObj::hipOps();
@@ -123,7 +123,7 @@ protected:
 TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
 {
     hipObj::BufferMap buffers;
-    char              hostBuf[32] = {};
+    char              hostBuf[32]{};
 
     EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), reinterpret_cast<struct ibv_pd *>(1)), 0);
     const auto *entry = buffers.find(hostBuf);
@@ -197,9 +197,9 @@ TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers)
 TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
 {
     hipObj::BufferMap buffers;
-    auto             *pd          = reinterpret_cast<struct ibv_pd *>(1);
-    void             *gpuBuf      = reinterpret_cast<void *>(0x3000);
-    char              hostBuf[32] = {};
+    auto             *pd     = reinterpret_cast<struct ibv_pd *>(1);
+    void             *gpuBuf = reinterpret_cast<void *>(0x3000);
+    char              hostBuf[32]{};
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, hipObj::MAX_MR_SIZE + 1, pd), -1);
     EXPECT_EQ(buffers.registerHostBuffer(hostBuf, hipObj::MAX_MR_SIZE + 1, pd), -1);

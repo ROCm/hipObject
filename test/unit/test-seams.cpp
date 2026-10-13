@@ -300,14 +300,14 @@ class IbvSeamTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs funcs = {};
-        funcs.create_cq        = &fakeCreateCq;
-        funcs.create_qp        = &fakeCreateQp;
-        funcs.destroy_cq       = &fakeDestroyCq;
-        funcs.destroy_qp       = &fakeDestroyQp;
-        funcs.dealloc_pd       = &fakeDeallocPd;
-        funcs.close_device     = &fakeCloseDevice;
-        funcs.modify_qp        = &fakeRecordingModifyQp;
+        hipObj::IbvFuncs funcs{};
+        funcs.create_cq    = &fakeCreateCq;
+        funcs.create_qp    = &fakeCreateQp;
+        funcs.destroy_cq   = &fakeDestroyCq;
+        funcs.destroy_qp   = &fakeDestroyQp;
+        funcs.dealloc_pd   = &fakeDeallocPd;
+        funcs.close_device = &fakeCloseDevice;
+        funcs.modify_qp    = &fakeRecordingModifyQp;
         fakeIbv_.emplace(funcs);
         g_calls = IbvCallLog();
     }
@@ -515,7 +515,7 @@ namespace {
             ops.hipDeviceSynchronize = &fakeSynchronizeNoDevice;
             hipObj::hipOps()         = ops;
 
-            hipObj::IbvFuncs funcs = {};
+            hipObj::IbvFuncs funcs{};
             funcs.get_device_list  = &fakeGetDeviceList;
             funcs.free_device_list = &fakeFreeDeviceList;
             funcs.open_device      = &fakeOpenDevice;
@@ -550,9 +550,9 @@ namespace {
 
         hipObjConfig_t makeConfig()
         {
-            hipObjConfig_t config = {};
-            config.gpuDevice      = -1;
-            config.nicHint        = "mlx5_0";
+            hipObjConfig_t config{};
+            config.gpuDevice = -1;
+            config.nicHint   = "mlx5_0";
             return config;
         }
 
@@ -581,10 +581,10 @@ namespace {
         hipObjConfig_t config = makeConfig();
         ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
 
-        char hostBuf[32] = {};
+        char hostBuf[32]{};
         ASSERT_EQ(hipObjBufRegisterHost(hostBuf, sizeof(hostBuf)).opError, hipObjSuccess);
 
-        hipObjOps_t ops = {};
+        hipObjOps_t ops{};
         ops.sendRequest = &fakeSendRequest;
         ops.recvReply   = &fakeRecvReply;
 
@@ -608,7 +608,7 @@ namespace {
         void *gpuBuf = reinterpret_cast<void *>(0x1000);
         ASSERT_EQ(hipObjBufRegister(gpuBuf, 64).opError, hipObjSuccess);
 
-        hipObjOps_t ops = {};
+        hipObjOps_t ops{};
         ops.sendRequest = &fakeSendRequest;
         ops.recvReply   = &fakeRecvReply;
 

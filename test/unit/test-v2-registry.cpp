@@ -156,15 +156,15 @@ fakeDeallocPd(struct ibv_pd *pd)
 hipObj::IbvFuncs
 fakeVerbs()
 {
-    hipObj::IbvFuncs funcs = {};
-    funcs.create_cq        = fakeCreateCq;
-    funcs.destroy_cq       = fakeDestroyCq;
-    funcs.create_qp        = fakeCreateQp;
-    funcs.destroy_qp       = fakeDestroyQp;
-    funcs.modify_qp        = fakeModifyQp;
-    funcs.query_device     = fakeQueryDevice;
-    funcs.query_port       = fakeQueryPort;
-    funcs.dealloc_pd       = fakeDeallocPd;
+    hipObj::IbvFuncs funcs{};
+    funcs.create_cq    = fakeCreateCq;
+    funcs.destroy_cq   = fakeDestroyCq;
+    funcs.create_qp    = fakeCreateQp;
+    funcs.destroy_qp   = fakeDestroyQp;
+    funcs.modify_qp    = fakeModifyQp;
+    funcs.query_device = fakeQueryDevice;
+    funcs.query_port   = fakeQueryPort;
+    funcs.dealloc_pd   = fakeDeallocPd;
     return funcs;
 }
 

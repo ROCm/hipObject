@@ -219,7 +219,7 @@ class ConnRefFaultTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        hipObj::IbvFuncs f = {};
+        hipObj::IbvFuncs f{};
         f.modify_qp        = fakeModifyQp;
         f.destroy_qp       = fakeDestroyQp;
         f.destroy_cq       = fakeDestroyCq;

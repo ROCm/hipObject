@@ -90,9 +90,9 @@ TEST(ApiArgsErrorString, UnknownCode)
 
 TEST_F(ApiArgsTest, EverythingButInitNeedsInit)
 {
-    char        buf[kBufSize] = {};
-    hipObjOps_t ops           = makeOps();
-    char       *token         = nullptr;
+    char        buf[kBufSize]{};
+    hipObjOps_t ops   = makeOps();
+    char       *token = nullptr;
 
     EXPECT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjNotInitialized);
     EXPECT_EQ(hipObjBufRegisterHost(buf, sizeof(buf)).opError, hipObjNotInitialized);
@@ -178,8 +178,8 @@ TEST_F(ApiArgsTest, InitReportsDeviceCountFailure)
 TEST_F(ApiArgsTest, InitAcceptsOptionalFieldsUnset)
 {
     /* endpoint, region, the keys, and the NIC hint may all be NULL */
-    hipObjConfig_t config = {};
-    config.gpuDevice      = 0;
+    hipObjConfig_t config{};
+    config.gpuDevice = 0;
     EXPECT_EQ(hipObjInit(&config).opError, hipObjNicNotFound);
 
     config.nicHint = "mlx5_0";
@@ -790,10 +790,10 @@ fakeSendCancel(void *, const hipObjTransferReqV2_t *)
 hipObjOpsV2_t
 makeOpsV2()
 {
-    hipObjOpsV2_t ops = {};
-    ops.sendPrepare   = &fakeSendPrepare;
-    ops.sendReady     = &fakeSendReady;
-    ops.sendCancel    = &fakeSendCancel;
+    hipObjOpsV2_t ops{};
+    ops.sendPrepare = &fakeSendPrepare;
+    ops.sendReady   = &fakeSendReady;
+    ops.sendCancel  = &fakeSendCancel;
     return ops;
 }
 

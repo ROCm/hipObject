@@ -33,7 +33,7 @@ struct DeviceHandle {
     IbvPdPtr              pd;
     uint8_t               portNum  = 1;
     int                   gidIndex = -1;
-    union ibv_gid         localGid = {};
+    ibv_gid               localGid{};
     std::atomic<uint32_t> connRefs{0};
 };
 
