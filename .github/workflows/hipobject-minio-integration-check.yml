@@ -17,6 +17,7 @@ on:
       - "src/**"
       - ".github/workflows/hipobject-minio-integration-check.yml"
       - "!cmake/HIPOBJClangTidy.cmake"
+      - "!**/.clang-tidy"
       - "!cmake/HIPOBJDocumentation.cmake"
       - "!**/*.md"
   push:
