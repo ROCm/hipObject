@@ -36,17 +36,13 @@ namespace {
     }
 
     /* Is this pointer device memory? Answered through the seam so unit tests can
-     * drive both branches without a GPU. A runtime that cannot tell us is treated
-     * as "not device memory": the strict check below must not fail a host buffer
-     * it merely failed to classify. */
+     * drive both branches without a GPU. A pointer the runtime cannot classify is
+     * treated as "not device memory": the strict check below must not fail a host
+     * buffer it merely failed to classify. */
     bool isDevicePointer(void *ptr)
     {
-        HipOps &ops = hipOps();
-        if (!ops.hipPointerGetAttributes) {
-            return false;
-        }
         hipPointerAttribute_t attr{};
-        if (ops.hipPointerGetAttributes(&attr, ptr) != hipSuccess) {
+        if (hip().pointerGetAttributes(&attr, ptr) != hipSuccess) {
             return false;
         }
         return attr.type == hipMemoryTypeDevice;
@@ -76,13 +72,9 @@ isValidDeviceRange(void *ptr, size_t size)
     if (!isDevicePointer(ptr)) {
         return true;
     }
-    HipOps &ops = hipOps();
-    if (!ops.hipMemGetAddressRange) {
-        return false;
-    }
     hipDeviceptr_t base      = nullptr;
     size_t         allocSize = 0;
-    if (ops.hipMemGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
+    if (hip().memGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
         return false;
     }
     auto start = reinterpret_cast<uintptr_t>(base);
@@ -98,12 +90,7 @@ isValidDeviceRange(void *ptr, size_t size)
 void
 HostBufDeleter::operator()(void *hostBuf) const noexcept
 {
-    auto freeFn = hipObj::hipOps().hipHostFree;
-    if (freeFn) {
-        (void)freeFn(hostBuf);
-        return;
-    }
-    (void)hipHostFree(hostBuf);
+    (void)hip().hostFree(hostBuf);
 }
 
 int
@@ -142,7 +129,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     }
 
     void      *rawHostBuf = nullptr;
-    hipError_t err        = hipObj::hipOps().hipHostMalloc(&rawHostBuf, size, hipHostMallocDefault);
+    hipError_t err        = hip().hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
     if (err != hipSuccess || !rawHostBuf) {
         return -1;
     }

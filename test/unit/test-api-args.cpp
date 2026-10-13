@@ -23,7 +23,6 @@
 #include <sys/types.h>
 
 #include "fake-device.h"
-#include "hip-seam.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -36,8 +35,6 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 namespace {
 
 using hipObjTest::fake;
-using hipObjTest::fakeMemGetAddressRange;
-using hipObjTest::fakePointerGetAttributes;
 using hipObjTest::makeOps;
 
 /* Fake device addresses. reg_mr is faked, so nothing reads or writes
@@ -266,10 +263,6 @@ protected:
     void SetUp() override
     {
         ApiArgsTest::SetUp();
-        hipObj::HipOps &ops         = hipObj::hipOps();
-        ops.hipPointerGetAttributes = &fakePointerGetAttributes;
-        ops.hipMemGetAddressRange   = &fakeMemGetAddressRange;
-
         fake().memoryType        = hipMemoryTypeDevice;
         fake().allocBase         = kAllocBase;
         fake().allocSize         = kAllocSize;
@@ -317,9 +310,6 @@ TEST_F(DeviceRangeTest, RejectsBufferWhoseAllocationIsNotFound)
 {
     ASSERT_NO_FATAL_FAILURE(init());
     fake().addressRangeErr = hipErrorNotFound;
-    EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjInvalidValue);
-
-    hipObj::hipOps().hipMemGetAddressRange = nullptr;
     EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjInvalidValue);
     EXPECT_EQ(fake().log.registerMr, 0);
 }

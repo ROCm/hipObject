@@ -29,10 +29,9 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime_api.h>
 
+#include "fake-device.h"
 #include "fake-ibv.h"
-#include "hip-seam.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -66,7 +65,7 @@ runThreads(int count, const std::function<void(int)> &body)
     // Each std::jthread joins its thread when it's destroyed
 }
 
-// ---- Fake libibverbs and HIP -------------------------------------------
+// ---- Fake libibverbs ---------------------------------------------------
 
 std::atomic<int> g_openDeviceCalls{0};
 
@@ -202,13 +201,6 @@ fakePollCq(struct ibv_cq *, int, struct ibv_wc *wc)
     return 1;
 }
 
-/* With no GPU and a NIC hint, hipObjInit() opens the hinted NIC directly */
-hipError_t
-fakeGetDeviceNoDevice(int *)
-{
-    return hipErrorNoDevice;
-}
-
 // ---- Transfer callbacks ------------------------------------------------
 
 int
@@ -279,13 +271,9 @@ protected:
     {
         savedState_ = hipObj::setStateForTest(&state_);
 
-        savedHipOps_       = hipObj::hipOps();
-        hipObj::HipOps ops = savedHipOps_;
-        ops.hipGetDevice   = &fakeGetDeviceNoDevice;
-        /* Without it, every pointer counts as host memory, so registration
-         * never calls into the HIP runtime */
-        ops.hipPointerGetAttributes = nullptr;
-        hipObj::hipOps()            = ops;
+        /* The fake HIP runtime has no GPU, so with a NIC hint,
+         * hipObjInit() opens the hinted NIC directly */
+        fakeHip_.emplace(hip_);
 
         hipObj::IbvFuncs funcs{};
         funcs.get_device_list  = &fakeGetDeviceList;
@@ -316,7 +304,7 @@ protected:
     {
         (void)hipObjShutdown();
         fakeIbv_.reset();
-        hipObj::hipOps() = savedHipOps_;
+        fakeHip_.reset();
         hipObj::setStateForTest(savedState_);
     }
 
@@ -330,7 +318,9 @@ protected:
     hipObj::DriverState                      state_{};
     hipObj::DriverState                     *savedState_ = nullptr;
     std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-    hipObj::HipOps                           savedHipOps_{};
+    hipObjTest::FakeDevice                   hipDevice_{};
+    hipObjTest::FakeHip                      hip_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
     std::vector<char>                        pool_ = std::vector<char>(kThreads * kBufSize);
     TransferProbe                            probe_{};
     hipObjOps_t                              probeOps_{};

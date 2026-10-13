@@ -72,8 +72,8 @@ if(HIPOBJECT_V2_API)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJECT_V2_API)
 endif()
 
-# A test of the public API that runs against the fake RDMA device and HIP
-# runtime in fake-device.h
+# A test that runs against the fake RDMA device and HIP runtime in
+# fake-device.h
 function(hipobj_add_fake_device_test TEST_NAME TEST_SOURCE)
   hipobj_add_test(${TEST_NAME} ${TEST_SOURCE})
   target_sources(${TEST_NAME} PRIVATE
@@ -183,7 +183,7 @@ if(HIPOBJECT_V2_API)
     test-v2-connref.cpp)
 endif()
 
-hipobj_add_test(test-seams
+hipobj_add_fake_device_test(test-seams
   test-seams.cpp)
 
 hipobj_add_test(test-replace-by-move
@@ -198,13 +198,13 @@ hipobj_add_test(test-scope-guard
 hipobj_add_test(test-gid-select
   test-gid-select.cpp)
 
-hipobj_add_test(test-buffer-registration
+hipobj_add_fake_device_test(test-buffer-registration
   test-buffer-registration.cpp)
 
 hipobj_add_test(test-ibv-lazy-load
   test-ibv-lazy-load.cpp)
 
-hipobj_add_test(test-ibv-dmabuf
+hipobj_add_fake_device_test(test-ibv-dmabuf
   test-ibv-dmabuf.cpp)
 # The tests of turning dma-buf registration off need HIPOBJ_DMABUF=0 in
 # the environment, so they run in a process of their own (see
@@ -239,7 +239,7 @@ add_test(NAME test-staging-bad-env
 set_tests_properties(test-staging-bad-env PROPERTIES
   ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=+20")
 
-hipobj_add_test(test-thread-safety
+hipobj_add_fake_device_test(test-thread-safety
   test-thread-safety.cpp)
 # A deadlock fails the test instead of hanging the run
 set_tests_properties(test-thread-safety PROPERTIES TIMEOUT 120)

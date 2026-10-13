@@ -231,7 +231,7 @@ std::optional<RdmaNic>
 GetClosestNicToGpu(int gpuIndex, const char *hca_list)
 {
     char       gpu_bus_id[32];
-    hipError_t err = hipObj::hipOps().hipDeviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id), gpuIndex);
+    hipError_t err = hip().deviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id), gpuIndex);
     if (err != hipSuccess)
         return std::nullopt;
 

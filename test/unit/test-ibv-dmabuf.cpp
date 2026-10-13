@@ -2,8 +2,9 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * IBVWrapper::reg_mr()'s dma-buf path, with the HSA export and close and
- * the libibverbs registration faked, so no GPU or NIC is needed.
+ * IBVWrapper::reg_mr()'s dma-buf path, with the HSA export and close (in
+ * the fake HIP runtime) and the libibverbs registration faked, so no GPU or
+ * NIC is needed.
  *
  * The DmabufDisabledTest tests need HIPOBJ_DMABUF=0 in the environment the
  * program starts with, so they skip unless it's set, and CMakeLists.txt
@@ -20,8 +21,8 @@
 #include <string>
 
 #include <gtest/gtest.h>
-#include <hsa/hsa.h>
 
+#include "fake-device.h"
 #include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
@@ -33,24 +34,24 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
-constexpr int      kFakeFd     = 1234;
-constexpr uint64_t kFakeOffset = 0x200;
-constexpr size_t   kBufSize    = 64;
-constexpr int      kAccess     = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+using hipObjTest::fake;
+using hipObjTest::fakeDevBuf;
+using hipObjTest::kFakeDmabufFd;
+using hipObjTest::kFakeDmabufOffset;
 
+constexpr size_t kBufSize = 64;
+constexpr int    kAccess  = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+
+/* The fake libibverbs' calls. The fake HIP runtime records the export and
+ * close in fake(). */
 struct DmabufLog {
-    bool failExport   = false;
     bool failRegister = false;
-
-    int exportCalls = 0;
-    int closeCalls  = 0;
-    int closedFd    = -1;
 
     int      dmabufRegisterCalls = 0;
     int      registeredFd        = -1;
     uint64_t registeredOffset    = 0;
     uint64_t registeredIova      = 0;
-    /* closeCalls when the fake ibv_reg_dmabuf_mr() ran */
+    /* fake().log.closeDmabuf when the fake ibv_reg_dmabuf_mr() ran */
     int closeCallsDuringRegister = -1;
 
     int plainRegisterCalls = 0;
@@ -58,13 +59,6 @@ struct DmabufLog {
 };
 
 DmabufLog g_log;
-
-/* A fake device address. Everything that would use it is faked. */
-void *
-fakeDevBuf()
-{
-    return reinterpret_cast<void *>(0x10000);
-}
 
 struct ibv_pd *
 fakePd()
@@ -79,26 +73,6 @@ dmabufEnabledByEnv()
 {
     const char *env = std::getenv("HIPOBJ_DMABUF");
     return !(env && (env[0] == '0' || env[0] == 'n' || env[0] == 'N'));
-}
-
-int
-fakeExportDmabuf(const void *, size_t, int *fd, uint64_t *offset)
-{
-    ++g_log.exportCalls;
-    if (g_log.failExport) {
-        return static_cast<int>(HSA_STATUS_ERROR_INVALID_ALLOCATION);
-    }
-    *fd     = kFakeFd;
-    *offset = kFakeOffset;
-    return 0;
-}
-
-int
-fakeCloseDmabuf(int fd)
-{
-    ++g_log.closeCalls;
-    g_log.closedFd = fd;
-    return 0;
 }
 
 struct ibv_mr *
@@ -121,7 +95,7 @@ fakeRegisterDmabufMr(struct ibv_pd *, uint64_t offset, size_t, uint64_t iova, in
     g_log.registeredFd             = fd;
     g_log.registeredOffset         = offset;
     g_log.registeredIova           = iova;
-    g_log.closeCallsDuringRegister = g_log.closeCalls;
+    g_log.closeCallsDuringRegister = fake().log.closeDmabuf;
     if (g_log.failRegister) {
         errno = EINVAL;
         return nullptr;
@@ -156,19 +130,20 @@ protected:
     void SetUp() override
     {
         hipObj::IbvFuncs funcs{};
-        funcs.export_dmabuf = &fakeExportDmabuf;
-        funcs.close_dmabuf  = &fakeCloseDmabuf;
         funcs.reg_dmabuf_mr = &fakeRegisterDmabufMr;
         funcs.reg_mr_iova2  = &fakeRegisterMrIova2;
         funcs.dereg_mr      = &fakeDeregisterMr;
         fakeIbv_.emplace(funcs);
+        fakeHip_.emplace(hip_);
 
-        g_log = {};
+        g_log  = {};
+        fake() = hipObjTest::FakeDevice{};
     }
 
     void TearDown() override
     {
         fakeIbv_.reset();
+        fakeHip_.reset();
     }
 
     static hipObj::IbvMrPtr registerFakeBuffer()
@@ -177,6 +152,8 @@ protected:
     }
 
     std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
+    hipObjTest::FakeHip                      hip_{fake()};
+    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
 };
 
 class DmabufTest : public FakeDmabufTest {
@@ -195,22 +172,22 @@ TEST_F(DmabufTest, RegistrationClosesFdBeforeReturning)
     hipObj::IbvMrPtr mr = registerFakeBuffer();
     ASSERT_NE(mr, nullptr);
     EXPECT_EQ(mr->addr, nullptr);
-    EXPECT_EQ(g_log.exportCalls, 1);
+    EXPECT_EQ(fake().log.exportDmabuf, 1);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 1);
-    EXPECT_EQ(g_log.registeredFd, kFakeFd);
-    EXPECT_EQ(g_log.registeredOffset, kFakeOffset);
+    EXPECT_EQ(g_log.registeredFd, kFakeDmabufFd);
+    EXPECT_EQ(g_log.registeredOffset, kFakeDmabufOffset);
     EXPECT_EQ(g_log.registeredIova, reinterpret_cast<uintptr_t>(fakeDevBuf()));
     EXPECT_EQ(g_log.plainRegisterCalls, 0);
 
     /* Open while it was registered, and closed once by the time reg_mr()
      * returned */
     EXPECT_EQ(g_log.closeCallsDuringRegister, 0);
-    EXPECT_EQ(g_log.closeCalls, 1);
-    EXPECT_EQ(g_log.closedFd, kFakeFd);
+    EXPECT_EQ(fake().log.closeDmabuf, 1);
+    EXPECT_EQ(fake().closedDmabufFd, kFakeDmabufFd);
 
     EXPECT_EQ(hipObj::ibv().dereg_mr(mr.release()), 0);
     EXPECT_EQ(g_log.deregisterCalls, 1);
-    EXPECT_EQ(g_log.closeCalls, 1);
+    EXPECT_EQ(fake().log.closeDmabuf, 1);
 }
 
 TEST_F(DmabufTest, FailedRegistrationClosesFdAndFallsBack)
@@ -224,25 +201,25 @@ TEST_F(DmabufTest, FailedRegistrationClosesFdAndFallsBack)
     EXPECT_EQ(g_log.plainRegisterCalls, 1);
 
     EXPECT_EQ(g_log.closeCallsDuringRegister, 0);
-    EXPECT_EQ(g_log.closeCalls, 1);
-    EXPECT_EQ(g_log.closedFd, kFakeFd);
+    EXPECT_EQ(fake().log.closeDmabuf, 1);
+    EXPECT_EQ(fake().closedDmabufFd, kFakeDmabufFd);
 
     EXPECT_EQ(hipObj::ibv().dereg_mr(mr.release()), 0);
     EXPECT_EQ(g_log.deregisterCalls, 1);
-    EXPECT_EQ(g_log.closeCalls, 1);
+    EXPECT_EQ(fake().log.closeDmabuf, 1);
 }
 
 TEST_F(DmabufTest, FailedExportClosesNothing)
 {
-    g_log.failExport = true;
+    fake().fail.exportDmabuf = true;
 
     hipObj::IbvMrPtr mr = registerFakeBuffer();
     ASSERT_NE(mr, nullptr);
     EXPECT_EQ(mr->addr, fakeDevBuf());
-    EXPECT_EQ(g_log.exportCalls, 1);
+    EXPECT_EQ(fake().log.exportDmabuf, 1);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 0);
     EXPECT_EQ(g_log.plainRegisterCalls, 1);
-    EXPECT_EQ(g_log.closeCalls, 0);
+    EXPECT_EQ(fake().log.closeDmabuf, 0);
 }
 
 /* libibverbs older than rdma-core 34 has no ibv_reg_dmabuf_mr() */
@@ -255,9 +232,9 @@ TEST_F(DmabufTest, NoDmabufVerbSkipsExport)
     hipObj::IbvMrPtr mr = registerFakeBuffer();
     ASSERT_NE(mr, nullptr);
     EXPECT_EQ(mr->addr, fakeDevBuf());
-    EXPECT_EQ(g_log.exportCalls, 0);
+    EXPECT_EQ(fake().log.exportDmabuf, 0);
     EXPECT_EQ(g_log.plainRegisterCalls, 1);
-    EXPECT_EQ(g_log.closeCalls, 0);
+    EXPECT_EQ(fake().log.closeDmabuf, 0);
 }
 
 // ---- Settings read from the environment --------------------------
@@ -314,14 +291,14 @@ TEST_F(FakeDmabufTest, SettingIsReadWhenWrapperIsCreated)
         fakeIbv_->replace(fakeIbv_->funcs());
         hipObj::IbvMrPtr mr = registerFakeBuffer();
         ASSERT_NE(mr, nullptr);
-        EXPECT_EQ(g_log.exportCalls, 0);
+        EXPECT_EQ(fake().log.exportDmabuf, 0);
     }
     {
         const ScopedEnv on("HIPOBJ_DMABUF", "1");
         fakeIbv_->replace(fakeIbv_->funcs());
         hipObj::IbvMrPtr mr = registerFakeBuffer();
         ASSERT_NE(mr, nullptr);
-        EXPECT_EQ(g_log.exportCalls, 1);
+        EXPECT_EQ(fake().log.exportDmabuf, 1);
     }
 }
 
@@ -330,10 +307,10 @@ TEST_F(DmabufDisabledTest, RegistersWithoutExporting)
     hipObj::IbvMrPtr mr = registerFakeBuffer();
     ASSERT_NE(mr, nullptr);
     EXPECT_EQ(mr->addr, fakeDevBuf());
-    EXPECT_EQ(g_log.exportCalls, 0);
+    EXPECT_EQ(fake().log.exportDmabuf, 0);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 0);
     EXPECT_EQ(g_log.plainRegisterCalls, 1);
-    EXPECT_EQ(g_log.closeCalls, 0);
+    EXPECT_EQ(fake().log.closeDmabuf, 0);
 }
 
 } // namespace

@@ -235,73 +235,159 @@ namespace {
         return 1;
     }
 
-    // ---- HIP ---------------------------------------------------------
-
-    hipError_t fakeGetDeviceNoDevice(int *)
-    {
-        return hipErrorNoDevice;
-    }
-
-    hipError_t fakeGetDeviceCount(int *count)
-    {
-        const FakeDevice &f = fake();
-        *count              = f.deviceCountErr == hipSuccess ? f.deviceCount : 0;
-        return f.deviceCountErr;
-    }
-
-    /* No topology for any GPU, so hipObjInit() opens the hinted NIC */
-    hipError_t fakeDeviceGetPCIBusId(char *, int, int)
-    {
-        return hipErrorInvalidDevice;
-    }
-
-    hipError_t fakeDeviceSynchronize()
-    {
-        return fake().deviceSyncErr;
-    }
-
-    hipError_t fakeHostMalloc(void **ptr, size_t size, unsigned int)
-    {
-        if (fake().fail.hostMalloc) {
-            return hipErrorOutOfMemory;
-        }
-        *ptr = std::malloc(size);
-        return *ptr ? hipSuccess : hipErrorOutOfMemory;
-    }
-
-    hipError_t fakeHostFree(void *ptr)
-    {
-        std::free(ptr);
-        return hipSuccess;
-    }
-
-    hipError_t fakeMemcpy(void *, const void *, size_t, hipMemcpyKind)
-    {
-        ++fake().log.memcpy;
-        return hipSuccess;
-    }
-
 } // namespace
 
+// ---- HIP -------------------------------------------------------------
+
 hipError_t
-fakePointerGetAttributes(hipPointerAttribute_t *attr, const void *)
+FakeHip::getDevice(int *device) const
 {
-    *attr      = {};
-    attr->type = fake().memoryType;
+    if (device_->getDeviceErr != hipSuccess) {
+        return device_->getDeviceErr;
+    }
+    *device = device_->device;
     return hipSuccess;
 }
 
 hipError_t
-fakeMemGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t)
+FakeHip::getDeviceCount(int *count) const
 {
-    FakeDevice &f = fake();
-    ++f.addressRangeCalls;
-    if (f.addressRangeErr != hipSuccess) {
-        return f.addressRangeErr;
+    *count = device_->deviceCountErr == hipSuccess ? device_->deviceCount : 0;
+    return device_->deviceCountErr;
+}
+
+hipError_t
+FakeHip::deviceGetPCIBusId(char *pciBusId, int len, int) const
+{
+    const std::string_view busId = device_->gpuBusId;
+    if (busId.empty()) {
+        return hipErrorInvalidDevice;
     }
-    *base = reinterpret_cast<hipDeviceptr_t>(f.allocBase);
-    *size = f.allocSize;
+    const std::span<char> out = hipObj::spanFromPointer(pciBusId, static_cast<size_t>(len));
+    if (busId.size() >= out.size()) {
+        return hipErrorInvalidValue;
+    }
+    std::ranges::copy(busId, out.begin());
+    out[busId.size()] = '\0';
     return hipSuccess;
+}
+
+hipError_t
+FakeHip::hostMalloc(void **ptr, size_t size, unsigned int) const
+{
+    ++device_->log.hostMalloc;
+    if (device_->fail.hostMalloc) {
+        return hipErrorOutOfMemory;
+    }
+    *ptr                    = std::malloc(size);
+    device_->lastHostMalloc = *ptr;
+    return *ptr ? hipSuccess : hipErrorOutOfMemory;
+}
+
+hipError_t
+FakeHip::hostFree(void *ptr) const
+{
+    ++device_->log.hostFree;
+    device_->lastHostFree = ptr;
+    std::free(ptr);
+    return hipSuccess;
+}
+
+hipError_t
+FakeHip::deviceSynchronize() const
+{
+    ++device_->log.deviceSynchronize;
+    return device_->deviceSyncErr;
+}
+
+hipError_t
+FakeHip::memcpyAsync(void *, const void *, size_t, hipMemcpyKind kind, hipStream_t) const
+{
+    ++device_->log.memcpy;
+    device_->lastMemcpyKind = kind;
+    return device_->memcpyErr;
+}
+
+hipError_t
+FakeHip::eventCreate(hipEvent_t *event) const
+{
+    if (device_->eventCreateErr != hipSuccess) {
+        return device_->eventCreateErr;
+    }
+    ++device_->log.eventCreate;
+    device_->eventQueriesAtCreate = device_->log.eventQuery;
+    *event                        = fakeEvent();
+    return hipSuccess;
+}
+
+hipError_t
+FakeHip::eventRecord(hipEvent_t event, hipStream_t) const
+{
+    EXPECT_EQ(event, fakeEvent());
+    ++device_->log.eventRecord;
+    return device_->eventRecordErr;
+}
+
+hipError_t
+FakeHip::eventQuery(hipEvent_t event) const
+{
+    EXPECT_EQ(event, fakeEvent());
+    const int queries = ++device_->log.eventQuery - device_->eventQueriesAtCreate;
+    if (device_->eventNeverCompletes || queries <= device_->eventNotReadyCount) {
+        return hipErrorNotReady;
+    }
+    return device_->eventQueryResult;
+}
+
+hipError_t
+FakeHip::eventDestroy(hipEvent_t event) const
+{
+    EXPECT_EQ(event, fakeEvent());
+    ++device_->log.eventDestroy;
+    return hipSuccess;
+}
+
+hipError_t
+FakeHip::pointerGetAttributes(hipPointerAttribute_t *attributes, const void *) const
+{
+    *attributes      = {};
+    attributes->type = device_->memoryType;
+    return hipSuccess;
+}
+
+hipError_t
+FakeHip::memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t) const
+{
+    ++device_->addressRangeCalls;
+    if (device_->addressRangeErr != hipSuccess) {
+        return device_->addressRangeErr;
+    }
+    *base = reinterpret_cast<hipDeviceptr_t>(device_->allocBase);
+    *size = device_->allocSize;
+    return hipSuccess;
+}
+
+// ---- HSA -------------------------------------------------------------
+
+int
+FakeHip::exportDmabuf(const void *, size_t, int *fd, uint64_t *offset) const
+{
+    ++device_->log.exportDmabuf;
+    if (device_->fail.exportDmabuf) {
+        /* Any nonzero hsa_status_t */
+        return 1;
+    }
+    *fd     = kFakeDmabufFd;
+    *offset = kFakeDmabufOffset;
+    return 0;
+}
+
+int
+FakeHip::closeDmabuf(int fd) const
+{
+    ++device_->log.closeDmabuf;
+    device_->closedDmabufFd = fd;
+    return 0;
 }
 
 // ---- S3 callbacks ----------------------------------------------------
@@ -350,23 +436,7 @@ FakeDeviceTest::SetUp()
     savedState_      = hipObj::setStateForTest(&state_);
     savedEnumerator_ = hipObj::setNicEnumerator(&enumerator_);
 
-    savedHipOps_                = hipObj::hipOps();
-    hipObj::HipOps ops          = savedHipOps_;
-    ops.hipGetDevice            = &fakeGetDeviceNoDevice;
-    ops.hipGetDeviceCount       = &fakeGetDeviceCount;
-    ops.hipDeviceGetPCIBusId    = &fakeDeviceGetPCIBusId;
-    ops.hipDeviceSynchronize    = &fakeDeviceSynchronize;
-    ops.hipHostMalloc           = &fakeHostMalloc;
-    ops.hipHostFree             = &fakeHostFree;
-    ops.hipPointerGetAttributes = nullptr;
-    /* Without the async entries, staging uses hipMemcpy */
-    ops.hipMemcpy       = &fakeMemcpy;
-    ops.hipMemcpyAsync  = nullptr;
-    ops.hipEventCreate  = nullptr;
-    ops.hipEventRecord  = nullptr;
-    ops.hipEventQuery   = nullptr;
-    ops.hipEventDestroy = nullptr;
-    hipObj::hipOps()    = ops;
+    fakeHip_.emplace(hip_);
 
     hipObj::IbvFuncs funcs{};
     funcs.get_device_list  = &fakeGetDeviceList;
@@ -397,7 +467,7 @@ FakeDeviceTest::TearDown()
 {
     (void)hipObjShutdown();
     fakeIbv_.reset();
-    hipObj::hipOps() = savedHipOps_;
+    fakeHip_.reset();
     hipObj::setNicEnumerator(savedEnumerator_);
     hipObj::setStateForTest(savedState_);
 }

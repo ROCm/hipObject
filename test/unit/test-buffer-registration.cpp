@@ -8,11 +8,10 @@
 #include <optional>
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime_api.h>
 
 #include "buffer.h"
+#include "fake-device.h"
 #include "fake-ibv.h"
-#include "hip-seam.h"
 #include "hipobj-private.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
@@ -30,10 +29,6 @@ struct IbvLog {
 };
 
 IbvLog g_ibvLog;
-int    g_hostMallocCalls = 0;
-int    g_hostFreeCalls   = 0;
-void  *g_lastHostMalloc  = nullptr;
-void  *g_lastHostFree    = nullptr;
 
 struct ibv_mr *
 makeFakeMr(void *addr)
@@ -70,24 +65,6 @@ fakeDeregisterMr(struct ibv_mr *mr)
     return 0;
 }
 
-hipError_t
-fakeHipHostMalloc(void **ptr, size_t size, unsigned int)
-{
-    ++g_hostMallocCalls;
-    *ptr             = std::malloc(size);
-    g_lastHostMalloc = *ptr;
-    return *ptr ? hipSuccess : hipErrorOutOfMemory;
-}
-
-hipError_t
-fakeHipHostFree(void *ptr)
-{
-    ++g_hostFreeCalls;
-    g_lastHostFree = ptr;
-    std::free(ptr);
-    return hipSuccess;
-}
-
 class BufferRegistrationTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -96,28 +73,21 @@ protected:
         funcs.reg_mr_iova2 = &fakeRegisterMrIova2;
         funcs.dereg_mr     = &fakeDeregisterMr;
         fakeIbv_.emplace(funcs);
+        fakeHip_.emplace(hip_);
 
-        savedHipOps_       = hipObj::hipOps();
-        hipObj::HipOps ops = savedHipOps_;
-        ops.hipHostMalloc  = &fakeHipHostMalloc;
-        ops.hipHostFree    = &fakeHipHostFree;
-        hipObj::hipOps()   = ops;
-
-        g_ibvLog          = {};
-        g_hostMallocCalls = 0;
-        g_hostFreeCalls   = 0;
-        g_lastHostMalloc  = nullptr;
-        g_lastHostFree    = nullptr;
+        g_ibvLog = {};
     }
 
     void TearDown() override
     {
         fakeIbv_.reset();
-        hipObj::hipOps() = savedHipOps_;
+        fakeHip_.reset();
     }
 
     std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-    hipObj::HipOps                           savedHipOps_{};
+    hipObjTest::FakeDevice                   hipDevice_{};
+    hipObjTest::FakeHip                      hip_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
 };
 
 TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
@@ -134,10 +104,10 @@ TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
     EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(hostBuf));
     EXPECT_EQ(entry->size, sizeof(hostBuf));
     EXPECT_FALSE(entry->isDmabuf);
-    EXPECT_EQ(g_hostMallocCalls, 0);
+    EXPECT_EQ(hipDevice_.log.hostMalloc, 0);
 
     EXPECT_EQ(buffers.deregisterBuffer(hostBuf), 0);
-    EXPECT_EQ(g_hostFreeCalls, 0);
+    EXPECT_EQ(hipDevice_.log.hostFree, 0);
 }
 
 TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
@@ -165,15 +135,15 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
     const auto *entry = buffers.find(gpuBuf);
     ASSERT_NE(entry, nullptr);
     ASSERT_NE(entry->mr, nullptr);
-    EXPECT_EQ(entry->mr->addr, g_lastHostMalloc);
-    EXPECT_EQ(entry->hostBuf.get(), g_lastHostMalloc);
-    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(g_lastHostMalloc));
+    EXPECT_EQ(entry->mr->addr, hipDevice_.lastHostMalloc);
+    EXPECT_EQ(entry->hostBuf.get(), hipDevice_.lastHostMalloc);
+    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(hipDevice_.lastHostMalloc));
     EXPECT_FALSE(entry->isDmabuf);
-    EXPECT_EQ(g_hostMallocCalls, 1);
+    EXPECT_EQ(hipDevice_.log.hostMalloc, 1);
 
     EXPECT_EQ(buffers.deregisterBuffer(gpuBuf), 0);
-    EXPECT_EQ(g_hostFreeCalls, 1);
-    EXPECT_EQ(g_lastHostFree, g_lastHostMalloc);
+    EXPECT_EQ(hipDevice_.log.hostFree, 1);
+    EXPECT_EQ(hipDevice_.lastHostFree, hipDevice_.lastHostMalloc);
 }
 
 TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers)
@@ -183,12 +153,12 @@ TEST_F(BufferRegistrationTest, DeregisterAllFreesOwnedFallbackHostBuffers)
     g_ibvLog.failRegisterAddr = gpuBuf;
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)), 0);
-    ASSERT_NE(g_lastHostMalloc, nullptr);
+    ASSERT_NE(hipDevice_.lastHostMalloc, nullptr);
 
     buffers.deregisterAll();
 
-    EXPECT_EQ(g_hostFreeCalls, 1);
-    EXPECT_EQ(g_lastHostFree, g_lastHostMalloc);
+    EXPECT_EQ(hipDevice_.log.hostFree, 1);
+    EXPECT_EQ(hipDevice_.lastHostFree, hipDevice_.lastHostMalloc);
     EXPECT_EQ(g_ibvLog.deregisterCalls, 1);
 }
 

@@ -13,10 +13,9 @@
 
 namespace hipObj {
 
-/* The functions the wrapper calls: libibverbs', and the two HSA calls
- * that reg_mr() makes to register a GPU buffer through a dma-buf.
- * Public so tests can build a wrapper from fakes; production code goes
- * through the wrapper methods and never touches it directly. */
+/* The libibverbs functions the wrapper calls. Public so tests can build
+ * a wrapper from fakes; production code goes through the wrapper methods
+ * and never touches it directly. */
 struct IbvFuncs {
     struct ibv_device **(*get_device_list)(int *);
     void (*free_device_list)(struct ibv_device **);
@@ -39,14 +38,6 @@ struct IbvFuncs {
     int (*poll_cq)(struct ibv_cq *, int, struct ibv_wc *);
     int (*post_send)(struct ibv_qp *, struct ibv_send_wr *, struct ibv_send_wr **);
     int (*post_recv)(struct ibv_qp *, struct ibv_recv_wr *, struct ibv_recv_wr **);
-
-    /* HSA, not libibverbs: hsa_amd_portable_export_dmabuf() and
-     * hsa_amd_portable_close_dmabuf(). They return 0 or the failing
-     * hsa_status_t as an int, so this header doesn't need the HSA
-     * headers. They're here so tests can fake them, and are set whether
-     * or not libibverbs loads. */
-    int (*export_dmabuf)(const void *, size_t, int *, uint64_t *);
-    int (*close_dmabuf)(int);
 };
 
 class IBVWrapper {
@@ -54,8 +45,8 @@ public:
     /* Loads libibverbs. is_initialized() says whether it succeeded. */
     IBVWrapper();
 
-    /* Calls funcs, including its HSA entries, as given, and loads
-     * nothing. For tests, which pass fakes; is_initialized() is true. */
+    /* Calls funcs as given, and loads nothing. For tests, which pass
+     * fakes; is_initialized() is true. */
     explicit IBVWrapper(const IbvFuncs &funcs);
 
     ~IBVWrapper() = default;

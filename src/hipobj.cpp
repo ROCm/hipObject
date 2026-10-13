@@ -161,7 +161,7 @@ finishTransferAfterReply(std::string_view reply, bool requiresDeviceSync)
     if (!requiresDeviceSync) {
         return 0;
     }
-    hipError_t err = hipObj::hipOps().hipDeviceSynchronize();
+    hipError_t err = hip().deviceSynchronize();
     return (err == hipSuccess) ? 0 : -1;
 }
 
@@ -206,36 +206,20 @@ stageTimeout()
 static hipObjError_t
 stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
 {
-    HipOps             &ops  = hipOps();
-    const hipMemcpyKind kind = toDevice ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
-    void               *dst  = toDevice ? dev : host;
-    const void         *src  = toDevice ? host : dev;
-
-    /* Unbounded fallback, for a table that cannot express the bounded form --
-     * a test seam with only the classic entries, or a HIP runtime too old to
-     * have events. */
-    auto blockingCopy = [&]() -> hipObjError_t {
-        if (!ops.hipMemcpy) {
-            return {hipObjInternalError, 0};
-        }
-        hipError_t err = ops.hipMemcpy(dst, src, size, kind);
-        return (err == hipSuccess) ? hipObjError_t{hipObjSuccess, 0} : hipObjError_t{hipObjInternalError, 0};
-    };
-
-    if (!ops.hipMemcpyAsync || !ops.hipEventCreate || !ops.hipEventRecord || !ops.hipEventQuery ||
-        !ops.hipEventDestroy) {
-        return blockingCopy();
-    }
+    const HipRuntime   &runtime = hip();
+    const hipMemcpyKind kind    = toDevice ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
+    void               *dst     = toDevice ? dev : host;
+    const void         *src     = toDevice ? host : dev;
 
     hipEvent_t rawDone = nullptr;
-    if (ops.hipEventCreate(&rawDone) != hipSuccess) {
-        return blockingCopy();
+    if (runtime.eventCreate(&rawDone) != hipSuccess) {
+        return {hipObjInternalError, 0};
     }
-    HipEventPtr done(rawDone, HipEventDeleter{ops.hipEventDestroy});
+    HipEventPtr done(rawDone);
 
-    hipError_t err = ops.hipMemcpyAsync(dst, src, size, kind, nullptr);
+    hipError_t err = runtime.memcpyAsync(dst, src, size, kind, nullptr);
     if (err == hipSuccess) {
-        err = ops.hipEventRecord(done.get(), nullptr);
+        err = runtime.eventRecord(done.get(), nullptr);
     }
     if (err != hipSuccess) {
         return {hipObjInternalError, 0};
@@ -244,7 +228,7 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
     const std::chrono::milliseconds timeout  = stageTimeout();
     const auto                      deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
-        hipError_t q = ops.hipEventQuery(done.get());
+        hipError_t q = runtime.eventQuery(done.get());
         if (q == hipSuccess) {
             return {hipObjSuccess, 0};
         }
@@ -504,7 +488,7 @@ try {
     const bool haveNicHint = config->nicHint && config->nicHint[0] != '\0';
     int        gpuDevice   = config->gpuDevice;
     if (gpuDevice < 0) {
-        hipError_t err = hipObj::hipOps().hipGetDevice(&gpuDevice);
+        hipError_t err = hipObj::hip().getDevice(&gpuDevice);
         if (err != hipSuccess) {
             // No GPU to infer a device from. That is only fatal when we also have
             // no NIC hint -- with a hint the topology lookup below is skipped
@@ -519,7 +503,7 @@ try {
         // An explicit device has to exist, even when a NIC hint means its
         // topology isn't needed
         int        deviceCount = 0;
-        hipError_t err         = hipObj::hipOps().hipGetDeviceCount(&deviceCount);
+        hipError_t err         = hipObj::hip().getDeviceCount(&deviceCount);
         if (err == hipErrorNoDevice) {
             deviceCount = 0;
         }
