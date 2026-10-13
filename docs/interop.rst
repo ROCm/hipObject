@@ -57,6 +57,10 @@ read ``x-amz-rdma-reply`` from the HTTP response.
   | 42    | 2 bytes     | u16 LE | LID                                      |
   +-------+-------------+--------+------------------------------------------+
 
+  The fields are packed with no padding between them. The integers are
+  little-endian whatever the byte order of the host that encodes or decodes
+  the token.
+
   Enumerated values:
 
   * ``transport = 0x00``: DC

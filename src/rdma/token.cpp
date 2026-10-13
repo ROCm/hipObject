@@ -7,9 +7,15 @@
 
 #include "token.h"
 
+#include <algorithm>
+#include <array>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -23,8 +29,69 @@ namespace {
 
     constexpr std::string_view kHexDigits = "0123456789abcdef";
 
-    constexpr size_t kTokenBinaryLen = 1 + 4 + kGidLen + 4 + 8 + 8 + 1 + 2;
+    /* The token's binary form: its fields, in the order docs/interop.rst
+     * lists them, with no padding */
+    constexpr size_t kTokenBinaryLen = sizeof(RdmaToken::transport) + sizeof(RdmaToken::qpNum) + kGidLen +
+                                       sizeof(RdmaToken::rkey) + sizeof(RdmaToken::remoteAddr) +
+                                       sizeof(RdmaToken::length) + sizeof(RdmaToken::portNum) +
+                                       sizeof(RdmaToken::lid);
+    /* Fails when a field of RdmaToken changes size, which changes the wire
+     * format */
     static_assert(kRdmaTokenHexLen == kTokenBinaryLen * 2);
+
+    /* Writes a token's binary form front to back, with its integers
+     * little-endian on any host */
+    class TokenWriter {
+    public:
+        explicit TokenWriter(std::span<uint8_t> out) : rest_(out)
+        {
+        }
+
+        template <std::unsigned_integral T> void put(T value)
+        {
+            for (size_t i = 0; i < sizeof(T); ++i)
+                rest_[i] = static_cast<uint8_t>(value >> (8 * i));
+            rest_ = rest_.subspan(sizeof(T));
+        }
+
+        void put(std::span<const uint8_t> bytes)
+        {
+            std::ranges::copy(bytes, rest_.begin());
+            rest_ = rest_.subspan(bytes.size());
+        }
+
+    private:
+        std::span<uint8_t> rest_;
+    };
+
+    /* Reads a token's binary form front to back, the way TokenWriter
+     * writes it */
+    class TokenReader {
+    public:
+        explicit TokenReader(std::span<const uint8_t> in) : rest_(in)
+        {
+        }
+
+        template <std::unsigned_integral T> T get()
+        {
+            T value = 0;
+            /* Not |=, which -Wconversion flags for a uint16_t, since the
+             * operands are promoted to int */
+            for (size_t i = 0; i < sizeof(T); ++i)
+                value = static_cast<T>(value | (T{rest_[i]} << (8 * i)));
+            rest_ = rest_.subspan(sizeof(T));
+            return value;
+        }
+
+        void get(std::span<uint8_t> bytes)
+        {
+            std::ranges::copy(rest_.first(bytes.size()), bytes.begin());
+            rest_ = rest_.subspan(bytes.size());
+        }
+
+    private:
+        std::span<const uint8_t> rest_;
+    };
 
     bool isSuccessHttpCode(int code)
     {
@@ -79,22 +146,16 @@ namespace {
 RdmaTokenHex
 encodeRdmaTokenHex(const RdmaToken &token)
 {
-    uint8_t buf[kTokenBinaryLen];
-    size_t  off = 0;
-
-    buf[off++] = static_cast<uint8_t>(token.transport);
-    std::memcpy(buf + off, &token.qpNum, 4);
-    off += 4;
-    std::memcpy(buf + off, token.gid.data(), token.gid.size());
-    off += token.gid.size();
-    std::memcpy(buf + off, &token.rkey, 4);
-    off += 4;
-    std::memcpy(buf + off, &token.remoteAddr, 8);
-    off += 8;
-    std::memcpy(buf + off, &token.length, 8);
-    off += 8;
-    buf[off++] = token.portNum;
-    std::memcpy(buf + off, &token.lid, 2);
+    std::array<uint8_t, kTokenBinaryLen> buf{};
+    TokenWriter                          out(buf);
+    out.put(static_cast<uint8_t>(token.transport));
+    out.put(token.qpNum);
+    out.put(token.gid);
+    out.put(token.rkey);
+    out.put(token.remoteAddr);
+    out.put(token.length);
+    out.put(token.portNum);
+    out.put(token.lid);
 
     RdmaTokenHex hex{}; /* zeroed, so it ends with a NUL */
     for (size_t i = 0; i < kTokenBinaryLen; ++i) {
@@ -117,34 +178,30 @@ decodeRdmaTokenHex(std::string_view tokenHex)
     if (tokenHex.size() != kRdmaTokenHexLen)
         return std::nullopt;
 
-    uint8_t buf[kTokenBinaryLen];
+    std::array<uint8_t, kTokenBinaryLen> buf{};
     for (size_t i = 0; i < kTokenBinaryLen; ++i) {
         const auto byte = parseNumber<uint8_t>(tokenHex.substr(i * 2, 2), 16);
         if (!byte)
             return std::nullopt;
         buf[i] = *byte;
     }
+
+    TokenReader in(buf);
     /* Any uint8_t is a valid TransportType value, so the cast is
      * defined even for a byte that names no enumerator */
-    const auto transport = static_cast<TransportType>(buf[0]);
+    const auto transport = static_cast<TransportType>(in.get<uint8_t>());
     if (transport != TransportType::DC && transport != TransportType::RC)
         return std::nullopt;
 
     RdmaToken token;
-    size_t    off   = 1;
     token.transport = transport;
-    std::memcpy(&token.qpNum, buf + off, 4);
-    off += 4;
-    std::memcpy(token.gid.data(), buf + off, token.gid.size());
-    off += token.gid.size();
-    std::memcpy(&token.rkey, buf + off, 4);
-    off += 4;
-    std::memcpy(&token.remoteAddr, buf + off, 8);
-    off += 8;
-    std::memcpy(&token.length, buf + off, 8);
-    off += 8;
-    token.portNum = buf[off++];
-    std::memcpy(&token.lid, buf + off, 2);
+    token.qpNum     = in.get<uint32_t>();
+    in.get(token.gid);
+    token.rkey       = in.get<uint32_t>();
+    token.remoteAddr = in.get<uint64_t>();
+    token.length     = in.get<uint64_t>();
+    token.portNum    = in.get<uint8_t>();
+    token.lid        = in.get<uint16_t>();
     return token;
 }
 
