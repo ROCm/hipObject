@@ -59,10 +59,10 @@ vendor-neutral client for GPU-direct object storage.
 
 ### Software
 
-- Linux (Ubuntu 22.04+, RHEL 9+)
+- Linux (Ubuntu 24.04+, RHEL 9+)
 - ROCm 7.14+ (HIP runtime, HSA runtime)
 - Linux kernel 6.18+ (for `ionic_rdma` driver)
-- CMake 3.21+
+- CMake 3.25.2+
 - C++20 compiler (e.g., g++ or amdclang++)
 
 ### Hardware

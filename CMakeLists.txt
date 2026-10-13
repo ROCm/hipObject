@@ -2,7 +2,10 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21)
+# TheRock requires 3.25. 3.25.0 and 3.25.1 pass FetchContent_Declare()'s
+# SYSTEM on to ExternalProject_Add() as part of the previous option's
+# value, which breaks the download.
+cmake_minimum_required(VERSION 3.25.2)
 
 set(HIPOBJ_VERSION_MAJOR 0)
 set(HIPOBJ_VERSION_MINOR 1)

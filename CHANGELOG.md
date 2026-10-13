@@ -10,8 +10,8 @@
   `hipobject-static-dev` DEB or `hipobject-static-devel` RPM package
   for a static build. rocm-cmake is downloaded if ROCm doesn't provide
   it.
-- Nightly DEB packages of the `develop` branch, for Ubuntu 22.04 and
-  24.04 with ROCm 10.1.0 and 7.14.1, are published as the `nightly`
+- Nightly DEB packages of the `develop` branch, for Ubuntu 24.04 with
+  ROCm 10.1.0 and 7.14.1, are published as the `nightly`
   prerelease on GitHub, which each new build replaces. They're for
   testing, and aren't a supported release.
 - The `ROCM_VERSION` CMake and environment variable sets the ROCm
@@ -54,6 +54,13 @@
 - hipObject now requires ROCm 7.14 or later, and configuring fails if
   `ROCM_VERSION` is earlier. The documentation used to list ROCm 6.x as
   the minimum.
+- hipObject now requires CMake 3.25.2 or later, instead of 3.21. Earlier
+  versions couldn't configure hipObject with amdclang, or with
+  `HIPOBJ_FETCH_CUOBJECT_CLIENT` on.
+- The oldest supported Ubuntu release is now 24.04, instead of 22.04,
+  whose CMake is 3.22. The DEB packages depend on the libraries' Ubuntu
+  24.04 package names, such as `libcurl4t64`, so they no longer install
+  on 22.04.
 - hipObject is now built as a shared library (`libhipobj.so`) by default.
   The `BUILD_SHARED_LIBS` CMake option, which was previously ignored, now
   selects between a shared and a static library and defaults to `ON`. Set

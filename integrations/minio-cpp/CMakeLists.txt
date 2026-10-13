@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25.2)
 
 include(FetchContent)
 
@@ -19,7 +19,6 @@ set(BUILD_SHARED_LIBS OFF)
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
 include(${PROJECT_SOURCE_DIR}/cmake/HIPOBJMinioCppDeps.cmake)
-include(HIPOBJSystemIncludes)
 
 set(MINIO_CPP_ENABLE_RDMA OFF CACHE BOOL "" FORCE)
 set(MINIO_CPP_TEST OFF CACHE BOOL "" FORCE)
@@ -29,6 +28,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/minio/minio-cpp.git
   GIT_TAG v0.4.0
   GIT_SHALLOW TRUE
+  SYSTEM
 )
 # minio-cpp is only a build dependency of hipobj_minio, so don't
 # generate its install rules. Its install(EXPORT) can't be generated
@@ -43,7 +43,6 @@ FetchContent_MakeAvailable(miniocpp_upstream)
 set(CMAKE_SKIP_INSTALL_RULES "${_minio_skip_install_rules}")
 set_property(DIRECTORY ${miniocpp_upstream_SOURCE_DIR}
   PROPERTY EXCLUDE_FROM_ALL TRUE)
-hipobj_mark_dir_targets_system(${miniocpp_upstream_SOURCE_DIR})
 # minio-cpp adds its own -Wall -Wextra -Wconversion to miniocpp, which
 # warn under Clang. It isn't our code to fix, so silence all warnings
 # in its sources. This only affects compiling miniocpp itself, not
@@ -101,14 +100,14 @@ hipobj_install_executable(
 
 hipobj_add_runtime_library_dependency(
   SONAMES libcurl.so.4
-  DEB "libcurl4t64 | libcurl4")
+  DEB libcurl4t64)
 hipobj_add_runtime_library_dependency(
   SONAMES libz.so.1
   DEB zlib1g)
 if(OPENSSL_VERSION VERSION_GREATER_EQUAL 3)
   hipobj_add_runtime_library_dependency(
     SONAMES libssl.so.3 libcrypto.so.3
-    DEB "libssl3t64 | libssl3")
+    DEB libssl3t64)
 else()
   hipobj_add_runtime_library_dependency(
     SONAMES libssl.so.1.1 libcrypto.so.1.1
@@ -124,5 +123,5 @@ endif()
 if(TARGET unofficial-curlpp AND CURLPP_LIBRARY MATCHES "\\.so")
   hipobj_add_runtime_library_dependency(
     SONAMES libcurlpp.so.1
-    DEB "libcurlpp0t64 | libcurlpp0")
+    DEB libcurlpp0t64)
 endif()

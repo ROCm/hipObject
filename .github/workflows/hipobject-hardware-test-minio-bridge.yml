@@ -47,7 +47,6 @@ on:
       - "cmake/HIPOBJFortifySource.cmake"
       - "cmake/HIPOBJGNUCompilerOptions.cmake"
       - "cmake/HIPOBJMinioCppDeps.cmake"
-      - "cmake/HIPOBJSystemIncludes.cmake"
       - "cmake/HIPOBJUseROCmCMake.cmake"
       - "cmake/minio-deps/**"
       - "include/**"

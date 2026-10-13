@@ -141,7 +141,7 @@ endfunction()
 #                                    (e.g., libcurl.so.4), which the RPM
 #                                    package requires
 #   DEB <dependency>                 The Debian package that provides
-#                                    them (e.g., "libcurl4t64 | libcurl4")
+#                                    them (e.g., libcurl4t64)
 #
 # The RPM packages don't generate their requirements automatically (see
 # HIPOBJInstall.cmake), so they require the sonames, which every

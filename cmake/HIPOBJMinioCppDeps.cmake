@@ -4,9 +4,12 @@
 
 # Fetch and expose minio-cpp dependencies using vcpkg-style
 # imported target names (unofficial::curlpp::curlpp, etc.)
+#
+# Dependencies added with FetchContent_MakeAvailable() are declared
+# SYSTEM, so warnings in their headers don't fire in hipObject targets
+# that use them.
 
 include(FetchContent)
-include(HIPOBJSystemIncludes)
 
 find_package(OpenSSL REQUIRED)
 if(NOT OpenSSL_FOUND)
@@ -23,9 +26,9 @@ if(NOT nlohmann_json_FOUND)
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG v3.11.3
+    SYSTEM
   )
   FetchContent_MakeAvailable(nlohmann_json)
-  hipobj_mark_dir_targets_system(${nlohmann_json_SOURCE_DIR})
 endif()
 
 find_package(pugixml CONFIG QUIET)
@@ -34,10 +37,10 @@ if(NOT pugixml_FOUND)
     pugixml
     GIT_REPOSITORY https://github.com/zeux/pugixml.git
     GIT_TAG v1.14
+    SYSTEM
   )
   set(PUGIXML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(pugixml)
-  hipobj_mark_dir_targets_system(${pugixml_SOURCE_DIR})
   if(NOT TARGET pugixml::pugixml AND TARGET pugixml)
     add_library(pugixml::pugixml ALIAS pugixml)
   endif()
