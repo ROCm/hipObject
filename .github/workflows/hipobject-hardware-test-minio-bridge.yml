@@ -57,9 +57,11 @@ on:
       - "test/integration/CMakeLists.txt"
       - "test/integration/rdma-test-server/**"
       - "ci/ernic/assert-transfer.sh"
+      - "ci/ernic/background-task.sh"
       - "ci/ernic/minio-v1-client-entrypoint.sh"
       - "ci/ernic/server-entrypoint.sh"
       - ".github/actions/fetch-guest-vm/**"
+      - ".github/actions/fetch-ionic-sources/**"
       - ".github/workflows/hipobject-hardware-test-minio-bridge.yml"
       - "!src/rdma/bnxt/**"
       - "!test/integration/rdma-test-server/run-v2-e2e.sh"
@@ -88,6 +90,10 @@ env:
   #   cannot change what this lane tests underneath it.
   ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244
   ROCM_IMAGE: rocm/dev-ubuntu-24.04:10.0.0-full
+  # rocm-ernic's Ansible needs community.general >=13.3.0. Pinned, like the
+  # images, because the installed collections are cached under this version:
+  # fetching them from Galaxy took ~3 minutes of every run.
+  COMMUNITY_GENERAL_VERSION: 13.5.0
 
 # Every run step uses bash, including in container jobs, where the runner
 # would otherwise pick sh. "bash -e {0}" and not "bash": the bare name adds
@@ -126,6 +132,9 @@ jobs:
       VM1_ADDR: 192.168.200.10
       SERVER_PORT: 9000
       TEST_SIZE: 1048576
+      # Where the guest role looks for the ionic driver sources. Passed to it
+      # explicitly, so the copies staged there cannot drift from its default.
+      IONIC_GUEST_DIR: /var/tmp/ionic-src
 
     steps:
       - name: Checkout
@@ -143,26 +152,20 @@ jobs:
           path: rocm-ernic
           persist-credentials: false
 
-      - name: Install deps
+      - name: Start building hipObject binaries (ROCm container)
         run: |
-          apt-get update -qq
-          apt-get install -y -qq iproute2 sudo libibverbs1 libnl-3-200 \
-            libnl-route-3-200 ansible python3-jmespath
-          for attempt in 1 2 3; do
-            ansible-galaxy collection install community.general && break
-            echo "::warning::galaxy install failed (attempt ${attempt}/3)"
-            sleep $((attempt * 20))
-          done
-
-      - name: Build hipObject binaries (ROCm container)
-        run: |
+          # In the background: pulling the ROCm image is most of the build's
+          # ~3 minutes, and nothing needs the binaries until they are copied
+          # into the guests. "Wait for the build" joins it, and prints its log.
+          #
           # Stage what the binaries load at run time in rocm-libs, which
           # travels to the guest VMs with them: the ROCm libraries,
           # pugixml, curlpp when it's the system's, and the shared
           # libhipobj. In this container the binaries' build-tree run path
           # still finds libhipobj in /hipobject-build/src, so the check
           # treats that as unstaged.
-          docker run --rm \
+          bash ci/ernic/background-task.sh start build << 'EOF'
+          docker run --rm --name hipobj-build \
             --user root \
             -v "${{ github.workspace }}:/hipobject:ro" \
             -v "${{ github.workspace }}/ernic-build:/hipobject-build" \
@@ -203,36 +206,45 @@ jobs:
               done && \
               echo 'staged closure complete'
             "
+          EOF
 
-      - name: Extract rocm-ernic binary from ernic image
-        run: |
-          docker create --name ernic-tmp-2vm "$ERNIC_IMAGE"
-          # Not the workspace: it is mounted noexec in the job container.
-          docker cp ernic-tmp-2vm:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
-          docker rm ernic-tmp-2vm
-          chmod +x /usr/local/bin/rocm-ernic
-          rocm-ernic --help > /tmp/ernic-help.txt
-          head -3 /tmp/ernic-help.txt
+      - name: Restore the cached Ansible collections
+        id: ansible_collections
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.ansible/collections
+          key: ansible-collections-community.general-${{ env.COMMUNITY_GENERAL_VERSION }}
 
-      - name: Select QEMU accelerator and guest size
+      - name: Start installing deps
+        env:
+          COLLECTIONS_CACHED: ${{ steps.ansible_collections.outputs.cache-hit }}
         run: |
-          if [ -c /dev/kvm ] && "${QEMU_PATH:-}qemu-system-x86_64" -accel help 2>/dev/null | grep -qw kvm; then
-            echo "QEMU_ACCEL=kvm" >> "$GITHUB_ENV"
-            echo "QEMU_CPU=host"  >> "$GITHUB_ENV"
-          else
-            echo "QEMU_ACCEL=tcg"  >> "$GITHUB_ENV"
-            echo "QEMU_CPU=qemu64" >> "$GITHUB_ENV"
+          # In the background, alongside the guest image fetch. "Wait for
+          # deps" joins it before anything uses what it installs.
+          bash ci/ernic/background-task.sh start deps << 'EOF'
+          apt-get update -qq
+          apt-get install -y -qq iproute2 sudo libibverbs1 libnl-3-200 \
+            libnl-route-3-200 ansible python3-jmespath
+          if [ "$COLLECTIONS_CACHED" != true ]; then
+            # Galaxy drops connections often enough to fail a lane on its own.
+            for attempt in 1 2 3; do
+              ansible-galaxy collection install \
+                "community.general:==${COMMUNITY_GENERAL_VERSION}" && break
+              # Fail here: carrying on without the collection fails much
+              # later, in provisioning, with an error that doesn't say why.
+              if [ "$attempt" -eq 3 ]; then
+                echo "::error::galaxy install failed after 3 attempts"
+                exit 1
+              fi
+              echo "::warning::galaxy install failed (attempt ${attempt}/3)"
+              sleep $((attempt * 20))
+            done
           fi
-          HOST_MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
-          # IONIC_EQ_COUNT_MIN is 4: a guest with fewer online CPUs can never
-          # register the ibdev, so 4 is a floor and not a preference, even
-          # when that means oversubscribing the runner.
-          VM_VCPUS=$(( ($(nproc) - 1) / 2 )); [ "$VM_VCPUS" -lt 4 ] && VM_VCPUS=4
-          VM_MEM_MB=$(( HOST_MEM_MB * 3 / 4 / 2 ))
-          [ "$VM_MEM_MB" -lt 1024 ] && VM_MEM_MB=1024
-          [ "$VM_MEM_MB" -gt 4096 ] && VM_MEM_MB=4096
-          echo "VM_VCPUS=$VM_VCPUS"   >> "$GITHUB_ENV"
-          echo "VM_MEM_MB=$VM_MEM_MB" >> "$GITHUB_ENV"
+          EOF
+
+      - name: Fetch the ionic driver sources
+        id: ionic_sources
+        uses: $/.github/actions/fetch-ionic-sources
 
       - name: Fetch guest VM image
         id: guest_image
@@ -268,6 +280,39 @@ jobs:
             echo "vm_disk=$VM_DISK"
             echo "ssh_key=$SSH_KEY_PRIVATE"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Wait for deps
+        run: bash ci/ernic/background-task.sh wait deps
+
+      - name: Extract rocm-ernic binary from ernic image
+        run: |
+          docker create --name ernic-tmp-2vm "$ERNIC_IMAGE"
+          # Not the workspace: it is mounted noexec in the job container.
+          docker cp ernic-tmp-2vm:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
+          docker rm ernic-tmp-2vm
+          chmod +x /usr/local/bin/rocm-ernic
+          rocm-ernic --help > /tmp/ernic-help.txt
+          head -3 /tmp/ernic-help.txt
+
+      - name: Select QEMU accelerator and guest size
+        run: |
+          if [ -c /dev/kvm ] && "${QEMU_PATH:-}qemu-system-x86_64" -accel help 2>/dev/null | grep -qw kvm; then
+            echo "QEMU_ACCEL=kvm" >> "$GITHUB_ENV"
+            echo "QEMU_CPU=host"  >> "$GITHUB_ENV"
+          else
+            echo "QEMU_ACCEL=tcg"  >> "$GITHUB_ENV"
+            echo "QEMU_CPU=qemu64" >> "$GITHUB_ENV"
+          fi
+          HOST_MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
+          # IONIC_EQ_COUNT_MIN is 4: a guest with fewer online CPUs can never
+          # register the ibdev, so 4 is a floor and not a preference, even
+          # when that means oversubscribing the runner.
+          VM_VCPUS=$(( ($(nproc) - 1) / 2 )); [ "$VM_VCPUS" -lt 4 ] && VM_VCPUS=4
+          VM_MEM_MB=$(( HOST_MEM_MB * 3 / 4 / 2 ))
+          [ "$VM_MEM_MB" -lt 1024 ] && VM_MEM_MB=1024
+          [ "$VM_MEM_MB" -gt 4096 ] && VM_MEM_MB=4096
+          echo "VM_VCPUS=$VM_VCPUS"   >> "$GITHUB_ENV"
+          echo "VM_MEM_MB=$VM_MEM_MB" >> "$GITHUB_ENV"
 
       - name: Create the per-VM disk overlays
         id: overlays
@@ -478,10 +523,34 @@ jobs:
           EOFVM
           done
 
+      - name: Stage the ionic driver sources in both VMs
+        env:
+          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
+          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          IONIC_SRC: ${{ steps.ionic_sources.outputs.source_dir }}
+          IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
+        run: |
+          # Left to itself, the guest role sparse-clones the kernel from
+          # git.kernel.org through user-mode NAT in each guest, ~100 s every
+          # run. It skips that when .patches-applied-<ref> is already in
+          # place, so copy in the runner's cached tree; provisioning is
+          # given the same directory and ref below.
+          set -o pipefail
+          for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
+            tar -C "$IONIC_SRC" -cf - . | \
+              ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+                -p "$port" "${VM_USER}@localhost" \
+                "sudo rm -rf '${IONIC_GUEST_DIR}' && sudo mkdir -p '${IONIC_GUEST_DIR}' && \
+                 sudo tar -C '${IONIC_GUEST_DIR}' -xf - && \
+                 test -f '${IONIC_GUEST_DIR}/.patches-applied-${IONIC_REF}'"
+          done
+          echo "ionic sources at ${IONIC_REF} staged in ${IONIC_GUEST_DIR}"
+
       - name: Provision both VMs with the ernic Ansible collection
         env:
           SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
           VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
         run: |
           ERNIC_RUN_DIR=/tmp/ernic-ci
           mkdir -p "$ERNIC_RUN_DIR"
@@ -506,6 +575,8 @@ jobs:
             -e ernic_instances=2 \
             -e ernic_vm_ssh_base_port="$VM1_SSH_PORT" \
             -e ernic_vm_ssh_user="$VM_USER" \
+            -e ernic_ionic_source_dir="$IONIC_GUEST_DIR" \
+            -e ernic_ionic_kernel_ref="$IONIC_REF" \
             -e ernic_gpu_passthrough=false \
             -e ernic_guest_agent=false \
             -e ernic_set_hostname=false
@@ -535,6 +606,9 @@ jobs:
             echo "VM ${n}: $DEV is PORT_ACTIVE"
             echo "RDMA_DEVICE_${n}=$DEV" >> "$GITHUB_ENV"
           done
+
+      - name: Wait for the build
+        run: bash ci/ernic/background-task.sh wait build
 
       - name: Copy hipObject binaries into both VMs
         env:
@@ -655,6 +729,8 @@ jobs:
         run: |
           kill "${QEMU_PID1:-}" "${QEMU_PID2:-}"   2>/dev/null || true
           kill "${ERNIC_PID1:-}" "${ERNIC_PID2:-}" 2>/dev/null || true
+          # Still running if the job failed before "Wait for the build".
+          docker rm -f hipobj-build 2>/dev/null || true
           docker run --rm -v "${{ github.workspace }}/ernic-build:/d" \
             busybox sh -c "rm -rf /d/*" 2>/dev/null || true
           rm -rf "${{ github.workspace }}/ernic-build" 2>/dev/null || true
