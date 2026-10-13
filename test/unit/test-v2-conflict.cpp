@@ -19,6 +19,7 @@
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 
+#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -105,40 +106,27 @@ fakeDeallocPd(struct ibv_pd *)
     return 0;
 }
 
-class IbvFakeInstall {
-public:
-    IbvFakeInstall()
-    {
-        auto &funcs        = hipObj::ibv().funcsForTest();
-        saved_             = funcs;
-        funcs.create_cq    = fakeCreateCq;
-        funcs.destroy_cq   = fakeDestroyCq;
-        funcs.create_qp    = fakeCreateQp;
-        funcs.destroy_qp   = fakeDestroyQp;
-        funcs.modify_qp    = fakeModifyQp;
-        funcs.query_device = fakeQueryDevice;
-        funcs.dealloc_pd   = fakeDeallocPd;
-    }
-    ~IbvFakeInstall()
-    {
-        hipObj::ibv().funcsForTest() = saved_;
-    }
-
-    IbvFakeInstall(const IbvFakeInstall &)            = delete;
-    IbvFakeInstall &operator=(const IbvFakeInstall &) = delete;
-    IbvFakeInstall(IbvFakeInstall &&)                 = delete;
-    IbvFakeInstall &operator=(IbvFakeInstall &&)      = delete;
-
-private:
-    hipObj::IbvFuncs saved_;
-};
+/* The fakes the fixture installs */
+hipObj::IbvFuncs
+fakeVerbs()
+{
+    hipObj::IbvFuncs funcs = {};
+    funcs.create_cq        = fakeCreateCq;
+    funcs.destroy_cq       = fakeDestroyCq;
+    funcs.create_qp        = fakeCreateQp;
+    funcs.destroy_qp       = fakeDestroyQp;
+    funcs.modify_qp        = fakeModifyQp;
+    funcs.query_device     = fakeQueryDevice;
+    funcs.dealloc_pd       = fakeDeallocPd;
+    return funcs;
+}
 
 class V2ConflictTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        g_state  = FakeState{};
-        install_ = std::make_unique<IbvFakeInstall>();
+        g_state = FakeState{};
+        install_.emplace(fakeVerbs());
         testReg_ = std::make_unique<hipObj::v2::ConnectionRegistry>();
         prevReg_ = hipObj::v2::setRegistryForTest(testReg_.get());
     }
@@ -173,7 +161,7 @@ protected:
 
     /* install_ is declared first so it's destroyed last: the registry
      * entries free their fake objects through the fake table. */
-    std::unique_ptr<IbvFakeInstall>                 install_;
+    std::optional<hipObjTest::ScopedFakeIbv>        install_;
     std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_;
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;
     hipObj::DeviceHandle                            dh_;
@@ -365,15 +353,16 @@ protected:
     void SetUp() override
     {
         V2ConflictTest::SetUp();
-        g_transport        = TransportFakes{};
-        auto &funcs        = hipObj::ibv().funcsForTest();
-        funcs.create_cq    = fakeCreateCqOrFail;
-        funcs.modify_qp    = fakeRecordingModifyQp;
-        funcs.query_port   = fakeQueryPort;
-        funcs.query_device = fakeVendorQueryDevice;
-        funcs.close_device = fakeCloseDevice;
-        funcs.post_recv    = fakePostRecv;
-        dh_.gidIndex       = 0;
+        g_transport            = TransportFakes{};
+        hipObj::IbvFuncs funcs = install_->funcs();
+        funcs.create_cq        = fakeCreateCqOrFail;
+        funcs.modify_qp        = fakeRecordingModifyQp;
+        funcs.query_port       = fakeQueryPort;
+        funcs.query_device     = fakeVendorQueryDevice;
+        funcs.close_device     = fakeCloseDevice;
+        funcs.post_recv        = fakePostRecv;
+        install_->replace(funcs);
+        dh_.gidIndex = 0;
     }
 
     /* Gives the device a context, so the vendor attributes are looked up */

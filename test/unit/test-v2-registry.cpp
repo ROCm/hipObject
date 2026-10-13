@@ -13,6 +13,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +21,7 @@
 #include <gtest/gtest.h>
 
 #include "buffer.h"
+#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -160,34 +162,21 @@ fakeDeallocPd(struct ibv_pd *pd)
     return 0;
 }
 
-class IbvFakeInstall {
-public:
-    IbvFakeInstall()
-    {
-        auto &funcs        = hipObj::ibv().funcsForTest();
-        saved_             = funcs;
-        funcs.create_cq    = fakeCreateCq;
-        funcs.destroy_cq   = fakeDestroyCq;
-        funcs.create_qp    = fakeCreateQp;
-        funcs.destroy_qp   = fakeDestroyQp;
-        funcs.modify_qp    = fakeModifyQp;
-        funcs.query_device = fakeQueryDevice;
-        funcs.query_port   = fakeQueryPort;
-        funcs.dealloc_pd   = fakeDeallocPd;
-    }
-    ~IbvFakeInstall()
-    {
-        hipObj::ibv().funcsForTest() = saved_;
-    }
-
-    IbvFakeInstall(const IbvFakeInstall &)            = delete;
-    IbvFakeInstall &operator=(const IbvFakeInstall &) = delete;
-    IbvFakeInstall(IbvFakeInstall &&)                 = delete;
-    IbvFakeInstall &operator=(IbvFakeInstall &&)      = delete;
-
-private:
-    hipObj::IbvFuncs saved_;
-};
+/* The fakes the fixture installs */
+hipObj::IbvFuncs
+fakeVerbs()
+{
+    hipObj::IbvFuncs funcs = {};
+    funcs.create_cq        = fakeCreateCq;
+    funcs.destroy_cq       = fakeDestroyCq;
+    funcs.create_qp        = fakeCreateQp;
+    funcs.destroy_qp       = fakeDestroyQp;
+    funcs.modify_qp        = fakeModifyQp;
+    funcs.query_device     = fakeQueryDevice;
+    funcs.query_port       = fakeQueryPort;
+    funcs.dealloc_pd       = fakeDeallocPd;
+    return funcs;
+}
 
 /* ---- registry fixture ------------------------------------------- */
 
@@ -196,7 +185,7 @@ protected:
     void SetUp() override
     {
         g_fake.reset();
-        install_ = std::make_unique<IbvFakeInstall>();
+        install_.emplace(fakeVerbs());
         testReg_ = std::make_unique<hipObj::v2::ConnectionRegistry>();
         prevReg_ = hipObj::v2::setRegistryForTest(testReg_.get());
     }
@@ -230,7 +219,7 @@ protected:
 
     /* install_ is declared first so it's destroyed last: the registry
      * entries free their fake objects through the fake table. */
-    std::unique_ptr<IbvFakeInstall>                 install_;
+    std::optional<hipObjTest::ScopedFakeIbv>        install_;
     std::unique_ptr<hipObj::v2::ConnectionRegistry> testReg_;
     hipObj::v2::ConnectionRegistry                 *prevReg_ = nullptr;
     hipObj::DeviceHandle                            dh_;

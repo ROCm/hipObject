@@ -15,12 +15,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
 #include "fake-device.h"
+#include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -98,10 +100,11 @@ protected:
         g_thrown = GetParam();
     }
 
-    static void throwFromRegisterMr()
+    void throwFromRegisterMr()
     {
-        auto &funcs        = hipObj::ibv().funcsForTest();
-        funcs.reg_mr_iova2 = &throwingRegisterMrIova2;
+        hipObj::IbvFuncs funcs = fakeIbv_->funcs();
+        funcs.reg_mr_iova2     = &throwingRegisterMrIova2;
+        fakeIbv_->replace(funcs);
     }
 };
 
@@ -115,9 +118,10 @@ TEST_P(ApiExceptionTest, Init)
 
 TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
 {
-    auto      &funcs    = hipObj::ibv().funcsForTest();
-    const auto createQp = funcs.create_qp;
-    funcs.create_qp     = &throwingCreateQp;
+    const hipObj::IbvFuncs fakes = fakeIbv_->funcs();
+    hipObj::IbvFuncs       funcs = fakes;
+    funcs.create_qp              = &throwingCreateQp;
+    fakeIbv_->replace(funcs);
 
     hipObjConfig_t config = makeConfig();
     EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
@@ -133,7 +137,7 @@ TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
     EXPECT_EQ(log.destroyCq, 1);
 
     /* The library still works */
-    funcs.create_qp = createQp;
+    fakeIbv_->replace(fakes);
     ASSERT_NO_FATAL_FAILURE(init());
 }
 

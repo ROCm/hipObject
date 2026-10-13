@@ -26,6 +26,7 @@
 #include "../../../src/rdma/token.h"
 #include "../../../src/rdma/v2-registry.h"
 #include "../../../src/rdma/v2-transport.h"
+#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "malloc_ptr.h"
 #include "v2_backend.h"
@@ -231,8 +232,7 @@ class ConnRefFaultTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        saved_             = hipObj::ibv().funcsForTest();
-        auto &f            = hipObj::ibv().funcsForTest();
+        hipObj::IbvFuncs f = {};
         f.modify_qp        = fakeModifyQp;
         f.destroy_qp       = fakeDestroyQp;
         f.destroy_cq       = fakeDestroyCq;
@@ -249,13 +249,14 @@ protected:
         f.query_gid        = fakeQueryGid;
         f.reg_mr_iova2     = fakeRegMrIova2;
         f.dereg_mr         = fakeDeregMr;
-        g_fault            = FaultCtl{};
-        verifier_          = std::make_unique<PassAllVerifier>();
-        backend_           = std::make_unique<hipObj::v2::MemoryBackend>();
+        fakeIbv_.emplace(f);
+        g_fault   = FaultCtl{};
+        verifier_ = std::make_unique<PassAllVerifier>();
+        backend_  = std::make_unique<hipObj::v2::MemoryBackend>();
     }
     void TearDown() override
     {
-        hipObj::ibv().funcsForTest() = saved_;
+        fakeIbv_.reset();
     }
 
     /* A PUT PREPARE that reaches the transport path */
@@ -280,7 +281,7 @@ protected:
         return req;
     }
 
-    hipObj::IbvFuncs                           saved_;
+    std::optional<hipObjTest::ScopedFakeIbv>   fakeIbv_;
     std::unique_ptr<hipObj::v2::SigV4Verifier> verifier_;
     std::unique_ptr<hipObj::v2::MemoryBackend> backend_;
 };

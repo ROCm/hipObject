@@ -170,7 +170,7 @@ struct RdmaTestServer::Impl {
 
 RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
 {
-    if (!hipObj::ibv().is_initialized) {
+    if (!hipObj::ibv().is_initialized()) {
         return;
     }
     if (hipObj::openRdmaDevice(0, impl_->conn) != 0) {

@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -41,31 +42,18 @@ public:
     }
 };
 
-/* Swaps in no-op destroy verbs for its lifetime. Some tests give a
- * session made-up qp/cq addresses; if a test fails before
- * commitDestroy() drops them, the table's destructor destroys them
- * through these fakes instead of passing them to libibverbs. */
-class FakeDestroyVerbs {
-public:
-    FakeDestroyVerbs() : saved_(hipObj::ibv().funcsForTest())
-    {
-        auto &funcs      = hipObj::ibv().funcsForTest();
-        funcs.destroy_qp = [](struct ibv_qp *) -> int { return 0; };
-        funcs.destroy_cq = [](struct ibv_cq *) -> int { return 0; };
-    }
-    ~FakeDestroyVerbs()
-    {
-        hipObj::ibv().funcsForTest() = saved_;
-    }
-
-    FakeDestroyVerbs(const FakeDestroyVerbs &)            = delete;
-    FakeDestroyVerbs &operator=(const FakeDestroyVerbs &) = delete;
-    FakeDestroyVerbs(FakeDestroyVerbs &&)                 = delete;
-    FakeDestroyVerbs &operator=(FakeDestroyVerbs &&)      = delete;
-
-private:
-    hipObj::IbvFuncs saved_;
-};
+/* No-op destroy verbs. Some tests give a session made-up qp/cq
+ * addresses; if a test fails before commitDestroy() drops them, the
+ * table's destructor destroys them through these fakes instead of
+ * passing them to libibverbs. */
+hipObj::IbvFuncs
+fakeDestroyVerbs()
+{
+    hipObj::IbvFuncs funcs = {};
+    funcs.destroy_qp       = [](struct ibv_qp *) -> int { return 0; };
+    funcs.destroy_cq       = [](struct ibv_cq *) -> int { return 0; };
+    return funcs;
+}
 
 class V2SessionTest : public ::testing::Test {
 protected:
@@ -99,7 +87,7 @@ protected:
 private:
     /* Declared before table_ so the fakes outlive it (members are
      * destroyed in reverse order, after TearDown()). */
-    FakeDestroyVerbs fakeVerbs_;
+    hipObjTest::ScopedFakeIbv fakeVerbs_{fakeDestroyVerbs()};
 
 protected:
     hipObj::v2::SessionTable table_;

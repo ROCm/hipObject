@@ -14,16 +14,17 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
+#include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj.h"
 #include "ibv-core.h"
-#include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "state.h"
 #include "token.h"
@@ -156,13 +157,12 @@ protected:
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
     static void initAndRegister();
 
-    hipObj::DriverState    state_;
-    hipObj::DriverState   *savedState_ = nullptr;
-    EmptyNicEnumerator     enumerator_;
-    hipObj::NicEnumerator *savedEnumerator_ = nullptr;
-    hipObj::IbvFuncs       savedFuncs_      = {};
-    hipObj::HipOps         savedHipOps_;
-    bool                   savedIbvInitialized_ = false;
+    hipObj::DriverState          state_;
+    hipObj::DriverState         *savedState_ = nullptr;
+    EmptyNicEnumerator           enumerator_;
+    hipObj::NicEnumerator       *savedEnumerator_ = nullptr;
+    std::optional<ScopedFakeIbv> fakeIbv_;
+    hipObj::HipOps               savedHipOps_;
 };
 
 } // namespace hipObjTest

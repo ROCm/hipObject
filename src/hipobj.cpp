@@ -492,7 +492,7 @@ try {
     if (state.initialized) {
         return {hipObjAlreadyInitialized, 0};
     }
-    if (!hipObj::ibv().is_initialized) {
+    if (!hipObj::ibv().is_initialized()) {
         return {hipObjRdmaError, 0};
     }
     const bool haveNicHint = config->nicHint && config->nicHint[0] != '\0';

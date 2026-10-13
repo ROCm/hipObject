@@ -15,8 +15,8 @@ namespace hipObj {
 
 /* The functions the wrapper calls: libibverbs', and the two HSA calls
  * that reg_mr() makes to register a GPU buffer through a dma-buf.
- * Public so the unit-test accessor can name the type; production code
- * goes through the wrapper methods and never touches it directly. */
+ * Public so tests can build a wrapper from fakes; production code goes
+ * through the wrapper methods and never touches it directly. */
 struct IbvFuncs {
     struct ibv_device **(*get_device_list)(int *);
     void (*free_device_list)(struct ibv_device **);
@@ -51,17 +51,27 @@ struct IbvFuncs {
 
 class IBVWrapper {
 public:
+    /* Loads libibverbs. is_initialized() says whether it succeeded. */
     IBVWrapper();
+
+    /* Calls funcs, including its HSA entries, as given, and loads
+     * nothing. For tests, which pass fakes; is_initialized() is true. */
+    explicit IBVWrapper(const IbvFuncs &funcs);
+
     ~IBVWrapper() = default;
 
-    /* There is one instance, the one ibv() returns. A moved-from wrapper would
-     * keep its function table without keeping libibverbs loaded. */
+    /* A moved-from wrapper would keep its function table without keeping
+     * libibverbs loaded */
     IBVWrapper(const IBVWrapper &)            = delete;
     IBVWrapper &operator=(const IBVWrapper &) = delete;
     IBVWrapper(IBVWrapper &&)                 = delete;
     IBVWrapper &operator=(IBVWrapper &&)      = delete;
 
-    bool is_initialized = false;
+    /* True when every required function is available */
+    bool is_initialized() const noexcept
+    {
+        return initialized_;
+    }
 
     struct ibv_device **get_device_list(int *num_devices);
     void                free_device_list(struct ibv_device **list);
@@ -93,24 +103,21 @@ private:
 
     DlHandle ibv_handle_;
     IbvFuncs funcs_          = {};
+    bool     initialized_    = false;
     bool     dmabuf_enabled_ = true;
     bool     dmabuf_debug_   = false;
-
-#ifdef HIPOBJ_UNIT_TESTS
-public:
-    /* Test accessor for the internal function table. Compiled out of
-     * the shipped library because the macro is only set for the
-     * unit-test object build (see test/unit/CMakeLists.txt). */
-    IbvFuncs &funcsForTest()
-    {
-        return funcs_;
-    }
-
-private:
-#endif
 };
 
-/* Returns the wrapper, loading libibverbs on the first call */
+/* Returns the wrapper that every libibverbs call goes through: the one
+ * installed with setIbvForTest(), or otherwise the library's own, which
+ * loads libibverbs on the first call */
 IBVWrapper &ibv();
+
+/* Installs a wrapper for ibv() to return, and returns the previously
+ * installed one (nullptr when the library's own was active). Passing
+ * nullptr restores the library's own. Unit tests only; production never
+ * calls it. Not synchronized, so call it only while no other thread can
+ * be calling ibv(). */
+IBVWrapper *setIbvForTest(IBVWrapper *wrapper);
 
 } // namespace hipObj

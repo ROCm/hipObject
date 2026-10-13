@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -102,9 +103,8 @@ class V2PsnDeliveryTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        auto &funcs     = hipObj::ibv().funcsForTest();
-        saved_          = funcs;
-        funcs.modify_qp = [](struct ibv_qp *, struct ibv_qp_attr *attr, int) -> int {
+        hipObj::IbvFuncs funcs = {};
+        funcs.modify_qp        = [](struct ibv_qp *, struct ibv_qp_attr *attr, int) -> int {
             if (attr->qp_state == 3) { /* RTS */
                 g_sqPsn.push_back(attr->sq_psn);
             }
@@ -119,19 +119,20 @@ protected:
             return 0;
         };
         /* The test's RcConnV2 owns a fake QP and destroys it when the
-         * test body ends, before TearDown() restores the table. */
+         * test body ends, before TearDown() removes the fakes. */
         funcs.destroy_qp = [](struct ibv_qp *) -> int { return 0; };
+        fakeIbv_.emplace(funcs);
         g_rqPsn.clear();
         g_sqPsn.clear();
     }
     void TearDown() override
     {
-        hipObj::ibv().funcsForTest() = saved_;
+        fakeIbv_.reset();
     }
 
-    hipObj::IbvFuncs             saved_;
-    static std::vector<uint32_t> g_rqPsn;
-    static std::vector<uint32_t> g_sqPsn;
+    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_;
+    static std::vector<uint32_t>             g_rqPsn;
+    static std::vector<uint32_t>             g_sqPsn;
 };
 
 HIPOBJ_WARN_NO_EXIT_DTOR_OFF

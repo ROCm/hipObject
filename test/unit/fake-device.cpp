@@ -9,6 +9,8 @@
 #include <cstring>
 #include <string>
 
+#include "ibv-wrapper.h"
+
 namespace hipObjTest {
 
 FakeDevice &
@@ -362,8 +364,7 @@ FakeDeviceTest::SetUp()
     ops.hipEventDestroy = nullptr;
     hipObj::hipOps()    = ops;
 
-    auto &funcs            = hipObj::ibv().funcsForTest();
-    savedFuncs_            = funcs;
+    hipObj::IbvFuncs funcs = {};
     funcs.get_device_list  = &fakeGetDeviceList;
     funcs.free_device_list = &fakeFreeDeviceList;
     funcs.open_device      = &fakeOpenDevice;
@@ -382,9 +383,7 @@ FakeDeviceTest::SetUp()
     funcs.modify_qp        = &fakeModifyQp;
     funcs.destroy_qp       = &fakeDestroyQp;
     funcs.poll_cq          = &fakePollCq;
-
-    savedIbvInitialized_         = hipObj::ibv().is_initialized;
-    hipObj::ibv().is_initialized = true;
+    fakeIbv_.emplace(funcs);
 
     fake() = FakeDevice{};
 }
@@ -393,9 +392,8 @@ void
 FakeDeviceTest::TearDown()
 {
     (void)hipObjShutdown();
-    hipObj::ibv().is_initialized = savedIbvInitialized_;
-    hipObj::ibv().funcsForTest() = savedFuncs_;
-    hipObj::hipOps()             = savedHipOps_;
+    fakeIbv_.reset();
+    hipObj::hipOps() = savedHipOps_;
     hipObj::setNicEnumerator(savedEnumerator_);
     hipObj::setStateForTest(savedState_);
 }
