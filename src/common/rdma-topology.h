@@ -7,8 +7,8 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "gid.h"
 
@@ -39,7 +39,7 @@ struct GidCandidate {
  * entries are skipped, the highest GidPriority wins, and ties keep the
  * earliest candidate. Returns that candidate's index, or -1 if none
  * qualifies. */
-int PickBestGid(const GidCandidate *candidates, size_t count);
+int PickBestGid(std::span<const GidCandidate> candidates);
 
 int GetClosestNicToGpu(int gpuIndex, const char *hca_list, const char **dev_name);
 

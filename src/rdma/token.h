@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include "gid.h"
 
@@ -46,15 +47,15 @@ std::string encodeRdmaToken(const RdmaToken &token);
 
 bool decodeRdmaTokenHex(const char *tokenHex, RdmaToken &out);
 
-bool decodeRdmaReply(const char *reply, size_t replyLen, int &status);
+bool decodeRdmaReply(std::string_view reply, int &status);
 
-bool parseRdmaReplyHttpCode(const char *reply, size_t replyLen, int &httpCode);
+bool parseRdmaReplyHttpCode(std::string_view reply, int &httpCode);
 
 bool parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen);
 
 std::string formatRdmaHeaderValue(const char *tokenHex, const void *buf, size_t size);
 
-bool parsePeerTokenFromReply(const char *reply, size_t replyLen, RdmaToken &peerToken, int &httpCode);
+bool parsePeerTokenFromReply(std::string_view reply, RdmaToken &peerToken, int &httpCode);
 
 std::string encodeReplyWithPeerToken(int httpCode, const RdmaToken &peerToken);
 

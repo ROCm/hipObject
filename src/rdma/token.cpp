@@ -73,17 +73,12 @@ namespace {
      * an 88-hex peer token. Trailing NUL, CR, and LF characters are
      * ignored; anything else that doesn't match is rejected. The outputs are
      * only written on success, and hasPeerToken says whether peerToken was. */
-    bool parseReply(const char *reply, size_t replyLen, int &httpCode, RdmaToken &peerToken,
-                    bool &hasPeerToken)
+    bool parseReply(std::string_view reply, int &httpCode, RdmaToken &peerToken, bool &hasPeerToken)
     {
-        if (!reply)
-            return false;
-
-        size_t len = replyLen;
-        while (len > 0 && (reply[len - 1] == '\0' || reply[len - 1] == '\n' || reply[len - 1] == '\r')) {
-            --len;
+        std::string_view value = reply;
+        while (!value.empty() && (value.back() == '\0' || value.back() == '\n' || value.back() == '\r')) {
+            value.remove_suffix(1);
         }
-        const std::string_view value(reply, len);
 
         if (value == "ok") {
             httpCode     = 200;
@@ -169,18 +164,18 @@ decodeRdmaTokenHex(const char *tokenHex, RdmaToken &out)
 }
 
 bool
-parseRdmaReplyHttpCode(const char *reply, size_t replyLen, int &httpCode)
+parseRdmaReplyHttpCode(std::string_view reply, int &httpCode)
 {
     RdmaToken peerToken;
     bool      hasPeerToken = false;
-    return parseReply(reply, replyLen, httpCode, peerToken, hasPeerToken);
+    return parseReply(reply, httpCode, peerToken, hasPeerToken);
 }
 
 bool
-decodeRdmaReply(const char *reply, size_t replyLen, int &status)
+decodeRdmaReply(std::string_view reply, int &status)
 {
     int httpCode = 0;
-    if (!parseRdmaReplyHttpCode(reply, replyLen, httpCode))
+    if (!parseRdmaReplyHttpCode(reply, httpCode))
         return false;
     if (httpCode == 501) {
         status = -2;
@@ -235,12 +230,12 @@ formatRdmaHeaderValue(const char *tokenHex, const void *buf, size_t size)
 }
 
 bool
-parsePeerTokenFromReply(const char *reply, size_t replyLen, RdmaToken &peerToken, int &httpCode)
+parsePeerTokenFromReply(std::string_view reply, RdmaToken &peerToken, int &httpCode)
 {
     int       code = 0;
     RdmaToken token;
     bool      hasPeerToken = false;
-    if (!parseReply(reply, replyLen, code, token, hasPeerToken) || !hasPeerToken)
+    if (!parseReply(reply, code, token, hasPeerToken) || !hasPeerToken)
         return false;
     peerToken = token;
     httpCode  = code;

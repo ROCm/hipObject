@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -100,7 +101,7 @@ namespace {
             c.roceVersion = GetRoceVersionNumber(ctx->device->name, port_num, i);
             candidates.push_back(c);
         }
-        return PickBestGid(candidates.data(), candidates.size());
+        return PickBestGid(candidates);
     }
 
     std::string ExtractBusNumber(const std::string &pcie_bus_id)
@@ -257,12 +258,11 @@ GetClosestNicToGpu(int gpuIndex, const char *hca_list, const char **dev_name)
 }
 
 int
-PickBestGid(const GidCandidate *candidates, size_t count)
+PickBestGid(std::span<const GidCandidate> candidates)
 {
     int         best_idx  = -1;
     GidPriority best_prio = GidPriority::Unknown;
-    for (size_t i = 0; i < count; ++i) {
-        const GidCandidate &c = candidates[i];
+    for (const GidCandidate &c : candidates) {
         if (!IsConfiguredGid(c.gid))
             continue;
         GidPriority prio = ClassifyGid(c.gid, c.roceVersion);

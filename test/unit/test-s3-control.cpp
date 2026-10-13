@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstring>
 #include <initializer_list>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -25,12 +26,14 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
-/* What the fake callbacks saw, and what they return */
+/* What the fake callbacks saw, and what they return. A nonzero
+ * extraLen makes recvReply report that many more bytes than it wrote. */
 struct Callbacks {
     size_t           tokenLen = 0;
     int              sendRet  = 0;
     int              recvRet  = 0;
     std::string_view reply    = "200";
+    size_t           extraLen = 0;
     void            *ctx      = nullptr;
 };
 
@@ -52,7 +55,7 @@ fakeRecvReply(void *ctx, char *reply, size_t *replyLen)
         return g_callbacks.recvRet;
     }
     std::memcpy(reply, g_callbacks.reply.data(), g_callbacks.reply.size());
-    *replyLen = g_callbacks.reply.size();
+    *replyLen = g_callbacks.reply.size() + g_callbacks.extraLen;
     return 0;
 }
 
@@ -67,8 +70,8 @@ protected:
 
     int receive(int &status)
     {
-        size_t len = buf_.size();
-        return hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_.data(), &len, status);
+        std::string_view reply;
+        return hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_, reply, status);
     }
 
     hipObjOps_t           ops_ = {};
@@ -98,9 +101,12 @@ TEST_F(S3ControlTest, SendNeedsCallback)
 
 TEST_F(S3ControlTest, ReceiveDecodesStatus)
 {
-    int status = 99;
-    ASSERT_EQ(receive(status), 0);
+    int              status = 99;
+    std::string_view reply;
+    ASSERT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_, reply, status), 0);
     EXPECT_EQ(status, 0);
+    EXPECT_EQ(reply, "200");
+    EXPECT_EQ(reply.data(), buf_.data());
     EXPECT_EQ(g_callbacks.ctx, &ctx_);
 
     g_callbacks.reply = "404";
@@ -122,6 +128,27 @@ TEST_F(S3ControlTest, ReceiveRejectsMalformedReply)
     }
 }
 
+/* A length the buffer can't hold must not be read */
+TEST_F(S3ControlTest, ReceiveRejectsLengthPastBuffer)
+{
+    /* The callback writes "200" into a three-byte buffer and reports four
+     * bytes. The fourth is the NUL after the buffer, which the parser
+     * would skip and accept the reply if it read it. */
+    const std::span<char> replyBuf(buf_.data(), 3);
+    g_callbacks.extraLen    = 1;
+    int              status = 99;
+    std::string_view reply  = "untouched";
+    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf, reply, status), -1);
+    EXPECT_EQ(status, 99);
+    EXPECT_EQ(reply, "untouched");
+
+    /* Filling the buffer exactly is fine */
+    g_callbacks.extraLen = 0;
+    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf, reply, status), 0);
+    EXPECT_EQ(status, 0);
+    EXPECT_EQ(reply, "200");
+}
+
 TEST_F(S3ControlTest, ReceiveReportsCallbackFailure)
 {
     g_callbacks.recvRet = 3;
@@ -131,13 +158,12 @@ TEST_F(S3ControlTest, ReceiveReportsCallbackFailure)
 
 TEST_F(S3ControlTest, ReceiveNeedsCallbackAndBuffer)
 {
-    int    status = 0;
-    size_t len    = buf_.size();
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(nullptr, &ctx_, buf_.data(), &len, status), -1);
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, nullptr, &len, status), -1);
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_.data(), nullptr, status), -1);
+    int              status = 0;
+    std::string_view reply;
+    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(nullptr, &ctx_, buf_, reply, status), -1);
+    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, {}, reply, status), -1);
     ops_.recvReply = nullptr;
-    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_.data(), &len, status), -1);
+    EXPECT_EQ(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_, reply, status), -1);
 }
 
 } // namespace

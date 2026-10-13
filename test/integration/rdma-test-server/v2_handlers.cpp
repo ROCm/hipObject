@@ -251,7 +251,7 @@ namespace v2 {
                 /* Consume this session's device reference exactly once:
                  * only a session whose QP was actually created (and now
                  * destroyed) holds one; a CQ-only retry does not. */
-                hipObj::v2::releaseDevice(s_dev);
+                hipObj::v2::releaseDevice(*s_dev);
                 table_.withSession(id, [&](V2Session &s) { s.connRefHeld = false; });
             }
         }
@@ -448,11 +448,11 @@ namespace v2 {
         if (dh != nullptr && dh->pd != nullptr) {
             hipObj::RcConnV2 conn;
             bool             rollbackFailed = false;
-            bool             created        = hipObj::v2::createRcConnV2(dh, conn, &rollbackFailed) == 0;
+            bool             created        = hipObj::v2::createRcConnV2(*dh, conn, &rollbackFailed) == 0;
             if (created &&
                 /* The pair starts in RESET; move it to INIT so the READY
                  * RTR/RTS transitions are valid. */
-                hipObj::v2::transitionQpToInitV2(dh, conn) != 0) {
+                hipObj::v2::transitionQpToInitV2(*dh, conn) != 0) {
                 /* INIT failed: destroy the pair here or its handles leak
                  * on every PREPARE. A handle that fails to destroy stays
                  * on the session so the reaper keeps retrying it. */
@@ -462,7 +462,7 @@ namespace v2 {
                     /* The QP existed and destroyed cleanly: consume this
                      * session's device reference right here - the reaper
                      * will find no handle and must not release again. */
-                    hipObj::v2::releaseDevice(dh);
+                    hipObj::v2::releaseDevice(*dh);
                 }
                 if (!qOk || !cOk) {
                     /* The surviving handles move to the session in the
@@ -699,12 +699,12 @@ namespace v2 {
                 /* A device-less session pairs with an empty handle */
                 hipObj::DeviceHandle noDevice;
                 noDevice.gidIndex        = 0;
-                hipObj::DeviceHandle *dh = s.device != nullptr ? s.device : &noDevice;
+                hipObj::DeviceHandle &dh = s.device != nullptr ? *s.device : noDevice;
                 /* Same-HCA pairing: the server's own GID routes the
                  * loopback path on RoCE devices. */
                 /* Route to the real peer when the token carried its GID;
                  * same-HCA loopback (zero token) keeps the local GID. */
-                union ibv_gid peer = s.hasPeerGid ? s.peerGid : dh->localGid;
+                union ibv_gid peer = s.hasPeerGid ? s.peerGid : dh.localGid;
                 paired = hipObj::v2::transitionQpToRtrV2(dh, s.conn, req.qpn, peer, s.clientPsn) == 0 &&
                          hipObj::v2::transitionQpToRtsV2(s.conn, dh, s.serverPsn) == 0;
             }

@@ -47,9 +47,9 @@ namespace v2 {
         /* Vendor QP attributes depend only on the device, not on the
          * connection struct, so both v1 and v2 transitions share the same
          * helpers below (mirrors transport.cpp's applyVendorQpAttrs). */
-        void applyVendorQpAttrs(struct ibv_context *ctx, struct ibv_qp_attr *attr)
+        void applyVendorQpAttrs(struct ibv_context *ctx, struct ibv_qp_attr &attr)
         {
-            if (!ctx || !attr) {
+            if (!ctx) {
                 return;
             }
             struct ibv_device_attr devAttr;
@@ -69,15 +69,15 @@ namespace v2 {
 #endif
         }
 
-        int modifyQpToInit(DeviceHandle *dh, struct ibv_qp *qp)
+        int modifyQpToInit(DeviceHandle &dh, struct ibv_qp *qp)
         {
             struct ibv_qp_attr attr;
             std::memset(&attr, 0, sizeof(attr));
             attr.qp_state        = IBV_QPS_INIT;
             attr.pkey_index      = 0;
-            attr.port_num        = dh->portNum;
+            attr.port_num        = dh.portNum;
             attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-            applyVendorQpAttrs(dh->ctx.get(), &attr);
+            applyVendorQpAttrs(dh.ctx.get(), attr);
             int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
             return ibv.modify_qp(qp, &attr, mask);
         }
@@ -109,7 +109,7 @@ namespace v2 {
                     attr.path_mtu = IBV_MTU_1024;
                 }
             }
-            applyVendorQpAttrs(ctx, &attr);
+            applyVendorQpAttrs(ctx, attr);
             attr.dest_qp_num        = destQpNum;
             attr.rq_psn             = rqPsn;
             attr.max_dest_rd_atomic = 1;
@@ -138,7 +138,7 @@ namespace v2 {
             struct ibv_qp_attr attr;
             std::memset(&attr, 0, sizeof(attr));
             attr.qp_state = IBV_QPS_RTS;
-            applyVendorQpAttrs(ctx, &attr);
+            applyVendorQpAttrs(ctx, attr);
             attr.timeout       = 14;
             attr.retry_cnt     = 7;
             attr.rnr_retry     = 7;
@@ -151,12 +151,12 @@ namespace v2 {
 
     } // namespace
 
-    int createRcConnV2(DeviceHandle *dh, RcConnV2 &conn, bool *rollbackFailed)
+    int createRcConnV2(DeviceHandle &dh, RcConnV2 &conn, bool *rollbackFailed)
     {
         if (rollbackFailed) {
             *rollbackFailed = false;
         }
-        conn.cq.reset(ibv.create_cq(dh->ctx.get(), kCqSize, nullptr, nullptr, 0));
+        conn.cq.reset(ibv.create_cq(dh.ctx.get(), kCqSize, nullptr, nullptr, 0));
         if (!conn.cq) {
             return -1;
         }
@@ -169,7 +169,7 @@ namespace v2 {
         init.cap.max_recv_wr  = kMaxRecvWr;
         init.cap.max_send_sge = 1;
         init.cap.max_recv_sge = 1;
-        conn.qp.reset(ibv.create_qp(dh->pd.get(), &init));
+        conn.qp.reset(ibv.create_qp(dh.pd.get(), &init));
         if (!conn.qp) {
             /* ibvDestroy() keeps conn.cq when the destroy fails: clearing
              * it would lose the handle the caller needs for the reaper
@@ -182,7 +182,7 @@ namespace v2 {
         conn.qpNum = conn.qp->qp_num;
         /* Threaded callers share the device handle; the counter must
          * be atomic to avoid a data race on concurrent PREPAREs. */
-        dh->connRefs.fetch_add(1, std::memory_order_relaxed);
+        dh.connRefs.fetch_add(1, std::memory_order_relaxed);
         return 0;
     }
 
@@ -204,7 +204,7 @@ namespace v2 {
         }
     }
 
-    int createRcQpOnly(DeviceHandle *dh, struct ibv_cq *cq, RcConnV2 &conn)
+    int createRcQpOnly(DeviceHandle &dh, struct ibv_cq *cq, RcConnV2 &conn)
     {
         if (!cq) {
             return -1;
@@ -218,7 +218,7 @@ namespace v2 {
         init.cap.max_recv_wr  = kMaxRecvWr;
         init.cap.max_send_sge = 1;
         init.cap.max_recv_sge = 1;
-        conn.qp.reset(ibv.create_qp(dh->pd.get(), &init));
+        conn.qp.reset(ibv.create_qp(dh.pd.get(), &init));
         if (!conn.qp) {
             return -1;
         }
@@ -226,38 +226,33 @@ namespace v2 {
         return 0;
     }
 
-    int transitionQpToInitV2(DeviceHandle *dh, RcConnV2 &conn)
+    int transitionQpToInitV2(DeviceHandle &dh, RcConnV2 &conn)
     {
         return modifyQpToInit(dh, conn.qp.get());
     }
 
-    int transitionQpToRtrV2(DeviceHandle *dh, RcConnV2 &conn, uint32_t destQpNum, union ibv_gid destGid,
+    int transitionQpToRtrV2(DeviceHandle &dh, RcConnV2 &conn, uint32_t destQpNum, union ibv_gid destGid,
                             uint32_t rqPsn)
     {
-        return modifyQpToRtr(dh->ctx.get(), conn.qp.get(), destQpNum, destGid, dh->gidIndex, rqPsn,
-                             dh->portNum);
+        return modifyQpToRtr(dh.ctx.get(), conn.qp.get(), destQpNum, destGid, dh.gidIndex, rqPsn, dh.portNum);
     }
 
-    int transitionQpToRtsV2(RcConnV2 &conn, DeviceHandle *dh, uint32_t sqPsn)
+    int transitionQpToRtsV2(RcConnV2 &conn, DeviceHandle &dh, uint32_t sqPsn)
     {
-        return modifyQpToRts(dh->ctx.get(), conn.qp.get(), sqPsn);
+        return modifyQpToRts(dh.ctx.get(), conn.qp.get(), sqPsn);
     }
 
-    void releaseDevice(DeviceHandle *dh)
+    void releaseDevice(DeviceHandle &dh)
     {
-        if (!dh) {
-            return;
-        }
-        uint32_t cur = dh->connRefs.load(std::memory_order_relaxed);
-        while (cur > 0 && !dh->connRefs.compare_exchange_weak(cur, cur - 1, std::memory_order_relaxed)) {
+        uint32_t cur = dh.connRefs.load(std::memory_order_relaxed);
+        while (cur > 0 && !dh.connRefs.compare_exchange_weak(cur, cur - 1, std::memory_order_relaxed)) {
         }
         /* PD/context close happens only when the buffer map is empty too;
          * the caller (hipObjShutdown stage) checks both. */
     }
 
-    int postRecvImm(DeviceHandle *dh, RcConnV2 &conn)
+    int postRecvImm(RcConnV2 &conn)
     {
-        (void)dh;
         struct ibv_recv_wr  wr;
         struct ibv_recv_wr *bad = nullptr;
         struct ibv_sge      sge; /* zero-SGE: no scatter entry */
@@ -358,8 +353,9 @@ namespace v2 {
             cap.qpn    = entry.conn.qpNum;
             cap.psn    = entry.clientPsn;
         });
-        if (!found || !cap.qp || !cap.cq || cap.rid == 0) {
-            /* Nothing to discard or the entry is mid-teardown. */
+        if (!found || !cap.qp || !cap.cq || !cap.device || cap.rid == 0) {
+            /* Nothing to discard, no device to recreate the qp on, or the
+             * entry is mid-teardown. */
             reg.retired().unreserve(slotB);
             return kReleaseLeftover;
         }
@@ -387,7 +383,7 @@ namespace v2 {
         });
 
         RcConnV2 fresh;
-        if (createRcQpOnly(cap.device, cap.cq, fresh) != 0) {
+        if (createRcQpOnly(*cap.device, cap.cq, fresh) != 0) {
             /* No qp: release through the normal teardown path (the cq is
              * destroyed there) and report the failure. */
             int rc = releaseConnection(id);

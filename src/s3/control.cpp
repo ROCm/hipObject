@@ -5,6 +5,10 @@
 
 #include "control.h"
 
+#include <cstddef>
+#include <span>
+#include <string_view>
+
 #include "token.h"
 
 namespace hipObj {
@@ -19,16 +23,26 @@ injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token)
 }
 
 int
-receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, char *replyBuf, size_t *replyLen, int &rdmaStatus)
+receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf, std::string_view &reply,
+                    int &rdmaStatus)
 {
-    if (!ops || !ops->recvReply || !replyBuf || !replyLen) {
+    if (!ops || !ops->recvReply || replyBuf.empty()) {
         return -1;
     }
-    int ret = ops->recvReply(ctx, replyBuf, replyLen);
+    size_t replyLen = replyBuf.size();
+    int    ret      = ops->recvReply(ctx, replyBuf.data(), &replyLen);
     if (ret != 0) {
         return ret;
     }
-    return decodeRdmaReply(replyBuf, *replyLen, rdmaStatus) ? 0 : -1;
+    if (replyLen > replyBuf.size()) {
+        return -1;
+    }
+    const std::string_view received(replyBuf.data(), replyLen);
+    if (!decodeRdmaReply(received, rdmaStatus)) {
+        return -1;
+    }
+    reply = received;
+    return 0;
 }
 
 } // namespace hipObj

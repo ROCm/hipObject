@@ -16,6 +16,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -139,11 +140,11 @@ buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset, RdmaTo
 }
 
 static int
-finishTransferAfterReply(const char *reply, size_t replyLen, bool requiresDeviceSync)
+finishTransferAfterReply(std::string_view reply, bool requiresDeviceSync)
 {
     RdmaToken peerToken{};
     int       httpCode = 0;
-    if (parsePeerTokenFromReply(reply, replyLen, peerToken, httpCode)) {
+    if (parsePeerTokenFromReply(reply, peerToken, httpCode)) {
         if (connectRcPeer(*g_conn, peerToken) != 0) {
             return -1;
         }
@@ -288,13 +289,13 @@ runRdmaTransfer(const BufferMap::BufEntry &buf, size_t size, off_t offset, hipOb
     if (injectRdmaToken(ops, ctx, std::string_view(encoded.data(), kRdmaTokenHexLen)) != 0) {
         return {hipObjS3Error, 0};
     }
-    char   replyBuf[512];
-    size_t replyLen   = sizeof(replyBuf);
-    int    rdmaStatus = 0;
-    if (receiveRdmaReplyRaw(ops, ctx, replyBuf, &replyLen, rdmaStatus) != 0 || rdmaStatus != 0) {
+    std::array<char, 512> replyBuf;
+    std::string_view      reply;
+    int                   rdmaStatus = 0;
+    if (receiveRdmaReplyRaw(ops, ctx, replyBuf, reply, rdmaStatus) != 0 || rdmaStatus != 0) {
         return {hipObjS3Error, 0};
     }
-    if (finishTransferAfterReply(replyBuf, replyLen, buf.isDmabuf) != 0) {
+    if (finishTransferAfterReply(reply, buf.isDmabuf) != 0) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -840,7 +841,7 @@ try {
         return {hipObjInvalidValue, 0};
     }
     int code = 0;
-    if (!hipObj::parseRdmaReplyHttpCode(reply, replyLen, code)) {
+    if (!hipObj::parseRdmaReplyHttpCode(std::string_view(reply, replyLen), code)) {
         return {hipObjInvalidValue, 0};
     }
     *httpCode = code;

@@ -38,11 +38,11 @@ struct DeviceHandle {
 namespace v2 {
 
     /* Creates the qp/cq pair on dh. On success conn holds both objects,
-     * conn.qpNum is captured, and dh->connRefs was incremented. On
+     * conn.qpNum is captured, and dh.connRefs was incremented. On
      * failure every partially created object was rolled back (rollback
      * failures are reported via *rollbackFailed so the caller can raise
      * a poisoned tombstone). */
-    int createRcConnV2(DeviceHandle *dh, RcConnV2 &conn, bool *rollbackFailed = nullptr);
+    int createRcConnV2(DeviceHandle &dh, RcConnV2 &conn, bool *rollbackFailed = nullptr);
 
     /* Destroys conn's qp and cq. Reflects per-object success through
      * the out flags; the caller feeds them to commitDestroy(). */
@@ -50,14 +50,14 @@ namespace v2 {
 
     /* QP state transitions taking the device topology from dh. The v1
      * signatures (RcConnection&) remain unchanged. */
-    int transitionQpToInitV2(DeviceHandle *dh, RcConnV2 &conn);
-    int transitionQpToRtrV2(DeviceHandle *dh, RcConnV2 &conn, uint32_t destQpNum, union ibv_gid destGid,
+    int transitionQpToInitV2(DeviceHandle &dh, RcConnV2 &conn);
+    int transitionQpToRtrV2(DeviceHandle &dh, RcConnV2 &conn, uint32_t destQpNum, union ibv_gid destGid,
                             uint32_t rqPsn);
-    int transitionQpToRtsV2(RcConnV2 &conn, DeviceHandle *dh, uint32_t sqPsn);
+    int transitionQpToRtsV2(RcConnV2 &conn, DeviceHandle &dh, uint32_t sqPsn);
 
     /* Creates only a qp on an existing cq (conflict-discard retry uses
      * this so the original cq survives). */
-    int createRcQpOnly(DeviceHandle *dh, struct ibv_cq *cq, RcConnV2 &conn);
+    int createRcQpOnly(DeviceHandle &dh, struct ibv_cq *cq, RcConnV2 &conn);
 
     /* Retires a live qp whose (qpn, psn) was already used by a peer:
      * reserves a fresh ring slot, destroys the old qp, records the
@@ -66,9 +66,9 @@ namespace v2 {
      * error); the busy return means the retired ring is exhausted. */
     int discardAndRecreateQp(ConnId id);
 
-    /* Decrements dh->connRefs after a successful releaseRcConnV2 and
+    /* Decrements dh.connRefs after a successful releaseRcConnV2 and
      * closes ctx/pd when no MR and no connection remain. */
-    void releaseDevice(DeviceHandle *dh);
+    void releaseDevice(DeviceHandle &dh);
 
     /* Full v2 release procedure for one registry entry: claim, reserve
      * a retired slot for a live qp, destroy, commit, record, erase.
@@ -78,7 +78,7 @@ namespace v2 {
 
     /* Posts the zero-SGE receive work request (wr_id = kRecvImm). */
     constexpr uint64_t kRecvImm = 0x5245435632494d4dULL; /* "RECV2IMM" */
-    int                postRecvImm(DeviceHandle *dh, RcConnV2 &conn);
+    int                postRecvImm(RcConnV2 &conn);
 
     /* Completion validation for the data phase. A GET consumes one
      * RECV_RDMA_WITH_IMM completion; a PUT consumes one RECV completion
