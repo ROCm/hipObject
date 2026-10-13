@@ -154,12 +154,19 @@
 - hipObject no longer loads other libraries or prints anything when the
   program starts. It used to load libibverbs and libnuma, and to print a
   message to stderr if libibverbs was missing, even in a program that
-  never called `hipObjInit()`. hipObject now loads libibverbs, prints
-  that message, and reads the `HIPOBJ_DMABUF` and `HIPOBJ_RDMA_DEBUG`
-  environment variables when `hipObjInit()` first runs, so a program can
-  set them before calling it. It doesn't load libnuma, which it never
+  never called `hipObjInit()`. hipObject now loads libibverbs and prints
+  that message when `hipObjInit()` first runs. It reads the
+  `HIPOBJ_DMABUF` and `HIPOBJ_RDMA_DEBUG` environment variables when
+  `hipObjBufRegister()` first registers a buffer, so a program can set
+  them any time before that. It doesn't load libnuma, which it never
   used. libibverbs stays loaded until the program exits. Building the
   tests no longer needs libnuma's development package (`libnuma-dev`).
+- For a buffer that's staged through host memory, `hipObjGet()`,
+  `hipObjPut()`, and `hipObjBufSync()` now fail with
+  `hipObjInternalError` if the HIP runtime can't create the event that
+  limits how long the staging copy can take (`HIPOBJ_STAGE_TIMEOUT_MS`).
+  They used to copy with `hipMemcpy()` instead, with no time limit, so a
+  copy that never finished could hang the call.
 
 ### Removed
 
