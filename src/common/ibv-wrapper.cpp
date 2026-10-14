@@ -117,14 +117,13 @@ namespace {
     bool load_functions(LoadedVerbs::Funcs &funcs, void *handle)
     {
         dlsym_load_optional(funcs.reg_dmabuf_mr, handle, "ibv_reg_dmabuf_mr");
-        // poll_cq / post_send / post_recv are static inline helpers in verbs.h
+        // poll_cq / post_send are static inline helpers in verbs.h
         // that delegate to the per-context ops table; depending on the
         // rdma-core build they may not exist as dynamic symbols. Load them
         // optionally and fall back to the context ops entries, which is what
         // the inline functions themselves call.
         dlsym_load_optional(funcs.poll_cq, handle, "ibv_poll_cq");
         dlsym_load_optional(funcs.post_send, handle, "ibv_post_send");
-        dlsym_load_optional(funcs.post_recv, handle, "ibv_post_recv");
 
         // && stops at the first symbol that's missing
         return dlsym_load(funcs.get_device_list, handle, "ibv_get_device_list") &&
@@ -311,15 +310,6 @@ LoadedVerbs::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_sen
         return funcs_.post_send(qp, wr, bad_wr);
     }
     return qp->context->ops.post_send(qp, wr, bad_wr);
-}
-
-int
-LoadedVerbs::post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr) const
-{
-    if (funcs_.post_recv) {
-        return funcs_.post_recv(qp, wr, bad_wr);
-    }
-    return qp->context->ops.post_recv(qp, wr, bad_wr);
 }
 
 // ---- Smart pointer deleters (ibv-ptr.h) -----------------------------

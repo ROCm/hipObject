@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: MIT
 #
 # Run the pre-built minio-getput-rdma inside an ernic guest VM against
-# hipobj-rdma-test-server (v1 mode) running in a second guest. All binaries
+# hipobj-rdma-test-server running in a second guest. All binaries
 # are built on the runner (ROCm container) and copied into the guest at
 # ${BUILD_DIR}.
 #
 # GPU_MODE defaults to nogpu because the plain two-VM lane emulates a NIC and
 # nothing else: hipMalloc returns hipErrorNoDevice before any of the RDMA path
-# is reached, and nogpu drives the same v1 transfer from a page-aligned host
+# is reached, and nogpu drives the same transfer from a page-aligned host
 # buffer. The two-VM GPU lane attaches rocjitsu's emulated GPU to this guest
 # as a second vfio-user function and passes GPU_MODE=gpu, which makes the
 # payload a real hipMalloc'd device buffer.
@@ -48,7 +48,7 @@ SERVER_HOST="${SERVER_ENDPOINT#http://}"
 SERVER_HOST="${SERVER_HOST%%:*}"
 SERVER_PORT="${SERVER_ENDPOINT##*:}"
 
-echo "--- v1 PUT + GET over the emulated wire ---"
+echo "--- PUT + GET over the emulated wire ---"
 echo "    server: ${SERVER_ENDPOINT}"
 echo "    size:   ${TEST_SIZE} bytes"
 echo "    buffer: ${GPU_MODE}"
@@ -70,4 +70,4 @@ stdbuf -oL -eL "${BUILD_DIR}/integrations/minio-cpp/minio-getput-rdma" \
 "$(dirname "$0")/assert-transfer.sh" "${LOG}" "${EXPECT_TRANSPORT:-rdma}" || exit 1
 rm -f "${LOG}"
 
-echo "--- ernic two-VM v1 integration (${GPU_MODE}): PASS (exit ${rc}) ---"
+echo "--- ernic two-VM integration (${GPU_MODE}): PASS (exit ${rc}) ---"

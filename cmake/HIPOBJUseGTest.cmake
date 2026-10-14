@@ -41,15 +41,13 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
   hipobj_add_test_executable(
     NAME ${TEST_NAME}
     SRCS ${TEST_SOURCE})
-  # Link the unit-test object build (HIPOBJ_UNIT_TESTS), not the
-  # shipped library, so tests can swap seam tables. The macro must
-  # also be set on the test TU so headers declare the accessors.
+  # Link the unit-test object build, not the shipped library, so tests
+  # can call internal functions, such as the ones that swap seams.
   target_link_libraries(${TEST_NAME} PRIVATE
     hipobj_test_objects
     GTest::gtest
     GTest::gtest_main
   )
-  target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_UNIT_TESTS)
   # So tests know which vendor backends hipobj_test_objects has
   if(HIPOBJ_BNXT)
     target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_BNXT)

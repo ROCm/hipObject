@@ -286,13 +286,6 @@ FakeVerbs::post_send(struct ibv_qp *, struct ibv_send_wr *, struct ibv_send_wr *
     return 0;
 }
 
-int
-FakeVerbs::post_recv(struct ibv_qp *, struct ibv_recv_wr *, struct ibv_recv_wr **) const
-{
-    ++device_->log.postRecv;
-    return 0;
-}
-
 // ---- HIP -------------------------------------------------------------
 
 hipError_t

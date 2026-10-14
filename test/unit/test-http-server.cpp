@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* The RDMA test server's HttpServer, and the test clients'
- * parseStatusCode(), both in test/integration/rdma-test-server */
+/* The RDMA test server's HttpServer, in test/integration/rdma-test-server */
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -27,7 +27,6 @@
 
 #include "hipobj-warnings.h"
 #include "http_server.h"
-#include "http_status.h"
 #include "unique-fd.h"
 
 /* Google Test registers each test with a global constructor */
@@ -38,7 +37,6 @@ namespace {
 using hipobj::test::HttpRequest;
 using hipobj::test::HttpResponse;
 using hipobj::test::HttpServer;
-using hipobj::test::parseStatusCode;
 
 /* How long a client waits for the server to answer and close */
 constexpr auto kDeadline = std::chrono::seconds(10);
@@ -51,6 +49,13 @@ remainingMs(const std::chrono::steady_clock::time_point &deadline)
     auto left = deadline - std::chrono::steady_clock::now();
     auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(left).count();
     return static_cast<int>(std::clamp<decltype(ms)>(ms, 0, std::numeric_limits<int>::max()));
+}
+
+/* The status line that starts response, without its CRLF */
+std::string_view
+statusLine(std::string_view response)
+{
+    return response.substr(0, response.find("\r\n"));
 }
 
 /* An HttpServer on an ephemeral port, with a handler that records each
@@ -140,7 +145,7 @@ TEST_F(HttpServerTest, PassesValidContentLengthToHandler)
 {
     const auto reply = exchange("PUT /bucket/key HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello");
     ASSERT_TRUE(reply);
-    EXPECT_EQ(parseStatusCode(*reply), 200);
+    EXPECT_EQ(statusLine(*reply), "HTTP/1.1 200 OK");
     const auto reqs = requests();
     ASSERT_EQ(reqs.size(), 1U);
     EXPECT_EQ(reqs[0].contentLength, 5U);
@@ -151,7 +156,7 @@ TEST_F(HttpServerTest, MissingContentLengthIsZero)
 {
     const auto reply = exchange("GET /bucket/key HTTP/1.1\r\n\r\n");
     ASSERT_TRUE(reply);
-    EXPECT_EQ(parseStatusCode(*reply), 200);
+    EXPECT_EQ(statusLine(*reply), "HTTP/1.1 200 OK");
     const auto reqs = requests();
     ASSERT_EQ(reqs.size(), 1U);
     EXPECT_EQ(reqs[0].contentLength, 0U);
@@ -171,42 +176,6 @@ TEST_F(HttpServerTest, ClosesWithoutDispatchOnBadContentLength)
         EXPECT_TRUE(reply->empty()) << "\"" << value << "\"";
     }
     EXPECT_TRUE(requests().empty());
-}
-
-TEST(ParseStatusCode, AcceptsValidStatusLines)
-{
-    EXPECT_EQ(parseStatusCode("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"), 200);
-    EXPECT_EQ(parseStatusCode("HTTP/1.1 404 Not Found"), 404);
-    EXPECT_EQ(parseStatusCode("HTTP/1.0 100 Continue\r\n"), 100);
-    /* The reason phrase can be empty, but the space before it can't */
-    EXPECT_EQ(parseStatusCode("HTTP/1.1 599 \r\n"), 599);
-}
-
-TEST(ParseStatusCode, RejectsMalformedStatusLines)
-{
-    for (const char *line : {"",
-                             "HTTP/1.1",
-                             "HTTP/1.1 200",
-                             "HTTP/1.1 200\r\n",
-                             "HTTP/1.1 2000 OK",
-                             "HTTP/1.1 20 OK",
-                             "HTTP/1.1 -12 OK",
-                             "HTTP/1.1 +12 OK",
-                             "HTTP/1.1 2a0 OK",
-                             "HTTP/1.1  200 OK",
-                             "HTTP/1.1 099 OK",
-                             "HTTP/1.1 600 OK",
-                             "XTTP/1.1 200 OK",
-                             "HTTP/1.1\r\nX-Y: 1 200 OK",
-                             "HTTP/x 200 OK",
-                             "HTTP/1x1 200 OK",
-                             "HTTP/123 200 OK",
-                             "HTTP/1. 200 OK",
-                             "HTTP/.1 200 OK",
-                             "HTTP/1.1.1 200 OK",
-                             "HTTP/2 200 OK"}) {
-        EXPECT_FALSE(parseStatusCode(line)) << "\"" << line << "\"";
-    }
 }
 
 } // namespace

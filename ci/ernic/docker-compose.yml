@@ -12,12 +12,12 @@
 # The RDMA topologies live in the hipobject-hardware-test-*.yml CI lanes,
 # which boot guests; run-local.sh mirrors them.
 #
-# Default profile (v1 protocol, run here as two containers):
+# Default profile (run here as two containers):
 #   ernic-server: rocm-ernic loopback + hipobj-rdma-test-server on port 9000.
 #   ernic-client: minio-getput-rdma in nogpu mode, HTTP fallback.
 #
-# minio-v1 profile (v1 protocol, minio-cpp bridge):
-#   ernic-server-v1: rocm-ernic loopback + hipobj-rdma-test-server (v1 mode).
+# minio-v1 profile (minio-cpp bridge):
+#   ernic-server-v1: rocm-ernic loopback + hipobj-rdma-test-server.
 #   rocjitsu:        rocjitsu GPU emulator serving a vfio-user socket on the
 #                    shared vfio-sockets volume.  Provides /dev/kfd + /dev/dri
 #                    to the client container via the emulated GFX device.
@@ -25,11 +25,11 @@
 #                    mode depending on whether the rocjitsu socket is present.
 #
 # Usage:
-#   docker compose up                          # v1 test
-#   docker compose --profile minio-v1 up      # v1 minio-cpp test with rocjitsu
+#   docker compose up                          # two-container test
+#   docker compose --profile minio-v1 up      # minio-cpp test with rocjitsu
 
 services:
-  # ── v1 protocol (default) ──────────────────────────────────────────────────
+  # ── default profile ────────────────────────────────────────────────────────
 
   ernic-server:
     image: ${ERNIC_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244}
@@ -71,7 +71,7 @@ services:
     networks:
       - ernic-net
 
-  # ── v1 minio-cpp profile ───────────────────────────────────────────────────
+  # ── minio-cpp profile ──────────────────────────────────────────────────────
 
   ernic-server-v1:
     profiles: [minio-v1]

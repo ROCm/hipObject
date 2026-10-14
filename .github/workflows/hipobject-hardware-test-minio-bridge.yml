@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# MinIO bridge integration test (v1 protocol, minio-cpp, two VMs).
+# MinIO bridge integration test (minio-cpp, two VMs).
 #
 # This lane used to be three containers, and it could not do what its name
 # claimed. rocm-ernic serves an emulated PCI function over vfio-user; turning
@@ -15,7 +15,7 @@
 # So it is two VMs now, the same topology as the Two-VM Protocol lane: two
 # rocm-ernic instances joined by a tcp:manager / tcp:worker mesh, each bridged
 # onto ernicbr0 through its own tap and serving one emulated ionic function.
-# VM 1 (192.168.200.10) runs hipobj-rdma-test-server in v1 mode on port 9000;
+# VM 1 (192.168.200.10) runs hipobj-rdma-test-server on port 9000;
 # VM 2 drives the minio-cpp bridge against it and asserts, from the bridge's
 # own counters, that every byte moved over RDMA.
 #
@@ -111,7 +111,7 @@ jobs:
     # so HIPOBJ_NIC_HINT=ernic0 never resolved. The missing piece was the
     # guest, not the image tag. This is that topology, taken from rocm-ernic's
     # own system-test-two-vms lane: two emulated NICs on one bridge, one
-    # guest per NIC, hipObject's v1 server in the first and the minio-cpp
+    # guest per NIC, hipObject's test server in the first and the minio-cpp
     # bridge client in the second.
     container:
       image: sbates130272/batesste-ci-images-ubuntu-qemu-libvfio-user:20260924.ge1cd640-qemu11.1.1-vfu.8039244

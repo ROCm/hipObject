@@ -131,10 +131,6 @@ makeFuncs()
         g_call = {"post_send", qp, 0};
         return kResult;
     };
-    funcs.post_recv = [](struct ibv_qp *qp, struct ibv_recv_wr *, struct ibv_recv_wr **) {
-        g_call = {"post_recv", qp, 0};
-        return kResult;
-    };
     return funcs;
 }
 
@@ -215,15 +211,11 @@ TEST_F(LoadedVerbsTest, ForwardsEachCall)
     ibv_qp_attr  qpAttr{};
     ibv_send_wr  sendWr{};
     ibv_send_wr *badSend = nullptr;
-    ibv_recv_wr  recvWr{};
-    ibv_recv_wr *badRecv = nullptr;
     EXPECT_EQ(verbs.modify_qp(qp, &qpAttr, IBV_QP_STATE), kResult);
     expectCall("modify_qp", qp);
     EXPECT_EQ(g_call.value, static_cast<uint64_t>(IBV_QP_STATE));
     EXPECT_EQ(verbs.post_send(qp, &sendWr, &badSend), kResult);
     expectCall("post_send", qp);
-    EXPECT_EQ(verbs.post_recv(qp, &recvWr, &badRecv), kResult);
-    expectCall("post_recv", qp);
     EXPECT_EQ(verbs.destroy_qp(qp), kResult);
     expectCall("destroy_qp", qp);
 }
@@ -275,7 +267,6 @@ TEST_F(LoadedVerbsTest, FallsBackToContextOps)
     hipObj::LoadedVerbs::Funcs funcs = makeFuncs();
     funcs.poll_cq                    = nullptr;
     funcs.post_send                  = nullptr;
-    funcs.post_recv                  = nullptr;
     const hipObj::LoadedVerbs verbs(funcs);
 
     struct ibv_context context {};
@@ -285,10 +276,6 @@ TEST_F(LoadedVerbsTest, FallsBackToContextOps)
     };
     context.ops.post_send = [](struct ibv_qp *qp, struct ibv_send_wr *, struct ibv_send_wr **) {
         g_call = {"ops.post_send", qp, 0};
-        return kResult;
-    };
-    context.ops.post_recv = [](struct ibv_qp *qp, struct ibv_recv_wr *, struct ibv_recv_wr **) {
-        g_call = {"ops.post_recv", qp, 0};
         return kResult;
     };
     struct ibv_cq cq {};
@@ -305,11 +292,6 @@ TEST_F(LoadedVerbsTest, FallsBackToContextOps)
     ibv_send_wr *badSend = nullptr;
     EXPECT_EQ(verbs.post_send(&qp, &sendWr, &badSend), kResult);
     expectCall("ops.post_send", &qp);
-
-    ibv_recv_wr  recvWr{};
-    ibv_recv_wr *badRecv = nullptr;
-    EXPECT_EQ(verbs.post_recv(&qp, &recvWr, &badRecv), kResult);
-    expectCall("ops.post_recv", &qp);
 }
 
 /* The real libibverbs, where it's installed. Listing the devices works
