@@ -648,7 +648,7 @@ namespace {
         hipObjError_t err = initFakes(makeConfig());
 
         EXPECT_EQ(err.opError, hipObjSuccess);
-        const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+        const hipObj::Instance *const instance = hipObj::currentInstance();
         ASSERT_NE(instance, nullptr);
         EXPECT_EQ(instance->config.gpuDevice, -1);
         EXPECT_EQ(instance->config.nicHint, "mlx5_0");

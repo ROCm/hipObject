@@ -15,7 +15,6 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
-#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -155,7 +154,7 @@ TEST_F(ApiArgsTest, InitRejectsDeviceThatDoesNotExist)
     hipObjConfig_t config = makeConfig();
     config.gpuDevice      = 1;
     EXPECT_EQ(initFakes(config).opError, hipObjSuccess);
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    const hipObj::Instance *const instance = hipObj::currentInstance();
     ASSERT_NE(instance, nullptr);
     EXPECT_EQ(instance->config.gpuDevice, 1);
 }

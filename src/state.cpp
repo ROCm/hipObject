@@ -67,10 +67,10 @@ namespace {
      * safe during static destruction, so hipObjShutdown() is what releases
      * it. Clang still warns, since NoDestructor's empty destructor isn't
      * trivial. */
-    std::shared_ptr<Instance> &current()
+    std::unique_ptr<Instance> &current()
     {
         HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-        static NoDestructor<std::shared_ptr<Instance>> instance;
+        static NoDestructor<std::unique_ptr<Instance>> instance;
         HIPOBJ_WARN_NO_EXIT_DTOR_ON
         return *instance;
     }
@@ -180,10 +180,10 @@ Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Optio
 {
 }
 
-std::shared_ptr<Instance>
-currentInstance()
+Instance *
+currentInstance() noexcept
 {
-    return current();
+    return current().get();
 }
 
 void
@@ -262,7 +262,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         .nicHint   = config.nicHint ? config.nicHint : "",
         .nicIndex  = nic->index,
     };
-    auto instance = std::make_shared<Instance>(std::move(platform), options, std::move(resolved),
+    auto instance = std::make_unique<Instance>(std::move(platform), options, std::move(resolved),
                                                std::move(device), std::move(*conn));
 
     /* Can't throw */
