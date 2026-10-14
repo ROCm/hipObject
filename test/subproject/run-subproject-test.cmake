@@ -13,7 +13,9 @@
 #
 # Steps:
 #   1. Configure the parent project, which checks that hipObject leaves
-#      the parent's build type and install prefix alone
+#      the parent's build type and install prefix alone, and that
+#      hipObject's own subproject test passes on a prefix the parent
+#      added to CMAKE_PREFIX_PATH
 #   2. Build the hipobj library in it
 
 if(NOT SETTINGS)

@@ -219,7 +219,7 @@ To build the HTML documentation locally:
    cmake -B build \
      -DHIPOBJ_BUILD_DOCS=ON
 
-   cmake --build build --target sphinx-html
+   cmake --build build --target hipobj-sphinx-html
 
 The output appears in ``build/docs/html/``.
 
@@ -232,7 +232,7 @@ toolchain:
      -DHIPOBJ_DOCS_ONLY=ON \
      -DHIPOBJ_BUILD_DOCS=ON
 
-   cmake --build build --target sphinx-html
+   cmake --build build --target hipobj-sphinx-html
 
 Environment Variables
 ---------------------

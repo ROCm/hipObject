@@ -140,6 +140,12 @@
 - Building the documentation (`HIPOBJ_BUILD_DOCS`) requires Breathe 4.36
   or later, up from 4.35. The documentation build installs it from
   `requirements.txt` into its own virtual environment.
+- The documentation build's targets are now `hipobj-sphinx-html`,
+  `hipobj-doxygen`, and `hipobj-docs-venv`, rather than `sphinx-html`,
+  `doxygen`, and `docs-venv`, so they can't collide with another
+  project's targets when hipObject is built as part of one. Build the
+  HTML documentation with `cmake --build build --target
+  hipobj-sphinx-html`.
 - hipObject no longer loads other libraries or prints anything when the
   program starts. It used to load libibverbs and libnuma, and to print a
   message to stderr if libibverbs was missing, even in a program that

@@ -558,7 +558,7 @@ Python code must run on **Python 3.10**. Don't use anything newer, such as
 
   ```bash
   cmake -B build-docs -DHIPOBJ_DOCS_ONLY=ON -DHIPOBJ_BUILD_DOCS=ON
-  cmake --build build-docs --target sphinx-html
+  cmake --build build-docs --target hipobj-sphinx-html
   ```
 
   CI:

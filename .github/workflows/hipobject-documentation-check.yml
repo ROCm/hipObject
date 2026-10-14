@@ -52,7 +52,7 @@ jobs:
           -DHIPOBJ_DOCS_ONLY=ON \
           -DHIPOBJ_BUILD_DOCS=ON
     - name: Build documentation
-      run: cmake --build build --target sphinx-html
+      run: cmake --build build --target hipobj-sphinx-html
 
   rst-lint:
     name: RST Lint

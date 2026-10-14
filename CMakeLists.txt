@@ -89,6 +89,12 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS)
   endforeach()
 endif()
 
+# CMAKE_PREFIX_PATH as hipObject received it, before HIPOBJUseROCmCMake
+# adds ROCm's prefixes. It includes any prefixes a project above
+# hipObject added as a normal variable, which $CACHE{CMAKE_PREFIX_PATH}
+# doesn't. The subproject test passes it on to its parent project.
+set(HIPOBJ_INHERITED_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
+
 include(HIPOBJUseROCmCMake)
 include(HIPOBJSanitizers)
 include(HIPOBJCoverage)
