@@ -53,10 +53,11 @@ private:
     const NicTopology *topology_;
 };
 
-/* A platform over hip(), ibv(), and the NIC topology NIC selection uses.
- * The returned pointer owns the SysfsTopology it uses when no test
- * installed a topology. Call it only once ibvAvailable() has returned
- * true. */
+/* The platform over the system's HIP runtime, libibverbs, and the NIC
+ * topology sysfs reports, or null when libibverbs can't be loaded. Every
+ * call returns the same platform, built on the first call, which loads
+ * libibverbs. It's never destroyed, so libibverbs stays loaded until the
+ * process exits. */
 std::shared_ptr<const Platform> systemPlatform();
 
 /* The settings that hipObjInit() reads from the environment, and how long

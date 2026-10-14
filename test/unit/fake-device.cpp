@@ -12,6 +12,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 
 #include "hipobj-span.h"
 #include "hipobj.h"
@@ -487,15 +488,21 @@ EmptyNicTopology::roceVersion(const char *, uint8_t, int) const
     return -1;
 }
 
+// ---- Platform --------------------------------------------------------
+
+hipObjError_t
+initWithPlatform(const hipObjConfig_t &config, std::shared_ptr<const hipObj::Platform> platform,
+                 const hipObj::Options &options)
+{
+    const hipObj::ApiGuard guard;
+    return hipObj::initWith(config, std::move(platform), options);
+}
+
 // ---- Fixture ---------------------------------------------------------
 
 void
 FakeDeviceTest::SetUp()
 {
-    fakeTopology_.emplace(topology_);
-    fakeHip_.emplace(hip_);
-    fakeIbv_.emplace(verbs_);
-
     resetFake();
 }
 
@@ -504,9 +511,8 @@ FakeDeviceTest::TearDown()
 {
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
-    fakeIbv_.reset();
-    fakeHip_.reset();
-    fakeTopology_.reset();
+    /* An instance that outlived its shutdown would still hold them */
+    EXPECT_EQ(fakes_.use_count(), 1);
 }
 
 hipObjConfig_t
@@ -518,15 +524,20 @@ FakeDeviceTest::makeConfig()
     return config;
 }
 
-void
-FakeDeviceTest::init()
+hipObjError_t
+FakeDeviceTest::initFakes(const hipObjConfig_t &config, const hipObj::Options &options) const
 {
-    hipObjConfig_t config = makeConfig();
-    ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+    return initWithPlatform(config, fakes_->platform(), options);
 }
 
 void
-FakeDeviceTest::initAndRegister()
+FakeDeviceTest::init() const
+{
+    ASSERT_EQ(initFakes(makeConfig()).opError, hipObjSuccess);
+}
+
+void
+FakeDeviceTest::initAndRegister() const
 {
     ASSERT_NO_FATAL_FAILURE(init());
     ASSERT_EQ(hipObjBufRegister(fakeDevBuf(), kFakeBufSize).opError, hipObjSuccess);

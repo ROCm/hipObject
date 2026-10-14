@@ -19,9 +19,7 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
-/* BufferMap with the fake verbs and HIP runtime, which aren't installed
- * as ibv() and hip(), so the map can only reach them through what it's
- * given */
+/* BufferMap with the fake verbs and HIP runtime */
 class BufferRegistrationTest : public ::testing::Test {
 protected:
     hipObj::BufferMap makeBuffers() const

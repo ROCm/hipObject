@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: MIT
  *
  * A fake RDMA device and HIP runtime for tests of the public API. The
- * fixture substitutes fakes for libibverbs, the HIP runtime, and the NIC
- * topology, so hipObjInit() and transfers run without GPU or RDMA
- * hardware. The fakes record their calls and can be
- * told to fail (see FakeDevice).
+ * fixture initializes the library with a FakePlatform, whose fakes stand
+ * in for libibverbs, the HIP runtime, and the NIC topology, so
+ * initialization and transfers run without GPU or RDMA hardware. The
+ * fakes record their calls and can be told to fail (see FakeDevice).
  */
 
 #pragma once
@@ -15,19 +15,19 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
-#include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
+#include "state.h"
 #include "token.h"
 
 namespace hipObjTest {
@@ -271,32 +271,6 @@ private:
     FakeDevice *device_;
 };
 
-/* Makes hip() return runtime for as long as it lives, and puts the
- * previous runtime back when it's destroyed. runtime has to outlive it.
- * Create and destroy it only while no other thread is calling hip(). */
-class ScopedFakeHip {
-public:
-    explicit ScopedFakeHip(const hipObj::HipRuntime &runtime)
-        : runtime_(&runtime), previous_(hipObj::setHipForTest(&runtime))
-    {
-    }
-
-    ~ScopedFakeHip()
-    {
-        /* Restored in the reverse order they were installed */
-        EXPECT_EQ(hipObj::setHipForTest(previous_), runtime_);
-    }
-
-    ScopedFakeHip(const ScopedFakeHip &)            = delete;
-    ScopedFakeHip &operator=(const ScopedFakeHip &) = delete;
-    ScopedFakeHip(ScopedFakeHip &&)                 = delete;
-    ScopedFakeHip &operator=(ScopedFakeHip &&)      = delete;
-
-private:
-    const hipObj::HipRuntime *runtime_;
-    const hipObj::HipRuntime *previous_;
-};
-
 /* hipObjOps_t callbacks for the fake S3 server */
 int         fakeSendRequest(void *ctx, const char *token, size_t tokenLen);
 int         fakeRecvReply(void *ctx, char *reply, size_t *replyLen);
@@ -329,36 +303,68 @@ public:
     int roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
 };
 
-/* Makes NIC and GID selection use topology for as long as it lives, and
- * puts the previous topology back when it's destroyed. topology has to
- * outlive it. Create and destroy it only while no other thread can be
- * selecting a NIC or GID. */
-class ScopedFakeTopology {
+/* Fakes of the outside world over a FakeDevice, and a platform over them
+ * for an instance to call. Hip and Verbs can be fakes a test derived from
+ * FakeHip or FakeVerbs to change what they do. Build it with
+ * std::make_shared: platform() shares ownership of it, so the fakes live
+ * as long as an instance that calls them. */
+template <typename Hip = FakeHip, typename Verbs = FakeVerbs>
+class FakePlatform final : public std::enable_shared_from_this<FakePlatform<Hip, Verbs>> {
 public:
-    explicit ScopedFakeTopology(const hipObj::NicTopology &topology)
-        : topology_(&topology), previous_(hipObj::setNicTopologyForTest(&topology))
+    /* device has to outlive it */
+    explicit FakePlatform(FakeDevice &device) noexcept
+        : hip_(device), verbs_(device), platform_(hip_, verbs_, topology_)
     {
     }
 
-    ~ScopedFakeTopology()
+    ~FakePlatform() = default;
+
+    /* The platform refers to the members */
+    FakePlatform(const FakePlatform &)            = delete;
+    FakePlatform &operator=(const FakePlatform &) = delete;
+    FakePlatform(FakePlatform &&)                 = delete;
+    FakePlatform &operator=(FakePlatform &&)      = delete;
+
+    /* The platform over the fakes, which keeps this alive */
+    std::shared_ptr<const hipObj::Platform> platform() const
     {
-        /* Restored in the reverse order they were installed */
-        EXPECT_EQ(hipObj::setNicTopologyForTest(previous_), topology_);
+        /* Points to the platform, and shares ownership of this. The base
+         * class depends on the template's arguments, so its members are
+         * named through this. */
+        return {this->shared_from_this(), &platform_};
     }
 
-    ScopedFakeTopology(const ScopedFakeTopology &)            = delete;
-    ScopedFakeTopology &operator=(const ScopedFakeTopology &) = delete;
-    ScopedFakeTopology(ScopedFakeTopology &&)                 = delete;
-    ScopedFakeTopology &operator=(ScopedFakeTopology &&)      = delete;
+    const Hip &hip() const noexcept
+    {
+        return hip_;
+    }
+
+    const Verbs &verbs() const noexcept
+    {
+        return verbs_;
+    }
+
+    const EmptyNicTopology &topology() const noexcept
+    {
+        return topology_;
+    }
 
 private:
-    const hipObj::NicTopology *topology_;
-    const hipObj::NicTopology *previous_;
+    Hip              hip_;
+    Verbs            verbs_;
+    EmptyNicTopology topology_{};
+    hipObj::Platform platform_;
 };
 
-/* Installs the fakes for each test, and restores the real functions after.
- * After each test, it shuts the library down and checks that the instance
- * is gone. */
+/* initWith() with config, platform, and options, holding the API lock as
+ * hipObjInit() does. hipObjInit() always uses the system platform, so
+ * this is how a test initializes the library with fakes. */
+hipObjError_t initWithPlatform(const hipObjConfig_t &config, std::shared_ptr<const hipObj::Platform> platform,
+                               const hipObj::Options &options = {});
+
+/* Gives each test a FakePlatform over fake(), and resets fake(). After each
+ * test, it shuts the library down, and checks that the instance is gone
+ * and that nothing but the fixture still holds the fakes. */
 class FakeDeviceTest : public ::testing::Test {
 protected:
     void SetUp() override;
@@ -366,18 +372,26 @@ protected:
 
     static hipObjConfig_t makeConfig();
 
-    /* Initializes the library with the fake device */
-    static void init();
+    /* initWithPlatform() with the fakes */
+    hipObjError_t initFakes(const hipObjConfig_t &config, const hipObj::Options &options = {}) const;
+
+    /* Initializes the library with the fakes */
+    void init() const;
 
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
-    static void initAndRegister();
+    void initAndRegister() const;
 
-    EmptyNicTopology                  topology_{};
-    std::optional<ScopedFakeTopology> fakeTopology_{};
-    FakeVerbs                         verbs_{fake()};
-    std::optional<ScopedFakeIbv>      fakeIbv_{};
-    FakeHip                           hip_{fake()};
-    std::optional<ScopedFakeHip>      fakeHip_{};
+    const hipObj::Verbs &verbs() const noexcept
+    {
+        return fakes_->verbs();
+    }
+
+    const hipObj::NicTopology &topology() const noexcept
+    {
+        return fakes_->topology();
+    }
+
+    std::shared_ptr<FakePlatform<>> fakes_ = std::make_shared<FakePlatform<>>(fake());
 };
 
 } // namespace hipObjTest

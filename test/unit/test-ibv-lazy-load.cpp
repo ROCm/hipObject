@@ -2,9 +2,10 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * hipObject loads libibverbs the first time ibvAvailable() or ibv() is
- * called, not when the program starts. This is a program of its own, so
- * that nothing calls either before the test does.
+ * hipObject loads libibverbs when it builds the system platform, on the
+ * first systemPlatform() call, not when the program starts or when
+ * hipObjInit() rejects its arguments. This is a program of its own, so
+ * that nothing builds the platform before the test does.
  */
 
 #include <memory>
@@ -15,7 +16,8 @@
 
 #include "dl-handle.h"
 #include "hipobj-warnings.h"
-#include "ibv-wrapper.h"
+#include "hipobj.h"
+#include "state.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -32,17 +34,20 @@ libibverbsIsLoaded()
 
 TEST(IbvLazyLoad, LibibverbsLoadsOnFirstUse)
 {
-    EXPECT_FALSE(libibverbsIsLoaded()) << "libibverbs was loaded before ibvAvailable() was called";
+    EXPECT_FALSE(libibverbsIsLoaded()) << "libibverbs was loaded before the test started";
 
-    if (!hipObj::ibvAvailable()) {
+    /* hipObjInit() checks its arguments first */
+    EXPECT_EQ(hipObjInit(nullptr).opError, hipObjInvalidValue);
+    EXPECT_FALSE(libibverbsIsLoaded()) << "libibverbs was loaded before the system platform was built";
+
+    const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
+    if (!platform) {
         GTEST_SKIP() << "libibverbs couldn't be loaded";
     }
     EXPECT_TRUE(libibverbsIsLoaded());
 
-    /* Loaded once */
-    const hipObj::Verbs &verbs = hipObj::ibv();
-    EXPECT_TRUE(hipObj::ibvAvailable());
-    EXPECT_EQ(&hipObj::ibv(), &verbs);
+    /* Built once */
+    EXPECT_EQ(hipObj::systemPlatform(), platform);
 }
 
 } // namespace

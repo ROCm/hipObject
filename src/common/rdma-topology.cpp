@@ -64,9 +64,6 @@ namespace {
         return GidPriority::Unknown;
     }
 
-    /* The topology installed with setNicTopologyForTest(), or null */
-    const NicTopology *g_topology_override = nullptr;
-
     int AutoSelectGidIndex(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx,
                            uint8_t port_num)
     {
@@ -206,22 +203,6 @@ SysfsTopology::roceVersion(const char *devName, uint8_t portNum, int gidIndex) c
     if (line.find("IB/RoCE v1") != std::string::npos || line.find("RoCE v1") != std::string::npos)
         return 1;
     return 0;
-}
-
-const NicTopology *
-setNicTopologyForTest(const NicTopology *topology)
-{
-    const NicTopology *previous = g_topology_override;
-    g_topology_override         = topology;
-    return previous;
-}
-
-const NicTopology &
-currentNicTopology(std::optional<SysfsTopology> &storage)
-{
-    if (g_topology_override)
-        return *g_topology_override;
-    return storage.emplace(ibv());
 }
 
 std::optional<RdmaNic>

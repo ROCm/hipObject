@@ -33,7 +33,6 @@
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
-#include "ibv-wrapper.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
@@ -300,14 +299,15 @@ try {
     if (hipObj::currentInstance()) {
         return {hipObjAlreadyInitialized, 0};
     }
-    if (!hipObj::ibvAvailable()) {
+    std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
+    if (!platform) {
         return {hipObjRdmaError, 0};
     }
     /* std::getenv is called through a lambda, since C++ doesn't allow
      * taking the address of most standard library functions */
-    return hipObj::initWith(
-        *config, hipObj::systemPlatform(),
-        hipObj::parseOptions([](const char *name) noexcept { return std::getenv(name); }));
+    return hipObj::initWith(*config, std::move(platform), hipObj::parseOptions([](const char *name) noexcept {
+        return std::getenv(name);
+    }));
 }
 catch (...) {
     return hipObj::handleException();

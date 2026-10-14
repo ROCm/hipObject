@@ -20,7 +20,6 @@
 #include <functional>
 #include <latch>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -31,7 +30,6 @@
 #include <gtest/gtest.h>
 
 #include "fake-device.h"
-#include "fake-ibv.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -125,18 +123,12 @@ makeConfig()
     return config;
 }
 
-/* Installs the fakes for each test, and puts the real ones back
- * afterward */
+/* Shuts the library down after each test, and checks that nothing but the
+ * fixture still holds the fakes */
 class ThreadSafetyTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        /* The fake HIP runtime has no GPU, so with a NIC hint,
-         * hipObjInit() opens the hinted NIC directly */
-        fakeHip_.emplace(hip_);
-
-        fakeIbv_.emplace(verbs_);
-
         probeOps_.sendRequest = &probeSendRequest;
         probeOps_.recvReply   = &probeRecvReply;
     }
@@ -144,8 +136,15 @@ protected:
     void TearDown() override
     {
         (void)hipObjShutdown();
-        fakeIbv_.reset();
-        fakeHip_.reset();
+        EXPECT_EQ(fakes_.use_count(), 1);
+    }
+
+    /* Initializes the library with the fakes. The fake HIP runtime has no
+     * GPU, so with a NIC hint, initialization opens the hinted NIC
+     * directly. */
+    hipObjOpError_t init() const
+    {
+        return hipObjTest::initWithPlatform(makeConfig(), fakes_->platform()).opError;
     }
 
     /* The buffer for thread index, kBufSize bytes, distinct from every
@@ -155,20 +154,17 @@ protected:
         return std::span(pool_).subspan(static_cast<size_t>(index) * kBufSize, kBufSize).data();
     }
 
-    hipObjTest::FakeDevice                   hipDevice_{};
-    hipObjTest::FakeVerbs                    verbs_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-    hipObjTest::FakeHip                      hip_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
-    std::vector<char>                        pool_ = std::vector<char>(kThreads * kBufSize);
-    TransferProbe                            probe_{};
-    hipObjOps_t                              probeOps_{};
+    hipObjTest::FakeDevice                      hipDevice_{};
+    std::shared_ptr<hipObjTest::FakePlatform<>> fakes_ =
+        std::make_shared<hipObjTest::FakePlatform<>>(hipDevice_);
+    std::vector<char> pool_ = std::vector<char>(kThreads * kBufSize);
+    TransferProbe     probe_{};
+    hipObjOps_t       probeOps_{};
 };
 
 TEST_F(ThreadSafetyTest, TransfersRunOneAtATime)
 {
-    hipObjConfig_t config = makeConfig();
-    ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+    ASSERT_EQ(init(), hipObjSuccess);
     for (int t = 0; t < kThreads; ++t) {
         ASSERT_EQ(hipObjBufRegisterHost(buffer(t), kBufSize).opError, hipObjSuccess);
     }
@@ -188,8 +184,7 @@ TEST_F(ThreadSafetyTest, TransfersRunOneAtATime)
 
 TEST_F(ThreadSafetyTest, BufferCallsFromManyThreads)
 {
-    hipObjConfig_t config = makeConfig();
-    ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+    ASSERT_EQ(init(), hipObjSuccess);
 
     /* Each thread works on its own buffer, so every call succeeds, while
      * the other threads' calls change the buffer map under it */
@@ -225,8 +220,7 @@ TEST_F(ThreadSafetyTest, ConcurrentInitHasOneWinner)
     std::atomic<int> alreadyInitialized{0};
 
     runThreads(kThreads, [&](int) {
-        hipObjConfig_t  config = makeConfig();
-        hipObjOpError_t err    = hipObjInit(&config).opError;
+        hipObjOpError_t err = init();
         if (err == hipObjSuccess) {
             succeeded.fetch_add(1);
         }
@@ -234,7 +228,7 @@ TEST_F(ThreadSafetyTest, ConcurrentInitHasOneWinner)
             alreadyInitialized.fetch_add(1);
         }
         else {
-            ADD_FAILURE() << "hipObjInit() returned " << err;
+            ADD_FAILURE() << "initialization returned " << err;
         }
     });
 
@@ -245,8 +239,7 @@ TEST_F(ThreadSafetyTest, ConcurrentInitHasOneWinner)
 
 TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)
 {
-    hipObjConfig_t config = makeConfig();
-    ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+    ASSERT_EQ(init(), hipObjSuccess);
 
     /* The results a call can get when the library may be shut down, and
      * all buffers deregistered, before or after it */
@@ -259,8 +252,7 @@ TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)
             /* Only this thread shuts down and initializes, so neither fails */
             for (int i = 0; i < kIterations; ++i) {
                 EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
-                hipObjConfig_t again = makeConfig();
-                EXPECT_EQ(hipObjInit(&again).opError, hipObjSuccess);
+                EXPECT_EQ(init(), hipObjSuccess);
             }
             return;
         }
@@ -321,8 +313,7 @@ reentrantSendRequest(void *ctx, const char *, size_t)
 
 TEST_F(ThreadSafetyTest, CallbackReentryFailsInsteadOfDeadlocking)
 {
-    hipObjConfig_t config = makeConfig();
-    ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+    ASSERT_EQ(init(), hipObjSuccess);
 
     ReentryProbe probe;
     probe.registered   = buffer(0);
@@ -353,8 +344,7 @@ TEST_F(ThreadSafetyTest, CallbackReentryFailsInsteadOfDeadlocking)
 
 TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
 {
-    hipObjConfig_t config = makeConfig();
-    ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+    ASSERT_EQ(init(), hipObjSuccess);
     ASSERT_EQ(hipObjBufRegisterHost(buffer(0), kBufSize).opError, hipObjSuccess);
     char *token = nullptr;
     ASSERT_EQ(hipObjGetRdmaToken(buffer(0), kBufSize, HIPOBJ_RDMA_OP_GET, &token).opError, hipObjSuccess);

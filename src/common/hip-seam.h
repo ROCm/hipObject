@@ -83,17 +83,6 @@ public:
     int        closeDmabuf(int fd) const override;
 };
 
-/* Returns the HIP runtime the library calls: the one installed with
- * setHipForTest(), or otherwise a SystemHip */
-const HipRuntime &hip();
-
-/* Installs a runtime for hip() to return, and returns the previously
- * installed one (nullptr when the SystemHip was active). Passing nullptr
- * restores the SystemHip. Unit tests only; production never calls it.
- * Not synchronized, so call it only while no other thread can be calling
- * hip(). */
-const HipRuntime *setHipForTest(const HipRuntime *runtime);
-
 /* Destroys a HIP event through the runtime that created it, which has to
  * outlive the pointer. Create the pointer with own() (ibv-ptr.h). */
 struct HipEventDeleter {

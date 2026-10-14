@@ -85,9 +85,7 @@ public:
     }
 };
 
-/* Resets the fakes' records for each test. The fakes aren't installed as
- * ibv() and hip(), so the code can only reach them through what it's
- * given. */
+/* Resets the fakes' records for each test */
 class DmabufTest : public ::testing::Test {
 protected:
     void SetUp() override
