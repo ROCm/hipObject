@@ -18,6 +18,10 @@ struct ibv_context;
 
 namespace hipObj {
 
+class HipRuntime;
+class NicTopology;
+class Verbs;
+
 /* Higher value = more preferred. */
 enum class GidPriority {
     Unknown         = -1,
@@ -50,15 +54,17 @@ struct RdmaNic {
     std::string name;
 };
 
-/* The NIC with a known PCIe bus id closest to the GPU's, picking the
- * first of the closest, among the NICs that hca_list (comma-separated
- * device names, or null for all) allows. std::nullopt when there's no
- * such NIC or the GPU's bus id can't be found. */
-std::optional<RdmaNic> GetClosestNicToGpu(int gpuIndex, const char *hca_list);
+/* The NIC in topology with a known PCIe bus id closest to the bus id
+ * runtime reports for GPU gpuIndex, picking the first of the closest,
+ * among the NICs that hca_list (comma-separated device names, or null for
+ * all) allows. std::nullopt when there's no such NIC or the GPU's bus id
+ * can't be found. */
+std::optional<RdmaNic> GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology,
+                                          int gpuIndex, const char *hca_list);
 
-/* PickBestGid() over the GID table of port_num on ctx's device, with each
- * entry's RoCE version from the NIC topology. -1 when the port can't be
- * queried or no entry qualifies. */
-int SelectBestGid(ibv_context *ctx, uint8_t port_num);
+/* PickBestGid() over the GID table that verbs reports for port_num on
+ * ctx's device, with each entry's RoCE version from topology. -1 when the
+ * port can't be queried or no entry qualifies. */
+int SelectBestGid(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx, uint8_t port_num);
 
 } // namespace hipObj

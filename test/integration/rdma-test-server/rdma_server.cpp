@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -21,6 +23,7 @@
 #include "hipobj-span.h"
 #include "ibv-wrapper.h"
 #include "malloc_ptr.h"
+#include "nic-seam.h"
 #include "scope-guard.h"
 #include "token.h"
 #include "token_header.h"
@@ -40,16 +43,19 @@ namespace {
         return -1;
     }
 
+    /* The size of the buffer each transfer is staged through */
+    constexpr size_t kStagingSize = 64 * 1024 * 1024;
+
     hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, struct ibv_mr *mr, size_t size)
     {
         hipObj::RdmaToken token{};
         token.transport  = hipObj::TransportType::RC;
         token.qpNum      = conn.qp->qp_num;
-        token.gid        = hipObj::toGid(conn.localGid);
+        token.gid        = hipObj::toGid(conn.device().localGid());
         token.rkey       = mr->rkey;
         token.remoteAddr = reinterpret_cast<uint64_t>(mr->addr);
         token.length     = size;
-        token.portNum    = conn.portNum;
+        token.portNum    = conn.device().portNum();
         token.lid        = 0;
         return token;
     }
@@ -72,7 +78,7 @@ namespace {
         wr.wr.rdma.rkey        = clientToken.rkey;
 
         ibv_send_wr *bad = nullptr;
-        if (hipObj::ibv().post_send(conn.qp.get(), &wr, &bad) != 0) {
+        if (conn.device().verbs().post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
         return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, std::chrono::seconds(10));
@@ -96,7 +102,7 @@ namespace {
         wr.wr.rdma.rkey        = clientToken.rkey;
 
         ibv_send_wr *bad = nullptr;
-        if (hipObj::ibv().post_send(conn.qp.get(), &wr, &bad) != 0) {
+        if (conn.device().verbs().post_send(conn.qp.get(), &wr, &bad) != 0) {
             return -1;
         }
         return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::seconds(10));
@@ -105,19 +111,25 @@ namespace {
 } // namespace
 
 struct RdmaTestServer::Impl {
-    /* Destroyed in reverse order: the MR is deregistered and its buffer
-     * freed before the connection's PD and context go away. */
-    hipObj::RcConnection conn{};
-    hipObj::MallocPtr    stagingBuf{};
-    hipObj::IbvMrPtr     stagingMr{};
-    size_t               stagingSize = 64 * 1024 * 1024;
-    bool                 ready       = false;
+    /* The connection has no QP until createRcQp() gives it one */
+    Impl(hipObj::RdmaDevice rdmaDevice, hipObj::MallocPtr buf, hipObj::IbvMrPtr mr) noexcept
+        : device(std::move(rdmaDevice)), stagingBuf(std::move(buf)), stagingMr(std::move(mr)), conn(device)
+    {
+    }
 
-    /* The staging buffer's bytes. Only call it once the buffer is
-     * allocated. */
+    /* Destroyed in reverse order: the QP and CQ are destroyed, and the MR
+     * deregistered and its buffer freed, before the device's PD and
+     * context go away. */
+    hipObj::RdmaDevice   device;
+    hipObj::MallocPtr    stagingBuf;
+    hipObj::IbvMrPtr     stagingMr;
+    hipObj::RcConnection conn;
+    bool                 ready = false;
+
+    /* The staging buffer's bytes */
     std::span<uint8_t> staging() const
     {
-        return hipObj::spanFromPointer(static_cast<uint8_t *>(stagingBuf.get()), stagingSize);
+        return hipObj::spanFromPointer(static_cast<uint8_t *>(stagingBuf.get()), kStagingSize);
     }
 
     /* One QP serves every request in turn, so it has to come back to INIT
@@ -141,7 +153,7 @@ struct RdmaTestServer::Impl {
     }
 };
 
-RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
+RdmaTestServer::RdmaTestServer()
 {
     if (!hipObj::ibvAvailable()) {
         return;
@@ -149,28 +161,28 @@ RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
     /* Built in locals and moved into impl_ only once everything has
      * succeeded, so a failure, or an exception, destroys them in reverse
      * order with no rollback code */
-    hipObj::RcConnection conn;
-    if (hipObj::openRdmaDevice(0, conn) != 0) {
+    const hipObj::Verbs              &verbs = hipObj::ibv();
+    const hipObj::SysfsTopology       topology(verbs);
+    std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs, topology, 0);
+    if (!device) {
         return;
     }
-    hipObj::MallocPtr stagingBuf(std::malloc(impl_->stagingSize));
+    hipObj::MallocPtr stagingBuf(std::malloc(kStagingSize));
     if (!stagingBuf) {
         return;
     }
-    const hipObj::Verbs &verbs     = hipObj::ibv();
-    hipObj::IbvMrPtr     stagingMr = hipObj::own<hipObj::IbvMrPtr>(
-        verbs, verbs.reg_mr(conn.pd.get(), stagingBuf.get(), impl_->stagingSize,
-                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+    hipObj::IbvMrPtr stagingMr = hipObj::own<hipObj::IbvMrPtr>(
+        verbs, verbs.reg_mr(device->pd(), stagingBuf.get(), kStagingSize,
+                            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!stagingMr) {
         return;
     }
-    if (hipObj::createRcQp(conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(conn) != 0) {
+    auto impl = std::make_unique<Impl>(std::move(*device), std::move(stagingBuf), std::move(stagingMr));
+    if (hipObj::createRcQp(impl->conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(impl->conn) != 0) {
         return;
     }
-    impl_->conn       = std::move(conn);
-    impl_->stagingBuf = std::move(stagingBuf);
-    impl_->stagingMr  = std::move(stagingMr);
-    impl_->ready      = true;
+    impl->ready = true;
+    impl_       = std::move(impl);
 }
 
 RdmaTestServer::~RdmaTestServer() = default;
@@ -193,11 +205,11 @@ RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vec
     if (xferSize == 0) {
         xferSize = data.size();
     }
-    if (data.size() < xferSize || xferSize > impl_->stagingSize) {
+    if (data.size() < xferSize || xferSize > kStagingSize) {
         fprintf(stderr,
                 "hipobj-rdma-test-server: GET failed: %zu bytes requested of a %zu "
                 "byte object, %zu byte staging buffer\n",
-                xferSize, data.size(), impl_->stagingSize);
+                xferSize, data.size(), kStagingSize);
         return -1;
     }
 
@@ -230,11 +242,11 @@ RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size, 
     if (xferSize == 0) {
         xferSize = clientToken.length;
     }
-    if (xferSize > impl_->stagingSize) {
+    if (xferSize > kStagingSize) {
         fprintf(stderr,
                 "hipobj-rdma-test-server: PUT failed: %zu bytes exceeds the %zu "
                 "byte staging buffer\n",
-                xferSize, impl_->stagingSize);
+                xferSize, kStagingSize);
         return -1;
     }
 

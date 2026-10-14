@@ -102,11 +102,14 @@ using EnvLookup = std::function<const char *(const char *name)>;
 Options parseOptions(const EnvLookup &lookup);
 
 /* The library's state from hipObjInit() to hipObjShutdown(). Members are
- * destroyed in reverse order: the buffers are deregistered before the
- * connection's protection domain is deallocated, and the platform outlives
- * both. */
+ * destroyed in reverse order: the buffers are deregistered, and the
+ * connection's QP and CQ destroyed, before the device's protection domain
+ * is deallocated, and the platform outlives them all. */
 struct Instance final {
-    Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions) noexcept;
+    /* instanceDevice has to have come from instancePlatform's verbs. The
+     * connection has no QP yet. */
+    Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
+             RdmaDevice instanceDevice) noexcept;
     ~Instance() = default;
 
     /* Lives in a shared_ptr, and isn't copied or moved */
@@ -127,7 +130,8 @@ struct Instance final {
     int         nicIndex = -1;
     uint32_t    flags    = 0;
 
-    RcConnection conn{};
+    RdmaDevice   device;
+    RcConnection conn;
     BufferMap    buffers;
 };
 
@@ -142,11 +146,8 @@ std::shared_ptr<Instance> currentInstance();
  * hipObjAlreadyInitialized if there's already an instance. Throws only
  * before anything changes.
  *
- * Only the GPU lookup calls the platform's HIP runtime. NIC selection, the
- * RDMA device, buffer registration, and transfers call hip(), ibv(), and
- * the installed NIC topology, and the owning pointers they create release
- * their objects through the same ones, so platform has to be one that
- * systemPlatform() returned while the same ones were installed. */
+ * Everything the instance does, from choosing the NIC to transfers, calls
+ * the outside world through platform. */
 hipObjError_t initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
                        const Options &options);
 

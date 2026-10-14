@@ -14,7 +14,9 @@
  */
 
 #include <cstddef>
+#include <memory>
 #include <stdexcept>
+#include <utility>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -25,6 +27,11 @@
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "state.h"
+
+namespace hipObj {
+class HipRuntime;
+class Verbs;
+} // namespace hipObj
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -52,9 +59,8 @@ throwIt()
     throw 42;
 }
 
-/* The fake HIP runtime, with the calls that start hipObjInit() and a
- * staging copy throwing */
-class ThrowingHip : public hipObjTest::FakeHip {
+/* The fake HIP runtime, with the call that starts hipObjInit() throwing */
+class ThrowingGetDeviceHip : public hipObjTest::FakeHip {
 public:
     using FakeHip::FakeHip;
 
@@ -62,6 +68,12 @@ public:
     {
         throwIt();
     }
+};
+
+/* The fake HIP runtime, with a staging copy throwing */
+class ThrowingMemcpyHip : public hipObjTest::FakeHip {
+public:
+    using FakeHip::FakeHip;
 
     hipError_t memcpyAsync(void *, const void *, size_t, hipMemcpyKind, hipStream_t) const override
     {
@@ -110,11 +122,25 @@ protected:
         FakeDeviceTest::SetUp();
         g_thrown = GetParam();
     }
+
+    /* Initializes the library with runtime and verbs, which the instance
+     * calls from then on, holding the API lock as hipObjInit() does */
+    void initWith(const hipObj::HipRuntime &runtime, const hipObj::Verbs &verbs) const
+    {
+        const hipObj::ApiGuard guard;
+        const hipObjConfig_t   config   = makeConfig();
+        auto                   platform = std::make_shared<const hipObj::Platform>(runtime, verbs, topology_);
+        ASSERT_EQ(hipObj::initWith(config, std::move(platform), {}).opError, hipObjSuccess);
+    }
+
+    /* Members, so they outlive the instance, which TearDown() destroys */
+    const ThrowingRegMrVerbs throwingRegMr_{fake()};
+    const ThrowingMemcpyHip  throwingMemcpy_{fake()};
 };
 
 TEST_P(ApiExceptionTest, Init)
 {
-    const ThrowingHip               throwing(fake());
+    const ThrowingGetDeviceHip      throwing(fake());
     const hipObjTest::ScopedFakeHip installed(throwing);
     hipObjConfig_t                  config = makeConfig();
     EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
@@ -146,18 +172,14 @@ TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
 
 TEST_P(ApiExceptionTest, BufRegister)
 {
-    ASSERT_NO_FATAL_FAILURE(init());
-    const ThrowingRegMrVerbs        throwing(fake());
-    const hipObjTest::ScopedFakeIbv installed(throwing);
+    ASSERT_NO_FATAL_FAILURE(initWith(hip_, throwingRegMr_));
     EXPECT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
 }
 
 TEST_P(ApiExceptionTest, BufRegisterHost)
 {
-    ASSERT_NO_FATAL_FAILURE(init());
-    const ThrowingRegMrVerbs        throwing(fake());
-    const hipObjTest::ScopedFakeIbv installed(throwing);
+    ASSERT_NO_FATAL_FAILURE(initWith(hip_, throwingRegMr_));
     EXPECT_EQ(hipObjBufRegisterHost(kDevBuf, kBufSize).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
 }
@@ -182,12 +204,10 @@ TEST_P(ApiExceptionTest, GetAndPut)
 
 TEST_P(ApiExceptionTest, BufSync)
 {
-    ASSERT_NO_FATAL_FAILURE(init());
+    ASSERT_NO_FATAL_FAILURE(initWith(throwingMemcpy_, verbs_));
     /* Registered through a staging buffer, so a sync copies */
     fake().fail.registerAddr = kDevBuf;
     ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);
-    const ThrowingHip               throwing(fake());
-    const hipObjTest::ScopedFakeHip installed(throwing);
     EXPECT_EQ(hipObjBufSync(kDevBuf, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufSync(kDevBuf, kBufSize, 0, HIPOBJ_SYNC_TO_DEVICE).opError, hipObjInternalError);
 }

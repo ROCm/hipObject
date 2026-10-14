@@ -5,13 +5,11 @@
 
 #include <atomic>
 #include <cstdint>
-#include <optional>
 
 #include <gtest/gtest.h>
 
 #include "buffer.h"
 #include "fake-device.h"
-#include "fake-ibv.h"
 #include "hipobj-private.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
@@ -21,30 +19,24 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
+/* BufferMap with the fake verbs and HIP runtime, which aren't installed
+ * as ibv() and hip(), so the map can only reach them through what it's
+ * given */
 class BufferRegistrationTest : public ::testing::Test {
 protected:
-    void SetUp() override
+    hipObj::BufferMap makeBuffers() const
     {
-        fakeIbv_.emplace(verbs_);
-        fakeHip_.emplace(hip_);
+        return {verbs_, hip_, {}, false};
     }
 
-    void TearDown() override
-    {
-        fakeIbv_.reset();
-        fakeHip_.reset();
-    }
-
-    hipObjTest::FakeDevice                   hipDevice_{};
-    hipObjTest::FakeVerbs                    verbs_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-    hipObjTest::FakeHip                      hip_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
+    hipObjTest::FakeDevice hipDevice_{};
+    hipObjTest::FakeVerbs  verbs_{hipDevice_};
+    hipObjTest::FakeHip    hip_{hipDevice_};
 };
 
 TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
 {
-    hipObj::BufferMap buffers({}, false);
+    hipObj::BufferMap buffers = makeBuffers();
     char              hostBuf[32]{};
 
     EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), reinterpret_cast<struct ibv_pd *>(1)), 0);
@@ -64,8 +56,8 @@ TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
 
 TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
 {
-    hipObj::BufferMap buffers({}, false);
-    void             *gpuBuf = reinterpret_cast<void *>(0x4000);
+    hipObj::BufferMap buffers = makeBuffers();
+    void             *gpuBuf  = reinterpret_cast<void *>(0x4000);
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)), 0);
     const auto *entry = buffers.find(gpuBuf);
@@ -79,7 +71,7 @@ TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
 
 TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
 {
-    hipObj::BufferMap buffers({}, false);
+    hipObj::BufferMap buffers    = makeBuffers();
     void             *gpuBuf     = reinterpret_cast<void *>(0x1000);
     hipDevice_.fail.registerAddr = gpuBuf;
 
@@ -103,7 +95,7 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
 TEST_F(BufferRegistrationTest, DestroyingFreesOwnedFallbackHostBuffers)
 {
     {
-        hipObj::BufferMap buffers({}, false);
+        hipObj::BufferMap buffers    = makeBuffers();
         void             *gpuBuf     = reinterpret_cast<void *>(0x2000);
         hipDevice_.fail.registerAddr = gpuBuf;
 
@@ -121,9 +113,9 @@ TEST_F(BufferRegistrationTest, DestroyingFreesOwnedFallbackHostBuffers)
  * reached directly */
 TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
 {
-    hipObj::BufferMap buffers({}, false);
-    auto             *pd     = reinterpret_cast<struct ibv_pd *>(1);
-    void             *gpuBuf = reinterpret_cast<void *>(0x3000);
+    hipObj::BufferMap buffers = makeBuffers();
+    auto             *pd      = reinterpret_cast<struct ibv_pd *>(1);
+    void             *gpuBuf  = reinterpret_cast<void *>(0x3000);
     char              hostBuf[32]{};
 
     EXPECT_EQ(buffers.registerBuffer(gpuBuf, hipObj::MAX_MR_SIZE + 1, pd), -1);
@@ -144,8 +136,8 @@ TEST_F(BufferRegistrationTest, FindsOnlyRegisteredBuffers)
     /* A fake address: registration is faked, so nothing reads or writes
      * it, and there's no object there to do pointer arithmetic in */
     constexpr uintptr_t kGpuAddr = 0x5000;
-    hipObj::BufferMap   buffers({}, false);
-    void               *gpuBuf = reinterpret_cast<void *>(kGpuAddr);
+    hipObj::BufferMap   buffers  = makeBuffers();
+    void               *gpuBuf   = reinterpret_cast<void *>(kGpuAddr);
 
     EXPECT_EQ(buffers.find(gpuBuf), nullptr);
     EXPECT_FALSE(buffers.isRegistered(gpuBuf));

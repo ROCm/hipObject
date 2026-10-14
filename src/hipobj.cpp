@@ -115,18 +115,18 @@ buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf, size_t 
     RdmaToken token;
     token.transport  = TransportType::RC;
     token.qpNum      = conn.qp->qp_num;
-    token.gid        = toGid(conn.localGid);
+    token.gid        = toGid(conn.device().localGid());
     token.rkey       = buf.mr->rkey;
     token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
     token.length     = size;
-    token.portNum    = conn.portNum;
+    token.portNum    = conn.device().portNum();
     token.lid        = 0;
     return token;
 }
 
 static int
-finishTransferAfterReply(RcConnection &conn, std::string_view reply, bool requiresDeviceSync,
-                         std::chrono::milliseconds pollTimeout)
+finishTransferAfterReply(const HipRuntime &runtime, RcConnection &conn, std::string_view reply,
+                         bool requiresDeviceSync, std::chrono::milliseconds pollTimeout)
 {
     if (const auto peerToken = parsePeerTokenFromReply(reply)) {
         if (connectRcPeer(conn, *peerToken) != 0) {
@@ -143,7 +143,7 @@ finishTransferAfterReply(RcConnection &conn, std::string_view reply, bool requir
     if (!requiresDeviceSync) {
         return 0;
     }
-    hipError_t err = hip().deviceSynchronize();
+    hipError_t err = runtime.deviceSynchronize();
     return (err == hipSuccess) ? 0 : -1;
 }
 
@@ -154,12 +154,12 @@ finishTransferAfterReply(RcConnection &conn, std::string_view reply, bool requir
  * still land. The caller gets an error instead of a hang, which is the
  * whole point. */
 static hipObjError_t
-stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice, std::chrono::milliseconds timeout)
+stageCopyWithDeadline(const HipRuntime &runtime, void *dev, void *host, size_t size, bool toDevice,
+                      std::chrono::milliseconds timeout)
 {
-    const HipRuntime   &runtime = hip();
-    const hipMemcpyKind kind    = toDevice ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
-    void               *dst     = toDevice ? dev : host;
-    const void         *src     = toDevice ? host : dev;
+    const hipMemcpyKind kind = toDevice ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
+    void               *dst  = toDevice ? dev : host;
+    const void         *src  = toDevice ? host : dev;
 
     hipEvent_t rawDone = nullptr;
     if (runtime.eventCreate(&rawDone) != hipSuccess) {
@@ -202,8 +202,8 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice, std::ch
 }
 
 static hipObjError_t
-stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t offset, bool toDevice,
-            std::chrono::milliseconds timeout)
+stageBuffer(const HipRuntime &runtime, void *devPtr, const BufferMap::BufEntry &buf, size_t size,
+            off_t offset, bool toDevice, std::chrono::milliseconds timeout)
 {
     if (!buf.hostBuf) {
         /* the NIC reads and writes the caller's memory */
@@ -216,8 +216,8 @@ stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t off
     const std::span<std::byte> host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
     const std::span<std::byte> dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
     const auto                 start = static_cast<size_t>(offset);
-    return stageCopyWithDeadline(dev.subspan(start, size).data(), host.subspan(start, size).data(), size,
-                                 toDevice, timeout);
+    return stageCopyWithDeadline(runtime, dev.subspan(start, size).data(), host.subspan(start, size).data(),
+                                 size, toDevice, timeout);
 }
 
 static hipObjError_t
@@ -237,8 +237,8 @@ runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
     if (!reply || reply->status != RdmaReplyStatus::Success) {
         return {hipObjS3Error, 0};
     }
-    if (finishTransferAfterReply(instance.conn, reply->text, buf.isDmabuf, instance.options.pollTimeout) !=
-        0) {
+    if (finishTransferAfterReply(instance.platform->hip(), instance.conn, reply->text, buf.isDmabuf,
+                                 instance.options.pollTimeout) != 0) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -342,13 +342,13 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    if (!hipObj::isValidDeviceRange(devPtr, size)) {
+    if (!hipObj::isValidDeviceRange(instance->platform->hip(), devPtr, size)) {
         return {hipObjInvalidValue, 0};
     }
     if (instance->buffers.isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = instance->buffers.registerBuffer(devPtr, size, instance->conn.pd.get());
+    int ret = instance->buffers.registerBuffer(devPtr, size, instance->device.pd());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -376,7 +376,7 @@ try {
     if (instance->buffers.isRegistered(hostPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = instance->buffers.registerHostBuffer(hostPtr, size, instance->conn.pd.get());
+    int ret = instance->buffers.registerHostBuffer(hostPtr, size, instance->device.pd());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -437,7 +437,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(devPtr, *buf, size, offset, true, instance->options.stageTimeout);
+    return hipObj::stageBuffer(instance->platform->hip(), devPtr, *buf, size, offset, true,
+                               instance->options.stageTimeout);
 }
 catch (...) {
     return hipObj::handleException();
@@ -463,8 +464,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::stageBuffer(const_cast<void *>(devPtr), *buf, size, offset, false,
-                              instance->options.stageTimeout);
+    err = hipObj::stageBuffer(instance->platform->hip(), const_cast<void *>(devPtr), *buf, size, offset,
+                              false, instance->options.stageTimeout);
     if (err.opError != hipObjSuccess) {
         return err;
     }
@@ -493,8 +494,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(devPtr, *buf, size, offset, direction == HIPOBJ_SYNC_TO_DEVICE,
-                               instance->options.stageTimeout);
+    return hipObj::stageBuffer(instance->platform->hip(), devPtr, *buf, size, offset,
+                               direction == HIPOBJ_SYNC_TO_DEVICE, instance->options.stageTimeout);
 }
 catch (...) {
     return hipObj::handleException();

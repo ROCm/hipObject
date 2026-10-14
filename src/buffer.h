@@ -49,11 +49,11 @@ struct HostBufDeleter {
 
 using HostBufPtr = std::unique_ptr<void, HostBufDeleter>;
 
-/* False when ptr is device memory and [ptr, ptr + size) doesn't fit inside
- * the HIP allocation that holds ptr, or when that allocation can't be
- * found. Memory the HIP runtime doesn't report as device memory passes:
- * registering it with the NIC checks that it's mapped. */
-bool isValidDeviceRange(void *ptr, size_t size);
+/* False when runtime reports ptr as device memory and [ptr, ptr + size)
+ * doesn't fit inside the allocation that holds ptr, or when that
+ * allocation can't be found. Memory the runtime doesn't report as device
+ * memory passes: registering it with the NIC checks that it's mapped. */
+bool isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size);
 
 class BufferMap {
 public:
@@ -88,13 +88,23 @@ public:
         }
     };
 
-    /* registerBuffer() registers GPU memory as dmabuf says, and with
-     * requireGpuDirect, fails rather than staging a GPU buffer the NIC
-     * can't reach through host memory */
-    BufferMap(const DmabufPolicy &dmabuf, bool requireGpuDirect) noexcept
-        : dmabuf_(dmabuf), requireGpuDirect_(requireGpuDirect)
+    /* Registers memory through verbs, and allocates host staging buffers
+     * from runtime, which both have to outlive it. registerBuffer()
+     * registers GPU memory as dmabuf says, and with requireGpuDirect, fails
+     * rather than staging a GPU buffer the NIC can't reach through host
+     * memory. */
+    BufferMap(const Verbs &verbs, const HipRuntime &runtime, const DmabufPolicy &dmabuf,
+              bool requireGpuDirect) noexcept
+        : verbs_(&verbs), runtime_(&runtime), dmabuf_(dmabuf), requireGpuDirect_(requireGpuDirect)
     {
     }
+    ~BufferMap() = default;
+
+    /* Lives in one place, and isn't copied or moved */
+    BufferMap(const BufferMap &)            = delete;
+    BufferMap &operator=(const BufferMap &) = delete;
+    BufferMap(BufferMap &&)                 = delete;
+    BufferMap &operator=(BufferMap &&)      = delete;
 
     int registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
     int registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
@@ -109,6 +119,8 @@ public:
     size_t size() const;
 
 private:
+    const Verbs                  *verbs_;
+    const HipRuntime             *runtime_;
     std::map<uintptr_t, BufEntry> entries_{};
     DmabufPolicy                  dmabuf_;
     bool                          requireGpuDirect_;

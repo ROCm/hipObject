@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -28,6 +29,7 @@
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
+#include "ibv-ptr.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
@@ -58,11 +60,32 @@ constexpr int kRtsMask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_
 
 class TransportTest : public hipObjTest::FakeDeviceTest {
 protected:
-    /* Opens the fake device and creates a QP on it */
-    static void open(hipObj::RcConnection &conn)
+    /* Opens the fake device in device_ */
+    void openDevice()
     {
-        ASSERT_EQ(hipObj::openRdmaDevice(0, conn), 0);
-        ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
+        std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+        ASSERT_TRUE(device);
+        device_.emplace(std::move(*device));
+    }
+
+    /* Opens the fake device, and creates a QP on it in conn_ */
+    void open()
+    {
+        ASSERT_NO_FATAL_FAILURE(openDevice());
+        conn_.emplace(*device_);
+        ASSERT_EQ(hipObj::createRcQp(*conn_, 16, 8, 8), 0);
+    }
+
+    /* A device on the fake context and protection domain, with gidIndex
+     * as its GID index */
+    hipObj::RdmaDevice deviceWithGidIndex(int gidIndex) const
+    {
+        return {verbs_,
+                hipObj::own<hipObj::IbvContextPtr>(verbs_, verbs_.open_device(nullptr)),
+                hipObj::own<hipObj::IbvPdPtr>(verbs_, verbs_.alloc_pd(nullptr)),
+                1,
+                gidIndex,
+                {}};
     }
 
     /* Every verbs object the fakes created has been destroyed */
@@ -80,25 +103,30 @@ protected:
         const hipObj::RdmaToken token = peerToken();
         EXPECT_EQ(hipObj::toGid(attr.ah_attr.grh.dgid), token.gid);
     }
+
+    /* conn_ is declared after device_, so it's destroyed first */
+    std::optional<hipObj::RdmaDevice>   device_{};
+    std::optional<hipObj::RcConnection> conn_{};
 };
 
 // ---- Opening the device ------------------------------------------
 
-TEST_F(TransportTest, OpenSetsUpContextAndPd)
+TEST_F(TransportTest, OpenSetsUpTheDevice)
 {
-    hipObj::RcConnection conn;
-    ASSERT_EQ(hipObj::openRdmaDevice(0, conn), 0);
-    EXPECT_TRUE(conn.ctx);
-    EXPECT_TRUE(conn.pd);
+    const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+    ASSERT_TRUE(device);
+    EXPECT_EQ(&device->verbs(), &verbs_);
+    EXPECT_NE(device->context(), nullptr);
+    EXPECT_NE(device->pd(), nullptr);
+    EXPECT_EQ(device->portNum(), 1);
     /* The fake port has no GIDs, so the first one is used */
-    EXPECT_EQ(conn.gidIndex, 0);
+    EXPECT_EQ(device->gidIndex(), 0);
 }
 
 TEST_F(TransportTest, OpenRejectsIndexOutsideDeviceList)
 {
     for (int index : {-1, 1}) {
-        hipObj::RcConnection conn;
-        EXPECT_EQ(hipObj::openRdmaDevice(index, conn), -1) << "index " << index;
+        EXPECT_FALSE(hipObj::openRdmaDevice(verbs_, topology_, index)) << "index " << index;
     }
     EXPECT_EQ(fake().log.openDevice, 0);
 }
@@ -106,19 +134,17 @@ TEST_F(TransportTest, OpenRejectsIndexOutsideDeviceList)
 TEST_F(TransportTest, OpenFailsWithoutDeviceList)
 {
     fake().fail.getDeviceList = true;
-    hipObj::RcConnection conn;
-    EXPECT_EQ(hipObj::openRdmaDevice(0, conn), -1);
-    EXPECT_EQ(hipObj::openRdmaDeviceByName("mlx5_0", conn), -1);
+    EXPECT_FALSE(hipObj::openRdmaDevice(verbs_, topology_, 0));
+    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs_, topology_, "mlx5_0"));
 }
 
 TEST_F(TransportTest, OpenByNameFindsOnlyThatDevice)
 {
-    hipObj::RcConnection conn;
-    EXPECT_EQ(hipObj::openRdmaDeviceByName(nullptr, conn), -1);
-    EXPECT_EQ(hipObj::openRdmaDeviceByName("mlx5_1", conn), -1);
+    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs_, topology_, nullptr));
+    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs_, topology_, "mlx5_1"));
     EXPECT_EQ(fake().log.openDevice, 0);
 
-    EXPECT_EQ(hipObj::openRdmaDeviceByName("mlx5_0", conn), 0);
+    EXPECT_TRUE(hipObj::openRdmaDeviceByName(verbs_, topology_, "mlx5_0"));
 }
 
 TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
@@ -127,12 +153,7 @@ TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
                                             &hipObjTest::Faults::queryPort, &hipObjTest::Faults::queryGid}) {
         resetFake();
         fake().fail.*fault = true;
-        {
-            hipObj::RcConnection conn;
-            EXPECT_EQ(hipObj::openRdmaDevice(0, conn), -1);
-            EXPECT_FALSE(conn.ctx);
-            EXPECT_FALSE(conn.pd);
-        }
+        EXPECT_FALSE(hipObj::openRdmaDevice(verbs_, topology_, 0));
         expectNothingLeaked();
     }
 }
@@ -141,9 +162,9 @@ TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
 
 TEST_F(TransportTest, CreateQpReleasesCqWhenQpCreationFails)
 {
+    ASSERT_NO_FATAL_FAILURE(openDevice());
     {
-        hipObj::RcConnection conn;
-        ASSERT_EQ(hipObj::openRdmaDevice(0, conn), 0);
+        hipObj::RcConnection conn(*device_);
         fake().fail.createQp = true;
         EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), -1);
         EXPECT_FALSE(conn.qp);
@@ -153,30 +174,36 @@ TEST_F(TransportTest, CreateQpReleasesCqWhenQpCreationFails)
         fake().fail.createCq = true;
         EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), -1);
     }
+    device_.reset();
     expectNothingLeaked();
 }
 
 TEST_F(TransportTest, DestroyingReleasesEverything)
 {
-    {
-        hipObj::RcConnection conn;
-        ASSERT_NO_FATAL_FAILURE(open(conn));
-        EXPECT_EQ(fake().log.destroyQp, 0);
-    }
+    ASSERT_NO_FATAL_FAILURE(open());
+    EXPECT_EQ(&conn_->device(), &*device_);
+    EXPECT_EQ(fake().log.destroyQp, 0);
+
+    /* The connection doesn't own its device */
+    conn_.reset();
     EXPECT_EQ(fake().log.destroyQp, 1);
+    EXPECT_EQ(fake().log.destroyCq, 1);
+    EXPECT_EQ(fake().log.deallocPd, 0);
+    EXPECT_EQ(fake().log.closeDevice, 0);
+
+    device_.reset();
     expectNothingLeaked();
 }
 
 TEST_F(TransportTest, InitTransitionGrantsRemoteReadAndWrite)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
-    ASSERT_EQ(hipObj::transitionQpToInit(conn), 0);
+    ASSERT_NO_FATAL_FAILURE(open());
+    ASSERT_EQ(hipObj::transitionQpToInit(*conn_), 0);
 
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
     ASSERT_EQ(calls.size(), 1U);
     EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_INIT);
-    EXPECT_EQ(calls[0].attr.port_num, conn.portNum);
+    EXPECT_EQ(calls[0].attr.port_num, device_->portNum());
     EXPECT_EQ(calls[0].attr.pkey_index, 0);
     EXPECT_EQ(calls[0].mask, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
     /* The peer reads the buffer for a PUT and writes it for a GET, and
@@ -189,10 +216,9 @@ TEST_F(TransportTest, InitTransitionGrantsRemoteReadAndWrite)
 
 TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
+    ASSERT_NO_FATAL_FAILURE(open());
     const hipObj::RdmaToken token = peerToken();
-    ASSERT_EQ(hipObj::connectRcPeer(conn, token), 0);
+    ASSERT_EQ(hipObj::connectRcPeer(*conn_, token), 0);
 
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
     ASSERT_EQ(calls.size(), 2U);
@@ -207,8 +233,8 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
     EXPECT_EQ(rtr.min_rnr_timer, 12);
     EXPECT_EQ(rtr.ah_attr.is_global, 1);
     EXPECT_EQ(rtr.ah_attr.dlid, token.lid);
-    EXPECT_EQ(rtr.ah_attr.port_num, conn.portNum);
-    EXPECT_EQ(rtr.ah_attr.grh.sgid_index, conn.gidIndex);
+    EXPECT_EQ(rtr.ah_attr.port_num, device_->portNum());
+    EXPECT_EQ(rtr.ah_attr.grh.sgid_index, device_->gidIndex());
     EXPECT_EQ(rtr.ah_attr.grh.hop_limit, 64);
     expectPeerGid(rtr);
 
@@ -224,31 +250,29 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
 
 TEST_F(TransportTest, ConnectRejectsPeerThatIsNotRc)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
-    EXPECT_EQ(hipObj::connectRcPeer(conn, peerToken(hipObj::TransportType::DC)), -1);
+    ASSERT_NO_FATAL_FAILURE(open());
+    EXPECT_EQ(hipObj::connectRcPeer(*conn_, peerToken(hipObj::TransportType::DC)), -1);
     EXPECT_EQ(fake().modifyQpCount, 0U);
 }
 
 TEST_F(TransportTest, ConnectNeedsQp)
 {
-    hipObj::RcConnection conn;
-    ASSERT_EQ(hipObj::openRdmaDevice(0, conn), 0);
+    ASSERT_NO_FATAL_FAILURE(openDevice());
+    hipObj::RcConnection conn(*device_);
     EXPECT_EQ(hipObj::connectRcPeer(conn, peerToken()), -1);
     EXPECT_EQ(fake().modifyQpCount, 0U);
 }
 
 TEST_F(TransportTest, ConnectStopsAtFailedTransition)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
+    ASSERT_NO_FATAL_FAILURE(open());
     fake().fail.modifyQpToState = IBV_QPS_RTR;
-    EXPECT_NE(hipObj::connectRcPeer(conn, peerToken()), 0);
+    EXPECT_NE(hipObj::connectRcPeer(*conn_, peerToken()), 0);
     EXPECT_EQ(fake().modifyQpCount, 1U);
 
     fake().modifyQpCount        = 0;
     fake().fail.modifyQpToState = IBV_QPS_RTS;
-    EXPECT_NE(hipObj::connectRcPeer(conn, peerToken()), 0);
+    EXPECT_NE(hipObj::connectRcPeer(*conn_, peerToken()), 0);
     EXPECT_EQ(fake().modifyQpCount, 2U);
 }
 
@@ -256,16 +280,18 @@ TEST_F(TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
 {
     /* The address handle holds the GID index in a uint8_t, so anything
      * outside [0, 255] must be refused, not truncated */
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
     ibv_gid gid{};
     for (int index : {-1, 256, 0x10000}) {
-        conn.gidIndex = index;
+        const hipObj::RdmaDevice device = deviceWithGidIndex(index);
+        hipObj::RcConnection     conn(device);
+        ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
         EXPECT_EQ(hipObj::transitionQpToRtr(conn, 1, 0, gid), -1) << "index " << index;
     }
     EXPECT_EQ(fake().modifyQpCount, 0U);
 
-    conn.gidIndex = 255;
+    const hipObj::RdmaDevice device = deviceWithGidIndex(255);
+    hipObj::RcConnection     conn(device);
+    ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
     ASSERT_EQ(hipObj::transitionQpToRtr(conn, 1, 0, gid), 0);
     EXPECT_EQ(modifyQpCalls().at(0).attr.ah_attr.grh.sgid_index, 255);
 }
@@ -285,10 +311,9 @@ class VendorQpTest : public TransportTest, public ::testing::WithParamInterface<
 
 TEST_P(VendorQpTest, RtrHasVendorAttributes)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
+    ASSERT_NO_FATAL_FAILURE(open());
     fake().vendorId = GetParam().vendorId;
-    ASSERT_EQ(hipObj::connectRcPeer(conn, peerToken()), 0);
+    ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
 
     const struct ibv_qp_attr rtr = modifyQpCalls().at(0).attr;
     if (GetParam().configured) {
@@ -323,11 +348,10 @@ INSTANTIATE_TEST_SUITE_P(Transport, VendorQpTest, ::testing::ValuesIn(kVendorCas
 
 TEST_F(TransportTest, NoVendorAttributesWhenDeviceQueryFails)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
+    ASSERT_NO_FATAL_FAILURE(open());
     fake().vendorId         = hipObj::VENDOR_ID_BROADCOM;
     fake().fail.queryDevice = true;
-    ASSERT_EQ(hipObj::connectRcPeer(conn, peerToken()), 0);
+    ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
     EXPECT_EQ(modifyQpCalls().at(0).attr.timeout, 0);
 }
 
@@ -335,46 +359,43 @@ TEST_F(TransportTest, NoVendorAttributesWhenDeviceQueryFails)
 
 TEST_F(TransportTest, PollReturnsOnCompletion)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), 0);
+    ASSERT_NO_FATAL_FAILURE(open());
+    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)), 0);
     fake().pollOpcode = IBV_WC_RDMA_READ;
-    EXPECT_EQ(hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::seconds(1)), 0);
+    EXPECT_EQ(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::seconds(1)), 0);
 }
 
 TEST_F(TransportTest, PollNeedsCq)
 {
-    hipObj::RcConnection conn;
+    ASSERT_NO_FATAL_FAILURE(openDevice());
+    hipObj::RcConnection conn(*device_);
     EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), -1);
 }
 
 TEST_F(TransportTest, PollFailsOnErrorCompletion)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
+    ASSERT_NO_FATAL_FAILURE(open());
     fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), -1);
+    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)), -1);
 }
 
 TEST_F(TransportTest, PollFailsWhenPollingFails)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
+    ASSERT_NO_FATAL_FAILURE(open());
     fake().pollResult = -1;
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), -1);
+    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)), -1);
 }
 
 TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
+    ASSERT_NO_FATAL_FAILURE(open());
     /* Nothing completes */
     fake().pollResult = 0;
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::milliseconds(10)), -1);
+    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::milliseconds(10)), -1);
     /* Only other work completes */
     fake().pollResult = 1;
     fake().pollOpcode = IBV_WC_SEND;
-    EXPECT_EQ(hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::milliseconds(10)), -1);
+    EXPECT_EQ(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::milliseconds(10)), -1);
 }
 
 // ---- hipObjInit --------------------------------------------------

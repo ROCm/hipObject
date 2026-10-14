@@ -148,9 +148,13 @@ parseOptions(const EnvLookup &lookup)
     return options;
 }
 
-Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions) noexcept
-    : platform(std::move(instancePlatform)), options(instanceOptions),
-      buffers(instanceOptions.dmabuf, instanceOptions.requireGpuDirect)
+/* The members are initialized in the order they're declared, so the
+ * connection and the buffers use the members, not the arguments moved
+ * into them */
+Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
+                   RdmaDevice instanceDevice) noexcept
+    : platform(std::move(instancePlatform)), options(instanceOptions), device(std::move(instanceDevice)),
+      conn(device), buffers(platform->verbs(), platform->hip(), options.dmabuf, options.requireGpuDirect)
 {
 }
 
@@ -204,7 +208,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     }
     std::optional<RdmaNic> nic;
     if (gpuDevice >= 0) {
-        nic = GetClosestNicToGpu(gpuDevice, config.nicHint);
+        nic = GetClosestNicToGpu(runtime, platform->topology(), gpuDevice, config.nicHint);
     }
     if (!nic) {
         // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
@@ -218,12 +222,16 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         }
     }
 
-    /* The instance is built in a local, which releases what it holds if
-     * anything fails or throws. It's only published once nothing else
-     * can. */
-    auto instance = std::make_shared<Instance>(std::move(platform), options);
-    if (openRdmaDeviceByName(nic->name.c_str(), instance->conn) != 0 ||
-        createRcQp(instance->conn, 256, 128, 128) != 0 || transitionQpToInit(instance->conn) != 0) {
+    /* The device and then the instance are built in locals, which release
+     * what they hold if anything fails or throws. The instance is only
+     * published once nothing else can. */
+    std::optional<RdmaDevice> device =
+        openRdmaDeviceByName(platform->verbs(), platform->topology(), nic->name.c_str());
+    if (!device) {
+        return {hipObjRdmaError, 0};
+    }
+    auto instance = std::make_shared<Instance>(std::move(platform), options, std::move(*device));
+    if (createRcQp(instance->conn, 256, 128, 128) != 0 || transitionQpToInit(instance->conn) != 0) {
         return {hipObjRdmaError, 0};
     }
     instance->gpuDevice = gpuDevice;
