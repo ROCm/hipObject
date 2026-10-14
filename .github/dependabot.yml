@@ -1,20 +1,24 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Dependabot version updates. See
+# https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
 
 version: 2
 updates:
   - package-ecosystem: "github-actions"
+    # "/" covers .github/workflows; composite actions keep their own `uses:`
+    # pins, so .github/actions has to be listed separately to get bumped.
     directory: "/"
     schedule:
-      interval: "weekly"
-    # Wait a week before proposing a newly published release, so a
-    # compromised or broken one has time to be caught and pulled first.
-    # Security updates are not delayed by this.
+      interval: "daily"
+      # Wait a week before adopting newly released action versions.
     cooldown:
       default-days: 7
+      exclude:
+        - "ROCm/rocm-security-gh*"
     groups:
+      rocm-security-gh:
+        patterns: ["ROCm/rocm-security-gh*"]
       github-actions:
-        patterns:
-          - "*"
+        patterns: ["*"]

@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: MIT
 #
 # Pre-commit security gate: fast, PR-side security scanners that run on
-# every pull request. The security counterpart to `pre-commit.yml`. The
-# set of scanners lives in `security-baseline.yml`, so scanners coming
-# online are picked up here without touching this file.
+# every pull request. Scanner selection and policy are defined by the pinned
+# ROCm/rocm-security-gh `security-baseline.yml` reusable workflow.
 #
 # Requests human-readable reports only: findings are uploaded as a build
 # artifact and printed to the job summary, never to the Security tab, so
@@ -22,18 +21,18 @@ on:
 permissions:
   contents: read
 
-# A newer commit on a pull request cancels the run for the older one.
-# Every other run gets a group of its own: in a shared group, a newer run
-# replaces a pending one even without cancel-in-progress, which would
-# leave a commit unscanned.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   security:
     name: Security scan
-    uses: ROCm/rocm-security-gh/.github/workflows/security-baseline.yml@32809e0da73e06ecf1f42f86cce258474d3a287a # v1.0.4
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    uses: ROCm/rocm-security-gh/.github/workflows/security-baseline.yml@228e62369c5d8b677215f8a112ea0c8e8119c58f # v1.0.6
     with:
       report_formats: human
       bandit_config_path: .github/scan_tools_configs/bandit.yml
