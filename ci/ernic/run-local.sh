@@ -11,11 +11,11 @@
 # that (EXPECT_TRANSPORT=http). For the RDMA topologies see the
 # hipobject-hardware-test-*.yml lanes, which boot guest VMs.
 #
-#   ci/ernic/run-local.sh                       # two-VM test, use build-v1 binaries
-#   ci/ernic/run-local.sh --rebuild             # two-VM test, force ROCm container build
-#   ci/ernic/run-local.sh --minio-v1            # minio-cpp test, use build-minio binaries
-#   ci/ernic/run-local.sh --minio-v1 --rebuild  # minio-cpp test, force build
-#   ci/ernic/run-local.sh --s3-backend          # rocm-ernic --backend s3 test (requires --privileged)
+#   ci/ernic/run-local.sh                    # two-VM test, use build-minio binaries
+#   ci/ernic/run-local.sh --rebuild          # two-VM test, force ROCm container build
+#   ci/ernic/run-local.sh --minio            # minio-cpp test, use build-minio binaries
+#   ci/ernic/run-local.sh --minio --rebuild  # minio-cpp test, force build
+#   ci/ernic/run-local.sh --s3-backend       # rocm-ernic --backend s3 test (requires --privileged)
 
 set -euo pipefail
 
@@ -25,13 +25,13 @@ ROCJITSU_IMAGE=${ROCJITSU_IMAGE:-sbates130272/batesste-ci-images-ubuntu-rocm-roc
 ROCM_IMAGE=rocm/dev-ubuntu-24.04:7.14.0-full
 AMD_CA_CERT=/home/stebates/Projects/batesste-ci-images/common/amd-root-ca.crt
 
-MINIO_V1=false
+MINIO=false
 S3_BACKEND=false
 REBUILD=false
 
 for arg in "$@"; do
     case "${arg}" in
-        --minio-v1)    MINIO_V1=true    ;;
+        --minio)       MINIO=true       ;;
         --s3-backend)  S3_BACKEND=true  ;;
         --rebuild)     REBUILD=true     ;;
         *) echo "Unknown argument: ${arg}"; exit 1 ;;
@@ -40,8 +40,8 @@ done
 
 # ── two-VM test ───────────────────────────────────────────────────────────────
 
-run_two_vm_v1() {
-    local BUILD_DIR="${REPO}/build-v1"
+run_two_vm() {
+    local BUILD_DIR="${REPO}/build-minio"
 
     if [ "${REBUILD}" = true ]; then
         BUILD_DIR=/tmp/ernic-rebuild
@@ -52,10 +52,10 @@ run_two_vm_v1() {
     else
         if [ ! -x "${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server" ]; then
             echo "ERROR: ${BUILD_DIR}/test/integration/rdma-test-server/hipobj-rdma-test-server not found"
-            echo "Run 'cmake --build build-v1 --target hipobj-rdma-test-server minio-getput-rdma' first"
+            echo "Run 'cmake --build build-minio --target hipobj-rdma-test-server minio-getput-rdma' first"
             exit 1
         fi
-        echo "=== Using existing build-v1 binaries ==="
+        echo "=== Using existing build-minio binaries ==="
     fi
 
     chmod +x "${REPO}/ci/ernic/server-entrypoint.sh" \
@@ -99,7 +99,7 @@ run_two_vm_v1() {
 
 # ── minio-cpp test ────────────────────────────────────────────────────────────
 
-run_minio_v1() {
+run_minio() {
     local BUILD_DIR="${REPO}/build-minio"
 
     if [ "${REBUILD}" = true ]; then
@@ -117,8 +117,8 @@ run_minio_v1() {
         echo "=== Using existing build-minio binaries ==="
     fi
 
-    chmod +x "${REPO}/ci/ernic/server-v1-entrypoint.sh" \
-             "${REPO}/ci/ernic/minio-v1-client-entrypoint.sh"
+    chmod +x "${REPO}/ci/ernic/minio-server-entrypoint.sh" \
+             "${REPO}/ci/ernic/minio-client-entrypoint.sh"
 
     VFIO_SOCK_DIR="$(mktemp -d /tmp/vfio-sockets-XXXXX)"
 
@@ -126,10 +126,10 @@ run_minio_v1() {
 
     cleanup() {
         echo "=== Server logs ==="
-        docker logs ernic-server-v1-local 2>&1 || true
+        docker logs ernic-minio-server-local 2>&1 || true
         echo "=== rocjitsu logs ==="
         docker logs rocjitsu-local 2>&1 || true
-        docker rm -f ernic-server-v1-local rocjitsu-local 2>/dev/null || true
+        docker rm -f ernic-minio-server-local rocjitsu-local 2>/dev/null || true
         docker network rm ernic-minio-local-net 2>/dev/null || true
         rm -rf "${VFIO_SOCK_DIR}"
     }
@@ -147,15 +147,15 @@ run_minio_v1() {
 
     echo "=== Starting ernic server ==="
     docker run -d \
-        --name ernic-server-v1-local \
+        --name ernic-minio-server-local \
         --hostname ernic-server \
         --network ernic-minio-local-net \
         -v "${BUILD_DIR}:/hipobject-build:ro" \
         -v "${REPO}:/hipobject:ro" \
-        --entrypoint /hipobject/ci/ernic/server-v1-entrypoint.sh \
+        --entrypoint /hipobject/ci/ernic/minio-server-entrypoint.sh \
         "$ERNIC_IMAGE"
 
-    _wait_for_server ernic-server-v1-local 9000
+    _wait_for_server ernic-minio-server-local 9000
 
     echo "=== Running ernic minio-cpp client ==="
     docker run --rm \
@@ -169,7 +169,7 @@ run_minio_v1() {
         -e ROCJITSU_SOCKET=/tmp/vfio-sockets/rocjitsu.sock \
         -e START_ERNIC=true \
         -e EXPECT_TRANSPORT=http \
-        --entrypoint /hipobject/ci/ernic/minio-v1-client-entrypoint.sh \
+        --entrypoint /hipobject/ci/ernic/minio-client-entrypoint.sh \
         "$ERNIC_IMAGE"
 }
 
@@ -273,8 +273,8 @@ run_s3_backend() {
 
 if [ "${S3_BACKEND}" = true ]; then
     run_s3_backend
-elif [ "${MINIO_V1}" = true ]; then
-    run_minio_v1
+elif [ "${MINIO}" = true ]; then
+    run_minio
 else
-    run_two_vm_v1
+    run_two_vm
 fi
