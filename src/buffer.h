@@ -72,7 +72,6 @@ public:
          * ibv_reg_dmabuf_mr leaves that NULL, and on the bounce path it
          * is the host staging buffer rather than the caller's pointer. */
         uint64_t remoteAddr = 0;
-        size_t   refCount   = 0; /* pinned by live v2 connections */
 
         BufEntry()                            = default;
         ~BufEntry()                           = default;
@@ -97,15 +96,6 @@ public:
     const BufEntry *find(const void *devPtr) const;
     bool            isRegistered(const void *devPtr) const;
 
-#ifdef HIPOBJECT_V2_API
-    /* v2: the shared device may close only when no MR and no
-     * connection remain. Connections pin the buffers they transfer
-     * with ref entries. */
-    bool   acquireMrRef(void *devPtr);
-    bool   releaseMrRef(void *devPtr);
-    size_t mrRefCount(void *devPtr) const;
-    bool   anyPinned() const;
-#endif
     size_t size() const;
 
 private:

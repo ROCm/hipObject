@@ -49,13 +49,7 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
     GTest::gtest
     GTest::gtest_main
   )
-  if(TARGET hipobj_v2_server_objects)
-    target_link_libraries(${TEST_NAME} PRIVATE hipobj_v2_server_objects)
-  endif()
   target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_UNIT_TESTS)
-  if(HIPOBJECT_V2_API)
-    target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJECT_V2_API)
-  endif()
   # So tests know which vendor backends hipobj_test_objects has
   if(HIPOBJ_BNXT)
     target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_BNXT)

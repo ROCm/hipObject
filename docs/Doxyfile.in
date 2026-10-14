@@ -46,12 +46,6 @@ PREDEFINED             = HIPOBJ_API= \
 ALIASES                = "serialized=@par Thread safety^^Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See @ref threads." \
                          "concurrent=@par Thread safety^^Concurrent: can be called from any thread at any time, including from a callback, as long as calls that run at the same time don't share a buffer that one of them writes to or a token that one of them releases. See @ref threads."
 
-# The hipobj-rc-v2 API surface in hipobj.h is gated on
-# HIPOBJECT_V2_API. CMake appends a "PREDEFINED +=" line
-# here when that build option is on (the default), so the
-# v2 declarations stay in the generated reference.
-@HIPOBJ_DOXYGEN_PREDEFINED@
-
 # Source browsing (available via Breathe)
 SOURCE_BROWSER         = YES
 INLINE_SOURCES         = NO

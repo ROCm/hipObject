@@ -21,31 +21,6 @@ target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 # hipobj_add_test_executable()). NEVER REMOVE IT.
 target_compile_options(hipobj_test_objects PRIVATE -pthread)
 
-if(HIPOBJECT_V2_API)
-  # Server-side v2 sources for the session/handler unit tests.
-  set(HIPOBJ_V2_SERVER_SOURCES
-    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_request.cpp
-    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_session.cpp
-    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_handlers.cpp
-    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_data_phase.cpp
-    ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server/v2_backend.cpp)
-
-  hipobj_add_library(
-    NAME hipobj_v2_server_objects
-    TYPE OBJECT
-    SRCS ${HIPOBJ_V2_SERVER_SOURCES})
-  target_include_directories(hipobj_v2_server_objects
-    PRIVATE
-      ${PROJECT_SOURCE_DIR}/include
-      ${PROJECT_SOURCE_DIR}/shared
-      ${PROJECT_SOURCE_DIR}/src
-      ${PROJECT_SOURCE_DIR}/src/common
-      ${PROJECT_SOURCE_DIR}/src/rdma
-      ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server)
-  # Like hipobj_test_objects. NEVER REMOVE IT.
-  target_compile_options(hipobj_v2_server_objects PRIVATE -pthread)
-endif()
-
 target_include_directories(hipobj_test_objects
   PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -67,9 +42,6 @@ if(HIPOBJ_BNXT)
 endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_IONIC)
-endif()
-if(HIPOBJECT_V2_API)
-  target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJECT_V2_API)
 endif()
 
 # A test that runs against the fake RDMA device and HIP runtime in
@@ -159,29 +131,6 @@ set_tests_properties(test-http-server PROPERTIES TIMEOUT 60)
 # The RDMA test server's x-amz-rdma-token parsing
 hipobj_add_test(test-token-header
   test-token-header.cpp)
-
-if(HIPOBJECT_V2_API)
-  hipobj_add_test(test-v2-wire
-    test-v2-wire.cpp)
-
-  hipobj_add_test(test-v2-state
-    test-v2-state.cpp)
-
-  hipobj_add_fake_device_test(test-v2-registry
-    test-v2-registry.cpp)
-
-  hipobj_add_fake_device_test(test-v2-random
-    test-v2-random.cpp)
-
-  hipobj_add_fake_device_test(test-v2-conflict
-    test-v2-conflict.cpp)
-
-  hipobj_add_fake_device_test(test-v2-server
-    test-v2-server.cpp)
-
-  hipobj_add_fake_device_test(test-v2-connref
-    test-v2-connref.cpp)
-endif()
 
 hipobj_add_fake_device_test(test-seams
   test-seams.cpp)

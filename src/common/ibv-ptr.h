@@ -6,14 +6,11 @@
 /* Owning smart pointers for ibverbs objects.
  *
  * Each deleter releases its object through ibv() and ignores
- * the verb's return code, so a deleter is only the last-resort cleanup.
- * Teardown that has to react to a failed destroy (the v2 poison/retry
- * paths) calls ibvDestroy() instead, which gives up ownership only when
- * the verb succeeded.
+ * the verb's return code.
  *
  * Never assign nullptr to one of these pointers after destroying the
  * object by hand: the assignment runs the deleter and destroys it a
- * second time. Use ibvDestroy() or dropOwnership() instead. */
+ * second time. Use dropOwnership() instead. */
 
 #pragma once
 
@@ -72,12 +69,6 @@ deviceSpan(const IbvDeviceListPtr &list, int count) noexcept
     }
     return spanFromPointer(list.get(), static_cast<size_t>(count));
 }
-
-/* Destroys the object and gives up ownership only when the verb
- * succeeded. On failure the pointer still owns the object so a retry
- * can find it. Returns the verb's result (0 for an empty pointer). */
-int ibvDestroy(IbvQpPtr &qp);
-int ibvDestroy(IbvCqPtr &cq);
 
 /* Gives up ownership without running the deleter, for an object that
  * was already destroyed some other way or is deliberately leaked */

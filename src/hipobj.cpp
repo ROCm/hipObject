@@ -22,7 +22,6 @@
 #include <string_view>
 #include <thread>
 #include <utility>
-#include <vector>
 
 #include <hip/hip_runtime_api.h>
 
@@ -42,11 +41,6 @@
 #include "state.h"
 #include "token.h"
 #include "transport.h"
-#ifdef HIPOBJECT_V2_API
-#include "v2-registry.h"
-#include "v2-transport.h"
-#include "v2-wire.h"
-#endif
 
 namespace hipObj {
 
@@ -291,134 +285,6 @@ runRdmaTransfer(const BufferMap::BufEntry &buf, size_t size, off_t offset, hipOb
     return {hipObjSuccess, 0};
 }
 
-#ifdef HIPOBJECT_V2_API
-/* The most any S3 service allows: AWS once allowed 255-character bucket
- * names, and object keys are at most 1024 bytes */
-constexpr size_t kMaxBucketLenV2 = 255;
-constexpr size_t kMaxKeyLenV2    = 1024;
-
-/* True for a non-empty string of at most maxLen bytes. Scans at most
- * maxLen + 1 bytes. */
-static bool
-isValidNameV2(const char *name, size_t maxLen)
-{
-    if (!name) {
-        return false;
-    }
-    const size_t len = cStringView(name, maxLen + 1).size();
-    return len > 0 && len <= maxLen;
-}
-
-/* The characters RFC 3986 leaves unreserved, which a canonical query
- * never escapes */
-static bool
-isUnreserved(char c)
-{
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
-           c == '.' || c == '_' || c == '~';
-}
-
-/* The value of an uppercase hex digit, or -1 for anything else */
-static int
-upperHexValue(char c)
-{
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-    return -1;
-}
-
-/* True when every character of a query key or value is unreserved or part
- * of a %XX escape with uppercase hex digits for a byte that isn't
- * unreserved */
-static bool
-isEncodedQueryComponent(std::string_view component)
-{
-    for (size_t i = 0; i < component.size(); ++i) {
-        const char c = component[i];
-        if (isUnreserved(c)) {
-            continue;
-        }
-        if (c != '%' || component.size() - i < 3) {
-            return false;
-        }
-        const int hi = upperHexValue(component[i + 1]);
-        const int lo = upperHexValue(component[i + 2]);
-        if (hi < 0 || lo < 0 || isUnreserved(static_cast<char>((hi << 4) | lo))) {
-            return false;
-        }
-        i += 2;
-    }
-    return true;
-}
-
-/* A canonical query string, in the SigV4 form the V2 target uses, is a
- * list of key=value parameters separated by '&', with the '=' present
- * even when the value is empty. Keys and values are percent-encoded with
- * uppercase hex digits, escaping only the characters that aren't
- * unreserved, and the parameters are sorted by key and then by value. The
- * string goes into the request as is, so anything else, such as a space
- * or a CR or LF, is rejected. NULL and "" mean no query. */
-static bool
-isValidCanonicalQueryV2(const char *query)
-{
-    if (!query || *query == '\0') {
-        return true;
-    }
-    const std::string_view all(query);
-    std::string_view       prevKey;
-    std::string_view       prevValue;
-    size_t                 start = 0;
-    for (;;) {
-        const size_t           end   = all.find('&', start);
-        const std::string_view param = all.substr(start, end == std::string_view::npos ? end : end - start);
-        const size_t           eq    = param.find('=');
-        if (eq == std::string_view::npos) {
-            return false;
-        }
-        const std::string_view key   = param.substr(0, eq);
-        const std::string_view value = param.substr(eq + 1);
-        if (key.empty() || !isEncodedQueryComponent(key) || !isEncodedQueryComponent(value)) {
-            return false;
-        }
-        if (start > 0 && (key < prevKey || (key == prevKey && value < prevValue))) {
-            return false;
-        }
-        if (end == std::string_view::npos) {
-            return true;
-        }
-        prevKey   = key;
-        prevValue = value;
-        start     = end + 1;
-    }
-}
-
-/* Checks the arguments to hipObjGetV2() and hipObjPutV2() */
-static hipObjError_t
-checkTransferArgsV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
-                    const char *query, const hipObjOpsV2_t *ops)
-{
-    if (!isValidNameV2(bucket, kMaxBucketLenV2) || !isValidNameV2(key, kMaxKeyLenV2) || !devPtr ||
-        size == 0 || !isValidCanonicalQueryV2(query)) {
-        return {hipObjInvalidValue, 0};
-    }
-    if (!ops || !ops->sendPrepare || !ops->sendReady || !ops->sendCancel) {
-        return {hipObjInvalidValue, 0};
-    }
-    if (size > v2::kMaxTransferSize) {
-        return {hipObjSizeTooLarge, 0};
-    }
-    /* The end of the object range, offset + size, must not wrap */
-    if (offset > std::numeric_limits<uint64_t>::max() - size) {
-        return {hipObjInvalidValue, 0};
-    }
-    return {hipObjSuccess, 0};
-}
-#endif /* HIPOBJECT_V2_API */
-
 } // namespace hipObj
 
 extern "C" {
@@ -452,12 +318,6 @@ hipObjGetErrorString(hipObjOpError_t err)
                 return "Size too large";
             case hipObjInternalError:
                 return "Internal error";
-#ifdef HIPOBJECT_V2_API
-            case hipObjNotSupported:
-                return "hipobj-rc-v2 not supported by server";
-            case hipObjBusy:
-                return "Server busy (backpressure)";
-#endif /* HIPOBJECT_V2_API */
             default:
                 return "Unknown error";
         }
@@ -567,23 +427,6 @@ try {
     if (!state.initialized) {
         return {hipObjSuccess, 0};
     }
-#ifdef HIPOBJECT_V2_API
-    /* v2 first: release every connection (destroy retries included);
-     * leftover poison must stop the teardown so the failure is
-     * visible instead of violating the PD/context lifetime rule. */
-    bool                            poisonLeft = false;
-    hipObj::v2::ConnectionRegistry &reg        = hipObj::v2::registry();
-    std::vector<hipObj::v2::ConnId> ids;
-    reg.forEachId([&ids](hipObj::v2::ConnId id) { ids.push_back(id); });
-    for (auto id : ids) {
-        if (hipObj::v2::releaseConnection(id) == hipObj::v2::ReleaseResult::Leftover) {
-            poisonLeft = true;
-        }
-    }
-    if (poisonLeft || reg.size() > 0) {
-        return {hipObjRdmaError, 0};
-    }
-#endif /* HIPOBJECT_V2_API */
     hipObj::g_bufferMap->deregisterAll();
     hipObj::closeRdmaDevice(*hipObj::g_conn);
     state.initialized = false;
@@ -868,45 +711,5 @@ try {
 catch (...) {
     return "0.0.0";
 }
-
-#ifdef HIPOBJECT_V2_API
-// Not implemented yet. The arguments are checked, then callers are told
-// to fall back to the v1 RDMA path.
-hipObjError_t
-hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
-try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
-    hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
-    if (err.opError != hipObjSuccess) {
-        return err;
-    }
-    return {hipObjNotSupported, 0};
-}
-catch (...) {
-    return hipObj::handleException();
-}
-
-hipObjError_t
-hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
-try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
-    hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
-    if (err.opError != hipObjSuccess) {
-        return err;
-    }
-    return {hipObjNotSupported, 0};
-}
-catch (...) {
-    return hipObj::handleException();
-}
-#endif /* HIPOBJECT_V2_API */
 
 } // extern "C"

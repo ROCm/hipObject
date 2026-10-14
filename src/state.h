@@ -36,7 +36,7 @@ DriverState *setStateForTest(DriverState *state);
  * hipobj.h) takes it on its first line and holds it for the whole call,
  * so the library runs one such call at a time. That includes every
  * function that reads or changes library state: the driver state, the
- * buffer map, the RDMA connection, and the v2 registry.
+ * buffer map, and the RDMA connection.
  *
  * hipObjGet() and hipObjPut() call the application's callbacks with the
  * lock held, and the lock isn't recursive, so a callback that called a

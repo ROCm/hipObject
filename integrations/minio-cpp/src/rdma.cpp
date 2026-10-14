@@ -7,10 +7,8 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <list>
 #include <memory>
 #include <optional>
-#include <span>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -25,7 +23,6 @@
 #include <miniocpp/utils.h>
 
 #include "bytes-transferred.h"
-#include "hipobj-span.h"
 #include "hipobj_minio/context.h"
 
 namespace hipobj::minio {
@@ -111,275 +108,6 @@ namespace {
 
     using RdmaTokenPtr = std::unique_ptr<char, RdmaTokenDeleter>;
 
-    // ---------------------------------------------------------------------------
-    // v2 callback context — carries the per-transfer minio credentials and
-    // endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
-    // ---------------------------------------------------------------------------
-
-#ifdef HIPOBJECT_V2_API
-
-    // Copies src into the C string buffer dst, cut to fit
-    void copyCString(std::span<char> dst, const std::string &src)
-    {
-        std::snprintf(dst.data(), dst.size(), "%s", src.c_str());
-    }
-
-    struct V2CallbackCtx {
-        S3RdmaContext *sctx;
-        std::string    clientNic; // NIC hint derived from the client token
-    };
-
-    minio::http::Response executeV2Request(S3RdmaContext *sctx, minio::http::Method method,
-                                           const std::string &nic, minio::utils::Multimap &extra_headers,
-                                           const std::string &bucket, const std::string &key,
-                                           const std::string &query_str)
-    {
-        minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-        minio::creds::Credentials creds = sctx->provider->Fetch();
-        minio::utils::Multimap    query_params;
-        minio::http::Url          url;
-        const std::string        &region = sctx->region;
-
-        if (minio::error::Error err = sctx->url.BuildUrl(url, method, region, query_params, bucket, key)) {
-            minio::http::Response bad;
-            bad.status_code = -1;
-            return bad;
-        }
-
-        if (!query_str.empty()) {
-            url.query_string = query_str;
-        }
-
-        std::string            host = url.HostHeaderValue();
-        minio::utils::Multimap sign_headers;
-        sign_headers.Add("Host", host);
-        sign_headers.Add("x-amz-date", date.ToAmzDate());
-        sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
-        sign_headers.Add("Content-Length", "0");
-
-        for (const auto &k : extra_headers.Keys()) {
-            sign_headers.Add(k, extra_headers.GetFront(k));
-        }
-
-        if (!creds.session_token.empty()) {
-            sign_headers.Add("X-Amz-Security-Token", creds.session_token);
-        }
-
-        minio::signer::SignV4S3(method, url.path, region, sign_headers, query_params, creds.access_key,
-                                creds.secret_key, kUnsignedPayload, date);
-
-        if (!query_str.empty()) {
-            url.query_string = query_str;
-        }
-        else {
-            url.query_string = query_params.ToQueryString();
-        }
-
-        minio::http::Request req(method, url);
-        req.headers              = std::move(sign_headers);
-        req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
-        req.timeout_secs         = kRdmaTimeoutSecs;
-
-        if (!nic.empty()) {
-            req.nic_interface = nic;
-        }
-
-        return req.Execute();
-    }
-
-    // hipObjOpsV2_t callbacks -------------------------------------------------
-
-    int v2SendPrepare(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out)
-    {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
-
-        minio::utils::Multimap extra;
-        extra.Add(kAmzRdmaToken, req->token ? req->token : "");
-        extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
-
-        std::string           query = req->query ? req->query : "";
-        minio::http::Response res =
-            executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                             req->key ? req->key : "", query);
-
-        if (!res.error.empty() || res.status_code <= 0) {
-            rdmaTrace("v2 prepare: http failed (status=", res.status_code, " error='", res.error, "')");
-            return -1;
-        }
-
-        hipObj::zeroObject(*out);
-        out->httpStatus        = res.status_code;
-        out->protocolEcho      = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
-        out->unsupportedMarker = (res.status_code == kRdmaReplyNotImplemented) ? 1 : 0;
-
-        std::string srv_token = res.headers.GetFront(kAmzRdmaToken);
-        if (!srv_token.empty()) {
-            copyCString(out->serverToken, srv_token);
-        }
-        std::string session = res.headers.GetFront(kAmzRdmaSession);
-        if (!session.empty()) {
-            copyCString(out->session, session);
-        }
-        return 0;
-    }
-
-    int v2SendReady(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out)
-    {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
-
-        minio::utils::Multimap extra;
-        extra.Add(kAmzRdmaSession, req->session ? req->session : "");
-        extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
-
-        std::string           query = req->query ? req->query : "";
-        minio::http::Response res =
-            executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                             req->key ? req->key : "", query);
-
-        if (!res.error.empty() || res.status_code <= 0) {
-            rdmaTrace("v2 ready: http failed (status=", res.status_code, " error='", res.error, "')");
-            return -1;
-        }
-
-        hipObj::zeroObject(*out);
-        out->httpStatus   = res.status_code;
-        out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
-
-        const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), 0);
-        if (!bytes) {
-            rdmaTrace("v2 ready: malformed ", kAmzRdmaBytesTransferred, " header");
-            return -1;
-        }
-        out->bytes = *bytes;
-
-        std::string etag = res.headers.GetFront("etag");
-        if (!etag.empty()) {
-            std::string trimmed = minio::utils::Trim(etag, '"');
-            copyCString(out->etag, trimmed);
-        }
-
-        std::string csum = res.headers.GetFront("x-amz-checksum-crc64nvme");
-        if (!csum.empty()) {
-            copyCString(out->checksumB64, csum);
-            c->sctx->checksum = csum;
-        }
-
-        if (!etag.empty()) {
-            c->sctx->etag = minio::utils::Trim(etag, '"');
-        }
-
-        return 0;
-    }
-
-    int v2SendCancel(void *ctx, const hipObjTransferReqV2_t *req)
-    {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
-
-        minio::utils::Multimap extra;
-        extra.Add(kAmzRdmaSession, req->session ? req->session : "");
-        extra.Add(kAmzRdmaCancel, "1");
-
-        std::string query = req->query ? req->query : "";
-        executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                         req->key ? req->key : "", query);
-        return 0;
-    }
-
-    // v2 entry points ---------------------------------------------------------
-
-    RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
-    {
-        char               *rawToken = nullptr;
-        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
-        const RdmaTokenPtr  token(rawToken);
-        if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v2 put: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
-        }
-
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
-        hipObjOpsV2_t ops{};
-        ops.sendPrepare = v2SendPrepare;
-        ops.sendReady   = v2SendReady;
-        ops.sendCancel  = v2SendCancel;
-
-        std::string query;
-        if (!sctx->uploadId.empty()) {
-            if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
-                rdmaTrace("v2 put: part number ", sctx->partNumber, " out of range");
-                return {RdmaStatus::Failed};
-            }
-            // hipObjPutV2() takes a canonical query: percent-encoded, with
-            // the keys sorted. Upload IDs can contain reserved characters
-            // such as '+' and '/', and Multimap encodes and sorts.
-            minio::utils::Multimap query_params;
-            query_params.Add("uploadId", sctx->uploadId);
-            query_params.Add("partNumber", std::to_string(sctx->partNumber));
-            query = query_params.ToQueryString();
-        }
-
-        hipObjError_t err = hipObjPutV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0,
-                                        query.empty() ? nullptr : query.c_str(), &ops, &cbctx);
-
-        if (err.opError == hipObjNotSupported) {
-            rdmaTrace("v2 put: unsupported (client v2 is a stub); falling back to v1");
-            return {RdmaStatus::NotSupported};
-        }
-        if (err.opError == hipObjSizeTooLarge) {
-            // v2 caps a transfer at 2^31-1 bytes; v1 can move it
-            rdmaTrace("v2 put: ", size, " bytes is too large for v2; falling back to v1");
-            return {RdmaStatus::NotSupported};
-        }
-        if (err.opError != hipObjSuccess) {
-            rdmaTrace("v2 put: hipObjPutV2: ", hipObjGetErrorString(err.opError));
-            return {RdmaStatus::Failed};
-        }
-        return {RdmaStatus::Ok, size};
-    }
-
-    RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
-    {
-        char               *rawToken = nullptr;
-        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
-        const RdmaTokenPtr  token(rawToken);
-        if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v2 get: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
-        }
-
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
-        hipObjOpsV2_t ops{};
-        ops.sendPrepare = v2SendPrepare;
-        ops.sendReady   = v2SendReady;
-        ops.sendCancel  = v2SendCancel;
-
-        hipObjError_t err =
-            hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0, nullptr, &ops, &cbctx);
-
-        if (err.opError == hipObjNotSupported) {
-            rdmaTrace("v2 get: unsupported (client v2 is a stub); falling back to v1");
-            return {RdmaStatus::NotSupported};
-        }
-        if (err.opError == hipObjSizeTooLarge) {
-            // v2 caps a transfer at 2^31-1 bytes; v1 can move it
-            rdmaTrace("v2 get: ", size, " bytes is too large for v2; falling back to v1");
-            return {RdmaStatus::NotSupported};
-        }
-        if (err.opError != hipObjSuccess) {
-            rdmaTrace("v2 get: hipObjGetV2: ", hipObjGetErrorString(err.opError));
-            return {RdmaStatus::Failed};
-        }
-        return {RdmaStatus::Ok, size};
-    }
-
-#endif /* HIPOBJECT_V2_API */
-
 } // namespace
 
 RdmaResult
@@ -445,7 +173,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
 
     minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
-        rdmaTrace("v1 put: http failed (status=", res.status_code, " error='", res.error, "')");
+        rdmaTrace("put: http failed (status=", res.status_code, " error='", res.error, "')");
         return {RdmaStatus::Failed};
     }
 
@@ -460,7 +188,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         return {RdmaStatus::NotSupported};
     }
     if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyNoContent) {
-        rdmaTrace("v1 put: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
+        rdmaTrace("put: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
         return {RdmaStatus::Failed};
     }
 
@@ -520,7 +248,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
 
     minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
-        rdmaTrace("v1 get: http failed (status=", res.status_code, " error='", res.error, "')");
+        rdmaTrace("get: http failed (status=", res.status_code, " error='", res.error, "')");
         return {RdmaStatus::Failed};
     }
 
@@ -529,7 +257,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
         return {RdmaStatus::NotSupported};
     }
     if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyPartialContent) {
-        rdmaTrace("v1 get: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
+        rdmaTrace("get: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
         return {RdmaStatus::Failed};
     }
 
@@ -537,7 +265,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     // have transferred more than that.
     const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), size);
     if (!bytes || *bytes > size) {
-        rdmaTrace("v1 get: malformed or out-of-range ", kAmzRdmaBytesTransferred, " header");
+        rdmaTrace("get: malformed or out-of-range ", kAmzRdmaBytesTransferred, " header");
         return {RdmaStatus::Failed};
     }
     return {RdmaStatus::Ok, static_cast<size_t>(*bytes)};
@@ -546,21 +274,13 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
 RdmaResult
 rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
-#ifdef HIPOBJECT_V2_API
-    // Try the v2 protocol first; fall back to v1 only when the server
-    // explicitly signals it does not support hipobj-rc-v2.
-    const RdmaResult v2 = rdmaPutV2(ctx, buf, size);
-    if (v2.status != RdmaStatus::NotSupported) {
-        return v2;
-    }
-#endif /* HIPOBJECT_V2_API */
     RdmaResult ret{RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
         char               *rawToken = nullptr;
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v1 put: token: ", hipObjGetErrorString(terr.opError));
+            rdmaTrace("put: token: ", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
         // A buffer the NIC cannot reach directly is registered as a host
@@ -568,7 +288,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         // reads it.
         hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
-            rdmaTrace("v1 put: stage to host: ", hipObjGetErrorString(serr.opError));
+            rdmaTrace("put: stage to host: ", hipObjGetErrorString(serr.opError));
             return {RdmaStatus::Failed};
         }
         ret = rdmaPut(ctx, token.get(), size);
@@ -582,26 +302,20 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 RdmaResult
 rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
-#ifdef HIPOBJECT_V2_API
-    const RdmaResult v2 = rdmaGetV2(ctx, buf, size);
-    if (v2.status != RdmaStatus::NotSupported) {
-        return v2;
-    }
-#endif /* HIPOBJECT_V2_API */
     RdmaResult ret{RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
         char               *rawToken = nullptr;
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v1 get: token: ", hipObjGetErrorString(terr.opError));
+            rdmaTrace("get: token: ", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
         ret = rdmaGet(ctx, token.get(), size);
         if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
             hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
             if (serr.opError != hipObjSuccess) {
-                rdmaTrace("v1 get: stage to device: ", hipObjGetErrorString(serr.opError));
+                rdmaTrace("get: stage to device: ", hipObjGetErrorString(serr.opError));
                 return {RdmaStatus::Failed};
             }
             return ret;

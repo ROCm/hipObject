@@ -80,13 +80,12 @@ Notes:
   backends—keep that difference in mind when debugging.
 - CI ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) builds this
   configuration in the `rocm/dev-ubuntu-24.04:10.0.0-full` image, along with
-  variants that add `-DHIPOBJECT_V2_API=OFF`, `-DBUILD_SHARED_LIBS=OFF`,
-  `-DHIPOBJ_USE_SANITIZERS=ON` (AddressSanitizer), or
-  `-DHIPOBJ_USE_CODE_COVERAGE=ON` (built with ROCm's amdclang, reported on the
-  run's summary page, and failed below the [coverage target](#tests); on
-  `develop`, a job then publishes the result to the `badges` branch for the
-  README's Coverage badge). It is the only workflow that builds these
-  variants.
+  variants that add `-DBUILD_SHARED_LIBS=OFF`, `-DHIPOBJ_USE_SANITIZERS=ON`
+  (AddressSanitizer), or `-DHIPOBJ_USE_CODE_COVERAGE=ON` (built with ROCm's
+  amdclang, reported on the run's summary page, and failed below the
+  [coverage target](#tests); on `develop`, a job then publishes the result to
+  the `badges` branch for the README's Coverage badge). It is the only
+  workflow that builds these variants.
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON`, plus the system
   packages listed in [docs/building.rst](docs/building.rst); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
@@ -101,8 +100,6 @@ Notes:
 - The ctest suite doesn't need a GPU, an RDMA NIC, or an S3 server; CI runs all
   of it in a plain container. Tests that need more are skipped or not
   registered:
-  - `v2-data-e2e` is only registered when a verbs device
-    (`/dev/infiniband/uverbs*`) exists at configure time.
   - `hipobj-package-deb` and `hipobj-package-rpm` are skipped when the tools
     to build and read their packages (`dpkg`, or `rpmbuild` and `rpm`) aren't
     installed.
@@ -143,13 +140,6 @@ Notes:
   C++11. Every build with `BUILD_TESTING=ON`, including CI's, compiles it as
   C11 and as C++11 with `-Wall -Wextra -Werror -pedantic`
   ([`test/header`](test/header)), so a violation breaks the build.
-- **The V2 API (hipobj-rc-v2) is experimental.** It can change in breaking
-  ways or be removed at any time, so don't add compatibility shims or
-  deprecation paths for it. Keep the V2 code, and any code that uses it (such
-  as the tests and the MinIO bridge), behind `HIPOBJECT_V2_API`. CI also builds
-  with `-DHIPOBJECT_V2_API=OFF`, and everything else has to build and work
-  without it. The rules for the header and the changelog still apply to the V2
-  declarations.
 - **The examples in [`examples/`](examples/) show how consumers use the header,
   and are written to C++11.** The build compiles them as C++20 like everything
   else, so nothing catches newer constructs in them; keep them to C++11 by
@@ -274,19 +264,19 @@ memory contents or let a peer read or write memory it shouldn't, so security
 takes priority over speed and convenience.
 
 - **Fully initialize anything that touches the wire.** That covers tokens, HTTP
-  headers and bodies, V2 control messages, and every verbs structure handed to
-  libibverbs (work requests, scatter/gather entries, QP attributes). Initialize
-  each one completely before filling it in (`T x{}`, or `hipObj::zeroObject()`
-  from [`shared/hipobj-span.h`](shared/hipobj-span.h) for C structs, as the
+  headers and bodies, and every verbs structure handed to libibverbs (work
+  requests, scatter/gather entries, QP attributes). Initialize each one
+  completely before filling it in (`T x{}`, or `hipObj::zeroObject()` from
+  [`shared/hipobj-span.h`](shared/hipobj-span.h) for C structs, as the
   existing code does). Serialize field by field; never copy a struct's raw
   bytes onto the wire, since its padding can carry stale memory, and `{}`
   doesn't guarantee that padding is zeroed.
 - **Treat everything from the network as untrusted.** That includes S3
-  responses, `x-amz-rdma-reply` values, peer tokens, V2 reply headers, and
-  completions. Check lengths, character sets (hex, base64), and ranges before
-  using a value, and reject malformed input with an error rather than
-  truncating, clamping, or guessing. Never use a peer-supplied remote address,
-  rkey, length, or offset without checking it against what was agreed.
+  responses, `x-amz-rdma-reply` values, peer tokens, and completions. Check
+  lengths, character sets (hex, base64), and ranges before using a value, and
+  reject malformed input with an error rather than truncating, clamping, or
+  guessing. Never use a peer-supplied remote address, rkey, length, or offset
+  without checking it against what was agreed.
 - **Integer arithmetic must be safe.**
   - Check for wrap-around before it happens, not after. `offset + size`, size
     multiplications, and buffer-end calculations need an explicit overflow
@@ -309,10 +299,10 @@ takes priority over speed and convenience.
   flags without a reason.
 - **Keep secrets secret.** Don't log, print, or put in error messages the S3
   credentials (`accessKey`, `secretKey`) or full RDMA tokens, which carry
-  rkeys and addresses. Session IDs, cookies, and anything else that must be
-  unpredictable come from the `getrandom()`-backed source in
-  [`src/rdma/v2-random.h`](src/rdma/v2-random.h), never from `rand()` or a
-  `<random>` engine.
+  rkeys and addresses. Anything that must be unpredictable, such as a session
+  ID or a cookie, comes from the operating system through `getrandom()`,
+  behind an internal interface (see [Portability](#portability)), never from
+  `rand()` or a `<random>` engine.
 - **Keep the hardening flags.** Don't remove or weaken `_FORTIFY_SOURCE`, the
   stack protector, `-fstack-clash-protection`, or `-z noexecstack`
   ([`cmake/`](cmake/)), and ask before changing any compile or link options
@@ -328,10 +318,9 @@ takes priority over speed and convenience.
 **Keep the overhead on the hot data path low.** The payload moves by RDMA
 without passing through the host, so what a transfer costs beyond the wire is
 mostly what hipObject adds. The hot path is everything that runs once per
-transfer: `hipObjGet()` and `hipObjPut()` (and their V2 counterparts), minting
-and parsing RDMA tokens and replies, `hipObjBufSync()`, and posting and polling
-RDMA work. `hipObjInit()`, buffer registration, and shutdown are setup, and can
-afford more.
+transfer: `hipObjGet()` and `hipObjPut()`, minting and parsing RDMA tokens and
+replies, `hipObjBufSync()`, and posting and polling RDMA work. `hipObjInit()`,
+buffer registration, and shutdown are setup, and can afford more.
 
 - **Do expensive work once, at setup**: opening devices, choosing the NIC,
   creating queue pairs, registering memory, exporting dmabufs, and reading
@@ -398,10 +387,10 @@ configuration files.
   `StatementMacros` in [`.clang-format`](.clang-format), wrap the smallest
   region you can, and comment why the warning can't be fixed. `shared/` is
   already on the include path of the library, the MinIO bridge, the unit
-  tests, `hipobj-rdma-test-server`, `v2-client-harness`, `v2-data-client`,
-  and `minio-getput-rdma`; add it only to a target that lacks it (the
-  examples). The examples are built with `-Wno-unsafe-buffer-usage`, the one
-  exception to these rules, since they're C++11 (see
+  tests, `hipobj-rdma-test-server`, and `minio-getput-rdma`; add it only to a
+  target that lacks it (the examples). The examples are built with
+  `-Wno-unsafe-buffer-usage`, the one exception to these rules, since they're
+  C++11 (see
   [Public API](#public-api)).
   Third-party code fetched with `FetchContent` is exempt; CMake
   already marks its headers `SYSTEM` and builds it with its warnings off.

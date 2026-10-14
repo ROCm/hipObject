@@ -15,16 +15,6 @@ set(HIPOBJ_SOURCES
   rdma/token.cpp
   s3/control.cpp)
 
-if(HIPOBJECT_V2_API)
-  list(APPEND HIPOBJ_SOURCES
-    rdma/v2-wire.cpp
-    rdma/v2-state.cpp
-    rdma/v2-clock.cpp
-    rdma/v2-random.cpp
-    rdma/v2-registry.cpp
-    rdma/v2-transport.cpp)
-endif()
-
 if(HIPOBJ_BNXT)
   list(APPEND HIPOBJ_SOURCES
     rdma/bnxt/bnxt-backend.cpp)
@@ -105,13 +95,6 @@ endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_IONIC)
-endif()
-if(HIPOBJECT_V2_API)
-  # PUBLIC: include/hipobj.h only declares the V2 API surface when this
-  # macro is defined, so consumers linking hipobj::hipobj (in-tree or via
-  # the exported CMake package) need it on their own translation units too.
-  target_compile_definitions(hipobj
-    PUBLIC HIPOBJECT_V2_API)
 endif()
 
 # The unit tests compile these same sources into a separate object

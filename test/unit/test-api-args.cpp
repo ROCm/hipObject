@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
@@ -60,9 +61,6 @@ TEST(ApiArgsErrorString, EveryCodeHasItsOwnString)
         hipObjBufNotRegistered, hipObjBufAlreadyRegistered,
         hipObjNicNotFound,      hipObjDmabufNotSupported,
         hipObjSizeTooLarge,     hipObjInternalError,
-#ifdef HIPOBJECT_V2_API
-        hipObjNotSupported,     hipObjBusy,
-#endif
     };
     std::vector<std::string> seen;
     for (hipObjOpError_t code : codes) {
@@ -759,175 +757,6 @@ TEST(ApiArgsTokenClientNic, EmptyWhenNoIpv4Address)
     EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp, sizeof(nicIp)).opError, hipObjSuccess);
     EXPECT_STREQ(nicIp, "");
 }
-
-#ifdef HIPOBJECT_V2_API
-
-// ---- hipObjGetV2 and hipObjPutV2 ---------------------------------
-
-int
-fakeSendPrepare(void *, const hipObjTransferReqV2_t *, hipObjPrepareReplyV2_t *)
-{
-    return 0;
-}
-
-int
-fakeSendReady(void *, const hipObjTransferReqV2_t *, hipObjFinalReplyV2_t *)
-{
-    return 0;
-}
-
-int
-fakeSendCancel(void *, const hipObjTransferReqV2_t *)
-{
-    return 0;
-}
-
-hipObjOpsV2_t
-makeOpsV2()
-{
-    hipObjOpsV2_t ops{};
-    ops.sendPrepare = &fakeSendPrepare;
-    ops.sendReady   = &fakeSendReady;
-    ops.sendCancel  = &fakeSendCancel;
-    return ops;
-}
-
-using TransferV2Fn = hipObjError_t (*)(const char *, const char *, void *, uint64_t, uint64_t, const char *,
-                                       hipObjOpsV2_t *);
-
-hipObjError_t
-callGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
-          const char *query, hipObjOpsV2_t *ops)
-{
-    return hipObjGetV2(bucket, key, devPtr, size, offset, query, ops, nullptr);
-}
-
-hipObjError_t
-callPutV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
-          const char *query, hipObjOpsV2_t *ops)
-{
-    return hipObjPutV2(bucket, key, devPtr, size, offset, query, ops, nullptr);
-}
-
-constexpr uint64_t kMaxV2Size = 0x7fffffff;
-
-/* The V2 entry points aren't implemented, so valid arguments get
- * hipObjNotSupported */
-class TransferV2ArgsTest : public ::testing::TestWithParam<TransferV2Fn> {
-protected:
-    hipObjOpError_t call(const char *bucket, const char *key, uint64_t size = kBufSize, uint64_t offset = 0,
-                         const char *query = nullptr)
-    {
-        return GetParam()(bucket, key, kDevBuf, size, offset, query, &ops_).opError;
-    }
-
-    hipObjOpsV2_t ops_ = makeOpsV2();
-};
-
-TEST_P(TransferV2ArgsTest, AcceptsValidArguments)
-{
-    EXPECT_EQ(call("bucket", "key"), hipObjNotSupported);
-    EXPECT_EQ(call("b", "a/b/c.bin", 1, 0, ""), hipObjNotSupported);
-}
-
-TEST_P(TransferV2ArgsTest, RejectsBadBucket)
-{
-    EXPECT_EQ(call(nullptr, "key"), hipObjInvalidValue);
-    EXPECT_EQ(call("", "key"), hipObjInvalidValue);
-    EXPECT_EQ(call(std::string(256, 'b').c_str(), "key"), hipObjInvalidValue);
-    EXPECT_EQ(call(std::string(255, 'b').c_str(), "key"), hipObjNotSupported);
-}
-
-TEST_P(TransferV2ArgsTest, RejectsBadKey)
-{
-    EXPECT_EQ(call("bucket", nullptr), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", ""), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", std::string(1025, 'k').c_str()), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", std::string(1024, 'k').c_str()), hipObjNotSupported);
-}
-
-TEST_P(TransferV2ArgsTest, RejectsNullPointer)
-{
-    EXPECT_EQ(GetParam()("bucket", "key", nullptr, kBufSize, 0, nullptr, &ops_).opError, hipObjInvalidValue);
-}
-
-TEST_P(TransferV2ArgsTest, ChecksSize)
-{
-    EXPECT_EQ(call("bucket", "key", 0), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", "key", kMaxV2Size + 1), hipObjSizeTooLarge);
-    EXPECT_EQ(call("bucket", "key", std::numeric_limits<uint64_t>::max()), hipObjSizeTooLarge);
-    EXPECT_EQ(call("bucket", "key", kMaxV2Size), hipObjNotSupported);
-}
-
-TEST_P(TransferV2ArgsTest, RejectsRangeThatWraps)
-{
-    const uint64_t max = std::numeric_limits<uint64_t>::max();
-    EXPECT_EQ(call("bucket", "key", 1, max), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", "key", kBufSize, max - kBufSize + 1), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", "key", kBufSize, max - kBufSize), hipObjNotSupported);
-}
-
-TEST_P(TransferV2ArgsTest, RejectsMissingCallbacks)
-{
-    EXPECT_EQ(GetParam()("bucket", "key", kDevBuf, kBufSize, 0, nullptr, nullptr).opError,
-              hipObjInvalidValue);
-
-    ops_.sendPrepare = nullptr;
-    EXPECT_EQ(call("bucket", "key"), hipObjInvalidValue);
-
-    ops_           = makeOpsV2();
-    ops_.sendReady = nullptr;
-    EXPECT_EQ(call("bucket", "key"), hipObjInvalidValue);
-
-    ops_            = makeOpsV2();
-    ops_.sendCancel = nullptr;
-    EXPECT_EQ(call("bucket", "key"), hipObjInvalidValue);
-}
-
-TEST_P(TransferV2ArgsTest, AcceptsCanonicalQuery)
-{
-    for (const char *query :
-         {"partNumber=10000&uploadId=abc-DEF_1.2~3", "uploadId=a%2Bb%2Fc%3D%3D", "a=%20%7F%80%FF",
-          "a=", "a=&b=", "a=1&a=2", "a=1&a=1", "a=&a=1", "a=9&a-b=1", "A=1&a=1", "a%2F=1&a-=1"}) {
-        EXPECT_EQ(call("bucket", "key", kBufSize, 0, query), hipObjNotSupported)
-            << "query \"" << query << "\"";
-    }
-}
-
-TEST_P(TransferV2ArgsTest, RejectsQueryThatIsNotCanonical)
-{
-    /* Characters that must be encoded, and bad escapes */
-    for (const char *query :
-         {"a=b c", "a=b\r\nX-Injected: 1", "a=b\n", "a=b\t", "a=b/c", "a=b+c", "a=b#c", "?a=b", "a=b=c",
-          "a=%", "a=%2", "a=%G0", "a=%0G", "a=%2f", "a=\x80", "a=\x7f"}) {
-        EXPECT_EQ(call("bucket", "key", kBufSize, 0, query), hipObjInvalidValue)
-            << "query \"" << query << "\"";
-    }
-    /* Escapes of unreserved characters, which are written as is */
-    for (const char *query : {"a=%41", "a=%7A", "a=%30", "a=%2D", "a=%2E", "a=%5F", "a=%7E", "%61=1"}) {
-        EXPECT_EQ(call("bucket", "key", kBufSize, 0, query), hipObjInvalidValue)
-            << "query \"" << query << "\"";
-    }
-    /* Empty parameters and keys, and parameters without '=' */
-    for (const char *query :
-         {"&", "a=1&", "&a=1", "a=1&&b=2", "=1", "a=1&=2", "a", "a&b=", "a=1&b", "a&a=1"}) {
-        EXPECT_EQ(call("bucket", "key", kBufSize, 0, query), hipObjInvalidValue)
-            << "query \"" << query << "\"";
-    }
-    /* Parameters out of order, by key and then by value */
-    for (const char *query :
-         {"uploadId=x&partNumber=1", "b=&a=", "a=2&a=1", "a=1&a=", "a-b=1&a=9", "a=1&A=1"}) {
-        EXPECT_EQ(call("bucket", "key", kBufSize, 0, query), hipObjInvalidValue)
-            << "query \"" << query << "\"";
-    }
-}
-
-INSTANTIATE_TEST_SUITE_P(ApiArgs, TransferV2ArgsTest, ::testing::Values(&callGetV2, &callPutV2),
-                         [](const ::testing::TestParamInfo<TransferV2Fn> &paramInfo) {
-                             return paramInfo.param == &callGetV2 ? "GetV2" : "PutV2";
-                         });
-
-#endif /* HIPOBJECT_V2_API */
 
 } // namespace
 
