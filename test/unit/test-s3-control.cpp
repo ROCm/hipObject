@@ -84,7 +84,7 @@ protected:
 
 TEST_F(S3ControlTest, SendsTokenToCallback)
 {
-    EXPECT_EQ(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"), 0);
+    EXPECT_TRUE(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"));
     EXPECT_EQ(g_callbacks.tokenLen, 4U);
     EXPECT_EQ(g_callbacks.ctx, &ctx_);
 }
@@ -92,14 +92,14 @@ TEST_F(S3ControlTest, SendsTokenToCallback)
 TEST_F(S3ControlTest, SendReportsCallbackFailure)
 {
     g_callbacks.sendRet = 7;
-    EXPECT_EQ(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"), 7);
+    EXPECT_FALSE(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"));
 }
 
 TEST_F(S3ControlTest, SendNeedsCallback)
 {
-    EXPECT_EQ(hipObj::injectRdmaToken(nullptr, &ctx_, "abcd"), -1);
+    EXPECT_FALSE(hipObj::injectRdmaToken(nullptr, &ctx_, "abcd"));
     ops_.sendRequest = nullptr;
-    EXPECT_EQ(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"), -1);
+    EXPECT_FALSE(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"));
 }
 
 TEST_F(S3ControlTest, ReceiveDecodesStatus)

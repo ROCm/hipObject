@@ -23,18 +23,9 @@ namespace hipObj {
 
 namespace {
 
-    int validateRegistration(bool isRegistered, size_t entryCount, size_t size)
+    [[nodiscard]] bool validateRegistration(bool isRegistered, size_t entryCount, size_t size)
     {
-        if (size > MAX_MR_SIZE) {
-            return -1;
-        }
-        if (isRegistered) {
-            return -1;
-        }
-        if (entryCount >= BufferMap::kMaxEntries) {
-            return -1;
-        }
-        return 0;
+        return size <= MAX_MR_SIZE && !isRegistered && entryCount < BufferMap::kMaxEntries;
     }
 
     /* Is this pointer device memory? Answered through the seam so unit tests can
@@ -155,12 +146,12 @@ HostBufDeleter::operator()(void *hostBuf) const noexcept
     (void)runtime->hostFree(hostBuf);
 }
 
-int
+bool
 BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 {
     uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
-        return -1;
+    if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
+        return false;
     }
     const Verbs      &verbs   = *verbs_;
     const HipRuntime &runtime = *runtime_;
@@ -172,7 +163,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         entry.size       = size;
         entry.isDmabuf   = true;
         entry.remoteAddr = key;
-        return 0;
+        return true;
     }
 
     const bool deviceMemory = isDevicePointer(runtime, devPtr);
@@ -183,7 +174,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
                     "HIPOBJ_REQUIRE_GPU_DIRECT is set; refusing to stage through "
                     "host memory.\n",
                     size, devPtr);
-            return -1;
+            return false;
         }
         fprintf(stderr,
                 "hipObj: GPU-direct registration of %zu bytes at %p failed; "
@@ -195,12 +186,12 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     void      *rawHostBuf = nullptr;
     hipError_t err        = runtime.hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
     if (err != hipSuccess || !rawHostBuf) {
-        return -1;
+        return false;
     }
     HostBufPtr hostBuf = own<HostBufPtr>(runtime, rawHostBuf);
     mr                 = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
     if (!mr) {
-        return -1;
+        return false;
     }
     BufEntry &entry = entries_[key];
     /* Read the address before hostBuf is moved into the entry */
@@ -209,41 +200,41 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     entry.mr         = std::move(mr);
     entry.size       = size;
     entry.isDmabuf   = false;
-    return 0;
+    return true;
 }
 
-int
+bool
 BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 {
     uintptr_t key = reinterpret_cast<uintptr_t>(hostPtr);
-    if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
-        return -1;
+    if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
+        return false;
     }
     const Verbs &verbs  = *verbs_;
     int          access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr     mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
     if (!mr) {
-        return -1;
+        return false;
     }
     BufEntry &entry  = entries_[key];
     entry.mr         = std::move(mr);
     entry.size       = size;
     entry.isDmabuf   = false;
     entry.remoteAddr = reinterpret_cast<uint64_t>(hostPtr);
-    return 0;
+    return true;
 }
 
-int
+bool
 BufferMap::deregisterBuffer(void *devPtr)
 {
     uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
     auto      it  = entries_.find(key);
     if (it == entries_.end()) {
-        return -1;
+        return false;
     }
     /* Deregisters the MR, then frees any staging buffer */
     entries_.erase(it);
-    return 0;
+    return true;
 }
 
 const BufferMap::BufEntry *

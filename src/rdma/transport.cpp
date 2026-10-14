@@ -101,7 +101,7 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, const char
 
 namespace {
 
-    int transitionQpToInit(RcConnection &conn)
+    [[nodiscard]] bool transitionQpToInit(RcConnection &conn)
     {
         struct ibv_qp_attr attr;
         zeroObject(attr);
@@ -110,7 +110,7 @@ namespace {
         attr.port_num        = conn.device().portNum();
         attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
         int mask             = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
-        return conn.device().verbs().modify_qp(conn.qp(), &attr, mask);
+        return conn.device().verbs().modify_qp(conn.qp(), &attr, mask) == 0;
     }
 
 } // namespace
@@ -139,7 +139,7 @@ createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uin
     /* Destroyed, releasing the QP and then the CQ, if the transition
      * fails */
     RcConnection conn(device, std::move(cq), std::move(qp));
-    if (transitionQpToInit(conn) != 0) {
+    if (!transitionQpToInit(conn)) {
         return std::nullopt;
     }
     return conn;
@@ -164,7 +164,7 @@ applyVendorQpAttrs(const RdmaDevice &device, struct ibv_qp_attr &attr)
 #endif
 }
 
-int
+bool
 transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid)
 {
     // The address handle stores the GID index in a uint8_t, so an index
@@ -172,7 +172,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     // used and must not be truncated into a different, valid-looking one.
     const RdmaDevice &device = conn.device();
     if (!std::in_range<uint8_t>(device.gidIndex())) {
-        return -1;
+        return false;
     }
 
     struct ibv_qp_attr attr;
@@ -196,10 +196,10 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.grh.traffic_class = 0;
     int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-    return device.verbs().modify_qp(conn.qp(), &attr, mask);
+    return device.verbs().modify_qp(conn.qp(), &attr, mask) == 0;
 }
 
-int
+bool
 transitionQpToRts(RcConnection &conn)
 {
     struct ibv_qp_attr attr;
@@ -213,23 +213,22 @@ transitionQpToRts(RcConnection &conn)
     attr.max_rd_atomic = 1;
     int mask           = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                IBV_QP_MAX_QP_RD_ATOMIC;
-    return conn.device().verbs().modify_qp(conn.qp(), &attr, mask);
+    return conn.device().verbs().modify_qp(conn.qp(), &attr, mask) == 0;
 }
 
-int
+bool
 connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
 {
     if (peerToken.transport != TransportType::RC) {
-        return -1;
+        return false;
     }
-    int ret = transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, toIbvGid(peerToken.gid));
-    if (ret != 0) {
-        return ret;
+    if (!transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, toIbvGid(peerToken.gid))) {
+        return false;
     }
     return transitionQpToRts(conn);
 }
 
-int
+bool
 pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout)
 {
     const Verbs &verbs    = conn.device().verbs();
@@ -238,7 +237,7 @@ pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds
         struct ibv_wc wc;
         int           n = verbs.poll_cq(conn.cq(), 1, &wc);
         if (n < 0) {
-            return -1;
+            return false;
         }
         if (n == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -248,15 +247,15 @@ pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds
             /* The NIC has told us exactly why the transfer died, and this is the
              * only place that number exists. Dropping it here is what turns a
              * specific fault -- a bad rkey, a protection violation, an unreachable
-             * remote -- into an indistinguishable -1 several layers up. */
+             * remote -- into an indistinguishable failure several layers up. */
             fprintf(stderr,
                     "hipObj: work completion failed: status=%d opcode=%d "
                     "vendor_err=0x%" PRIx32 " wr_id=%" PRIu64 "\n",
                     static_cast<int>(wc.status), static_cast<int>(wc.opcode), wc.vendor_err, wc.wr_id);
-            return -1;
+            return false;
         }
         if (expectedOpcode < 0 || wc.opcode == expectedOpcode) {
-            return 0;
+            return true;
         }
     }
     // A timeout is a failure: no completion arrived for the awaited work
@@ -267,7 +266,7 @@ pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds
             "hipObj: no work completion within %" PRId64 " ms (awaiting opcode %d); the "
             "transfer outcome is unknown\n",
             timeoutMs, expectedOpcode);
-    return -1;
+    return false;
 }
 
 } // namespace hipObj
