@@ -11,13 +11,19 @@
 #include <string>
 #include <vector>
 
+namespace hipObj {
+class Verbs;
+} // namespace hipObj
+
 namespace hipobj::test {
 
 struct TokenHeader;
 
 class RdmaTestServer {
 public:
-    RdmaTestServer();
+    /* Sets up RDMA through verbs, which has to outlive the server. With
+     * null verbs (libibverbs didn't load), the server isn't ready. */
+    explicit RdmaTestServer(const hipObj::Verbs *verbs);
     ~RdmaTestServer();
 
     RdmaTestServer(const RdmaTestServer &)            = delete;

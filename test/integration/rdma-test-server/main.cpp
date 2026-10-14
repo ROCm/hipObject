@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -25,6 +26,7 @@
 #include "hipobj-parse.h"
 #include "hipobj-span.h"
 #include "http_server.h"
+#include "ibv-wrapper.h"
 #include "rdma_server.h"
 #include "token_header.h"
 
@@ -70,7 +72,10 @@ main(int argc, char *argv[])
         port = *value;
     }
 
-    hipobj::test::RdmaTestServer rdma;
+    /* Declared before the server, so it outlives it. Null, after a
+     * message, when libibverbs can't be loaded. */
+    const std::unique_ptr<hipObj::LoadedVerbs> verbs = hipObj::loadLibibverbs();
+    hipobj::test::RdmaTestServer               rdma(verbs.get());
     if (!rdma.isReady()) {
         fprintf(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
                         "HTTP-only mode\n");
