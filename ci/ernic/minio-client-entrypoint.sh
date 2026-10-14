@@ -15,7 +15,7 @@
 #   runner, meshed to the server VM's. There is a real wire, so the defaults
 #   apply: do not start an emulator in here, and require RDMA.
 #
-#   docker-compose's minio-v1 profile runs it in a container, where
+#   docker-compose's minio profile runs it in a container, where
 #   START_ERNIC=true brings up a loopback rocm-ernic for the vfio-user socket
 #   but nothing binds it -- a container has no guest kernel, so
 #   /sys/class/infiniband stays empty and the bridge falls back to HTTP.
