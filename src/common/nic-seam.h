@@ -61,9 +61,7 @@ public:
  * /sys/class/infiniband */
 class SysfsTopology final : public NicTopology {
 public:
-    /* verbs has to outlive it. The owning pointers enumerate() uses
-     * release what they hold through ibv(), so verbs also has to be what
-     * ibv() returns. */
+    /* verbs has to outlive it */
     explicit SysfsTopology(const Verbs &verbs) noexcept : verbs_(&verbs)
     {
     }
@@ -81,14 +79,14 @@ private:
     const Verbs *verbs_;
 };
 
-/* Installs a topology for NIC and GID selection to use, and returns the
+/* Installs a topology for systemPlatform() to use, and returns the
  * previously installed one (nullptr when none was). Passing nullptr
  * restores the default, a SysfsTopology over ibv(). Unit tests only;
  * production never calls it. Not synchronized, so call it only while no
- * other thread can be selecting a NIC or GID. */
+ * other thread can be building a platform. */
 const NicTopology *setNicTopologyForTest(const NicTopology *topology);
 
-/* The topology NIC and GID selection use: the one installed with
+/* The topology systemPlatform() uses: the one installed with
  * setNicTopologyForTest(), or otherwise a SysfsTopology over ibv(), built
  * in storage */
 const NicTopology &currentNicTopology(std::optional<SysfsTopology> &storage);

@@ -41,10 +41,10 @@ namespace {
      * drive both branches without a GPU. A pointer the runtime cannot classify is
      * treated as "not device memory": the strict check below must not fail a host
      * buffer it merely failed to classify. */
-    bool isDevicePointer(void *ptr)
+    bool isDevicePointer(const HipRuntime &runtime, void *ptr)
     {
         hipPointerAttribute_t attr{};
-        if (hip().pointerGetAttributes(&attr, ptr) != hipSuccess) {
+        if (runtime.pointerGetAttributes(&attr, ptr) != hipSuccess) {
             return false;
         }
         return attr.type == hipMemoryTypeDevice;
@@ -129,14 +129,14 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_p
 }
 
 bool
-isValidDeviceRange(void *ptr, size_t size)
+isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
 {
-    if (!isDevicePointer(ptr)) {
+    if (!isDevicePointer(runtime, ptr)) {
         return true;
     }
     hipDeviceptr_t base      = nullptr;
     size_t         allocSize = 0;
-    if (hip().memGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
+    if (runtime.memGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
         return false;
     }
     auto start = reinterpret_cast<uintptr_t>(base);
@@ -162,8 +162,8 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
         return -1;
     }
-    const Verbs      &verbs   = ibv();
-    const HipRuntime &runtime = hip();
+    const Verbs      &verbs   = *verbs_;
+    const HipRuntime &runtime = *runtime_;
     int               access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr          mr      = registerDeviceMemory(verbs, runtime, pd, devPtr, size, access, dmabuf_);
     if (mr) {
@@ -175,7 +175,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return 0;
     }
 
-    const bool deviceMemory = isDevicePointer(devPtr);
+    const bool deviceMemory = isDevicePointer(runtime, devPtr);
     if (deviceMemory) {
         if (requireGpuDirect_) {
             fprintf(stderr,
@@ -219,7 +219,7 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
     if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
         return -1;
     }
-    const Verbs &verbs  = ibv();
+    const Verbs &verbs  = *verbs_;
     int          access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr     mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
     if (!mr) {

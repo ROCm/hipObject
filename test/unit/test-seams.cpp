@@ -5,7 +5,8 @@
  *
  * Unit tests for the test seams (HIP runtime, NIC topology, libibverbs)
  * and the platform built from them. All run without GPU or RDMA hardware
- * by substituting fakes through the seam accessors.
+ * by substituting fakes, either passed in or installed through the seam
+ * accessors.
  */
 
 #include <algorithm>
@@ -31,6 +32,7 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
+#include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
@@ -194,23 +196,19 @@ class NicSeamTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        fakeTopology_.emplace(topology_);
         device_.gpuBusId = kGpuBusId;
-        fakeHip_.emplace(hip_);
     }
 
-    void TearDown() override
+    /* The NIC closest to GPU 0, with the fakes */
+    std::optional<hipObj::RdmaNic> closestNic(const char *hcaList = nullptr) const
     {
-        fakeHip_.reset();
-        fakeTopology_.reset();
+        return hipObj::GetClosestNicToGpu(hip_, topology_, 0, hcaList);
     }
 
-    TopologyState                                 state_{};
-    FakeNicTopology                               topology_{state_};
-    std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
-    hipObjTest::FakeDevice                        device_{};
-    hipObjTest::FakeHip                           hip_{device_};
-    std::optional<hipObjTest::ScopedFakeHip>      fakeHip_{};
+    TopologyState          state_{};
+    FakeNicTopology        topology_{state_};
+    hipObjTest::FakeDevice device_{};
+    hipObjTest::FakeHip    hip_{device_};
 };
 
 TEST_F(NicSeamTest, ClosestBusIdWins)
@@ -221,7 +219,7 @@ TEST_F(NicSeamTest, ClosestBusIdWins)
         {"mlx5_2", "0000:11:00.0", 0, 1},
     };
 
-    const auto nic = hipObj::GetClosestNicToGpu(0, nullptr);
+    const auto nic = closestNic();
     // GPU bus 0000:42:00.0: distance 1 for 43, larger for the others.
     ASSERT_TRUE(nic);
     EXPECT_EQ(nic->index, 1);
@@ -230,7 +228,7 @@ TEST_F(NicSeamTest, ClosestBusIdWins)
 
 TEST_F(NicSeamTest, EmptyEnumerationFails)
 {
-    EXPECT_FALSE(hipObj::GetClosestNicToGpu(0, nullptr));
+    EXPECT_FALSE(closestNic());
 }
 
 TEST_F(NicSeamTest, NoKnownBusIdFails)
@@ -240,7 +238,15 @@ TEST_F(NicSeamTest, NoKnownBusIdFails)
         {"mlx5_1", "", 1, 1},
     };
 
-    EXPECT_FALSE(hipObj::GetClosestNicToGpu(0, nullptr));
+    EXPECT_FALSE(closestNic());
+}
+
+/* The GPU's bus id comes from the runtime */
+TEST_F(NicSeamTest, UnknownGpuBusIdFails)
+{
+    state_.nics      = {{"mlx5_0", "0000:43:00.0", 0, 1}};
+    device_.gpuBusId = {};
+    EXPECT_FALSE(closestNic());
 }
 
 TEST_F(NicSeamTest, FirstOfClosestWins)
@@ -251,7 +257,7 @@ TEST_F(NicSeamTest, FirstOfClosestWins)
         {"mlx5_2", "0000:43:00.1", 1, 1},
     };
 
-    const auto nic = hipObj::GetClosestNicToGpu(0, nullptr);
+    const auto nic = closestNic();
     ASSERT_TRUE(nic);
     EXPECT_EQ(nic->index, 1);
     EXPECT_EQ(nic->name, "mlx5_1");
@@ -260,7 +266,7 @@ TEST_F(NicSeamTest, FirstOfClosestWins)
 TEST_F(NicSeamTest, HcaFilterIsForwarded)
 {
     state_.nics = {{"mlx5_0", "0000:18:00.0", 0, 1}};
-    hipObj::GetClosestNicToGpu(0, "mlx5_0,mlx5_1");
+    closestNic("mlx5_0,mlx5_1");
     EXPECT_EQ(state_.lastHcaList, "mlx5_0,mlx5_1");
 }
 
@@ -323,6 +329,30 @@ public:
     }
 };
 
+/* TopologyVerbs whose device opens as context, whose name GID selection
+ * reads */
+class OpenableTopologyVerbs : public TopologyVerbs {
+public:
+    OpenableTopologyVerbs(hipObjTest::FakeDevice &device, struct ibv_context &context) noexcept
+        : TopologyVerbs(device), context_(&context)
+    {
+    }
+    ~OpenableTopologyVerbs() override = default;
+
+    OpenableTopologyVerbs(const OpenableTopologyVerbs &)            = delete;
+    OpenableTopologyVerbs &operator=(const OpenableTopologyVerbs &) = delete;
+    OpenableTopologyVerbs(OpenableTopologyVerbs &&)                 = delete;
+    OpenableTopologyVerbs &operator=(OpenableTopologyVerbs &&)      = delete;
+
+    struct ibv_context *open_device(struct ibv_device *device) const override
+    {
+        return TopologyVerbs::open_device(device) ? context_ : nullptr;
+    }
+
+private:
+    struct ibv_context *context_;
+};
+
 /* The fake verbs, and a context for the device they have, whose name
  * SelectBestGid() reads */
 class GidSeamTest : public ::testing::Test {
@@ -331,63 +361,75 @@ protected:
     {
         std::ranges::copy(kFakeDevName, std::span(device_.name).begin());
         context_.device = &device_;
-        fakeTopology_.emplace(topology_);
-        fakeIbv_.emplace(verbs_);
     }
 
-    void TearDown() override
+    int selectBestGid(uint8_t portNum)
     {
-        fakeIbv_.reset();
-        fakeTopology_.reset();
+        return hipObj::SelectBestGid(verbs_, topology_, &context_, portNum);
     }
 
-    struct ibv_device                             device_ {};
-    struct ibv_context                            context_ {};
-    TopologyState                                 state_{};
-    FakeNicTopology                               topology_{state_};
-    std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
-    hipObjTest::FakeDevice                        fakeDevice_{};
-    TopologyVerbs                                 verbs_{fakeDevice_};
-    std::optional<hipObjTest::ScopedFakeIbv>      fakeIbv_{};
+    struct ibv_device      device_ {};
+    struct ibv_context     context_ {};
+    TopologyState          state_{};
+    FakeNicTopology        topology_{state_};
+    hipObjTest::FakeDevice fakeDevice_{};
+    OpenableTopologyVerbs  verbs_{fakeDevice_, context_};
 };
 
 TEST_F(GidSeamTest, RoceVersionsComeFromTheTopology)
 {
     /* As RoCE v2 GIDs, the IPv4-mapped one is preferred */
     state_.roceVersions = {2, 2, 2};
-    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), 1);
+    EXPECT_EQ(selectBestGid(2), 1);
     EXPECT_EQ(state_.lastDevName, kFakeDevName);
     EXPECT_EQ(state_.lastPortNum, 2);
 
     /* A RoCE v2 GID is preferred to a RoCE v1 one */
     state_.roceVersions = {2, 1, 2};
-    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), 0);
+    EXPECT_EQ(selectBestGid(2), 0);
 }
 
 TEST_F(GidSeamTest, NoGidWithAKnownRoceVersion)
 {
-    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+    EXPECT_EQ(selectBestGid(2), -1);
 
     state_.roceVersions = {0, 0, 0};
-    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+    EXPECT_EQ(selectBestGid(2), -1);
 }
 
 TEST_F(GidSeamTest, PortQueryFails)
 {
     fakeDevice_.fail.queryPort = true;
     state_.roceVersions        = {2, 2, 2};
-    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+    EXPECT_EQ(selectBestGid(2), -1);
 }
 
 TEST_F(GidSeamTest, UnreadableGidsAreSkipped)
 {
     fakeDevice_.fail.queryGid = true;
     state_.roceVersions       = {2, 2, 2};
-    EXPECT_EQ(hipObj::SelectBestGid(&context_, 2), -1);
+    EXPECT_EQ(selectBestGid(2), -1);
 }
 
-/* SysfsTopology over the fake verbs. The owning pointers it uses release
- * what it opens through ibv(), so the fake verbs are installed too. */
+/* Opening a device chooses its GID with the topology it's given */
+TEST_F(GidSeamTest, OpenedDeviceHasTheGidTheTopologyPrefers)
+{
+    state_.roceVersions                          = {2, 2, 2};
+    const std::optional<hipObj::RdmaDevice> rdma = hipObj::openRdmaDevice(verbs_, topology_, 0);
+    ASSERT_TRUE(rdma);
+    EXPECT_EQ(rdma->context(), &context_);
+    EXPECT_EQ(rdma->portNum(), 1);
+    EXPECT_EQ(state_.lastPortNum, 1);
+    EXPECT_EQ(rdma->gidIndex(), 1);
+
+    union ibv_gid expected {
+    };
+    ASSERT_EQ(verbs_.query_gid(&context_, 1, 1, &expected), 0);
+    EXPECT_EQ(hipObj::toGid(rdma->localGid()), hipObj::toGid(expected));
+}
+
+/* SysfsTopology over the fake verbs. systemPlatform() builds one over
+ * ibv(), so the fake verbs are installed too. */
 class SysfsTopologyTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -471,17 +513,14 @@ TEST_F(SysfsTopologyTest, NoRoceVersionWithoutASysfsEntry)
     EXPECT_EQ(topology_.roceVersion(kFakeDevName.data(), 2, 0), -1);
 }
 
-/* Without a topology installed, NIC selection uses a SysfsTopology over
- * ibv() */
-TEST_F(SysfsTopologyTest, NicSelectionDefaultsToSysfs)
+TEST_F(SysfsTopologyTest, NicSelection)
 {
     hipObjTest::FakeDevice    hipDevice{};
     const hipObjTest::FakeHip hip(hipDevice);
     hipDevice.gpuBusId = kGpuBusId;
-    const hipObjTest::ScopedFakeHip fakeHip(hip);
 
     /* The fake device has no bus id, so it's not chosen */
-    EXPECT_FALSE(hipObj::GetClosestNicToGpu(0, nullptr));
+    EXPECT_FALSE(hipObj::GetClosestNicToGpu(hip, topology_, 0, nullptr));
     EXPECT_EQ(device_.log.openDevice, 1);
 }
 
@@ -549,48 +588,52 @@ TEST(IbvSeamTest, OverrideRedirectsIbv)
     }
 }
 
+/* Devices on made-up objects that the fake verbs release. The fake verbs
+ * aren't installed as ibv(), so code can only reach them through the
+ * device. */
 class FakeVerbsSeamTest : public ::testing::Test {
 protected:
-    void SetUp() override
+    hipObj::RdmaDevice makeDevice() const
     {
-        fakeIbv_.emplace(verbs_);
+        return {verbs_,
+                hipObj::own<hipObj::IbvContextPtr>(verbs_, reinterpret_cast<struct ibv_context *>(0x1234)),
+                hipObj::own<hipObj::IbvPdPtr>(verbs_, reinterpret_cast<struct ibv_pd *>(0x5678)),
+                1,
+                0,
+                {}};
     }
 
-    void TearDown() override
-    {
-        fakeIbv_.reset();
-    }
-
-    hipObjTest::FakeDevice                   device_{};
-    hipObjTest::FakeVerbs                    verbs_{device_};
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
+    hipObjTest::FakeDevice device_{};
+    hipObjTest::FakeVerbs  verbs_{device_};
 };
 
 TEST_F(FakeVerbsSeamTest, QpCreationAndTeardownUseTheSeam)
 {
     {
-        hipObj::RcConnection conn;
-        conn.ctx = hipObj::own<hipObj::IbvContextPtr>(verbs_, reinterpret_cast<struct ibv_context *>(0x1234));
-        conn.pd  = hipObj::own<hipObj::IbvPdPtr>(verbs_, reinterpret_cast<struct ibv_pd *>(0x5678));
+        const hipObj::RdmaDevice rdma = makeDevice();
+        {
+            hipObj::RcConnection conn(rdma);
+            EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
+            EXPECT_EQ(device_.log.createCq, 1);
+            EXPECT_EQ(device_.log.createQp, 1);
+            EXPECT_NE(conn.qp, nullptr);
+        }
 
-        EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
-        EXPECT_EQ(device_.log.createCq, 1);
-        EXPECT_EQ(device_.log.createQp, 1);
-        EXPECT_NE(conn.qp, nullptr);
+        /* Destroying the connection releases its QP and CQ */
+        EXPECT_EQ(device_.log.destroyQp, 1);
+        EXPECT_EQ(device_.log.destroyCq, 1);
+        EXPECT_EQ(device_.log.deallocPd, 0);
     }
 
-    /* Destroying the connection releases everything in it */
-    EXPECT_EQ(device_.log.destroyQp, 1);
-    EXPECT_EQ(device_.log.destroyCq, 1);
+    /* Destroying the device releases the rest */
     EXPECT_EQ(device_.log.deallocPd, 1);
     EXPECT_EQ(device_.log.closeDevice, 1);
 }
 
 TEST_F(FakeVerbsSeamTest, InitTransitionGrantsRemoteReadAndWrite)
 {
-    hipObj::RcConnection conn;
-    conn.ctx = hipObj::own<hipObj::IbvContextPtr>(verbs_, reinterpret_cast<struct ibv_context *>(0x1234));
-    conn.pd  = hipObj::own<hipObj::IbvPdPtr>(verbs_, reinterpret_cast<struct ibv_pd *>(0x5678));
+    const hipObj::RdmaDevice rdma = makeDevice();
+    hipObj::RcConnection     conn(rdma);
     ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
 
     ASSERT_EQ(hipObj::transitionQpToInit(conn), 0);

@@ -12,13 +12,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
-#include <optional>
 
 #include <gtest/gtest.h>
 
 #include "buffer.h"
 #include "fake-device.h"
-#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
@@ -87,23 +85,15 @@ public:
     }
 };
 
-/* Installs the fakes for each test, and removes them after. The MRs the
- * tests get back deregister through ibv(), so it's the fake verbs too. */
+/* Resets the fakes' records for each test. The fakes aren't installed as
+ * ibv() and hip(), so the code can only reach them through what it's
+ * given. */
 class DmabufTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        fakeIbv_.emplace(verbs_);
-        fakeHip_.emplace(hip_);
-
         g_log = {};
         resetFake();
-    }
-
-    void TearDown() override
-    {
-        fakeIbv_.reset();
-        fakeHip_.reset();
     }
 
     hipObj::IbvMrPtr registerFakeBuffer(const hipObj::DmabufPolicy &policy = {}) const
@@ -111,10 +101,8 @@ protected:
         return hipObj::registerDeviceMemory(verbs_, hip_, fakePd(), fakeDevBuf(), kBufSize, kAccess, policy);
     }
 
-    DmabufVerbs                              verbs_{fake()};
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-    hipObjTest::FakeHip                      hip_{fake()};
-    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
+    DmabufVerbs         verbs_{fake()};
+    hipObjTest::FakeHip hip_{fake()};
 };
 
 TEST_F(DmabufTest, RegistrationClosesFdBeforeReturning)
@@ -225,7 +213,7 @@ TEST_F(DmabufTest, DisabledPolicyRegistersWithoutExporting)
 
 TEST_F(DmabufTest, BufferMapExportsByDefault)
 {
-    hipObj::BufferMap buffers({}, false);
+    hipObj::BufferMap buffers(verbs_, hip_, {}, false);
     ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()), 0);
     EXPECT_EQ(fake().log.exportDmabuf, 1);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 1);
@@ -234,7 +222,7 @@ TEST_F(DmabufTest, BufferMapExportsByDefault)
 
 TEST_F(DmabufTest, BufferMapRegistersWithoutExportingWhenDisabled)
 {
-    hipObj::BufferMap buffers({.enabled = false, .debug = false}, false);
+    hipObj::BufferMap buffers(verbs_, hip_, {.enabled = false, .debug = false}, false);
     ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()), 0);
     EXPECT_EQ(fake().log.exportDmabuf, 0);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 0);

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -24,55 +25,55 @@
 
 namespace hipObj {
 
-int
-openRdmaDevice(int nicIndex, RcConnection &conn)
+std::optional<RdmaDevice>
+openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
 {
-    const Verbs     &verbs   = ibv();
+    /* Connections use the device's first port */
+    constexpr uint8_t kPortNum = 1;
+
     int              numDevs = 0;
     IbvDeviceListPtr devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
     if (!devList || numDevs <= 0 || nicIndex < 0 || nicIndex >= numDevs) {
-        return -1;
+        return std::nullopt;
     }
     struct ibv_device *dev = deviceSpan(devList, numDevs)[static_cast<size_t>(nicIndex)];
     if (!dev) {
-        return -1;
+        return std::nullopt;
     }
     IbvContextPtr ctx = own<IbvContextPtr>(verbs, verbs.open_device(dev));
     devList.reset();
     if (!ctx) {
-        return -1;
+        return std::nullopt;
     }
     IbvPdPtr pd = own<IbvPdPtr>(verbs, verbs.alloc_pd(ctx.get()));
     if (!pd) {
-        return -1;
+        return std::nullopt;
     }
     struct ibv_port_attr portAttr;
-    if (verbs.query_port(ctx.get(), conn.portNum, &portAttr) != 0) {
-        return -1;
+    if (verbs.query_port(ctx.get(), kPortNum, &portAttr) != 0) {
+        return std::nullopt;
     }
-    conn.gidIndex = SelectBestGid(ctx.get(), conn.portNum);
-    if (conn.gidIndex < 0) {
-        conn.gidIndex = 0;
+    int gidIndex = SelectBestGid(verbs, topology, ctx.get(), kPortNum);
+    if (gidIndex < 0) {
+        gidIndex = 0;
     }
-    if (verbs.query_gid(ctx.get(), conn.portNum, conn.gidIndex, &conn.localGid) != 0) {
-        return -1;
+    ibv_gid localGid{};
+    if (verbs.query_gid(ctx.get(), kPortNum, gidIndex, &localGid) != 0) {
+        return std::nullopt;
     }
-    conn.pd  = std::move(pd);
-    conn.ctx = std::move(ctx);
-    return 0;
+    return RdmaDevice(verbs, std::move(ctx), std::move(pd), kPortNum, gidIndex, localGid);
 }
 
-int
-openRdmaDeviceByName(const char *devName, RcConnection &conn)
+std::optional<RdmaDevice>
+openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, const char *devName)
 {
     if (!devName) {
-        return -1;
+        return std::nullopt;
     }
-    const Verbs     &verbs   = ibv();
     int              numDevs = 0;
     IbvDeviceListPtr devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
     if (!devList || numDevs <= 0) {
-        return -1;
+        return std::nullopt;
     }
     const std::span<struct ibv_device *> devices  = deviceSpan(devList, numDevs);
     int                                  nicIndex = -1;
@@ -84,16 +85,17 @@ openRdmaDeviceByName(const char *devName, RcConnection &conn)
         }
     }
     if (nicIndex < 0) {
-        return -1;
+        return std::nullopt;
     }
-    return openRdmaDevice(nicIndex, conn);
+    return openRdmaDevice(verbs, topology, nicIndex);
 }
 
 int
 createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
 {
-    const Verbs &verbs = ibv();
-    IbvCqPtr     cq    = own<IbvCqPtr>(verbs, verbs.create_cq(conn.ctx.get(), cqSize, nullptr, nullptr, 0));
+    const RdmaDevice &device = conn.device();
+    const Verbs      &verbs  = device.verbs();
+    IbvCqPtr cq = own<IbvCqPtr>(verbs, verbs.create_cq(device.context(), cqSize, nullptr, nullptr, 0));
     if (!cq) {
         return -1;
     }
@@ -106,7 +108,7 @@ createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvW
     initAttr.cap.max_send_sge = 1;
     initAttr.cap.max_recv_sge = 1;
     initAttr.qp_type          = IBV_QPT_RC;
-    IbvQpPtr qp               = own<IbvQpPtr>(verbs, verbs.create_qp(conn.pd.get(), &initAttr));
+    IbvQpPtr qp               = own<IbvQpPtr>(verbs, verbs.create_qp(device.pd(), &initAttr));
     if (!qp) {
         return -1;
     }
@@ -122,21 +124,21 @@ transitionQpToInit(RcConnection &conn)
     zeroObject(attr);
     attr.qp_state        = IBV_QPS_INIT;
     attr.pkey_index      = 0;
-    attr.port_num        = conn.portNum;
+    attr.port_num        = conn.device().portNum();
     attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
     int mask             = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
-    return ibv().modify_qp(conn.qp.get(), &attr, mask);
+    return conn.device().verbs().modify_qp(conn.qp.get(), &attr, mask);
 }
 
 static void
-applyVendorQpAttrs(RcConnection &conn, struct ibv_qp_attr &attr)
+applyVendorQpAttrs(const RdmaDevice &device, struct ibv_qp_attr &attr)
 {
-    if (!conn.ctx) {
+    if (!device.context()) {
         return;
     }
     struct ibv_device_attr devAttr;
     zeroObject(devAttr);
-    if (ibv().query_device(conn.ctx.get(), &devAttr) != 0) {
+    if (device.verbs().query_device(device.context(), &devAttr) != 0) {
         return;
     }
 #ifdef HIPOBJ_BNXT
@@ -157,7 +159,8 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     // The address handle stores the GID index in a uint8_t, so an index
     // outside [0, 255] (including the -1 "not selected" default) can't be
     // used and must not be truncated into a different, valid-looking one.
-    if (!std::in_range<uint8_t>(conn.gidIndex)) {
+    const RdmaDevice &device = conn.device();
+    if (!std::in_range<uint8_t>(device.gidIndex())) {
         return -1;
     }
 
@@ -165,7 +168,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     zeroObject(attr);
     attr.qp_state = IBV_QPS_RTR;
     attr.path_mtu = IBV_MTU_4096;
-    applyVendorQpAttrs(conn, attr);
+    applyVendorQpAttrs(device, attr);
     attr.dest_qp_num               = destQpNum;
     attr.rq_psn                    = 0;
     attr.max_dest_rd_atomic        = 1;
@@ -174,15 +177,15 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.dlid              = destLid;
     attr.ah_attr.sl                = 0;
     attr.ah_attr.src_path_bits     = 0;
-    attr.ah_attr.port_num          = conn.portNum;
+    attr.ah_attr.port_num          = device.portNum();
     attr.ah_attr.grh.dgid          = destGid;
     attr.ah_attr.grh.flow_label    = 0;
     attr.ah_attr.grh.hop_limit     = 64;
-    attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(conn.gidIndex);
+    attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(device.gidIndex());
     attr.ah_attr.grh.traffic_class = 0;
     int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-    return ibv().modify_qp(conn.qp.get(), &attr, mask);
+    return device.verbs().modify_qp(conn.qp.get(), &attr, mask);
 }
 
 int
@@ -191,7 +194,7 @@ transitionQpToRts(RcConnection &conn)
     struct ibv_qp_attr attr;
     zeroObject(attr);
     attr.qp_state = IBV_QPS_RTS;
-    applyVendorQpAttrs(conn, attr);
+    applyVendorQpAttrs(conn.device(), attr);
     attr.timeout       = 14;
     attr.retry_cnt     = 7;
     attr.rnr_retry     = 7;
@@ -199,7 +202,7 @@ transitionQpToRts(RcConnection &conn)
     attr.max_rd_atomic = 1;
     int mask           = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                IBV_QP_MAX_QP_RD_ATOMIC;
-    return ibv().modify_qp(conn.qp.get(), &attr, mask);
+    return conn.device().verbs().modify_qp(conn.qp.get(), &attr, mask);
 }
 
 int
@@ -221,10 +224,11 @@ pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds
     if (!conn.cq) {
         return -1;
     }
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    const Verbs &verbs    = conn.device().verbs();
+    const auto   deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         struct ibv_wc wc;
-        int           n = ibv().poll_cq(conn.cq.get(), 1, &wc);
+        int           n = verbs.poll_cq(conn.cq.get(), 1, &wc);
         if (n < 0) {
             return -1;
         }

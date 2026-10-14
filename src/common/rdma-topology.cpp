@@ -67,19 +67,17 @@ namespace {
     /* The topology installed with setNicTopologyForTest(), or null */
     const NicTopology *g_topology_override = nullptr;
 
-    int AutoSelectGidIndex(ibv_context *ctx, uint8_t port_num)
+    int AutoSelectGidIndex(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx,
+                           uint8_t port_num)
     {
-        std::optional<SysfsTopology> sysfs;
-        const NicTopology           &topology = currentNicTopology(sysfs);
-
         ibv_port_attr port_attr;
-        if (ibv().query_port(ctx, port_num, &port_attr) != 0)
+        if (verbs.query_port(ctx, port_num, &port_attr) != 0)
             return -1;
 
         std::vector<GidCandidate> candidates;
         for (int i = 0; i < port_attr.gid_tbl_len; ++i) {
             ibv_gid gid;
-            if (ibv().query_gid(ctx, port_num, i, &gid) != 0)
+            if (verbs.query_gid(ctx, port_num, i, &gid) != 0)
                 continue;
             GidCandidate c;
             c.index = i;
@@ -227,16 +225,15 @@ currentNicTopology(std::optional<SysfsTopology> &storage)
 }
 
 std::optional<RdmaNic>
-GetClosestNicToGpu(int gpuIndex, const char *hca_list)
+GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int gpuIndex, const char *hca_list)
 {
     char       gpu_bus_id[32];
-    hipError_t err = hip().deviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id), gpuIndex);
+    hipError_t err = runtime.deviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id), gpuIndex);
     if (err != hipSuccess)
         return std::nullopt;
 
-    std::string                  gpu_bus(gpu_bus_id);
-    std::optional<SysfsTopology> sysfs;
-    auto                         devices = currentNicTopology(sysfs).enumerate(hca_list);
+    std::string gpu_bus(gpu_bus_id);
+    auto        devices = topology.enumerate(hca_list);
     if (devices.empty())
         return std::nullopt;
 
@@ -268,9 +265,9 @@ PickBestGid(std::span<const GidCandidate> candidates)
 }
 
 int
-SelectBestGid(ibv_context *ctx, uint8_t port_num)
+SelectBestGid(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx, uint8_t port_num)
 {
-    return AutoSelectGidIndex(ctx, port_num);
+    return AutoSelectGidIndex(verbs, topology, ctx, port_num);
 }
 
 } // namespace hipObj

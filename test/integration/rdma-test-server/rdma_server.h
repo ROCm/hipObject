@@ -34,8 +34,9 @@ public:
                            std::string &replyHeader);
 
 private:
+    /* Null when the server couldn't set up RDMA */
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::unique_ptr<Impl> impl_{};
 };
 
 } // namespace hipobj::test
