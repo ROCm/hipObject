@@ -153,15 +153,15 @@ struct RdmaTestServer::Impl {
     }
 };
 
-RdmaTestServer::RdmaTestServer()
+RdmaTestServer::RdmaTestServer(const hipObj::Verbs *verbsPtr)
 {
-    if (!hipObj::ibvAvailable()) {
+    if (verbsPtr == nullptr) {
         return;
     }
     /* Built in locals and moved into impl_ only once everything has
      * succeeded, so a failure, or an exception, destroys them in reverse
      * order with no rollback code */
-    const hipObj::Verbs              &verbs = hipObj::ibv();
+    const hipObj::Verbs              &verbs = *verbsPtr;
     const hipObj::SysfsTopology       topology(verbs);
     std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs, topology, 0);
     if (!device) {
