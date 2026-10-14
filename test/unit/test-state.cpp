@@ -146,17 +146,15 @@ TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
     options.requireGpuDirect = true;
     ASSERT_EQ(initWith(options).opError, hipObjSuccess);
 
-    {
-        const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
-        ASSERT_NE(instance, nullptr);
-        EXPECT_EQ(instance->platform, fakes_->platform());
-        EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
-        EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
-        EXPECT_TRUE(instance->options.requireGpuDirect);
-        EXPECT_EQ(instance->config.gpuDevice, -1);
-        EXPECT_EQ(instance->config.nicHint, "mlx5_0");
-        EXPECT_EQ(instance->config.nicIndex, 0);
-    }
+    const hipObj::Instance *const instance = hipObj::currentInstance();
+    ASSERT_NE(instance, nullptr);
+    EXPECT_EQ(instance->platform, fakes_->platform());
+    EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
+    EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
+    EXPECT_TRUE(instance->options.requireGpuDirect);
+    EXPECT_EQ(instance->config.gpuDevice, -1);
+    EXPECT_EQ(instance->config.nicHint, "mlx5_0");
+    EXPECT_EQ(instance->config.nicIndex, 0);
 
     /* The instance's platform keeps the fakes alive until shutdown */
     EXPECT_EQ(fakes_.use_count(), 2);
@@ -180,7 +178,7 @@ TEST_F(InitWithTest, FailureLeavesNoInstance)
 TEST_F(InitWithTest, AlreadyInitialized)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    const hipObj::Instance *const instance = hipObj::currentInstance();
     EXPECT_EQ(initWith({}).opError, hipObjAlreadyInitialized);
     EXPECT_EQ(hipObj::currentInstance(), instance);
     EXPECT_EQ(fake().log.openDevice, 1);

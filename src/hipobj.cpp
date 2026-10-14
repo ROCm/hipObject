@@ -334,7 +334,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
         return {hipObjNotInitialized, 0};
     }
@@ -365,7 +365,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
         return {hipObjNotInitialized, 0};
     }
@@ -393,7 +393,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
         return {hipObjNotInitialized, 0};
     }
@@ -421,7 +421,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
         return {hipObjNotInitialized, 0};
     }
@@ -452,7 +452,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
         return {hipObjNotInitialized, 0};
     }
@@ -482,7 +482,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
         return {hipObjNotInitialized, 0};
     }
@@ -508,7 +508,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
         return {hipObjNotInitialized, 0};
     }

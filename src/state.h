@@ -125,7 +125,7 @@ struct Instance final {
              RcConnection instanceConn) noexcept;
     ~Instance() = default;
 
-    /* Lives in a shared_ptr, and isn't copied or moved */
+    /* Lives in a unique_ptr, and isn't copied or moved */
     Instance(const Instance &)            = delete;
     Instance &operator=(const Instance &) = delete;
     Instance(Instance &&)                 = delete;
@@ -141,8 +141,9 @@ struct Instance final {
 
 /* The library's instance, or null when it isn't initialized. Call it with
  * the API lock held (see ApiGuard), or while no other thread can call the
- * library. */
-std::shared_ptr<Instance> currentInstance();
+ * library. The pointer doesn't own the instance, and is valid until
+ * shutdownInstance() destroys it. */
+Instance *currentInstance() noexcept;
 
 /* hipObjInit(), with its platform and options given: builds an Instance
  * that holds them, and makes it the current one. The caller holds the API
