@@ -41,14 +41,13 @@ struct RcConnection final {
     }
 };
 
-int  openRdmaDevice(int nicIndex, RcConnection &conn);
-int  openRdmaDeviceByName(const char *devName, RcConnection &conn);
-void closeRdmaDevice(RcConnection &conn);
-int  createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr);
-int  transitionQpToInit(RcConnection &conn);
-int  transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid);
-int  transitionQpToRts(RcConnection &conn);
-int  connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);
-int  pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout);
+int openRdmaDevice(int nicIndex, RcConnection &conn);
+int openRdmaDeviceByName(const char *devName, RcConnection &conn);
+int createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr);
+int transitionQpToInit(RcConnection &conn);
+int transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid);
+int transitionQpToRts(RcConnection &conn);
+int connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);
+int pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout);
 
 } // namespace hipObj

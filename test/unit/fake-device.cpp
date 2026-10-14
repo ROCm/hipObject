@@ -14,6 +14,8 @@
 #include <string>
 
 #include "hipobj-span.h"
+#include "hipobj.h"
+#include "state.h"
 
 namespace hipObjTest {
 
@@ -488,8 +490,6 @@ EmptyNicTopology::roceVersion(const char *, uint8_t, int) const
 void
 FakeDeviceTest::SetUp()
 {
-    savedState_ = hipObj::setStateForTest(&state_);
-
     fakeTopology_.emplace(topology_);
     fakeHip_.emplace(hip_);
     fakeIbv_.emplace(verbs_);
@@ -500,11 +500,11 @@ FakeDeviceTest::SetUp()
 void
 FakeDeviceTest::TearDown()
 {
-    (void)hipObjShutdown();
+    EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
     fakeIbv_.reset();
     fakeHip_.reset();
     fakeTopology_.reset();
-    hipObj::setStateForTest(savedState_);
 }
 
 hipObjConfig_t

@@ -118,7 +118,7 @@ TEST_P(ApiExceptionTest, Init)
     const hipObjTest::ScopedFakeHip installed(throwing);
     hipObjConfig_t                  config = makeConfig();
     EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
-    EXPECT_FALSE(state_.initialized);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
 TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
@@ -128,7 +128,7 @@ TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
         const hipObjTest::ScopedFakeIbv installed(throwing);
         hipObjConfig_t                  config = makeConfig();
         EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
-        EXPECT_FALSE(state_.initialized);
+        EXPECT_EQ(hipObj::currentInstance(), nullptr);
     }
 
     /* The device, PD, and CQ opened before the throw are released */

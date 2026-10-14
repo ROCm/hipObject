@@ -8,7 +8,6 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -49,37 +48,6 @@ namespace {
             return false;
         }
         return attr.type == hipMemoryTypeDevice;
-    }
-
-    /* Strict GPU-direct mode. Registering a device buffer is supposed to hand the
-     * NIC the device memory itself; when that fails we silently fall back to a
-     * host staging buffer and copy through it, which still transfers the right
-     * bytes and so passes every assertion a test can make -- a GPU-direct lane
-     * that quietly stopped being GPU-direct reports success. CI sets this so the
-     * fallback is a hard failure there, while a production host without dmabuf
-     * keeps working. */
-    bool requireGpuDirect()
-    {
-        static bool required = [] {
-            const char *env = getenv("HIPOBJ_REQUIRE_GPU_DIRECT");
-            return env && *env && env[0] != '0' && env[0] != 'n' && env[0] != 'N';
-        }();
-        return required;
-    }
-
-    /* The dma-buf policy HIPOBJ_DMABUF and HIPOBJ_RDMA_DEBUG set, read on
-     * the first registration */
-    const DmabufPolicy &dmabufPolicy()
-    {
-        static const DmabufPolicy policy = [] {
-            DmabufPolicy result;
-            const char  *debug = std::getenv("HIPOBJ_RDMA_DEBUG");
-            result.debug       = debug && *debug && debug[0] != '0';
-            const char *dmabuf = std::getenv("HIPOBJ_DMABUF");
-            result.enabled     = !(dmabuf && (dmabuf[0] == '0' || dmabuf[0] == 'n' || dmabuf[0] == 'N'));
-            return result;
-        }();
-        return policy;
     }
 
     /* Owns a dmabuf fd from HipRuntime::exportDmabuf(), and closes it
@@ -194,7 +162,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return -1;
     }
     int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr     = registerDeviceMemory(ibv(), hip(), pd, devPtr, size, access, dmabufPolicy());
+    IbvMrPtr mr     = registerDeviceMemory(ibv(), hip(), pd, devPtr, size, access, dmabuf_);
     if (mr) {
         BufEntry &entry  = entries_[key];
         entry.mr         = std::move(mr);
@@ -206,7 +174,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 
     const bool deviceMemory = isDevicePointer(devPtr);
     if (deviceMemory) {
-        if (requireGpuDirect()) {
+        if (requireGpuDirect_) {
             fprintf(stderr,
                     "hipObj: GPU-direct registration of %zu bytes at %p failed and "
                     "HIPOBJ_REQUIRE_GPU_DIRECT is set; refusing to stage through "
@@ -272,12 +240,6 @@ BufferMap::deregisterBuffer(void *devPtr)
     /* Deregisters the MR, then frees any staging buffer */
     entries_.erase(it);
     return 0;
-}
-
-void
-BufferMap::deregisterAll()
-{
-    entries_.clear();
 }
 
 const BufferMap::BufEntry *

@@ -133,7 +133,7 @@ class SerializedDefinitionTest(unittest.TestCase):
     def test_state_used_before_guard(self) -> None:
         """Library state used before the guard"""
         self.assert_unguarded(
-            "    if (!getState().initialized) {\n" + RETURN + "    }\n" + GUARD + RETURN
+            "    if (!currentInstance()) {\n" + RETURN + "    }\n" + GUARD + RETURN
         )
 
     def test_conditional_guard(self) -> None:

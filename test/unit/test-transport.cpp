@@ -156,15 +156,13 @@ TEST_F(TransportTest, CreateQpReleasesCqWhenQpCreationFails)
     expectNothingLeaked();
 }
 
-TEST_F(TransportTest, CloseReleasesEverything)
+TEST_F(TransportTest, DestroyingReleasesEverything)
 {
-    hipObj::RcConnection conn;
-    ASSERT_NO_FATAL_FAILURE(open(conn));
-    hipObj::closeRdmaDevice(conn);
-    EXPECT_FALSE(conn.qp);
-    EXPECT_FALSE(conn.cq);
-    EXPECT_FALSE(conn.pd);
-    EXPECT_FALSE(conn.ctx);
+    {
+        hipObj::RcConnection conn;
+        ASSERT_NO_FATAL_FAILURE(open(conn));
+        EXPECT_EQ(fake().log.destroyQp, 0);
+    }
     EXPECT_EQ(fake().log.destroyQp, 1);
     expectNothingLeaked();
 }
@@ -391,7 +389,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
         fake().fail.*fault    = true;
         hipObjConfig_t config = makeConfig();
         EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
-        EXPECT_FALSE(state_.initialized);
+        EXPECT_EQ(hipObj::currentInstance(), nullptr);
         expectNothingLeaked();
     }
 }
@@ -401,7 +399,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenInitTransitionFails)
     fake().fail.modifyQpToState = IBV_QPS_INIT;
     hipObjConfig_t config       = makeConfig();
     EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
-    EXPECT_FALSE(state_.initialized);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
     expectNothingLeaked();
 }
 
@@ -410,14 +408,14 @@ TEST_F(TransportTest, InitFailsForUnknownNic)
     hipObjConfig_t config = makeConfig();
     config.nicHint        = "mlx5_1";
     EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
-    EXPECT_FALSE(state_.initialized);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
 TEST_F(TransportTest, ShutdownReleasesEverything)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
-    EXPECT_FALSE(state_.initialized);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
     EXPECT_EQ(fake().log.createQp, 1);
     expectNothingLeaked();
 }
