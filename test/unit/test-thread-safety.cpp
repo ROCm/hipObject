@@ -125,14 +125,12 @@ makeConfig()
     return config;
 }
 
-/* Installs the fakes and a fresh driver state for each test, and puts
- * the real ones back afterward */
+/* Installs the fakes for each test, and puts the real ones back
+ * afterward */
 class ThreadSafetyTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        savedState_ = hipObj::setStateForTest(&state_);
-
         /* The fake HIP runtime has no GPU, so with a NIC hint,
          * hipObjInit() opens the hinted NIC directly */
         fakeHip_.emplace(hip_);
@@ -148,7 +146,6 @@ protected:
         (void)hipObjShutdown();
         fakeIbv_.reset();
         fakeHip_.reset();
-        hipObj::setStateForTest(savedState_);
     }
 
     /* The buffer for thread index, kBufSize bytes, distinct from every
@@ -158,8 +155,6 @@ protected:
         return std::span(pool_).subspan(static_cast<size_t>(index) * kBufSize, kBufSize).data();
     }
 
-    hipObj::DriverState                      state_{};
-    hipObj::DriverState                     *savedState_ = nullptr;
     hipObjTest::FakeDevice                   hipDevice_{};
     hipObjTest::FakeVerbs                    verbs_{hipDevice_};
     std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
@@ -278,7 +273,7 @@ TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)
     });
 
     EXPECT_EQ(probe_.overlaps.load(), 0);
-    EXPECT_TRUE(state_.initialized);
+    EXPECT_NE(hipObj::currentInstance(), nullptr);
 }
 
 /* The number of functions reentrantSendRequest() calls that take the
@@ -351,7 +346,7 @@ TEST_F(ThreadSafetyTest, CallbackReentryFailsInsteadOfDeadlocking)
     EXPECT_EQ(probe.parsedCode, 200);
 
     /* The rejected calls changed nothing, and the lock was released */
-    EXPECT_TRUE(state_.initialized);
+    EXPECT_NE(hipObj::currentInstance(), nullptr);
     EXPECT_EQ(hipObjBufDeregister(probe.unregistered).opError, hipObjBufNotRegistered);
     EXPECT_EQ(hipObjBufDeregister(probe.registered).opError, hipObjSuccess);
 }

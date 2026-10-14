@@ -87,15 +87,6 @@ openRdmaDeviceByName(const char *devName, RcConnection &conn)
     return openRdmaDevice(nicIndex, conn);
 }
 
-void
-closeRdmaDevice(RcConnection &conn)
-{
-    conn.qp.reset();
-    conn.cq.reset();
-    conn.pd.reset();
-    conn.ctx.reset();
-}
-
 int
 createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
 {

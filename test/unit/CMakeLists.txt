@@ -149,13 +149,6 @@ hipobj_add_test(test-loaded-verbs
 
 hipobj_add_fake_device_test(test-ibv-dmabuf
   test-ibv-dmabuf.cpp)
-# The tests of turning dma-buf registration off need HIPOBJ_DMABUF=0 in
-# the environment, so they run in a process of their own (see
-# test-ibv-dmabuf.cpp)
-add_test(NAME test-ibv-dmabuf-disabled
-  COMMAND test-ibv-dmabuf --gtest_filter=DmabufDisabledTest.*)
-set_tests_properties(test-ibv-dmabuf-disabled PROPERTIES
-  ENVIRONMENT "HIPOBJ_DMABUF=0")
 
 hipobj_add_fake_device_test(test-api-args
   test-api-args.cpp)
@@ -166,13 +159,16 @@ hipobj_add_fake_device_test(test-api-exceptions
 hipobj_add_fake_device_test(test-transport
   test-transport.cpp)
 
+hipobj_add_fake_device_test(test-state
+  test-state.cpp)
+
 hipobj_add_test(test-s3-control
   test-s3-control.cpp)
 
 hipobj_add_fake_device_test(test-staging
   test-staging.cpp)
-# hipObject reads these settings once and caches them, so the tests of
-# them run in a process of their own (see test-staging.cpp)
+# The tests of these settings need them in the environment, so they run
+# in a process of their own (see test-staging.cpp)
 add_test(NAME test-staging-env
   COMMAND test-staging --gtest_filter=StagingEnvTest.*)
 set_tests_properties(test-staging-env PROPERTIES

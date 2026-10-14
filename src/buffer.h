@@ -85,10 +85,17 @@ public:
         }
     };
 
-    int  registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
-    int  registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
-    int  deregisterBuffer(void *devPtr);
-    void deregisterAll();
+    /* registerBuffer() registers GPU memory as dmabuf says, and with
+     * requireGpuDirect, fails rather than staging a GPU buffer the NIC
+     * can't reach through host memory */
+    BufferMap(const DmabufPolicy &dmabuf, bool requireGpuDirect) noexcept
+        : dmabuf_(dmabuf), requireGpuDirect_(requireGpuDirect)
+    {
+    }
+
+    int registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
+    int registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
+    int deregisterBuffer(void *devPtr);
     /* The registration at devPtr, or null if there isn't one. Looked up
      * once per transfer and passed down. The entry stays valid until
      * devPtr is deregistered, which can't happen during a call that holds
@@ -100,6 +107,8 @@ public:
 
 private:
     std::map<uintptr_t, BufEntry> entries_{};
+    DmabufPolicy                  dmabuf_;
+    bool                          requireGpuDirect_;
 };
 
 } // namespace hipObj

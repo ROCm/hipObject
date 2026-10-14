@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: MIT
  *
  * A fake RDMA device and HIP runtime for tests of the public API. The
- * fixture substitutes fakes for libibverbs, the HIP runtime, the NIC
- * topology, and the driver state, so hipObjInit() and transfers run
- * without GPU or RDMA hardware. The fakes record their calls and can be
+ * fixture substitutes fakes for libibverbs, the HIP runtime, and the NIC
+ * topology, so hipObjInit() and transfers run without GPU or RDMA
+ * hardware. The fakes record their calls and can be
  * told to fail (see FakeDevice).
  */
 
@@ -28,7 +28,6 @@
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
-#include "state.h"
 #include "token.h"
 
 namespace hipObjTest {
@@ -355,7 +354,9 @@ private:
     const hipObj::NicTopology *previous_;
 };
 
-/* Installs the fakes for each test, and restores the real functions after */
+/* Installs the fakes for each test, and restores the real functions after.
+ * After each test, it shuts the library down and checks that the instance
+ * is gone. */
 class FakeDeviceTest : public ::testing::Test {
 protected:
     void SetUp() override;
@@ -369,8 +370,6 @@ protected:
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
     static void initAndRegister();
 
-    hipObj::DriverState               state_{};
-    hipObj::DriverState              *savedState_ = nullptr;
     EmptyNicTopology                  topology_{};
     std::optional<ScopedFakeTopology> fakeTopology_{};
     FakeVerbs                         verbs_{fake()};

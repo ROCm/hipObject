@@ -67,20 +67,10 @@ namespace {
     /* The topology installed with setNicTopologyForTest(), or null */
     const NicTopology *g_topology_override = nullptr;
 
-    /* The topology NIC and GID selection use: the one installed with
-     * setNicTopologyForTest(), or otherwise a SysfsTopology over ibv(),
-     * built in storage */
-    const NicTopology &currentTopology(std::optional<SysfsTopology> &storage)
-    {
-        if (g_topology_override)
-            return *g_topology_override;
-        return storage.emplace(ibv());
-    }
-
     int AutoSelectGidIndex(ibv_context *ctx, uint8_t port_num)
     {
         std::optional<SysfsTopology> sysfs;
-        const NicTopology           &topology = currentTopology(sysfs);
+        const NicTopology           &topology = currentNicTopology(sysfs);
 
         ibv_port_attr port_attr;
         if (ibv().query_port(ctx, port_num, &port_attr) != 0)
@@ -228,6 +218,14 @@ setNicTopologyForTest(const NicTopology *topology)
     return previous;
 }
 
+const NicTopology &
+currentNicTopology(std::optional<SysfsTopology> &storage)
+{
+    if (g_topology_override)
+        return *g_topology_override;
+    return storage.emplace(ibv());
+}
+
 std::optional<RdmaNic>
 GetClosestNicToGpu(int gpuIndex, const char *hca_list)
 {
@@ -238,7 +236,7 @@ GetClosestNicToGpu(int gpuIndex, const char *hca_list)
 
     std::string                  gpu_bus(gpu_bus_id);
     std::optional<SysfsTopology> sysfs;
-    auto                         devices = currentTopology(sysfs).enumerate(hca_list);
+    auto                         devices = currentNicTopology(sysfs).enumerate(hca_list);
     if (devices.empty())
         return std::nullopt;
 

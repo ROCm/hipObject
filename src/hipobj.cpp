@@ -28,30 +28,17 @@
 #include "buffer.h"
 #include "control.h"
 #include "hip-seam.h"
-#include "hipobj-parse.h"
 #include "hipobj-private.h"
 #include "hipobj-span.h"
-#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
-#include "no-destructor.h"
-#include "rdma-topology.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
 
 namespace hipObj {
-
-/* Never destroyed: hipObjShutdown() releases their resources. Clang still
- * warns, since NoDestructor's empty destructor isn't trivial. */
-HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
-HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-static NoDestructor<BufferMap>    g_bufferMap;
-static NoDestructor<RcConnection> g_conn;
-HIPOBJ_WARN_NO_EXIT_DTOR_ON
-HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
 
 static hipObjError_t
 handleException()
@@ -100,7 +87,7 @@ checkRegistrationArgs(const void *ptr, size_t size)
 }
 
 /* Checks the arguments to a call that uses [offset, offset + size) of the
- * buffer registered at devPtr. buf is g_bufferMap->find(devPtr). */
+ * buffer registered at devPtr. buf is the instance's buffers.find(devPtr). */
 static hipObjError_t
 checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size, off_t offset)
 {
@@ -117,9 +104,9 @@ checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size,
 }
 
 static std::optional<RdmaToken>
-buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset)
+buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf, size_t size, off_t offset)
 {
-    if (!buf.mr || !g_conn->qp) {
+    if (!buf.mr || !conn.qp) {
         return std::nullopt;
     }
     if (!rangeInRegistration(offset, size, buf.size)) {
@@ -127,21 +114,22 @@ buildRdmaToken(const BufferMap::BufEntry &buf, size_t size, off_t offset)
     }
     RdmaToken token;
     token.transport  = TransportType::RC;
-    token.qpNum      = g_conn->qp->qp_num;
-    token.gid        = toGid(g_conn->localGid);
+    token.qpNum      = conn.qp->qp_num;
+    token.gid        = toGid(conn.localGid);
     token.rkey       = buf.mr->rkey;
     token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
     token.length     = size;
-    token.portNum    = g_conn->portNum;
+    token.portNum    = conn.portNum;
     token.lid        = 0;
     return token;
 }
 
 static int
-finishTransferAfterReply(std::string_view reply, bool requiresDeviceSync)
+finishTransferAfterReply(RcConnection &conn, std::string_view reply, bool requiresDeviceSync,
+                         std::chrono::milliseconds pollTimeout)
 {
     if (const auto peerToken = parsePeerTokenFromReply(reply)) {
-        if (connectRcPeer(*g_conn, *peerToken) != 0) {
+        if (connectRcPeer(conn, *peerToken) != 0) {
             return -1;
         }
     }
@@ -149,7 +137,7 @@ finishTransferAfterReply(std::string_view reply, bool requiresDeviceSync)
     // is unknown. With the current one-sided protocol the responder side
     // may not observe a completion at all (see issue #22), so this check
     // reports "no evidence of failure" rather than "transfer verified".
-    if (pollCompletion(*g_conn, -1, std::chrono::seconds(5)) != 0) {
+    if (pollCompletion(conn, -1, pollTimeout) != 0) {
         return -1;
     }
     if (!requiresDeviceSync) {
@@ -159,46 +147,14 @@ finishTransferAfterReply(std::string_view reply, bool requiresDeviceSync)
     return (err == hipSuccess) ? 0 : -1;
 }
 
-/* How long to wait for a staging copy before giving up. A 1 MiB copy is
- * single-digit milliseconds on real hardware and ~170 ms on the emulated GPU
- * the CI lanes use, so the default is several orders of magnitude of slack.
- * It exists for one reason: a DMA that never completes must not become an
- * unkillable process. ROCm waits on the completion signal with
- * BusyWaitSignal::WaitRelaxed, which spins in userspace rather than blocking,
- * so a wedged copy shows up as a busy core and no kernel log at all -- there
- * is no other layer that will ever time this out.
- *
- * HIPOBJ_STAGE_TIMEOUT_MS overrides the default with a whole number of
- * milliseconds. A value that isn't one, or is out of range, is ignored. */
-static std::chrono::milliseconds
-stageTimeout()
-{
-    static const std::chrono::milliseconds timeout = [] {
-        constexpr std::chrono::milliseconds kDefault{30000};
-        /* Longer than any copy could take, and short enough that adding it
-         * to the current time can't overflow the clock */
-        constexpr std::chrono::milliseconds kMax = std::chrono::hours(24);
-
-        const char *env = std::getenv("HIPOBJ_STAGE_TIMEOUT_MS");
-        if (!env) {
-            return kDefault;
-        }
-        const auto ms = parseNumber<int64_t>(env);
-        if (!ms || *ms <= 0 || *ms > kMax.count()) {
-            return kDefault;
-        }
-        return std::chrono::milliseconds(*ms);
-    }();
-    return timeout;
-}
-
-/* hipMemcpy with a deadline. Async copy plus a recorded event polled to a
- * wall-clock bound: on timeout the event and the copy are abandoned
- * deliberately -- the copy owns the staging buffer and the stream, and there
- * is no safe way to reclaim either while the DMA may still land. The caller
- * gets an error instead of a hang, which is the whole point. */
+/* hipMemcpy with a deadline (see Options::stageTimeout). Async copy plus a
+ * recorded event polled to a wall-clock bound: on timeout the event and the
+ * copy are abandoned deliberately -- the copy owns the staging buffer and
+ * the stream, and there is no safe way to reclaim either while the DMA may
+ * still land. The caller gets an error instead of a hang, which is the
+ * whole point. */
 static hipObjError_t
-stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
+stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice, std::chrono::milliseconds timeout)
 {
     const HipRuntime   &runtime = hip();
     const hipMemcpyKind kind    = toDevice ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
@@ -219,8 +175,7 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
         return {hipObjInternalError, 0};
     }
 
-    const std::chrono::milliseconds timeout  = stageTimeout();
-    const auto                      deadline = std::chrono::steady_clock::now() + timeout;
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
         hipError_t q = runtime.eventQuery(done.get());
         if (q == hipSuccess) {
@@ -245,8 +200,10 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
+
 static hipObjError_t
-stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t offset, bool toDevice)
+stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t offset, bool toDevice,
+            std::chrono::milliseconds timeout)
 {
     if (!buf.hostBuf) {
         /* the NIC reads and writes the caller's memory */
@@ -260,13 +217,14 @@ stageBuffer(void *devPtr, const BufferMap::BufEntry &buf, size_t size, off_t off
     const std::span<std::byte> dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
     const auto                 start = static_cast<size_t>(offset);
     return stageCopyWithDeadline(dev.subspan(start, size).data(), host.subspan(start, size).data(), size,
-                                 toDevice);
+                                 toDevice, timeout);
 }
 
 static hipObjError_t
-runRdmaTransfer(const BufferMap::BufEntry &buf, size_t size, off_t offset, hipObjOps_t *ops, void *ctx)
+runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size, off_t offset,
+                hipObjOps_t *ops, void *ctx)
 {
-    const auto token = buildRdmaToken(buf, size, offset);
+    const auto token = buildRdmaToken(instance.conn, buf, size, offset);
     if (!token) {
         return {hipObjRdmaError, 0};
     }
@@ -279,7 +237,8 @@ runRdmaTransfer(const BufferMap::BufEntry &buf, size_t size, off_t offset, hipOb
     if (!reply || reply->status != RdmaReplyStatus::Success) {
         return {hipObjS3Error, 0};
     }
-    if (finishTransferAfterReply(reply->text, buf.isDmabuf) != 0) {
+    if (finishTransferAfterReply(instance.conn, reply->text, buf.isDmabuf, instance.options.pollTimeout) !=
+        0) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -338,79 +297,17 @@ try {
     if (!config || config->flags != 0 || config->gpuDevice < -1) {
         return {hipObjInvalidValue, 0};
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (state.initialized) {
+    if (hipObj::currentInstance()) {
         return {hipObjAlreadyInitialized, 0};
     }
     if (!hipObj::ibvAvailable()) {
         return {hipObjRdmaError, 0};
     }
-    const bool haveNicHint = config->nicHint && config->nicHint[0] != '\0';
-    int        gpuDevice   = config->gpuDevice;
-    if (gpuDevice < 0) {
-        hipError_t err = hipObj::hip().getDevice(&gpuDevice);
-        if (err != hipSuccess) {
-            // No GPU to infer a device from. That is only fatal when we also have
-            // no NIC hint -- with a hint the topology lookup below is skipped
-            // entirely, so an absent GPU is not an error.
-            if (err != hipErrorNoDevice || !haveNicHint) {
-                return {hipObjRdmaError, static_cast<int>(err)};
-            }
-            gpuDevice = -1;
-        }
-    }
-    else {
-        // An explicit device has to exist, even when a NIC hint means its
-        // topology isn't needed
-        int        deviceCount = 0;
-        hipError_t err         = hipObj::hip().getDeviceCount(&deviceCount);
-        if (err == hipErrorNoDevice) {
-            deviceCount = 0;
-        }
-        else if (err != hipSuccess) {
-            return {hipObjRdmaError, static_cast<int>(err)};
-        }
-        if (gpuDevice >= deviceCount) {
-            return {hipObjInvalidValue, 0};
-        }
-    }
-    std::optional<hipObj::RdmaNic> nic;
-    if (gpuDevice >= 0) {
-        nic = hipObj::GetClosestNicToGpu(gpuDevice, config->nicHint);
-    }
-    if (!nic) {
-        // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
-        // hint is provided, try opening it directly without GPU topology so the
-        // library works in GPU-less environments (e.g. CI with emulated RDMA).
-        if (haveNicHint) {
-            nic = hipObj::RdmaNic{0, config->nicHint};
-        }
-        else {
-            return {hipObjNicNotFound, 0};
-        }
-    }
-    /* Everything that can fail or throw builds into locals, which release
-     * what they hold on the way out. The library state only changes once
-     * nothing else can fail. */
-    hipObj::RcConnection conn;
-    if (hipObj::openRdmaDeviceByName(nic->name.c_str(), conn) != 0 ||
-        hipObj::createRcQp(conn, 256, 128, 128) != 0 || hipObj::transitionQpToInit(conn) != 0) {
-        return {hipObjRdmaError, 0};
-    }
-    std::string endpoint = config->endpoint ? config->endpoint : "";
-    std::string region   = config->region ? config->region : "";
-    std::string nicHint  = config->nicHint ? config->nicHint : "";
-
-    /* None of these can throw */
-    *hipObj::g_conn   = std::move(conn);
-    state.gpuDevice   = gpuDevice;
-    state.endpoint    = std::move(endpoint);
-    state.region      = std::move(region);
-    state.nicHint     = std::move(nicHint);
-    state.nicIndex    = nic->index;
-    state.flags       = config->flags;
-    state.initialized = true;
-    return {hipObjSuccess, 0};
+    /* std::getenv is called through a lambda, since C++ doesn't allow
+     * taking the address of most standard library functions */
+    return hipObj::initWith(
+        *config, hipObj::systemPlatform(),
+        hipObj::parseOptions([](const char *name) noexcept { return std::getenv(name); }));
 }
 catch (...) {
     return hipObj::handleException();
@@ -423,19 +320,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
-        return {hipObjSuccess, 0};
-    }
-    hipObj::g_bufferMap->deregisterAll();
-    hipObj::closeRdmaDevice(*hipObj::g_conn);
-    state.initialized = false;
-    state.gpuDevice   = 0;
-    state.endpoint.clear();
-    state.region.clear();
-    state.nicHint.clear();
-    state.nicIndex = -1;
-    state.flags    = 0;
+    hipObj::shutdownInstance();
     return {hipObjSuccess, 0};
 }
 catch (...) {
@@ -449,8 +334,8 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return {hipObjNotInitialized, 0};
     }
     hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
@@ -460,10 +345,10 @@ try {
     if (!hipObj::isValidDeviceRange(devPtr, size)) {
         return {hipObjInvalidValue, 0};
     }
-    if (hipObj::g_bufferMap->isRegistered(devPtr)) {
+    if (instance->buffers.isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap->registerBuffer(devPtr, size, hipObj::g_conn->pd.get());
+    int ret = instance->buffers.registerBuffer(devPtr, size, instance->conn.pd.get());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -480,18 +365,18 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return {hipObjNotInitialized, 0};
     }
     hipObjError_t err = hipObj::checkRegistrationArgs(hostPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    if (hipObj::g_bufferMap->isRegistered(hostPtr)) {
+    if (instance->buffers.isRegistered(hostPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap->registerHostBuffer(hostPtr, size, hipObj::g_conn->pd.get());
+    int ret = instance->buffers.registerHostBuffer(hostPtr, size, instance->conn.pd.get());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -508,17 +393,17 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return {hipObjNotInitialized, 0};
     }
     if (!devPtr) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::g_bufferMap->isRegistered(devPtr)) {
+    if (!instance->buffers.isRegistered(devPtr)) {
         return {hipObjBufNotRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap->deregisterBuffer(devPtr);
+    int ret = instance->buffers.deregisterBuffer(devPtr);
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -536,23 +421,23 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return {hipObjNotInitialized, 0};
     }
     if (!ops || !ops->sendRequest || !ops->recvReply) {
         return {hipObjInvalidValue, 0};
     }
-    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::runRdmaTransfer(*buf, size, offset, ops, ctx);
+    err = hipObj::runRdmaTransfer(*instance, *buf, size, offset, ops, ctx);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(devPtr, *buf, size, offset, true);
+    return hipObj::stageBuffer(devPtr, *buf, size, offset, true, instance->options.stageTimeout);
 }
 catch (...) {
     return hipObj::handleException();
@@ -566,23 +451,24 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return {hipObjNotInitialized, 0};
     }
     if (!ops || !ops->sendRequest || !ops->recvReply) {
         return {hipObjInvalidValue, 0};
     }
-    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::stageBuffer(const_cast<void *>(devPtr), *buf, size, offset, false);
+    err = hipObj::stageBuffer(const_cast<void *>(devPtr), *buf, size, offset, false,
+                              instance->options.stageTimeout);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::runRdmaTransfer(*buf, size, offset, ops, ctx);
+    return hipObj::runRdmaTransfer(*instance, *buf, size, offset, ops, ctx);
 }
 catch (...) {
     return hipObj::handleException();
@@ -595,19 +481,20 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return {hipObjNotInitialized, 0};
     }
     if (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE) {
         return {hipObjInvalidValue, 0};
     }
-    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(devPtr, *buf, size, offset, direction == HIPOBJ_SYNC_TO_DEVICE);
+    return hipObj::stageBuffer(devPtr, *buf, size, offset, direction == HIPOBJ_SYNC_TO_DEVICE,
+                               instance->options.stageTimeout);
 }
 catch (...) {
     return hipObj::handleException();
@@ -620,19 +507,19 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return {hipObjNotInitialized, 0};
     }
     if (!outToken || (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET)) {
         return {hipObjInvalidValue, 0};
     }
-    const auto   *buf = hipObj::g_bufferMap->find(devPtr);
+    const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, 0);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    const auto token = hipObj::buildRdmaToken(*buf, size, 0);
+    const auto token = hipObj::buildRdmaToken(instance->conn, *buf, size, 0);
     if (!token) {
         return {hipObjRdmaError, 0};
     }

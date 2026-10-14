@@ -3,15 +3,16 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Unit tests for the test seams (HIP runtime, NIC topology, driver
- * state, libibverbs). All run without GPU or RDMA hardware by
- * substituting fakes through the seam accessors.
+ * Unit tests for the test seams (HIP runtime, NIC topology, libibverbs)
+ * and the platform built from them. All run without GPU or RDMA hardware
+ * by substituting fakes through the seam accessors.
  */
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -483,39 +484,43 @@ TEST_F(SysfsTopologyTest, NicSelectionDefaultsToSysfs)
     EXPECT_EQ(device_.log.openDevice, 1);
 }
 
-// ---- Driver state seam -------------------------------------------
+// ---- Platform ----------------------------------------------------
 
-class StateSeamTest : public ::testing::Test {
-protected:
-    void TearDown() override
-    {
-        hipObj::setStateForTest(savedState_);
-    }
-
-    // A fixture member rather than a test-body local, so the override
-    // stays valid until TearDown() even if the body exits early.
-    hipObj::DriverState  fresh_{};
-    hipObj::DriverState *savedState_ = nullptr;
-};
-
-TEST_F(StateSeamTest, OverrideRedirectsGetState)
+/* Without a topology installed, the system platform has a SysfsTopology
+ * over ibv() of its own, which lives as long as the platform does */
+TEST_F(SysfsTopologyTest, SystemPlatformDefaultsToSysfs)
 {
-    fresh_.initialized = true;
-    fresh_.gpuDevice   = 3;
-    fresh_.endpoint    = "http://example";
+    std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
+    ASSERT_NE(platform, nullptr);
+    EXPECT_EQ(&platform->verbs(), &verbs_);
+    EXPECT_NE(dynamic_cast<const hipObj::SysfsTopology *>(&platform->topology()), nullptr);
 
-    // Installed here rather than in SetUp() so the return value can be
-    // checked.
-    savedState_ = hipObj::setStateForTest(&fresh_);
-    EXPECT_EQ(savedState_, nullptr);
+    /* Every platform has its own */
+    const std::shared_ptr<const hipObj::Platform> other = hipObj::systemPlatform();
+    EXPECT_NE(&other->topology(), &platform->topology());
 
-    hipObj::DriverState &state = hipObj::getState();
-    EXPECT_EQ(&state, &fresh_);
-    EXPECT_TRUE(state.initialized);
-    EXPECT_EQ(state.gpuDevice, 3);
-    EXPECT_EQ(state.endpoint, "http://example");
+    expectFakeNic(platform->topology().enumerate(nullptr));
+    EXPECT_EQ(device_.log.openDevice, 1);
+    EXPECT_EQ(device_.log.closeDevice, 1);
+}
 
-    EXPECT_EQ(hipObj::setStateForTest(savedState_), &fresh_);
+/* The system platform is built from the seams the tests install */
+TEST(PlatformTest, SystemPlatformUsesTheInstalledSeams)
+{
+    hipObjTest::FakeDevice               device{};
+    const hipObjTest::FakeHip            hip(device);
+    const hipObjTest::FakeVerbs          verbs(device);
+    const hipObjTest::EmptyNicTopology   topology;
+    const hipObjTest::ScopedFakeHip      fakeHip(hip);
+    const hipObjTest::ScopedFakeIbv      fakeIbv(verbs);
+    const hipObjTest::ScopedFakeTopology fakeTopology(topology);
+
+    const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
+    ASSERT_NE(platform, nullptr);
+    EXPECT_EQ(&platform->hip(), &hip);
+    EXPECT_EQ(&platform->verbs(), &verbs);
+    EXPECT_EQ(&platform->topology(), &topology);
+    EXPECT_EQ(platform.use_count(), 1);
 }
 
 // ---- libibverbs seam --------------------------------------------
@@ -562,22 +567,22 @@ protected:
 
 TEST_F(FakeVerbsSeamTest, QpCreationAndTeardownUseTheSeam)
 {
-    hipObj::RcConnection conn;
-    conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
-    conn.pd.reset(reinterpret_cast<struct ibv_pd *>(0x5678));
+    {
+        hipObj::RcConnection conn;
+        conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
+        conn.pd.reset(reinterpret_cast<struct ibv_pd *>(0x5678));
 
-    EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
-    EXPECT_EQ(device_.log.createCq, 1);
-    EXPECT_EQ(device_.log.createQp, 1);
-    EXPECT_NE(conn.qp, nullptr);
+        EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
+        EXPECT_EQ(device_.log.createCq, 1);
+        EXPECT_EQ(device_.log.createQp, 1);
+        EXPECT_NE(conn.qp, nullptr);
+    }
 
-    hipObj::closeRdmaDevice(conn);
+    /* Destroying the connection releases everything in it */
     EXPECT_EQ(device_.log.destroyQp, 1);
     EXPECT_EQ(device_.log.destroyCq, 1);
     EXPECT_EQ(device_.log.deallocPd, 1);
     EXPECT_EQ(device_.log.closeDevice, 1);
-    EXPECT_EQ(conn.qp, nullptr);
-    EXPECT_EQ(conn.ctx, nullptr);
 }
 
 TEST_F(FakeVerbsSeamTest, InitTransitionGrantsRemoteReadAndWrite)
@@ -628,7 +633,6 @@ namespace {
     protected:
         void SetUp() override
         {
-            savedState_ = hipObj::setStateForTest(&state_);
             fakeTopology_.emplace(topology_);
 
             hipDevice_.deviceSyncErr = hipErrorNoDevice;
@@ -645,7 +649,6 @@ namespace {
             fakeIbv_.reset();
             fakeHip_.reset();
             fakeTopology_.reset();
-            hipObj::setStateForTest(savedState_);
         }
 
         hipObjConfig_t makeConfig()
@@ -656,8 +659,6 @@ namespace {
             return config;
         }
 
-        hipObj::DriverState                           state_{};
-        hipObj::DriverState                          *savedState_ = nullptr;
         TopologyState                                 topologyState_{};
         FakeNicTopology                               topology_{topologyState_};
         std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
@@ -675,9 +676,10 @@ namespace {
         hipObjError_t err = hipObjInit(&config);
 
         EXPECT_EQ(err.opError, hipObjSuccess);
-        EXPECT_TRUE(state_.initialized);
-        EXPECT_EQ(state_.gpuDevice, -1);
-        EXPECT_EQ(state_.nicHint, "mlx5_0");
+        const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+        ASSERT_NE(instance, nullptr);
+        EXPECT_EQ(instance->gpuDevice, -1);
+        EXPECT_EQ(instance->nicHint, "mlx5_0");
     }
 
     TEST_F(InitAndTransferTest, HostTransfersSkipDeviceSynchronizeWithoutGpu)

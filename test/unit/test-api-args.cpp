@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -113,7 +114,7 @@ TEST_F(ApiArgsTest, EverythingButInitNeedsInit)
 TEST_F(ApiArgsTest, InitRejectsNullConfig)
 {
     EXPECT_EQ(hipObjInit(nullptr).opError, hipObjInvalidValue);
-    EXPECT_FALSE(state_.initialized);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
 TEST_F(ApiArgsTest, InitRejectsReservedFlags)
@@ -122,7 +123,7 @@ TEST_F(ApiArgsTest, InitRejectsReservedFlags)
         hipObjConfig_t config = makeConfig();
         config.flags          = flags;
         EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue) << "flags " << flags;
-        EXPECT_FALSE(state_.initialized);
+        EXPECT_EQ(hipObj::currentInstance(), nullptr);
     }
 }
 
@@ -132,7 +133,7 @@ TEST_F(ApiArgsTest, InitRejectsNegativeDeviceOtherThanMinusOne)
         hipObjConfig_t config = makeConfig();
         config.gpuDevice      = device;
         EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue) << "device " << device;
-        EXPECT_FALSE(state_.initialized);
+        EXPECT_EQ(hipObj::currentInstance(), nullptr);
     }
 }
 
@@ -143,13 +144,15 @@ TEST_F(ApiArgsTest, InitRejectsDeviceThatDoesNotExist)
         hipObjConfig_t config = makeConfig();
         config.gpuDevice      = device;
         EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue) << "device " << device;
-        EXPECT_FALSE(state_.initialized);
+        EXPECT_EQ(hipObj::currentInstance(), nullptr);
     }
 
     hipObjConfig_t config = makeConfig();
     config.gpuDevice      = 1;
     EXPECT_EQ(hipObjInit(&config).opError, hipObjSuccess);
-    EXPECT_EQ(state_.gpuDevice, 1);
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    ASSERT_NE(instance, nullptr);
+    EXPECT_EQ(instance->gpuDevice, 1);
 }
 
 TEST_F(ApiArgsTest, InitRejectsExplicitDeviceWithoutGpus)
@@ -158,7 +161,7 @@ TEST_F(ApiArgsTest, InitRejectsExplicitDeviceWithoutGpus)
     hipObjConfig_t config = makeConfig();
     config.gpuDevice      = 0;
     EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue);
-    EXPECT_FALSE(state_.initialized);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
 TEST_F(ApiArgsTest, InitReportsDeviceCountFailure)
@@ -171,7 +174,26 @@ TEST_F(ApiArgsTest, InitReportsDeviceCountFailure)
 
     EXPECT_EQ(err.opError, hipObjRdmaError);
     EXPECT_EQ(err.hipError, static_cast<int>(hipErrorInvalidValue));
-    EXPECT_FALSE(state_.initialized);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+}
+
+TEST_F(ApiArgsTest, InitReportsGetDeviceFailure)
+{
+    /* The fake has no GPU, which is only an error without a NIC hint */
+    hipObjConfig_t config = makeConfig();
+    config.nicHint        = nullptr;
+    hipObjError_t err     = hipObjInit(&config);
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorNoDevice));
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+
+    /* Any other failure is an error even with one */
+    fake().getDeviceErr = hipErrorInvalidValue;
+    config              = makeConfig();
+    err                 = hipObjInit(&config);
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorInvalidValue));
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
 TEST_F(ApiArgsTest, InitAcceptsOptionalFieldsUnset)

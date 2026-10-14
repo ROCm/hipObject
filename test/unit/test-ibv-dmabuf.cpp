@@ -5,12 +5,6 @@
  * registerDeviceMemory()'s dma-buf path, with the HSA export and close (in
  * the fake HIP runtime) and the libibverbs registration faked, so no GPU or
  * NIC is needed.
- *
- * The DmabufDisabledTest tests need HIPOBJ_DMABUF=0 in the environment the
- * program starts with, so they skip unless it's set, and CMakeLists.txt
- * runs this program a second time, with it set, for just those tests. The
- * DmabufEnvTest tests skip when HIPOBJ_DMABUF turns dma-buf registration
- * off.
  */
 
 #include <cerrno>
@@ -63,15 +57,6 @@ struct ibv_pd *
 fakePd()
 {
     return reinterpret_cast<struct ibv_pd *>(1);
-}
-
-/* Returns false when HIPOBJ_DMABUF turns dma-buf registration off, by the
- * same test as the library's */
-bool
-dmabufEnabledByEnv()
-{
-    const char *env = std::getenv("HIPOBJ_DMABUF");
-    return !(env && (env[0] == '0' || env[0] == 'n' || env[0] == 'N'));
 }
 
 /* A libibverbs with ibv_reg_dmabuf_mr() */
@@ -236,44 +221,20 @@ TEST_F(DmabufTest, DisabledPolicyRegistersWithoutExporting)
     EXPECT_EQ(fake().log.closeDmabuf, 0);
 }
 
-// ---- The policy read from the environment ------------------------
+// ---- The policy BufferMap is given -------------------------------
 
-/* Registers a buffer through BufferMap, which takes its policy from the
- * environment */
-class DmabufEnvTest : public DmabufTest {
-protected:
-    void SetUp() override
-    {
-        DmabufTest::SetUp();
-        if (!dmabufEnabledByEnv()) {
-            GTEST_SKIP() << "HIPOBJ_DMABUF turns dma-buf registration off";
-        }
-    }
-};
-
-class DmabufDisabledTest : public DmabufTest {
-protected:
-    void SetUp() override
-    {
-        DmabufTest::SetUp();
-        if (dmabufEnabledByEnv()) {
-            GTEST_SKIP() << "needs HIPOBJ_DMABUF=0";
-        }
-    }
-};
-
-TEST_F(DmabufEnvTest, BufferMapExportsByDefault)
+TEST_F(DmabufTest, BufferMapExportsByDefault)
 {
-    hipObj::BufferMap buffers;
+    hipObj::BufferMap buffers({}, false);
     ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()), 0);
     EXPECT_EQ(fake().log.exportDmabuf, 1);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 1);
     EXPECT_EQ(fake().log.registerMr, 0);
 }
 
-TEST_F(DmabufDisabledTest, BufferMapRegistersWithoutExporting)
+TEST_F(DmabufTest, BufferMapRegistersWithoutExportingWhenDisabled)
 {
-    hipObj::BufferMap buffers;
+    hipObj::BufferMap buffers({.enabled = false, .debug = false}, false);
     ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()), 0);
     EXPECT_EQ(fake().log.exportDmabuf, 0);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 0);

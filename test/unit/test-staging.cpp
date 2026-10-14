@@ -7,9 +7,10 @@
  * memory with a deadline, against the fake device in fake-device.h.
  *
  * The StagingEnvTest tests need HIPOBJ_STAGE_TIMEOUT_MS and
- * HIPOBJ_REQUIRE_GPU_DIRECT, which hipObject reads once and caches, so they
- * skip unless they're set. CMakeLists.txt runs this program a second time,
- * with both set, for just those tests, and a third time with a malformed
+ * HIPOBJ_REQUIRE_GPU_DIRECT in the environment hipObjInit() reads them
+ * from, and the tests don't change their own environment, so they skip
+ * unless they're set. CMakeLists.txt runs this program a second time, with
+ * both set, for just those tests, and a third time with a malformed
  * HIPOBJ_STAGE_TIMEOUT_MS for the StagingBadEnvTest tests.
  */
 

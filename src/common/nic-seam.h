@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -86,5 +87,10 @@ private:
  * production never calls it. Not synchronized, so call it only while no
  * other thread can be selecting a NIC or GID. */
 const NicTopology *setNicTopologyForTest(const NicTopology *topology);
+
+/* The topology NIC and GID selection use: the one installed with
+ * setNicTopologyForTest(), or otherwise a SysfsTopology over ibv(), built
+ * in storage */
+const NicTopology &currentNicTopology(std::optional<SysfsTopology> &storage);
 
 } // namespace hipObj
