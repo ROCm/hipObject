@@ -20,17 +20,17 @@ class Verbs;
 struct RdmaToken;
 
 /* An open RDMA device: its context and protection domain, the verbs they
- * came from, and the port and GID that connections on it use. Nothing
- * changes once it's built, so several threads can use it at once.
+ * came from, the port and GID that connections on it use, and its vendor.
+ * Nothing changes once it's built, so several threads can use it at once.
  *
  * pd_ is declared after ctx_, so the protection domain is deallocated
  * before the context closes. verbs has to outlive it. */
 class RdmaDevice final {
 public:
     RdmaDevice(const Verbs &verbs, IbvContextPtr ctx, IbvPdPtr pd, uint8_t portNum, int gidIndex,
-               const ibv_gid &localGid) noexcept
+               const ibv_gid &localGid, std::optional<uint32_t> vendorId) noexcept
         : verbs_(&verbs), ctx_(std::move(ctx)), pd_(std::move(pd)), portNum_(portNum), gidIndex_(gidIndex),
-          localGid_(localGid)
+          localGid_(localGid), vendorId_(vendorId)
     {
     }
     ~RdmaDevice() = default;
@@ -72,13 +72,21 @@ public:
         return localGid_;
     }
 
+    /* The vendor ID the device reported when it opened, or std::nullopt if
+     * it couldn't be queried */
+    std::optional<uint32_t> vendorId() const noexcept
+    {
+        return vendorId_;
+    }
+
 private:
-    const Verbs  *verbs_;
-    IbvContextPtr ctx_;
-    IbvPdPtr      pd_;
-    uint8_t       portNum_;
-    int           gidIndex_;
-    ibv_gid       localGid_;
+    const Verbs            *verbs_;
+    IbvContextPtr           ctx_;
+    IbvPdPtr                pd_;
+    uint8_t                 portNum_;
+    int                     gidIndex_;
+    ibv_gid                 localGid_;
+    std::optional<uint32_t> vendorId_;
 };
 
 /* A reliable-connected QP, and the CQ its work completes on, on a device
@@ -113,7 +121,8 @@ private:
 
 /* Opens device nicIndex in verbs' device list, choosing its GID with the
  * RoCE versions topology reports. std::nullopt, with nothing left open,
- * when a step fails. */
+ * when a step fails. A device that can't report its vendor still opens,
+ * with no vendor ID. */
 std::optional<RdmaDevice> openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex);
 std::optional<RdmaDevice> openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology,
                                                const char *devName);

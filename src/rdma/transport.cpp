@@ -61,7 +61,16 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
     if (verbs.query_gid(ctx.get(), kPortNum, gidIndex, &localGid) != 0) {
         return std::nullopt;
     }
-    return RdmaDevice(verbs, std::move(ctx), std::move(pd), kPortNum, gidIndex, localGid);
+    /* Read once here, since it can't change while the device is open, so
+     * connecting a QP doesn't have to query it. A device that can't report
+     * it still opens, and its QPs get no vendor attributes. */
+    std::optional<uint32_t> vendorId;
+    struct ibv_device_attr  devAttr;
+    zeroObject(devAttr);
+    if (verbs.query_device(ctx.get(), &devAttr) == 0) {
+        vendorId = devAttr.vendor_id;
+    }
+    return RdmaDevice(verbs, std::move(ctx), std::move(pd), kPortNum, gidIndex, localGid, vendorId);
 }
 
 std::optional<RdmaDevice>
@@ -133,21 +142,17 @@ transitionQpToInit(RcConnection &conn)
 static void
 applyVendorQpAttrs(const RdmaDevice &device, struct ibv_qp_attr &attr)
 {
-    if (!device.context()) {
-        return;
-    }
-    struct ibv_device_attr devAttr;
-    zeroObject(devAttr);
-    if (device.verbs().query_device(device.context(), &devAttr) != 0) {
+    const std::optional<uint32_t> vendorId = device.vendorId();
+    if (!vendorId) {
         return;
     }
 #ifdef HIPOBJ_BNXT
-    if (isBnxtDevice(devAttr.vendor_id)) {
+    if (isBnxtDevice(*vendorId)) {
         configureBnxtQp(attr);
     }
 #endif
 #ifdef HIPOBJ_IONIC
-    if (isIonicDevice(devAttr.vendor_id)) {
+    if (isIonicDevice(*vendorId)) {
         configureIonicQp(attr);
     }
 #endif

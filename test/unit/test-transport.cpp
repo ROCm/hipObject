@@ -77,7 +77,7 @@ protected:
     }
 
     /* A device on the fake context and protection domain, with gidIndex
-     * as its GID index */
+     * as its GID index and no vendor ID */
     hipObj::RdmaDevice deviceWithGidIndex(int gidIndex) const
     {
         return {verbs_,
@@ -85,7 +85,8 @@ protected:
                 hipObj::own<hipObj::IbvPdPtr>(verbs_, verbs_.alloc_pd(nullptr)),
                 1,
                 gidIndex,
-                {}};
+                {},
+                std::nullopt};
     }
 
     /* Every verbs object the fakes created has been destroyed */
@@ -121,6 +122,26 @@ TEST_F(TransportTest, OpenSetsUpTheDevice)
     EXPECT_EQ(device->portNum(), 1);
     /* The fake port has no GIDs, so the first one is used */
     EXPECT_EQ(device->gidIndex(), 0);
+}
+
+TEST_F(TransportTest, OpenRecordsTheVendorId)
+{
+    fake().vendorId                                = hipObj::VENDOR_ID_PENSANDO;
+    const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+    ASSERT_TRUE(device);
+    EXPECT_EQ(device->vendorId(), hipObj::VENDOR_ID_PENSANDO);
+    EXPECT_EQ(fake().log.queryDevice, 1);
+}
+
+TEST_F(TransportTest, OpenSucceedsWithoutVendorIdWhenDeviceQueryFails)
+{
+    fake().fail.queryDevice = true;
+    {
+        const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+        ASSERT_TRUE(device);
+        EXPECT_FALSE(device->vendorId());
+    }
+    expectNothingLeaked();
 }
 
 TEST_F(TransportTest, OpenRejectsIndexOutsideDeviceList)
@@ -248,6 +269,16 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
     EXPECT_EQ(rts.max_rd_atomic, 1);
 }
 
+TEST_F(TransportTest, ConnectDoesNotQueryTheDevice)
+{
+    /* The vendor ID was read when the device opened */
+    fake().vendorId = hipObj::VENDOR_ID_BROADCOM;
+    ASSERT_NO_FATAL_FAILURE(open());
+    const int queries = fake().log.queryDevice;
+    ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
+    EXPECT_EQ(fake().log.queryDevice, queries);
+}
+
 TEST_F(TransportTest, ConnectRejectsPeerThatIsNotRc)
 {
     ASSERT_NO_FATAL_FAILURE(open());
@@ -311,8 +342,9 @@ class VendorQpTest : public TransportTest, public ::testing::WithParamInterface<
 
 TEST_P(VendorQpTest, RtrHasVendorAttributes)
 {
-    ASSERT_NO_FATAL_FAILURE(open());
+    /* The device reads its vendor ID when it opens */
     fake().vendorId = GetParam().vendorId;
+    ASSERT_NO_FATAL_FAILURE(open());
     ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
 
     const struct ibv_qp_attr rtr = modifyQpCalls().at(0).attr;
@@ -348,9 +380,10 @@ INSTANTIATE_TEST_SUITE_P(Transport, VendorQpTest, ::testing::ValuesIn(kVendorCas
 
 TEST_F(TransportTest, NoVendorAttributesWhenDeviceQueryFails)
 {
-    ASSERT_NO_FATAL_FAILURE(open());
+    /* The query fails when the device opens */
     fake().vendorId         = hipObj::VENDOR_ID_BROADCOM;
     fake().fail.queryDevice = true;
+    ASSERT_NO_FATAL_FAILURE(open());
     ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
     EXPECT_EQ(modifyQpCalls().at(0).attr.timeout, 0);
 }
@@ -500,7 +533,10 @@ TEST_P(TransportTransferTest, ConnectsToPeerInReply)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     setReplyWithPeerToken(peerToken());
+    const int queries = fake().log.queryDevice;
     ASSERT_EQ(transfer().opError, hipObjSuccess);
+    /* Connecting reads the vendor ID hipObjInit() stored, not the device */
+    EXPECT_EQ(fake().log.queryDevice, queries);
 
     /* hipObjInit() moved the QP to INIT; the reply's token connects it */
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();

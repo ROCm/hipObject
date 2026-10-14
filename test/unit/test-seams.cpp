@@ -600,7 +600,8 @@ protected:
                 hipObj::own<hipObj::IbvPdPtr>(verbs_, reinterpret_cast<struct ibv_pd *>(0x5678)),
                 1,
                 0,
-                {}};
+                {},
+                std::nullopt};
     }
 
     hipObjTest::FakeDevice device_{};
