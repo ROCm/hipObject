@@ -28,7 +28,7 @@ if(NOT profiles)
 endif()
 
 # Some of the library sources are compiled into more than one binary,
-# with different macros (the unit tests define HIPOBJ_UNIT_TESTS), so
+# with different options (the unit tests' copy is built with -pthread), so
 # llvm-cov warns that some functions have mismatched data: the profiles
 # have another copy of the function, but not the copy in that binary,
 # which didn't run. -sparse leaves out functions that never ran, so the

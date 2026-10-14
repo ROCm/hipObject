@@ -69,7 +69,6 @@ public:
     virtual int            destroy_qp(struct ibv_qp *qp) const                                          = 0;
     virtual int            poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const         = 0;
     virtual int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const = 0;
-    virtual int post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr) const = 0;
 };
 
 /* libibverbs, through the functions loadLibibverbs() loads from it */
@@ -97,14 +96,13 @@ public:
         int (*destroy_qp)(struct ibv_qp *);
         int (*poll_cq)(struct ibv_cq *, int, struct ibv_wc *);
         int (*post_send)(struct ibv_qp *, struct ibv_send_wr *, struct ibv_send_wr **);
-        int (*post_recv)(struct ibv_qp *, struct ibv_recv_wr *, struct ibv_recv_wr **);
     };
 
     /* Calls funcs, which came from library, and keeps library loaded for
-     * as long as it lives. Every entry but reg_dmabuf_mr, poll_cq,
-     * post_send, and post_recv has to be set. Without poll_cq, post_send,
-     * or post_recv, it calls the provider's entry in the context's ops,
-     * as the inline functions in <infiniband/verbs.h> do. */
+     * as long as it lives. Every entry but reg_dmabuf_mr, poll_cq, and
+     * post_send has to be set. Without poll_cq or post_send, it calls the
+     * provider's entry in the context's ops, as the inline functions in
+     * <infiniband/verbs.h> do. */
     explicit LoadedVerbs(const Funcs &funcs, DlHandle library = DlHandle{});
 
     struct ibv_device **get_device_list(int *num_devices) const override;
@@ -132,7 +130,6 @@ public:
     int            destroy_qp(struct ibv_qp *qp) const override;
     int            poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
     int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const override;
-    int post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr) const override;
 
 private:
     DlHandle library_;

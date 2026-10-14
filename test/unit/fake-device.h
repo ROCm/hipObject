@@ -52,7 +52,6 @@ struct CallLog {
     std::atomic<int> createQp{0};
     std::atomic<int> destroyQp{0};
     std::atomic<int> postSend{0};
-    std::atomic<int> postRecv{0};
 
     /* HIP and HSA */
     std::atomic<int> memcpy{0}; /* memcpyAsync() */
@@ -265,7 +264,6 @@ public:
     int            destroy_qp(struct ibv_qp *qp) const override;
     int            poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
     int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const override;
-    int post_recv(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr) const override;
 
 private:
     /* A pointer, so the const methods can change what it points to */

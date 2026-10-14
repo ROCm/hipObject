@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run the pre-built hipobj-rdma-test-server (v1 mode) inside the ernic
+# Run the pre-built hipobj-rdma-test-server inside the ernic
 # container.  Binary is built on the runner and mounted at /hipobject-build.
 
 set -euo pipefail

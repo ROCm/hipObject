@@ -2,20 +2,15 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Unit tests link a separate build of the library objects with
-# HIPOBJ_UNIT_TESTS defined. The macro only opens test accessors
-# (ConnectionRegistry::insertRawForTest); compiling the sources twice
-# into two distinct targets avoids ODR issues, and the shipped hipobj
-# library is compiled without the macro so the accessors are absent
-# there.
+# Unit tests link a separate build of the library objects, since the
+# shared library exports only the public hipObj* functions and the tests
+# call internal ones too.
 
 # HIPOBJ_SOURCES is exported by src/CMakeLists.txt as absolute paths.
 hipobj_add_library(
   NAME hipobj_test_objects
   TYPE OBJECT
   SRCS ${HIPOBJ_SOURCES})
-
-target_compile_definitions(hipobj_test_objects PRIVATE HIPOBJ_UNIT_TESTS)
 
 # Compiled only for the tests, so compiled with -pthread like them (see
 # hipobj_add_test_executable()). NEVER REMOVE IT.
@@ -57,9 +52,6 @@ hipobj_add_test(test-rdma-token
 
 hipobj_add_test(test-parse-number
   test-parse-number.cpp)
-
-hipobj_add_test(test-format-hex
-  test-format-hex.cpp)
 
 hipobj_add_test(test-span
   test-span.cpp)
@@ -120,8 +112,7 @@ if(CURL_FOUND)
   set_tests_properties(test-s3-curl-ops PROPERTIES TIMEOUT 60)
 endif()
 
-# The RDMA test server's HTTP framing, and the status-line parser its
-# clients use
+# The RDMA test server's HTTP framing
 hipobj_add_test(test-http-server
   test-http-server.cpp)
 target_sources(test-http-server PRIVATE

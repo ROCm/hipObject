@@ -3,8 +3,9 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Drive the minio-cpp bridge (minio-getput-rdma) against hipobj-rdma-test-server
-# in v1 mode, time the round trip, and assert what the transfer actually did.
+# Drive the minio-cpp bridge (minio-getput-rdma) against
+# hipobj-rdma-test-server, time the round trip, and assert what the transfer
+# actually did.
 #
 # Two callers, and they differ in one thing only -- where the verbs device
 # comes from:
@@ -62,7 +63,7 @@ SERVER_HOST="${SERVER_ENDPOINT#http://}"
 SERVER_HOST="${SERVER_HOST%%:*}"
 SERVER_PORT="${SERVER_ENDPOINT##*:}"
 
-echo "--- minio-cpp bridge v1 PUT + GET ---"
+echo "--- minio-cpp bridge PUT + GET ---"
 echo "    server:   ${SERVER_ENDPOINT}"
 echo "    size:     ${TEST_SIZE} bytes"
 echo "    gpu mode: ${GPU_MODE}"
@@ -95,9 +96,9 @@ fi
 # Exit code alone is not evidence: the bridge returns success when it falls
 # back to plain HTTP, so the assertion is on what the run reported doing.
 "$(dirname "$0")/assert-transfer.sh" "${LOG}" "${EXPECT_TRANSPORT:-rdma}" || {
-    echo "ERROR: minio-cpp bridge v1 verification failed (exit ${rc})"
+    echo "ERROR: minio-cpp bridge verification failed (exit ${rc})"
     exit 1
 }
 rm -f "${LOG}"
 
-echo "--- minio-cpp bridge v1 integration (${GPU_MODE}): PASS (exit ${rc}) ---"
+echo "--- minio-cpp bridge integration (${GPU_MODE}): PASS (exit ${rc}) ---"

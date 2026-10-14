@@ -11,10 +11,10 @@
 # that (EXPECT_TRANSPORT=http). For the RDMA topologies see the
 # hipobject-hardware-test-*.yml lanes, which boot guest VMs.
 #
-#   ci/ernic/run-local.sh                       # two-VM v1 test, use build-v1 binaries
-#   ci/ernic/run-local.sh --rebuild             # two-VM v1 test, force ROCm container build
-#   ci/ernic/run-local.sh --minio-v1            # v1 minio-cpp test, use build-minio binaries
-#   ci/ernic/run-local.sh --minio-v1 --rebuild  # v1 minio-cpp test, force build
+#   ci/ernic/run-local.sh                       # two-VM test, use build-v1 binaries
+#   ci/ernic/run-local.sh --rebuild             # two-VM test, force ROCm container build
+#   ci/ernic/run-local.sh --minio-v1            # minio-cpp test, use build-minio binaries
+#   ci/ernic/run-local.sh --minio-v1 --rebuild  # minio-cpp test, force build
 #   ci/ernic/run-local.sh --s3-backend          # rocm-ernic --backend s3 test (requires --privileged)
 
 set -euo pipefail
@@ -38,7 +38,7 @@ for arg in "$@"; do
     esac
 done
 
-# ── two-VM v1 protocol test ───────────────────────────────────────────────────
+# ── two-VM test ───────────────────────────────────────────────────────────────
 
 run_two_vm_v1() {
     local BUILD_DIR="${REPO}/build-v1"
@@ -46,7 +46,7 @@ run_two_vm_v1() {
     if [ "${REBUILD}" = true ]; then
         BUILD_DIR=/tmp/ernic-rebuild
         mkdir -p "${BUILD_DIR}/rocm-libs"
-        echo "=== Rebuilding (v1) in ROCm container ==="
+        echo "=== Rebuilding in ROCm container ==="
         _rocm_build "${BUILD_DIR}" "ON" \
             "hipobj-rdma-test-server minio-getput-rdma"
     else
@@ -64,14 +64,14 @@ run_two_vm_v1() {
     docker network create ernic-local-net 2>/dev/null || true
 
     cleanup() {
-        echo "=== Server logs (v1) ==="
+        echo "=== Server logs ==="
         docker logs ernic-server-local 2>&1 || true
         docker rm -f ernic-server-local 2>/dev/null || true
         docker network rm ernic-local-net 2>/dev/null || true
     }
     trap cleanup EXIT
 
-    echo "=== Starting ernic server (v1) ==="
+    echo "=== Starting ernic server ==="
     docker run -d \
         --name ernic-server-local \
         --hostname ernic-server \
@@ -83,7 +83,7 @@ run_two_vm_v1() {
 
     _wait_for_server ernic-server-local 9000
 
-    echo "=== Running ernic client (v1) ==="
+    echo "=== Running ernic client ==="
     docker run --rm \
         --name ernic-client-local \
         --network ernic-local-net \
@@ -97,7 +97,7 @@ run_two_vm_v1() {
         "$ERNIC_IMAGE"
 }
 
-# ── minio-v1 protocol test ────────────────────────────────────────────────────
+# ── minio-cpp test ────────────────────────────────────────────────────────────
 
 run_minio_v1() {
     local BUILD_DIR="${REPO}/build-minio"
@@ -105,7 +105,7 @@ run_minio_v1() {
     if [ "${REBUILD}" = true ]; then
         BUILD_DIR=/tmp/ernic-minio-rebuild
         mkdir -p "${BUILD_DIR}/rocm-libs"
-        echo "=== Rebuilding (minio-v1) in ROCm container ==="
+        echo "=== Rebuilding (minio-cpp) in ROCm container ==="
         _rocm_build "${BUILD_DIR}" "ON" \
             "hipobj-rdma-test-server minio-getput-rdma"
     else
@@ -125,7 +125,7 @@ run_minio_v1() {
     docker network create ernic-minio-local-net 2>/dev/null || true
 
     cleanup() {
-        echo "=== Server logs (v1) ==="
+        echo "=== Server logs ==="
         docker logs ernic-server-v1-local 2>&1 || true
         echo "=== rocjitsu logs ==="
         docker logs rocjitsu-local 2>&1 || true
@@ -145,7 +145,7 @@ run_minio_v1() {
             --config /usr/local/share/rocjitsu/configs/gfx950_mi355x.json \
             --vfio-socket /tmp/vfio-sockets/rocjitsu.sock
 
-    echo "=== Starting ernic server (v1) ==="
+    echo "=== Starting ernic server ==="
     docker run -d \
         --name ernic-server-v1-local \
         --hostname ernic-server \
@@ -157,7 +157,7 @@ run_minio_v1() {
 
     _wait_for_server ernic-server-v1-local 9000
 
-    echo "=== Running ernic minio-v1 client ==="
+    echo "=== Running ernic minio-cpp client ==="
     docker run --rm \
         --name ernic-minio-client-local \
         --network ernic-minio-local-net \
