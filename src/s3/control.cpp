@@ -45,4 +45,20 @@ receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf)
     return RdmaReply{received, *status};
 }
 
+int receiveRdmaReplyV3(hipObjOps_t* ops, void* ctx, v3::RdmaReplyV3& reply) {
+  if (!ops || !ops->recvReply) {
+    return -1;
+  }
+  char replyBuf[512];
+  size_t replyLen = sizeof(replyBuf);
+  int ret = ops->recvReply(ctx, replyBuf, &replyLen);
+  if (ret != 0) {
+    return ret;
+  }
+  if (replyLen > sizeof(replyBuf)) {
+    return -1;
+  }
+  return v3::decodeRdmaReplyV3(replyBuf, replyLen, reply) ? 0 : -1;
+}
+
 } // namespace hipObj

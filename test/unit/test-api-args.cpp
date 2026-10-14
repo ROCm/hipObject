@@ -22,7 +22,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 #include <sys/types.h>
 
 #include "fake-device.h"
@@ -31,6 +35,7 @@
 #include "hipobj.h"
 #include "state.h"
 #include "token.h"
+#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -592,7 +597,16 @@ TEST_F(ApiArgsTest, GetTokenAcceptsWholeBuffer)
         char *token = nullptr;
         ASSERT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, op, &token).opError, hipObjSuccess);
         ASSERT_NE(token, nullptr);
+        // v1's fixed-width hex token (qpNum+gid+rkey+remoteAddr+length+
+        // portNum+lid) is 88 hex chars; v3's RdmaTokenV3 (v3-wire.h) is
+        // 80 (ip+port+rkey+remoteAddr+length, ':'-delimited). Whichever
+        // HIPOBJ_RDMA_WIRE_V1 selects is what hipObjGetRdmaToken() built.
+#ifdef HIPOBJ_RDMA_WIRE_V1
         EXPECT_EQ(hipObj::cStringView(token, hipObj::kRdmaTokenHexLen + 1).size(), hipObj::kRdmaTokenHexLen);
+#else
+        EXPECT_EQ(hipObj::cStringView(token, hipObj::v3::kRdmaTokenV3HexLen + 1).size(),
+                  hipObj::v3::kRdmaTokenV3HexLen);
+#endif
         EXPECT_EQ(hipObjPutRdmaToken(token).opError, hipObjSuccess);
     }
 }

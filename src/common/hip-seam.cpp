@@ -6,7 +6,9 @@
 
 #include "hip-seam.h"
 
+#ifndef HIPOBJ_CPU_RDMA
 #include <hsa/hsa_ext_amd.h>
+#endif
 
 #include "hipobj-warnings.h"
 #include "no-destructor.h"
@@ -120,15 +122,28 @@ SystemHip::memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t
 }
 
 int
-SystemHip::exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const
+SystemHip::exportDmabuf([[maybe_unused]] const void *ptr, [[maybe_unused]] size_t size,
+                        [[maybe_unused]] int *fd, [[maybe_unused]] uint64_t *offset) const
 {
+#ifdef HIPOBJ_CPU_RDMA
+    // No HSA/ROCm runtime to export a dmabuf fd from on this build, and
+    // host memory has no GPU dmabuf to export in the first place --
+    // registerDeviceMemory() always falls back to plain ibv_reg_mr.
+    return -1;
+#else
     return static_cast<int>(hsa_amd_portable_export_dmabuf(ptr, size, fd, offset));
+#endif
 }
 
 int
-SystemHip::closeDmabuf(int fd) const
+SystemHip::closeDmabuf([[maybe_unused]] int fd) const
 {
+#ifdef HIPOBJ_CPU_RDMA
+    /* exportDmabuf() never succeeds, so there's nothing to close */
+    return -1;
+#else
     return static_cast<int>(hsa_amd_portable_close_dmabuf(fd));
+#endif
 }
 
 } // namespace hipObj

@@ -66,8 +66,10 @@ target_include_directories(hipobj_minio
 target_link_libraries(hipobj_minio
   PUBLIC
     miniocpp::miniocpp
-    hipobj
-    hip::host)
+    hipobj)
+if(NOT HIPOBJ_CPU_RDMA)
+  target_link_libraries(hipobj_minio PUBLIC hip::host)
+endif()
 
 if(BUILD_TESTING)
   add_subdirectory(test)
@@ -80,11 +82,14 @@ hipobj_add_executable(
 target_include_directories(minio-getput-rdma PRIVATE
   ${PROJECT_SOURCE_DIR}/shared)
 
+target_compile_features(minio-getput-rdma PUBLIC cxx_std_17)
 target_link_libraries(minio-getput-rdma PRIVATE
   hipobj_minio
   hipobj
-  hip::host
   miniocpp::miniocpp)
+if(NOT HIPOBJ_CPU_RDMA)
+  target_link_libraries(minio-getput-rdma PRIVATE hip::host)
+endif()
 
 # hipobj_minio is build-only. Its headers include minio-cpp's headers
 # and it links minio-cpp publicly, but minio-cpp and the curlpp and
