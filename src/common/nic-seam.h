@@ -17,7 +17,6 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -78,17 +77,5 @@ public:
 private:
     const Verbs *verbs_;
 };
-
-/* Installs a topology for systemPlatform() to use, and returns the
- * previously installed one (nullptr when none was). Passing nullptr
- * restores the default, a SysfsTopology over ibv(). Unit tests only;
- * production never calls it. Not synchronized, so call it only while no
- * other thread can be building a platform. */
-const NicTopology *setNicTopologyForTest(const NicTopology *topology);
-
-/* The topology systemPlatform() uses: the one installed with
- * setNicTopologyForTest(), or otherwise a SysfsTopology over ibv(), built
- * in storage */
-const NicTopology &currentNicTopology(std::optional<SysfsTopology> &storage);
 
 } // namespace hipObj

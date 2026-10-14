@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: MIT
  *
  * Unit tests for the test seams (HIP runtime, NIC topology, libibverbs)
- * and the platform built from them. All run without GPU or RDMA hardware
- * by substituting fakes, either passed in or installed through the seam
- * accessors.
+ * and the platform built from them. The code under test reaches the
+ * outside world only through the interfaces it's given, so these run
+ * without GPU or RDMA hardware by giving it fakes. The tests of the system
+ * platform use the real HIP runtime and libibverbs, and pass whether or
+ * not there's a GPU or an RDMA device.
  */
 
 #include <algorithm>
@@ -26,7 +28,6 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include "fake-device.h"
-#include "fake-ibv.h"
 #include "hip-seam.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
@@ -49,30 +50,6 @@ namespace {
 
 /* The GPU's bus ID in the NIC topology tests */
 constexpr std::string_view kGpuBusId = "0000:42:00.0";
-
-TEST(HipSeamTest, OverrideRedirectsHip)
-{
-    hipObjTest::FakeDevice    device{};
-    const hipObjTest::FakeHip fake(device);
-
-    const hipObj::HipRuntime *previous = hipObj::setHipForTest(&fake);
-    EXPECT_EQ(previous, nullptr);
-    EXPECT_EQ(&hipObj::hip(), &fake);
-
-    device.getDeviceErr = hipSuccess;
-    device.device       = 7;
-    int current         = -1;
-    EXPECT_EQ(hipObj::hip().getDevice(&current), hipSuccess);
-    EXPECT_EQ(current, 7);
-
-    device.gpuBusId = kGpuBusId;
-    std::array<char, 32> busId{};
-    EXPECT_EQ(hipObj::hip().deviceGetPCIBusId(busId.data(), static_cast<int>(busId.size()), 0), hipSuccess);
-    EXPECT_EQ(std::string_view(busId.data()), kGpuBusId);
-
-    EXPECT_EQ(hipObj::setHipForTest(previous), &fake);
-    EXPECT_NE(&hipObj::hip(), &fake);
-}
 
 /* SystemHip passes each call straight to HIP or HSA, so it gets the same
  * answer as calling them directly, whether or not there's a GPU */
@@ -428,20 +405,9 @@ TEST_F(GidSeamTest, OpenedDeviceHasTheGidTheTopologyPrefers)
     EXPECT_EQ(hipObj::toGid(rdma->localGid()), hipObj::toGid(expected));
 }
 
-/* SysfsTopology over the fake verbs. systemPlatform() builds one over
- * ibv(), so the fake verbs are installed too. */
+/* SysfsTopology over the fake verbs */
 class SysfsTopologyTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        fakeIbv_.emplace(verbs_);
-    }
-
-    void TearDown() override
-    {
-        fakeIbv_.reset();
-    }
-
     /* The NIC SysfsTopology reports for the fake device */
     static hipObj::NicInfo fakeNic()
     {
@@ -461,10 +427,9 @@ protected:
         EXPECT_EQ(nics[0].port_num, expected.port_num);
     }
 
-    hipObjTest::FakeDevice                   device_{};
-    TopologyVerbs                            verbs_{device_};
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-    const hipObj::SysfsTopology              topology_{verbs_};
+    hipObjTest::FakeDevice      device_{};
+    TopologyVerbs               verbs_{device_};
+    const hipObj::SysfsTopology topology_{verbs_};
 };
 
 TEST_F(SysfsTopologyTest, ListsTheFirstActivePort)
@@ -526,71 +491,67 @@ TEST_F(SysfsTopologyTest, NicSelection)
 
 // ---- Platform ----------------------------------------------------
 
-/* Without a topology installed, the system platform has a SysfsTopology
- * over ibv() of its own, which lives as long as the platform does */
-TEST_F(SysfsTopologyTest, SystemPlatformDefaultsToSysfs)
+/* A platform refers to the interfaces it's given */
+TEST(PlatformTest, RefersToItsInterfaces)
 {
-    std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
-    ASSERT_NE(platform, nullptr);
-    EXPECT_EQ(&platform->verbs(), &verbs_);
-    EXPECT_NE(dynamic_cast<const hipObj::SysfsTopology *>(&platform->topology()), nullptr);
+    hipObjTest::FakeDevice             device{};
+    const hipObjTest::FakeHip          hip(device);
+    const hipObjTest::FakeVerbs        verbs(device);
+    const hipObjTest::EmptyNicTopology topology;
 
-    /* Every platform has its own */
-    const std::shared_ptr<const hipObj::Platform> other = hipObj::systemPlatform();
-    EXPECT_NE(&other->topology(), &platform->topology());
-
-    expectFakeNic(platform->topology().enumerate(nullptr));
-    EXPECT_EQ(device_.log.openDevice, 1);
-    EXPECT_EQ(device_.log.closeDevice, 1);
+    const hipObj::Platform platform(hip, verbs, topology);
+    EXPECT_EQ(&platform.hip(), &hip);
+    EXPECT_EQ(&platform.verbs(), &verbs);
+    EXPECT_EQ(&platform.topology(), &topology);
 }
 
-/* The system platform is built from the seams the tests install */
-TEST(PlatformTest, SystemPlatformUsesTheInstalledSeams)
+/* A FakePlatform's platform refers to its fakes, and keeps them alive */
+TEST(PlatformTest, FakePlatformOutlivesItsLastPlatform)
 {
-    hipObjTest::FakeDevice               device{};
-    const hipObjTest::FakeHip            hip(device);
-    const hipObjTest::FakeVerbs          verbs(device);
-    const hipObjTest::EmptyNicTopology   topology;
-    const hipObjTest::ScopedFakeHip      fakeHip(hip);
-    const hipObjTest::ScopedFakeIbv      fakeIbv(verbs);
-    const hipObjTest::ScopedFakeTopology fakeTopology(topology);
+    hipObjTest::FakeDevice device{};
+    auto                   fakes = std::make_shared<hipObjTest::FakePlatform<>>(device);
+    const std::weak_ptr<hipObjTest::FakePlatform<>> watch = fakes;
 
+    std::shared_ptr<const hipObj::Platform> platform = fakes->platform();
+    EXPECT_EQ(&platform->hip(), &fakes->hip());
+    EXPECT_EQ(&platform->verbs(), &fakes->verbs());
+    EXPECT_EQ(&platform->topology(), &fakes->topology());
+
+    fakes.reset();
+    EXPECT_FALSE(watch.expired());
+    platform.reset();
+    EXPECT_TRUE(watch.expired());
+}
+
+/* The system platform is built once, from the real HIP runtime and
+ * libibverbs, and the topology sysfs reports */
+TEST(PlatformTest, SystemPlatformIsTheSystem)
+{
     const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
-    ASSERT_NE(platform, nullptr);
-    EXPECT_EQ(&platform->hip(), &hip);
-    EXPECT_EQ(&platform->verbs(), &verbs);
-    EXPECT_EQ(&platform->topology(), &topology);
-    EXPECT_EQ(platform.use_count(), 1);
-}
-
-// ---- libibverbs seam --------------------------------------------
-
-TEST(IbvSeamTest, OverrideRedirectsIbv)
-{
-    hipObjTest::FakeDevice      device{};
-    const hipObjTest::FakeVerbs fake(device);
-
-    const hipObj::Verbs *previous = hipObj::setIbvForTest(&fake);
-    EXPECT_EQ(previous, nullptr);
-    EXPECT_TRUE(hipObj::ibvAvailable());
-    EXPECT_EQ(&hipObj::ibv(), &fake);
-
-    int numDevices = 0;
-    EXPECT_NE(hipObj::ibv().get_device_list(&numDevices), nullptr);
-    EXPECT_EQ(numDevices, 1);
-    device.fail.getDeviceList = true;
-    EXPECT_EQ(hipObj::ibv().get_device_list(&numDevices), nullptr);
-
-    EXPECT_EQ(hipObj::setIbvForTest(previous), &fake);
-    /* Without fakes, ibv() loads libibverbs, if it can */
-    if (hipObj::ibvAvailable()) {
-        EXPECT_NE(&hipObj::ibv(), &fake);
+    if (!platform) {
+        GTEST_SKIP() << "libibverbs couldn't be loaded";
     }
+    EXPECT_EQ(hipObj::systemPlatform(), platform);
+    EXPECT_NE(dynamic_cast<const hipObj::SystemHip *>(&platform->hip()), nullptr);
+    EXPECT_NE(dynamic_cast<const hipObj::LoadedVerbs *>(&platform->verbs()), nullptr);
+    EXPECT_NE(dynamic_cast<const hipObj::SysfsTopology *>(&platform->topology()), nullptr);
 }
 
-/* Devices on made-up objects that the fake verbs release. The fake verbs
- * aren't installed as ibv(), so code can only reach them through the
- * device. */
+/* hipObjInit() initializes with the system platform. No system has this
+ * NIC, so it fails the same way with or without a GPU or libibverbs: with
+ * a GPU, NIC selection finds nothing the hint allows, and either way, the
+ * hinted NIC can't be opened. */
+TEST(PlatformTest, InitUsesTheSystemPlatform)
+{
+    hipObjConfig_t config{};
+    config.gpuDevice = -1;
+    config.nicHint   = "hipobj_no_such_nic";
+    EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+}
+
+/* Devices on made-up objects that the fake verbs release, which code can
+ * only reach through the device */
 class FakeVerbsSeamTest : public ::testing::Test {
 protected:
     hipObj::RdmaDevice makeDevice() const
@@ -674,51 +635,20 @@ namespace {
         return 0;
     }
 
-    class InitAndTransferTest : public ::testing::Test {
+    /* Without a GPU, so the device can't be synchronized */
+    class InitAndTransferTest : public hipObjTest::FakeDeviceTest {
     protected:
         void SetUp() override
         {
-            fakeTopology_.emplace(topology_);
-
-            hipDevice_.deviceSyncErr = hipErrorNoDevice;
-            fakeHip_.emplace(hip_);
-
-            fakeIbv_.emplace(verbs_);
-
-            g_apiTransferLog = {};
+            FakeDeviceTest::SetUp();
+            hipObjTest::fake().deviceSyncErr = hipErrorNoDevice;
+            g_apiTransferLog                 = {};
         }
-
-        void TearDown() override
-        {
-            (void)hipObjShutdown();
-            fakeIbv_.reset();
-            fakeHip_.reset();
-            fakeTopology_.reset();
-        }
-
-        hipObjConfig_t makeConfig()
-        {
-            hipObjConfig_t config{};
-            config.gpuDevice = -1;
-            config.nicHint   = "mlx5_0";
-            return config;
-        }
-
-        TopologyState                                 topologyState_{};
-        FakeNicTopology                               topology_{topologyState_};
-        std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
-        hipObjTest::FakeDevice                        hipDevice_{};
-        hipObjTest::FakeVerbs                         verbs_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeIbv>      fakeIbv_{};
-        hipObjTest::FakeHip                           hip_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeHip>      fakeHip_{};
     };
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)
     {
-        hipObjConfig_t config = makeConfig();
-
-        hipObjError_t err = hipObjInit(&config);
+        hipObjError_t err = initFakes(makeConfig());
 
         EXPECT_EQ(err.opError, hipObjSuccess);
         const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
@@ -729,8 +659,7 @@ namespace {
 
     TEST_F(InitAndTransferTest, HostTransfersSkipDeviceSynchronizeWithoutGpu)
     {
-        hipObjConfig_t config = makeConfig();
-        ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+        ASSERT_NO_FATAL_FAILURE(init());
 
         char hostBuf[32]{};
         ASSERT_EQ(hipObjBufRegisterHost(hostBuf, sizeof(hostBuf)).opError, hipObjSuccess);
@@ -744,15 +673,14 @@ namespace {
         EXPECT_EQ(err.opError, hipObjSuccess);
         EXPECT_EQ(g_apiTransferLog.sendRequestCalls, 1);
         EXPECT_EQ(g_apiTransferLog.recvReplyCalls, 1);
-        EXPECT_EQ(hipDevice_.log.deviceSynchronize, 0);
+        EXPECT_EQ(hipObjTest::fake().log.deviceSynchronize, 0);
     }
 
     TEST_F(InitAndTransferTest, GpuRegisteredTransfersStillSynchronize)
     {
-        hipObjConfig_t config = makeConfig();
-        ASSERT_EQ(hipObjInit(&config).opError, hipObjSuccess);
+        ASSERT_NO_FATAL_FAILURE(init());
 
-        hipDevice_.deviceSyncErr = hipSuccess;
+        hipObjTest::fake().deviceSyncErr = hipSuccess;
 
         void *gpuBuf = reinterpret_cast<void *>(0x1000);
         ASSERT_EQ(hipObjBufRegister(gpuBuf, 64).opError, hipObjSuccess);
@@ -764,7 +692,7 @@ namespace {
         hipObjError_t err = hipObjPut(nullptr, gpuBuf, 64, 0, &ops, nullptr);
 
         EXPECT_EQ(err.opError, hipObjSuccess);
-        EXPECT_EQ(hipDevice_.log.deviceSynchronize, 1);
+        EXPECT_EQ(hipObjTest::fake().log.deviceSynchronize, 1);
     }
 
 } // namespace

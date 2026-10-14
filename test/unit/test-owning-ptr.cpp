@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: MIT
  *
  * The owning pointers whose deleters hold the interface they release
- * through (ibv-ptr.h, HostBufPtr, HipEventPtr), and own(). Nothing here
- * installs a fake as ibv() or hip(), so a deleter that released through
- * them instead of its own interface would fail these tests.
+ * through (ibv-ptr.h, HostBufPtr, HipEventPtr), and own(). Each fake
+ * records its calls in a FakeDevice of its own, so a deleter that released
+ * through anything but its own interface would fail these tests.
  */
 
 #include <utility>

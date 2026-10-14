@@ -94,12 +94,13 @@ namespace {
         return !value.empty() && chars.find(value.front()) != std::string_view::npos;
     }
 
-    /* The platform systemPlatform() returns, and the SysfsTopology it
-     * uses, when no test installed a topology. sysfs_ is declared first,
-     * so it's built before platform_ refers to it. */
+    /* The platform systemPlatform() returns, and the interfaces it refers
+     * to. The members are built in the order they're declared, so verbs_
+     * is set before topology_ and platform_ refer to it. */
     class SystemPlatform final {
     public:
-        SystemPlatform() : platform_(hip(), ibv(), currentNicTopology(sysfs_))
+        explicit SystemPlatform(std::unique_ptr<LoadedVerbs> verbs) noexcept
+            : verbs_(std::move(verbs)), topology_(*verbs_), platform_(hip_, *verbs_, topology_)
         {
         }
 
@@ -109,20 +110,40 @@ namespace {
         }
 
     private:
-        std::optional<SysfsTopology> sysfs_{};
+        SystemHip                    hip_{};
+        std::unique_ptr<LoadedVerbs> verbs_;
+        SysfsTopology                topology_;
         Platform                     platform_;
     };
+
+    /* A new system platform, or null when libibverbs can't be loaded */
+    std::shared_ptr<const Platform> makeSystemPlatform()
+    {
+        std::unique_ptr<LoadedVerbs> verbs = loadLibibverbs();
+        if (!verbs) {
+            return nullptr;
+        }
+
+        /* Points to the platform, and shares ownership of the
+         * SystemPlatform that holds it */
+        const auto system = std::make_shared<const SystemPlatform>(std::move(verbs));
+        return {system, &system->platform()};
+    }
 
 } // namespace
 
 std::shared_ptr<const Platform>
 systemPlatform()
 {
-    /* Points to the platform, and shares ownership of the SystemPlatform
-     * that holds it, so the SysfsTopology lives as long as the platform
-     * does */
-    const auto system = std::make_shared<SystemPlatform>();
-    return {system, &system->platform()};
+    /* Built on the first call, not when the library loads, so an
+     * application that never initializes hipObject never loads
+     * libibverbs. Never destroyed, so it outlives an instance that's never
+     * shut down. Clang still warns, since NoDestructor's empty destructor
+     * isn't trivial. */
+    HIPOBJ_WARN_NO_EXIT_DTOR_OFF
+    static NoDestructor<std::shared_ptr<const Platform>> platform(makeSystemPlatform());
+    HIPOBJ_WARN_NO_EXIT_DTOR_ON
+    return *platform;
 }
 
 Options

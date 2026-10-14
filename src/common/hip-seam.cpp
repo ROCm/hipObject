@@ -8,38 +8,7 @@
 
 #include <hsa/hsa_ext_amd.h>
 
-#include "hipobj-warnings.h"
-#include "no-destructor.h"
-
 namespace hipObj {
-
-// Runtime installed by tests; null means the SystemHip is active. The
-// library itself never swaps the pointer.
-static const HipRuntime *g_hip_override = nullptr;
-
-const HipRuntime &
-hip()
-{
-    if (g_hip_override) {
-        return *g_hip_override;
-    }
-
-    /* Never destroyed, so it's still there for a global that releases
-     * HIP resources at exit. Clang still warns, since NoDestructor's
-     * empty destructor isn't trivial. */
-    HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-    static NoDestructor<SystemHip> system;
-    HIPOBJ_WARN_NO_EXIT_DTOR_ON
-    return *system;
-}
-
-const HipRuntime *
-setHipForTest(const HipRuntime *runtime)
-{
-    const HipRuntime *previous = g_hip_override;
-    g_hip_override             = runtime;
-    return previous;
-}
 
 hipError_t
 SystemHip::getDevice(int *device) const

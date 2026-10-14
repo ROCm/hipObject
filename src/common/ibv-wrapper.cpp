@@ -18,60 +18,10 @@
 
 #include <dlfcn.h>
 
-#include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
-#include "no-destructor.h"
 
 namespace hipObj {
-
-// Verbs installed by tests; null means the library's own are active.
-// The library itself never swaps the pointer.
-static const Verbs *g_ibv_override = nullptr;
-
-namespace {
-
-    /* The library's own verbs, or null when libibverbs couldn't be
-     * loaded. Loaded on the first call, not when the library loads, so
-     * an application that never initializes hipObject never loads
-     * libibverbs. Never destroyed, so libibverbs stays loaded until exit:
-     * a global holding verbs objects can outlive verbs that were loaded
-     * after it. Clang still warns, since NoDestructor's empty destructor
-     * isn't trivial. */
-    const Verbs *libraryVerbs()
-    {
-        HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-        static NoDestructor<std::unique_ptr<LoadedVerbs>> verbs(loadLibibverbs());
-        HIPOBJ_WARN_NO_EXIT_DTOR_ON
-        return verbs->get();
-    }
-
-} // anonymous namespace
-
-const Verbs &
-ibv()
-{
-    /* Checked first, so a test that installs fakes never loads
-     * libibverbs */
-    if (g_ibv_override) {
-        return *g_ibv_override;
-    }
-    return *libraryVerbs();
-}
-
-bool
-ibvAvailable()
-{
-    return g_ibv_override || libraryVerbs();
-}
-
-const Verbs *
-setIbvForTest(const Verbs *verbs)
-{
-    const Verbs *previous = g_ibv_override;
-    g_ibv_override        = verbs;
-    return previous;
-}
 
 namespace {
 

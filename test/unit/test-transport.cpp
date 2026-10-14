@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
@@ -30,6 +31,7 @@
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
+#include "ibv-wrapper.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
@@ -63,7 +65,7 @@ protected:
     /* Opens the fake device in device_ */
     void openDevice()
     {
-        std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+        std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs(), topology(), 0);
         ASSERT_TRUE(device);
         device_.emplace(std::move(*device));
     }
@@ -80,9 +82,9 @@ protected:
      * as its GID index and no vendor ID */
     hipObj::RdmaDevice deviceWithGidIndex(int gidIndex) const
     {
-        return {verbs_,
-                hipObj::own<hipObj::IbvContextPtr>(verbs_, verbs_.open_device(nullptr)),
-                hipObj::own<hipObj::IbvPdPtr>(verbs_, verbs_.alloc_pd(nullptr)),
+        return {verbs(),
+                hipObj::own<hipObj::IbvContextPtr>(verbs(), verbs().open_device(nullptr)),
+                hipObj::own<hipObj::IbvPdPtr>(verbs(), verbs().alloc_pd(nullptr)),
                 1,
                 gidIndex,
                 {},
@@ -114,9 +116,9 @@ protected:
 
 TEST_F(TransportTest, OpenSetsUpTheDevice)
 {
-    const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+    const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs(), topology(), 0);
     ASSERT_TRUE(device);
-    EXPECT_EQ(&device->verbs(), &verbs_);
+    EXPECT_EQ(&device->verbs(), &verbs());
     EXPECT_NE(device->context(), nullptr);
     EXPECT_NE(device->pd(), nullptr);
     EXPECT_EQ(device->portNum(), 1);
@@ -127,7 +129,7 @@ TEST_F(TransportTest, OpenSetsUpTheDevice)
 TEST_F(TransportTest, OpenRecordsTheVendorId)
 {
     fake().vendorId                                = hipObj::VENDOR_ID_PENSANDO;
-    const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+    const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs(), topology(), 0);
     ASSERT_TRUE(device);
     EXPECT_EQ(device->vendorId(), hipObj::VENDOR_ID_PENSANDO);
     EXPECT_EQ(fake().log.queryDevice, 1);
@@ -137,7 +139,7 @@ TEST_F(TransportTest, OpenSucceedsWithoutVendorIdWhenDeviceQueryFails)
 {
     fake().fail.queryDevice = true;
     {
-        const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs_, topology_, 0);
+        const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs(), topology(), 0);
         ASSERT_TRUE(device);
         EXPECT_FALSE(device->vendorId());
     }
@@ -147,7 +149,7 @@ TEST_F(TransportTest, OpenSucceedsWithoutVendorIdWhenDeviceQueryFails)
 TEST_F(TransportTest, OpenRejectsIndexOutsideDeviceList)
 {
     for (int index : {-1, 1}) {
-        EXPECT_FALSE(hipObj::openRdmaDevice(verbs_, topology_, index)) << "index " << index;
+        EXPECT_FALSE(hipObj::openRdmaDevice(verbs(), topology(), index)) << "index " << index;
     }
     EXPECT_EQ(fake().log.openDevice, 0);
 }
@@ -155,17 +157,17 @@ TEST_F(TransportTest, OpenRejectsIndexOutsideDeviceList)
 TEST_F(TransportTest, OpenFailsWithoutDeviceList)
 {
     fake().fail.getDeviceList = true;
-    EXPECT_FALSE(hipObj::openRdmaDevice(verbs_, topology_, 0));
-    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs_, topology_, "mlx5_0"));
+    EXPECT_FALSE(hipObj::openRdmaDevice(verbs(), topology(), 0));
+    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs(), topology(), "mlx5_0"));
 }
 
 TEST_F(TransportTest, OpenByNameFindsOnlyThatDevice)
 {
-    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs_, topology_, nullptr));
-    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs_, topology_, "mlx5_1"));
+    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs(), topology(), nullptr));
+    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs(), topology(), "mlx5_1"));
     EXPECT_EQ(fake().log.openDevice, 0);
 
-    EXPECT_TRUE(hipObj::openRdmaDeviceByName(verbs_, topology_, "mlx5_0"));
+    EXPECT_TRUE(hipObj::openRdmaDeviceByName(verbs(), topology(), "mlx5_0"));
 }
 
 TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
@@ -174,7 +176,7 @@ TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
                                             &hipObjTest::Faults::queryPort, &hipObjTest::Faults::queryGid}) {
         resetFake();
         fake().fail.*fault = true;
-        EXPECT_FALSE(hipObj::openRdmaDevice(verbs_, topology_, 0));
+        EXPECT_FALSE(hipObj::openRdmaDevice(verbs(), topology(), 0));
         expectNothingLeaked();
     }
 }
@@ -431,7 +433,7 @@ TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
     EXPECT_EQ(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::milliseconds(10)), -1);
 }
 
-// ---- hipObjInit --------------------------------------------------
+// ---- Initialization ----------------------------------------------
 
 TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
 {
@@ -442,7 +444,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
         resetFake();
         fake().fail.*fault    = true;
         hipObjConfig_t config = makeConfig();
-        EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
+        EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
         EXPECT_EQ(hipObj::currentInstance(), nullptr);
         expectNothingLeaked();
     }
@@ -452,7 +454,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenInitTransitionFails)
 {
     fake().fail.modifyQpToState = IBV_QPS_INIT;
     hipObjConfig_t config       = makeConfig();
-    EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
+    EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
     expectNothingLeaked();
 }
@@ -461,7 +463,7 @@ TEST_F(TransportTest, InitFailsForUnknownNic)
 {
     hipObjConfig_t config = makeConfig();
     config.nicHint        = "mlx5_1";
-    EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
+    EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
@@ -535,10 +537,10 @@ TEST_P(TransportTransferTest, ConnectsToPeerInReply)
     setReplyWithPeerToken(peerToken());
     const int queries = fake().log.queryDevice;
     ASSERT_EQ(transfer().opError, hipObjSuccess);
-    /* Connecting reads the vendor ID hipObjInit() stored, not the device */
+    /* Connecting reads the vendor ID initialization stored, not the device */
     EXPECT_EQ(fake().log.queryDevice, queries);
 
-    /* hipObjInit() moved the QP to INIT; the reply's token connects it */
+    /* Initialization moved the QP to INIT; the reply's token connects it */
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
     ASSERT_EQ(calls.size(), 3U);
     EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_INIT);

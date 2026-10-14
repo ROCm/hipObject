@@ -5,7 +5,9 @@
  * Exceptions must not cross the C API. Each public function that calls into
  * a seam or one of the caller's callbacks is run with one that throws, and
  * must return hipObjInternalError instead, against the fake device in
- * fake-device.h.
+ * fake-device.h. hipObjInit() always uses the system platform, so
+ * initialization is tested through initWith() instead, which must leave
+ * nothing initialized or open when it throws.
  *
  * Only the seams that acquire something throw here. A seam that releases
  * something (dereg_mr, destroy_qp, ...) runs in a destructor, where an
@@ -16,22 +18,15 @@
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
-#include <utility>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
 #include "fake-device.h"
-#include "fake-ibv.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "state.h"
-
-namespace hipObj {
-class HipRuntime;
-class Verbs;
-} // namespace hipObj
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -39,6 +34,8 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 namespace {
 
 using hipObjTest::fake;
+using hipObjTest::FakeHip;
+using hipObjTest::FakeVerbs;
 using hipObjTest::makeOps;
 
 void *const kDevBuf = hipObjTest::fakeDevBuf();
@@ -123,39 +120,25 @@ protected:
         g_thrown = GetParam();
     }
 
-    /* Initializes the library with runtime and verbs, which the instance
-     * calls from then on, holding the API lock as hipObjInit() does */
-    void initWith(const hipObj::HipRuntime &runtime, const hipObj::Verbs &verbs) const
+    /* Initializes the library with a FakePlatform over Hip and Verbs,
+     * which the instance calls from then on */
+    template <typename Hip, typename Verbs> static hipObjError_t initThrough()
     {
-        const hipObj::ApiGuard guard;
-        const hipObjConfig_t   config   = makeConfig();
-        auto                   platform = std::make_shared<const hipObj::Platform>(runtime, verbs, topology_);
-        ASSERT_EQ(hipObj::initWith(config, std::move(platform), {}).opError, hipObjSuccess);
+        const auto fakes = std::make_shared<hipObjTest::FakePlatform<Hip, Verbs>>(fake());
+        return hipObjTest::initWithPlatform(makeConfig(), fakes->platform());
     }
-
-    /* Members, so they outlive the instance, which TearDown() destroys */
-    const ThrowingRegMrVerbs throwingRegMr_{fake()};
-    const ThrowingMemcpyHip  throwingMemcpy_{fake()};
 };
 
 TEST_P(ApiExceptionTest, Init)
 {
-    const ThrowingGetDeviceHip      throwing(fake());
-    const hipObjTest::ScopedFakeHip installed(throwing);
-    hipObjConfig_t                  config = makeConfig();
-    EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
+    EXPECT_ANY_THROW((void)(initThrough<ThrowingGetDeviceHip, FakeVerbs>()));
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
 TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
 {
-    {
-        const ThrowingCreateQpVerbs     throwing(fake());
-        const hipObjTest::ScopedFakeIbv installed(throwing);
-        hipObjConfig_t                  config = makeConfig();
-        EXPECT_EQ(hipObjInit(&config).opError, hipObjInternalError);
-        EXPECT_EQ(hipObj::currentInstance(), nullptr);
-    }
+    EXPECT_ANY_THROW((void)(initThrough<FakeHip, ThrowingCreateQpVerbs>()));
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
 
     /* The device, PD, and CQ opened before the throw are released */
     const hipObjTest::CallLog &log = fake().log;
@@ -172,14 +155,14 @@ TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
 
 TEST_P(ApiExceptionTest, BufRegister)
 {
-    ASSERT_NO_FATAL_FAILURE(initWith(hip_, throwingRegMr_));
+    ASSERT_EQ((initThrough<FakeHip, ThrowingRegMrVerbs>().opError), hipObjSuccess);
     EXPECT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
 }
 
 TEST_P(ApiExceptionTest, BufRegisterHost)
 {
-    ASSERT_NO_FATAL_FAILURE(initWith(hip_, throwingRegMr_));
+    ASSERT_EQ((initThrough<FakeHip, ThrowingRegMrVerbs>().opError), hipObjSuccess);
     EXPECT_EQ(hipObjBufRegisterHost(kDevBuf, kBufSize).opError, hipObjInternalError);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjBufNotRegistered);
 }
@@ -204,7 +187,7 @@ TEST_P(ApiExceptionTest, GetAndPut)
 
 TEST_P(ApiExceptionTest, BufSync)
 {
-    ASSERT_NO_FATAL_FAILURE(initWith(throwingMemcpy_, verbs_));
+    ASSERT_EQ((initThrough<ThrowingMemcpyHip, FakeVerbs>().opError), hipObjSuccess);
     /* Registered through a staging buffer, so a sync copies */
     fake().fail.registerAddr = kDevBuf;
     ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);

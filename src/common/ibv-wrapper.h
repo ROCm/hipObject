@@ -141,21 +141,4 @@ private:
  * that has to be there. */
 std::unique_ptr<LoadedVerbs> loadLibibverbs();
 
-/* Returns the verbs every libibverbs call goes through: the ones
- * installed with setIbvForTest(), or otherwise the library's own, which
- * load libibverbs on the first call. Call it only once ibvAvailable() has
- * returned true. */
-const Verbs &ibv();
-
-/* Whether ibv() has verbs to return: true when a test installed some,
- * or when libibverbs loads. Loads it, unless a test installed verbs. */
-bool ibvAvailable();
-
-/* Installs verbs for ibv() to return, and returns the previously
- * installed ones (nullptr when the library's own were active). Passing
- * nullptr restores the library's own. Unit tests only; production never
- * calls it. Not synchronized, so call it only while no other thread can
- * be calling ibv(). */
-const Verbs *setIbvForTest(const Verbs *verbs);
-
 } // namespace hipObj

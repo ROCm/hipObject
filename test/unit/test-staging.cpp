@@ -4,24 +4,13 @@
  *
  * Buffers the NIC can't reach directly: registering them through a host
  * staging buffer, and copying between the staging buffer and the caller's
- * memory with a deadline, against the fake device in fake-device.h.
- *
- * The StagingEnvTest tests need HIPOBJ_STAGE_TIMEOUT_MS and
- * HIPOBJ_REQUIRE_GPU_DIRECT in the environment hipObjInit() reads them
- * from, and the tests don't change their own environment, so they skip
- * unless they're set. CMakeLists.txt runs this program a second time, with
- * both set, for just those tests, and a third time with a malformed
- * HIPOBJ_STAGE_TIMEOUT_MS for the StagingBadEnvTest tests.
+ * memory with a deadline, against the fake device in fake-device.h. The
+ * staging timeout and strict GPU-direct mode come from the options, which
+ * test-state.cpp tests.
  */
 
-#include <charconv>
-#include <chrono>
-#include <cstdint>
-#include <cstdlib>
+#include <cstddef>
 #include <limits>
-#include <memory>
-#include <string_view>
-#include <system_error>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -134,7 +123,7 @@ class StagingTest : public hipObjTest::FakeDeviceTest {
 protected:
     /* Initializes and registers kBufSize bytes at kStagedBuf through a
      * staging buffer */
-    static void initAndRegisterStaged()
+    void initAndRegisterStaged() const
     {
         ASSERT_NO_FATAL_FAILURE(init());
         fake().fail.registerAddr = kStagedBuf;
@@ -211,76 +200,6 @@ TEST_F(StagingTest, FailsAndReleasesEventWhenCopyFails)
     fake().eventNotReadyCount = 1;
     fake().eventQueryResult   = hipErrorLaunchFailure;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
-    EXPECT_EQ(fake().log.eventDestroy, 1);
-}
-
-// ---- Settings read from the environment --------------------------
-
-class StagingEnvTest : public StagingTest {
-protected:
-    void SetUp() override
-    {
-        if (!std::getenv("HIPOBJ_STAGE_TIMEOUT_MS") || !std::getenv("HIPOBJ_REQUIRE_GPU_DIRECT")) {
-            GTEST_SKIP() << "needs HIPOBJ_STAGE_TIMEOUT_MS and HIPOBJ_REQUIRE_GPU_DIRECT";
-        }
-        StagingTest::SetUp();
-    }
-};
-
-TEST_F(StagingEnvTest, AbandonsCopyThatMissesDeadline)
-{
-    const char *envValue = std::getenv("HIPOBJ_STAGE_TIMEOUT_MS");
-    ASSERT_NE(envValue, nullptr);
-    const std::string_view env       = envValue;
-    int64_t                timeoutMs = 0;
-    ASSERT_EQ(std::from_chars(env.data(), std::to_address(env.end()), timeoutMs).ec, std::errc{});
-    ASSERT_GT(timeoutMs, 0);
-    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    fake().eventNeverCompletes = true;
-
-    const auto start = std::chrono::steady_clock::now();
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
-    EXPECT_GE(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(timeoutMs));
-
-    /* The copy may still land, so the event that tracks it isn't destroyed */
-    EXPECT_EQ(fake().log.eventDestroy, 0);
-}
-
-TEST_F(StagingEnvTest, RequiringGpuDirectRefusesStaging)
-{
-    ASSERT_NO_FATAL_FAILURE(init());
-    fakeDeviceMemory();
-    fake().fail.registerAddr = kStagedBuf;
-    EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjRdmaError);
-    EXPECT_EQ(fake().log.registerMr, 1);
-    EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjBufNotRegistered);
-
-    /* Host memory isn't GPU-direct to begin with */
-    fake().memoryType = hipMemoryTypeHost;
-    EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjSuccess);
-}
-
-/* For a HIPOBJ_STAGE_TIMEOUT_MS that isn't a plain number, such as "+20" */
-class StagingBadEnvTest : public StagingTest {
-protected:
-    void SetUp() override
-    {
-        const char *env = std::getenv("HIPOBJ_STAGE_TIMEOUT_MS");
-        if (!env || std::string_view(env).find_first_not_of("0123456789") == std::string_view::npos) {
-            GTEST_SKIP() << "needs a malformed HIPOBJ_STAGE_TIMEOUT_MS";
-        }
-        StagingTest::SetUp();
-    }
-};
-
-TEST_F(StagingBadEnvTest, IgnoresMalformedTimeout)
-{
-    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    /* At least 100 ms, since hipObject sleeps 1 ms between polls. That's
-     * well under the default timeout, and over the 20 ms that "+20" would
-     * mean if it weren't ignored. */
-    fake().eventNotReadyCount = 100;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
     EXPECT_EQ(fake().log.eventDestroy, 1);
 }
 

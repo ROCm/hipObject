@@ -131,35 +131,25 @@ constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 
 class InitWithTest : public hipObjTest::FakeDeviceTest {
 protected:
-    /* initWith() with the system platform, which is the fakes, and
-     * options, holding the API lock as hipObjInit() does */
-    static hipObjError_t initWith(std::shared_ptr<const hipObj::Platform> platform,
-                                  const hipObj::Options                  &options)
+    /* Initializes the library with the fakes and options */
+    hipObjError_t initWith(const hipObj::Options &options) const
     {
-        const hipObj::ApiGuard guard;
-        const hipObjConfig_t   config = makeConfig();
-        return hipObj::initWith(config, std::move(platform), options);
-    }
-
-    static hipObjError_t initWith(const hipObj::Options &options)
-    {
-        return initWith(hipObj::systemPlatform(), options);
+        return initFakes(makeConfig(), options);
     }
 };
 
 TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
 {
-    const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
-    hipObj::Options                               options;
+    hipObj::Options options;
     options.stageTimeout     = milliseconds(7);
     options.pollTimeout      = milliseconds(9);
     options.requireGpuDirect = true;
-    ASSERT_EQ(initWith(platform, options).opError, hipObjSuccess);
+    ASSERT_EQ(initWith(options).opError, hipObjSuccess);
 
     {
         const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
         ASSERT_NE(instance, nullptr);
-        EXPECT_EQ(instance->platform, platform);
+        EXPECT_EQ(instance->platform, fakes_->platform());
         EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
         EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
         EXPECT_TRUE(instance->options.requireGpuDirect);
@@ -168,20 +158,19 @@ TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
         EXPECT_EQ(instance->nicIndex, 0);
     }
 
-    /* Shutting down releases the instance's copy of the platform */
-    EXPECT_EQ(platform.use_count(), 2);
+    /* The instance's platform keeps the fakes alive until shutdown */
+    EXPECT_EQ(fakes_.use_count(), 2);
     ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
-    EXPECT_EQ(platform.use_count(), 1);
+    EXPECT_EQ(fakes_.use_count(), 1);
 }
 
 TEST_F(InitWithTest, FailureLeavesNoInstance)
 {
-    const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
-    fake().fail.createQp                                   = true;
-    EXPECT_EQ(initWith(platform, {}).opError, hipObjRdmaError);
+    fake().fail.createQp = true;
+    EXPECT_EQ(initWith({}).opError, hipObjRdmaError);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
-    EXPECT_EQ(platform.use_count(), 1);
+    EXPECT_EQ(fakes_.use_count(), 1);
 
     /* The device opened before the failure was closed */
     EXPECT_EQ(fake().log.openDevice, 1);
@@ -228,6 +217,9 @@ TEST_F(InitWithTest, StageTimeoutLimitsTheWaitForACopy)
     const auto elapsed = std::chrono::steady_clock::now() - start;
     EXPECT_GE(elapsed, options.stageTimeout);
     EXPECT_LT(elapsed, hipObj::Options{}.stageTimeout);
+
+    /* The copy may still land, so the event that tracks it isn't destroyed */
+    EXPECT_EQ(fake().log.eventDestroy, 0);
 }
 
 TEST_F(InitWithTest, RequireGpuDirectRefusesStaging)
@@ -242,7 +234,13 @@ TEST_F(InitWithTest, RequireGpuDirectRefusesStaging)
     fake().allocSize         = 0x100000;
     fake().fail.registerAddr = kStagedBuf;
     EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.registerMr, 1);
     EXPECT_EQ(fake().log.hostMalloc, 0);
+    EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjBufNotRegistered);
+
+    /* Host memory isn't GPU-direct to begin with */
+    fake().memoryType = hipMemoryTypeHost;
+    EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjSuccess);
 }
 
 } // namespace

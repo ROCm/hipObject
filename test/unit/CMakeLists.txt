@@ -170,16 +170,6 @@ hipobj_add_test(test-s3-control
 
 hipobj_add_fake_device_test(test-staging
   test-staging.cpp)
-# The tests of these settings need them in the environment, so they run
-# in a process of their own (see test-staging.cpp)
-add_test(NAME test-staging-env
-  COMMAND test-staging --gtest_filter=StagingEnvTest.*)
-set_tests_properties(test-staging-env PROPERTIES
-  ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=20;HIPOBJ_REQUIRE_GPU_DIRECT=1")
-add_test(NAME test-staging-bad-env
-  COMMAND test-staging --gtest_filter=StagingBadEnvTest.*)
-set_tests_properties(test-staging-bad-env PROPERTIES
-  ENVIRONMENT "HIPOBJ_STAGE_TIMEOUT_MS=+20")
 
 hipobj_add_fake_device_test(test-thread-safety
   test-thread-safety.cpp)
