@@ -122,10 +122,11 @@ Notes:
   measure it, configure with Clang and `-DHIPOBJ_USE_CODE_COVERAGE=ON`, run
   `ctest`, and build the `hipobj-coverage` target, which writes
   `coverage/report.txt` and `coverage/lines.txt` in the build directory (see
-  [docs/building.rst](docs/building.rst)). Tests of the public API run
-  against the fake RDMA device and HIP runtime in
-  [`test/unit/fake-device.h`](test/unit/fake-device.h), which records the
-  calls and can make them fail.
+  [docs/building.rst](docs/building.rst)). Tests of the public API
+  initialize the library with a `FakePlatform`
+  ([`test/unit/fake-device.h`](test/unit/fake-device.h)), whose fakes of the
+  HIP runtime, libibverbs, and the NIC topology record the calls and can make
+  them fail.
 
 ## Public API
 
@@ -201,6 +202,24 @@ with it:
   - Don't let exceptions cross the C API. The public functions in
     `src/hipobj.cpp` catch everything and return an error code; keep it that
     way.
+- **Don't add global accessors.** The library's state lives in one global,
+  the current `Instance` (`currentInstance()`, [`src/state.h`](src/state.h)),
+  which the C API needs to find it. Everything below the `Instance` gets what
+  it uses from its constructor or its parameters. The outside world comes in
+  through the `Platform` that `initWith()` is given, as the `HipRuntime`,
+  `Verbs`, and `NicTopology` interfaces; `hipObjInit()` passes it
+  `systemPlatform()`, and tests pass a `FakePlatform` (see [Tests](#tests)).
+  - Pass the narrowest dependency (`const Verbs &`, not the `Platform`). An
+    object that uses it after the call returns holds a reference or pointer
+    to it, as `BufferMap` and `RdmaDevice` do; the `Instance` keeps the
+    platform alive for them.
+  - Don't add a function that returns a process-wide object for the library
+    to call, or a hook that swaps one for a test. Dependencies are set when an
+    object is built and never replaced, so tests run the same code, and
+    synchronize the same way, as production.
+  - Interfaces are only for the outside world. Don't add one to fake an
+    internal class; the tests run the internal classes for real, on the fake
+    platform.
 - **Don't do arithmetic on raw pointers.** Clang's `-Wunsafe-buffer-usage` is
   on, and flags pointer arithmetic, indexing through a raw pointer, the C
   library's memory and string functions (`memcpy()`, `memset()`, `strlen()`,
@@ -252,9 +271,14 @@ so don't add assumptions that only hold on Linux's data model.
   that will be fixed when hipObject moves to rocm-systems. Until then, don't
   change it, and don't spread it into new internal code; use a fixed-width
   type there and convert, with a range check, at the API boundary.
-- **Keep Linux-specific code behind the existing internal interfaces.** Don't
-  scatter sysfs, `getrandom()`, `dlopen()`, or libibverbs calls through the
-  library.
+- **Keep Linux-specific code behind the `Platform` interfaces**
+  ([`src/state.h`](src/state.h)): `HipRuntime`, `Verbs`, and `NicTopology`.
+  Their production implementations (`SystemHip`; `LoadedVerbs`, which loads
+  libibverbs with `dlopen()`; and `SysfsTopology`) are the only library code
+  that calls the HIP runtime, libibverbs, or sysfs. Don't scatter sysfs,
+  `getrandom()`, `dlopen()`, or libibverbs calls through the library; give
+  anything new from the outside world, such as a random source, its own
+  interface in `Platform` (see [C++ code](#c-code)).
 
 ## Security
 
