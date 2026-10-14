@@ -100,6 +100,7 @@ FakeVerbs::get_device_list(int *num_devices) const
 void
 FakeVerbs::free_device_list(struct ibv_device **) const
 {
+    ++device_->log.freeDeviceList;
 }
 
 struct ibv_context *

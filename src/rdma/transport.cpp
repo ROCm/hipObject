@@ -27,8 +27,9 @@ namespace hipObj {
 int
 openRdmaDevice(int nicIndex, RcConnection &conn)
 {
+    const Verbs     &verbs   = ibv();
     int              numDevs = 0;
-    IbvDeviceListPtr devList(ibv().get_device_list(&numDevs));
+    IbvDeviceListPtr devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
     if (!devList || numDevs <= 0 || nicIndex < 0 || nicIndex >= numDevs) {
         return -1;
     }
@@ -36,24 +37,24 @@ openRdmaDevice(int nicIndex, RcConnection &conn)
     if (!dev) {
         return -1;
     }
-    IbvContextPtr ctx(ibv().open_device(dev));
+    IbvContextPtr ctx = own<IbvContextPtr>(verbs, verbs.open_device(dev));
     devList.reset();
     if (!ctx) {
         return -1;
     }
-    IbvPdPtr pd(ibv().alloc_pd(ctx.get()));
+    IbvPdPtr pd = own<IbvPdPtr>(verbs, verbs.alloc_pd(ctx.get()));
     if (!pd) {
         return -1;
     }
     struct ibv_port_attr portAttr;
-    if (ibv().query_port(ctx.get(), conn.portNum, &portAttr) != 0) {
+    if (verbs.query_port(ctx.get(), conn.portNum, &portAttr) != 0) {
         return -1;
     }
     conn.gidIndex = SelectBestGid(ctx.get(), conn.portNum);
     if (conn.gidIndex < 0) {
         conn.gidIndex = 0;
     }
-    if (ibv().query_gid(ctx.get(), conn.portNum, conn.gidIndex, &conn.localGid) != 0) {
+    if (verbs.query_gid(ctx.get(), conn.portNum, conn.gidIndex, &conn.localGid) != 0) {
         return -1;
     }
     conn.pd  = std::move(pd);
@@ -67,15 +68,16 @@ openRdmaDeviceByName(const char *devName, RcConnection &conn)
     if (!devName) {
         return -1;
     }
+    const Verbs     &verbs   = ibv();
     int              numDevs = 0;
-    IbvDeviceListPtr devList(ibv().get_device_list(&numDevs));
+    IbvDeviceListPtr devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
     if (!devList || numDevs <= 0) {
         return -1;
     }
     const std::span<struct ibv_device *> devices  = deviceSpan(devList, numDevs);
     int                                  nicIndex = -1;
     for (size_t i = 0; i < devices.size(); ++i) {
-        const char *name = ibv().get_device_name(devices[i]);
+        const char *name = verbs.get_device_name(devices[i]);
         if (name && std::string_view(name) == devName) {
             nicIndex = static_cast<int>(i);
             break;
@@ -90,7 +92,8 @@ openRdmaDeviceByName(const char *devName, RcConnection &conn)
 int
 createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
 {
-    IbvCqPtr cq(ibv().create_cq(conn.ctx.get(), cqSize, nullptr, nullptr, 0));
+    const Verbs &verbs = ibv();
+    IbvCqPtr     cq    = own<IbvCqPtr>(verbs, verbs.create_cq(conn.ctx.get(), cqSize, nullptr, nullptr, 0));
     if (!cq) {
         return -1;
     }
@@ -103,7 +106,7 @@ createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvW
     initAttr.cap.max_send_sge = 1;
     initAttr.cap.max_recv_sge = 1;
     initAttr.qp_type          = IBV_QPT_RC;
-    IbvQpPtr qp(ibv().create_qp(conn.pd.get(), &initAttr));
+    IbvQpPtr qp               = own<IbvQpPtr>(verbs, verbs.create_qp(conn.pd.get(), &initAttr));
     if (!qp) {
         return -1;
     }

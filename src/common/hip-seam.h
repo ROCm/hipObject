@@ -94,11 +94,13 @@ const HipRuntime &hip();
  * hip(). */
 const HipRuntime *setHipForTest(const HipRuntime *runtime);
 
-/* Destroys a HIP event through hip() */
+/* Destroys a HIP event through the runtime that created it, which has to
+ * outlive the pointer. Create the pointer with own() (ibv-ptr.h). */
 struct HipEventDeleter {
-    void operator()(hipEvent_t event) const noexcept
+    const HipRuntime *runtime = nullptr;
+    void              operator()(hipEvent_t event) const noexcept
     {
-        (void)hip().eventDestroy(event);
+        (void)runtime->eventDestroy(event);
     }
 };
 

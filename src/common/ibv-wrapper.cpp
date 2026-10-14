@@ -317,37 +317,37 @@ LoadedVerbs::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_sen
 void
 IbvContextDeleter::operator()(struct ibv_context *ctx) const noexcept
 {
-    (void)ibv().close_device(ctx);
+    (void)verbs->close_device(ctx);
 }
 
 void
 IbvPdDeleter::operator()(struct ibv_pd *pd) const noexcept
 {
-    (void)ibv().dealloc_pd(pd);
+    (void)verbs->dealloc_pd(pd);
 }
 
 void
 IbvCqDeleter::operator()(struct ibv_cq *cq) const noexcept
 {
-    (void)ibv().destroy_cq(cq);
+    (void)verbs->destroy_cq(cq);
 }
 
 void
 IbvQpDeleter::operator()(struct ibv_qp *qp) const noexcept
 {
-    (void)ibv().destroy_qp(qp);
+    (void)verbs->destroy_qp(qp);
 }
 
 void
 IbvMrDeleter::operator()(struct ibv_mr *mr) const noexcept
 {
-    (void)ibv().dereg_mr(mr);
+    (void)verbs->dereg_mr(mr);
 }
 
 void
 IbvDeviceListDeleter::operator()(struct ibv_device **list) const noexcept
 {
-    ibv().free_device_list(list);
+    verbs->free_device_list(list);
 }
 
 } // namespace hipObj

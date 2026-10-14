@@ -126,6 +126,9 @@ hipobj_add_test(test-token-header
 hipobj_add_fake_device_test(test-seams
   test-seams.cpp)
 
+hipobj_add_fake_device_test(test-owning-ptr
+  test-owning-ptr.cpp)
+
 hipobj_add_test(test-replace-by-move
   test-replace-by-move.cpp)
 
