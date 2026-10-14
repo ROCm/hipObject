@@ -153,9 +153,9 @@ TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
         EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
         EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
         EXPECT_TRUE(instance->options.requireGpuDirect);
-        EXPECT_EQ(instance->gpuDevice, -1);
-        EXPECT_EQ(instance->nicHint, "mlx5_0");
-        EXPECT_EQ(instance->nicIndex, 0);
+        EXPECT_EQ(instance->config.gpuDevice, -1);
+        EXPECT_EQ(instance->config.nicHint, "mlx5_0");
+        EXPECT_EQ(instance->config.nicIndex, 0);
     }
 
     /* The instance's platform keeps the fakes alive until shutdown */

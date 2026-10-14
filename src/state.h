@@ -6,7 +6,6 @@
 #pragma once
 
 #include <chrono>
-#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -102,15 +101,28 @@ using EnvLookup = std::function<const char *(const char *name)>;
  * default. */
 Options parseOptions(const EnvLookup &lookup);
 
-/* The library's state from hipObjInit() to hipObjShutdown(). Members are
- * destroyed in reverse order: the buffers are deregistered, and the
- * connection's QP and CQ destroyed, before the device's protection domain
- * is deallocated, and the platform outlives them all. */
+/* What hipObjInit() chose from the hipObjConfig_t: the GPU, with -1
+ * resolved, and the NIC */
+struct ResolvedConfig {
+    int         gpuDevice = 0;
+    std::string nicHint{};
+    int         nicIndex = -1;
+};
+
+/* The library's state from hipObjInit() to hipObjShutdown(). It's
+ * complete when it's built, and only the connection's QP state and the
+ * buffers change after that. Members are destroyed in reverse order: the
+ * buffers are deregistered, and the connection's QP and CQ destroyed,
+ * before the device's protection domain is deallocated, and the platform
+ * outlives them all. */
 struct Instance final {
-    /* instanceDevice has to have come from instancePlatform's verbs. The
-     * connection has no QP yet. */
+    /* instanceDevice has to have come from instancePlatform's verbs, and
+     * instanceConn has to have been created on *instanceDevice. The device
+     * is on the heap so the connection can be created on it, at the
+     * address it keeps, before the instance is built. */
     Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
-             RdmaDevice instanceDevice) noexcept;
+             ResolvedConfig instanceConfig, std::unique_ptr<const RdmaDevice> instanceDevice,
+             RcConnection instanceConn) noexcept;
     ~Instance() = default;
 
     /* Lives in a shared_ptr, and isn't copied or moved */
@@ -119,21 +131,12 @@ struct Instance final {
     Instance(Instance &&)                 = delete;
     Instance &operator=(Instance &&)      = delete;
 
-    std::shared_ptr<const Platform> platform{};
-    Options                         options{};
-
-    /* From the hipObjConfig_t, with gpuDevice resolved and the NIC
-     * chosen */
-    int         gpuDevice = 0;
-    std::string endpoint{};
-    std::string region{};
-    std::string nicHint{};
-    int         nicIndex = -1;
-    uint32_t    flags    = 0;
-
-    RdmaDevice   device;
-    RcConnection conn;
-    BufferMap    buffers;
+    std::shared_ptr<const Platform>   platform;
+    Options                           options;
+    ResolvedConfig                    config;
+    std::unique_ptr<const RdmaDevice> device;
+    RcConnection                      conn;
+    BufferMap                         buffers;
 };
 
 /* The library's instance, or null when it isn't initialized. Call it with

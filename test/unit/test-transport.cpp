@@ -70,12 +70,16 @@ protected:
         device_.emplace(std::move(*device));
     }
 
-    /* Opens the fake device, and creates a QP on it in conn_ */
+    /* Opens the fake device, and creates a connection on it in conn_.
+     * Forgets the modify_qp() call that moved its QP to INIT, so a test
+     * sees only the calls it makes. */
     void open()
     {
         ASSERT_NO_FATAL_FAILURE(openDevice());
-        conn_.emplace(*device_);
-        ASSERT_EQ(hipObj::createRcQp(*conn_, 16, 8, 8), 0);
+        std::optional<hipObj::RcConnection> conn = hipObj::createRcConnection(*device_, 16, 8, 8);
+        ASSERT_TRUE(conn);
+        conn_.emplace(std::move(*conn));
+        fake().modifyQpCount = 0;
     }
 
     /* A device on the fake context and protection domain, with gidIndex
@@ -181,24 +185,55 @@ TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
     }
 }
 
-// ---- Creating the QP ---------------------------------------------
+// ---- Creating the connection -------------------------------------
 
-TEST_F(TransportTest, CreateQpReleasesCqWhenQpCreationFails)
+TEST_F(TransportTest, CreateSetsUpTheConnection)
 {
     ASSERT_NO_FATAL_FAILURE(openDevice());
-    {
-        hipObj::RcConnection conn(*device_);
-        fake().fail.createQp = true;
-        EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), -1);
-        EXPECT_FALSE(conn.qp);
-        EXPECT_FALSE(conn.cq);
-        EXPECT_EQ(fake().log.destroyCq, 1);
+    const std::optional<hipObj::RcConnection> conn = hipObj::createRcConnection(*device_, 16, 8, 8);
+    ASSERT_TRUE(conn);
+    EXPECT_EQ(&conn->device(), &*device_);
+    EXPECT_NE(conn->cq(), nullptr);
+    EXPECT_NE(conn->qp(), nullptr);
+    EXPECT_EQ(fake().log.createCq, 1);
+    EXPECT_EQ(fake().log.createQp, 1);
+}
 
-        fake().fail.createCq = true;
-        EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), -1);
-    }
+TEST_F(TransportTest, CreateReleasesCqWhenQpCreationFails)
+{
+    ASSERT_NO_FATAL_FAILURE(openDevice());
+    fake().fail.createQp = true;
+    EXPECT_FALSE(hipObj::createRcConnection(*device_, 16, 8, 8));
+    EXPECT_EQ(fake().log.destroyCq, 1);
+
+    fake().fail.createCq = true;
+    EXPECT_FALSE(hipObj::createRcConnection(*device_, 16, 8, 8));
     device_.reset();
     expectNothingLeaked();
+}
+
+TEST_F(TransportTest, CreateReleasesQpAndCqWhenInitTransitionFails)
+{
+    ASSERT_NO_FATAL_FAILURE(openDevice());
+    fake().fail.modifyQpToState = IBV_QPS_INIT;
+    EXPECT_FALSE(hipObj::createRcConnection(*device_, 16, 8, 8));
+    EXPECT_EQ(fake().modifyQpCount, 1U);
+    EXPECT_EQ(fake().log.destroyQp, 1);
+    EXPECT_EQ(fake().log.destroyCq, 1);
+    device_.reset();
+    expectNothingLeaked();
+}
+
+TEST_F(TransportTest, MovingKeepsTheQpAndDevice)
+{
+    ASSERT_NO_FATAL_FAILURE(open());
+    struct ibv_qp *const                qp = conn_->qp();
+    std::optional<hipObj::RcConnection> moved;
+    moved.emplace(std::move(*conn_));
+    conn_.reset();
+    EXPECT_EQ(fake().log.destroyQp, 0);
+    EXPECT_EQ(moved->qp(), qp);
+    EXPECT_EQ(&moved->device(), &*device_);
 }
 
 TEST_F(TransportTest, DestroyingReleasesEverything)
@@ -218,10 +253,10 @@ TEST_F(TransportTest, DestroyingReleasesEverything)
     expectNothingLeaked();
 }
 
-TEST_F(TransportTest, InitTransitionGrantsRemoteReadAndWrite)
+TEST_F(TransportTest, CreateMovesQpToInitWithRemoteReadAndWrite)
 {
-    ASSERT_NO_FATAL_FAILURE(open());
-    ASSERT_EQ(hipObj::transitionQpToInit(*conn_), 0);
+    ASSERT_NO_FATAL_FAILURE(openDevice());
+    ASSERT_TRUE(hipObj::createRcConnection(*device_, 16, 8, 8));
 
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
     ASSERT_EQ(calls.size(), 1U);
@@ -288,14 +323,6 @@ TEST_F(TransportTest, ConnectRejectsPeerThatIsNotRc)
     EXPECT_EQ(fake().modifyQpCount, 0U);
 }
 
-TEST_F(TransportTest, ConnectNeedsQp)
-{
-    ASSERT_NO_FATAL_FAILURE(openDevice());
-    hipObj::RcConnection conn(*device_);
-    EXPECT_EQ(hipObj::connectRcPeer(conn, peerToken()), -1);
-    EXPECT_EQ(fake().modifyQpCount, 0U);
-}
-
 TEST_F(TransportTest, ConnectStopsAtFailedTransition)
 {
     ASSERT_NO_FATAL_FAILURE(open());
@@ -315,17 +342,20 @@ TEST_F(TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
      * outside [0, 255] must be refused, not truncated */
     ibv_gid gid{};
     for (int index : {-1, 256, 0x10000}) {
-        const hipObj::RdmaDevice device = deviceWithGidIndex(index);
-        hipObj::RcConnection     conn(device);
-        ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
-        EXPECT_EQ(hipObj::transitionQpToRtr(conn, 1, 0, gid), -1) << "index " << index;
+        const hipObj::RdmaDevice            device = deviceWithGidIndex(index);
+        std::optional<hipObj::RcConnection> conn   = hipObj::createRcConnection(device, 16, 8, 8);
+        ASSERT_TRUE(conn);
+        /* Only the RTR transition's calls count */
+        fake().modifyQpCount = 0;
+        EXPECT_EQ(hipObj::transitionQpToRtr(*conn, 1, 0, gid), -1) << "index " << index;
+        EXPECT_EQ(fake().modifyQpCount, 0U) << "index " << index;
     }
-    EXPECT_EQ(fake().modifyQpCount, 0U);
 
-    const hipObj::RdmaDevice device = deviceWithGidIndex(255);
-    hipObj::RcConnection     conn(device);
-    ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
-    ASSERT_EQ(hipObj::transitionQpToRtr(conn, 1, 0, gid), 0);
+    const hipObj::RdmaDevice            device = deviceWithGidIndex(255);
+    std::optional<hipObj::RcConnection> conn   = hipObj::createRcConnection(device, 16, 8, 8);
+    ASSERT_TRUE(conn);
+    fake().modifyQpCount = 0;
+    ASSERT_EQ(hipObj::transitionQpToRtr(*conn, 1, 0, gid), 0);
     EXPECT_EQ(modifyQpCalls().at(0).attr.ah_attr.grh.sgid_index, 255);
 }
 
@@ -398,13 +428,6 @@ TEST_F(TransportTest, PollReturnsOnCompletion)
     EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)), 0);
     fake().pollOpcode = IBV_WC_RDMA_READ;
     EXPECT_EQ(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::seconds(1)), 0);
-}
-
-TEST_F(TransportTest, PollNeedsCq)
-{
-    ASSERT_NO_FATAL_FAILURE(openDevice());
-    hipObj::RcConnection conn(*device_);
-    EXPECT_EQ(hipObj::pollCompletion(conn, -1, std::chrono::seconds(1)), -1);
 }
 
 TEST_F(TransportTest, PollFailsOnErrorCompletion)

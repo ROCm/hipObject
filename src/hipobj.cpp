@@ -105,7 +105,7 @@ checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size,
 static std::optional<RdmaToken>
 buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf, size_t size, off_t offset)
 {
-    if (!buf.mr || !conn.qp) {
+    if (!buf.mr) {
         return std::nullopt;
     }
     if (!rangeInRegistration(offset, size, buf.size)) {
@@ -113,7 +113,7 @@ buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf, size_t 
     }
     RdmaToken token;
     token.transport  = TransportType::RC;
-    token.qpNum      = conn.qp->qp_num;
+    token.qpNum      = conn.qp()->qp_num;
     token.gid        = toGid(conn.device().localGid());
     token.rkey       = buf.mr->rkey;
     token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
@@ -348,7 +348,7 @@ try {
     if (instance->buffers.isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = instance->buffers.registerBuffer(devPtr, size, instance->device.pd());
+    int ret = instance->buffers.registerBuffer(devPtr, size, instance->device->pd());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -376,7 +376,7 @@ try {
     if (instance->buffers.isRegistered(hostPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = instance->buffers.registerHostBuffer(hostPtr, size, instance->device.pd());
+    int ret = instance->buffers.registerHostBuffer(hostPtr, size, instance->device->pd());
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
