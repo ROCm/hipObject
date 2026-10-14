@@ -129,6 +129,7 @@ FakeVerbs::get_device_name(struct ibv_device *) const
 int
 FakeVerbs::query_device(struct ibv_context *, struct ibv_device_attr *attr) const
 {
+    ++device_->log.queryDevice;
     if (device_->fail.queryDevice) {
         return -1;
     }
