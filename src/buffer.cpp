@@ -111,8 +111,9 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_p
         }
         else {
             const DmabufFd dmabuf(fd, runtime);
-            IbvMrPtr       mr(verbs.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr),
-                                                  dmabuf.get(), access));
+            IbvMrPtr       mr = own<IbvMrPtr>(verbs, verbs.reg_dmabuf_mr(pd, offset, length,
+                                                                         reinterpret_cast<uintptr_t>(addr),
+                                                                         dmabuf.get(), access));
             if (mr) {
                 return mr;
             }
@@ -124,7 +125,7 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_p
         // invent a registration here.
     }
 
-    return IbvMrPtr(verbs.reg_mr(pd, addr, length, access));
+    return own<IbvMrPtr>(verbs, verbs.reg_mr(pd, addr, length, access));
 }
 
 bool
@@ -151,7 +152,7 @@ isValidDeviceRange(void *ptr, size_t size)
 void
 HostBufDeleter::operator()(void *hostBuf) const noexcept
 {
-    (void)hip().hostFree(hostBuf);
+    (void)runtime->hostFree(hostBuf);
 }
 
 int
@@ -161,8 +162,10 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
         return -1;
     }
-    int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr     = registerDeviceMemory(ibv(), hip(), pd, devPtr, size, access, dmabuf_);
+    const Verbs      &verbs   = ibv();
+    const HipRuntime &runtime = hip();
+    int               access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    IbvMrPtr          mr      = registerDeviceMemory(verbs, runtime, pd, devPtr, size, access, dmabuf_);
     if (mr) {
         BufEntry &entry  = entries_[key];
         entry.mr         = std::move(mr);
@@ -190,12 +193,12 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     }
 
     void      *rawHostBuf = nullptr;
-    hipError_t err        = hip().hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
+    hipError_t err        = runtime.hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
     if (err != hipSuccess || !rawHostBuf) {
         return -1;
     }
-    HostBufPtr hostBuf(rawHostBuf);
-    mr.reset(ibv().reg_mr(pd, hostBuf.get(), size, access));
+    HostBufPtr hostBuf = own<HostBufPtr>(runtime, rawHostBuf);
+    mr                 = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
     if (!mr) {
         return -1;
     }
@@ -216,8 +219,9 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
     if (validateRegistration(entries_.contains(key), entries_.size(), size) != 0) {
         return -1;
     }
-    int      access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr mr(ibv().reg_mr(pd, hostPtr, size, access));
+    const Verbs &verbs  = ibv();
+    int          access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    IbvMrPtr     mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
     if (!mr) {
         return -1;
     }

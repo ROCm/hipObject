@@ -157,9 +157,10 @@ RdmaTestServer::RdmaTestServer() : impl_(std::make_unique<Impl>())
     if (!stagingBuf) {
         return;
     }
-    hipObj::IbvMrPtr stagingMr(
-        hipObj::ibv().reg_mr(conn.pd.get(), stagingBuf.get(), impl_->stagingSize,
-                             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+    const hipObj::Verbs &verbs     = hipObj::ibv();
+    hipObj::IbvMrPtr     stagingMr = hipObj::own<hipObj::IbvMrPtr>(
+        verbs, verbs.reg_mr(conn.pd.get(), stagingBuf.get(), impl_->stagingSize,
+                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!stagingMr) {
         return;
     }

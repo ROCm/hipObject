@@ -143,10 +143,10 @@ std::shared_ptr<Instance> currentInstance();
  * before anything changes.
  *
  * Only the GPU lookup calls the platform's HIP runtime. NIC selection, the
- * RDMA device, buffer registration, transfers, and the owning pointers'
- * deleters call hip(), ibv(), and the installed NIC topology, so platform
- * has to be one that systemPlatform() returned while the same ones were
- * installed. */
+ * RDMA device, buffer registration, and transfers call hip(), ibv(), and
+ * the installed NIC topology, and the owning pointers they create release
+ * their objects through the same ones, so platform has to be one that
+ * systemPlatform() returned while the same ones were installed. */
 hipObjError_t initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
                        const Options &options);
 

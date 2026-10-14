@@ -39,9 +39,12 @@ struct DmabufPolicy {
 IbvMrPtr registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_pd *pd, void *addr,
                               size_t length, int access, const DmabufPolicy &policy);
 
-/* Frees a host staging buffer allocated with hipHostMalloc() */
+/* Frees a host staging buffer through the runtime whose hostMalloc()
+ * allocated it, which has to outlive the pointer. Create the pointer with
+ * own() (ibv-ptr.h). */
 struct HostBufDeleter {
-    void operator()(void *hostBuf) const noexcept;
+    const HipRuntime *runtime = nullptr;
+    void              operator()(void *hostBuf) const noexcept;
 };
 
 using HostBufPtr = std::unique_ptr<void, HostBufDeleter>;

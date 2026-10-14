@@ -31,6 +31,7 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
+#include "ibv-ptr.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "rdma-topology.h"
@@ -569,8 +570,8 @@ TEST_F(FakeVerbsSeamTest, QpCreationAndTeardownUseTheSeam)
 {
     {
         hipObj::RcConnection conn;
-        conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
-        conn.pd.reset(reinterpret_cast<struct ibv_pd *>(0x5678));
+        conn.ctx = hipObj::own<hipObj::IbvContextPtr>(verbs_, reinterpret_cast<struct ibv_context *>(0x1234));
+        conn.pd  = hipObj::own<hipObj::IbvPdPtr>(verbs_, reinterpret_cast<struct ibv_pd *>(0x5678));
 
         EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
         EXPECT_EQ(device_.log.createCq, 1);
@@ -588,8 +589,8 @@ TEST_F(FakeVerbsSeamTest, QpCreationAndTeardownUseTheSeam)
 TEST_F(FakeVerbsSeamTest, InitTransitionGrantsRemoteReadAndWrite)
 {
     hipObj::RcConnection conn;
-    conn.ctx.reset(reinterpret_cast<struct ibv_context *>(0x1234));
-    conn.pd.reset(reinterpret_cast<struct ibv_pd *>(0x5678));
+    conn.ctx = hipObj::own<hipObj::IbvContextPtr>(verbs_, reinterpret_cast<struct ibv_context *>(0x1234));
+    conn.pd  = hipObj::own<hipObj::IbvPdPtr>(verbs_, reinterpret_cast<struct ibv_pd *>(0x5678));
     ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
 
     ASSERT_EQ(hipObj::transitionQpToInit(conn), 0);

@@ -165,7 +165,7 @@ stageCopyWithDeadline(void *dev, void *host, size_t size, bool toDevice, std::ch
     if (runtime.eventCreate(&rawDone) != hipSuccess) {
         return {hipObjInternalError, 0};
     }
-    HipEventPtr done(rawDone);
+    HipEventPtr done = own<HipEventPtr>(runtime, rawDone);
 
     hipError_t err = runtime.memcpyAsync(dst, src, size, kind, nullptr);
     if (err == hipSuccess) {

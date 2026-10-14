@@ -3,10 +3,20 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* Owning smart pointers for ibverbs objects.
+/* Owning smart pointers for ibverbs objects, and the helpers for them
+ * and the other owning pointers whose deleters hold the interface they
+ * release through (HostBufPtr and HipEventPtr).
  *
- * Each deleter releases its object through ibv() and ignores
- * the verb's return code.
+ * Each deleter holds the Verbs the object came from, releases the
+ * object through it, and ignores the verb's return code. The Verbs has
+ * to outlive the pointer, and everything its ownership moves to. A
+ * deleter only reads its own pointer, so pointers can be destroyed on
+ * different threads whenever their Verbs can be called from them.
+ *
+ * A default-constructed deleter has no Verbs, so a default-constructed
+ * pointer can hold nothing. Create a pointer that owns an object with
+ * own(), never with Ptr(raw) or ptr.reset(raw), which would keep a
+ * deleter with no Verbs to release the object through.
  *
  * Never assign nullptr to one of these pointers after destroying the
  * object by hand: the assignment runs the deleter and destroys it a
@@ -24,30 +34,38 @@
 
 namespace hipObj {
 
+class Verbs;
+
 /* The deleters are defined in ibv-wrapper.cpp so this header doesn't
  * pull in the verbs seam. */
 struct IbvContextDeleter {
-    void operator()(struct ibv_context *ctx) const noexcept;
+    const Verbs *verbs = nullptr;
+    void         operator()(struct ibv_context *ctx) const noexcept;
 };
 
 struct IbvPdDeleter {
-    void operator()(struct ibv_pd *pd) const noexcept;
+    const Verbs *verbs = nullptr;
+    void         operator()(struct ibv_pd *pd) const noexcept;
 };
 
 struct IbvCqDeleter {
-    void operator()(struct ibv_cq *cq) const noexcept;
+    const Verbs *verbs = nullptr;
+    void         operator()(struct ibv_cq *cq) const noexcept;
 };
 
 struct IbvQpDeleter {
-    void operator()(struct ibv_qp *qp) const noexcept;
+    const Verbs *verbs = nullptr;
+    void         operator()(struct ibv_qp *qp) const noexcept;
 };
 
 struct IbvMrDeleter {
-    void operator()(struct ibv_mr *mr) const noexcept;
+    const Verbs *verbs = nullptr;
+    void         operator()(struct ibv_mr *mr) const noexcept;
 };
 
 struct IbvDeviceListDeleter {
-    void operator()(struct ibv_device **list) const noexcept;
+    const Verbs *verbs = nullptr;
+    void         operator()(struct ibv_device **list) const noexcept;
 };
 
 using IbvContextPtr = std::unique_ptr<struct ibv_context, IbvContextDeleter>;
@@ -68,6 +86,17 @@ deviceSpan(const IbvDeviceListPtr &list, int count) noexcept
         return {};
     }
     return spanFromPointer(list.get(), static_cast<size_t>(count));
+}
+
+/* A Ptr that owns raw, which may be null, and releases it through
+ * dependency, the Verbs or HipRuntime it came from:
+ * own<IbvQpPtr>(verbs, verbs.create_qp(...)). dependency has to outlive
+ * the pointer. */
+template <typename Ptr, typename Dependency>
+Ptr
+own(const Dependency &dependency, typename Ptr::pointer raw) noexcept
+{
+    return Ptr(raw, typename Ptr::deleter_type{&dependency});
 }
 
 /* Gives up ownership without running the deleter, for an object that

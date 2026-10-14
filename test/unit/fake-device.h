@@ -44,6 +44,7 @@ struct CallLog {
     std::atomic<int> deregMr{0};
     std::atomic<int> openDevice{0};
     std::atomic<int> closeDevice{0};
+    std::atomic<int> freeDeviceList{0};
     std::atomic<int> allocPd{0};
     std::atomic<int> deallocPd{0};
     std::atomic<int> createCq{0};
