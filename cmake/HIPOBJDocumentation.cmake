@@ -66,7 +66,7 @@ if(HIPOBJ_BUILD_DOCS)
     VERBATIM
   )
 
-  add_custom_target(docs-venv
+  add_custom_target(hipobj-docs-venv
     DEPENDS ${HIPOBJ_DOCS_VENV_STAMP}
   )
 
@@ -96,7 +96,7 @@ if(HIPOBJ_BUILD_DOCS)
   )
 
   # ── Doxygen target: source headers -> XML ────────────
-  add_custom_target(doxygen
+  add_custom_target(hipobj-doxygen
     COMMAND ${DOXYGEN_EXECUTABLE}
       ${PROJECT_BINARY_DIR}/Doxyfile
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -105,18 +105,16 @@ if(HIPOBJ_BUILD_DOCS)
   )
 
   # ── Sphinx target: RST + Doxygen XML -> HTML ─────────
-  # Target name follows ROCm convention (ROCMSphinxDoc)
-  #
   # -d keeps Sphinx's doctree cache out of the HTML
   # directory, which is published to GitHub Pages as is.
-  add_custom_target(sphinx-html
+  add_custom_target(hipobj-sphinx-html
     COMMAND ${SPHINX_BUILD}
       -b html
       -d ${HIPOBJ_DOC_PATH}/doctrees
       -c ${PROJECT_BINARY_DIR}/docs-sphinx
       ${PROJECT_SOURCE_DIR}/docs
       ${HIPOBJ_DOC_PATH}/html
-    DEPENDS doxygen docs-venv
+    DEPENDS hipobj-doxygen hipobj-docs-venv
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Building Sphinx HTML documentation"
     VERBATIM
