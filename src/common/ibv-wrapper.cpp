@@ -360,32 +360,4 @@ IbvDeviceListDeleter::operator()(struct ibv_device **list) const noexcept
     ibv().free_device_list(list);
 }
 
-int
-ibvDestroy(IbvQpPtr &qp)
-{
-    struct ibv_qp *raw = qp.release();
-    if (!raw) {
-        return 0;
-    }
-    int ret = ibv().destroy_qp(raw);
-    if (ret != 0) {
-        qp.reset(raw); /* still alive: hand it back for a retry */
-    }
-    return ret;
-}
-
-int
-ibvDestroy(IbvCqPtr &cq)
-{
-    struct ibv_cq *raw = cq.release();
-    if (!raw) {
-        return 0;
-    }
-    int ret = ibv().destroy_cq(raw);
-    if (ret != 0) {
-        cq.reset(raw); /* still alive: hand it back for a retry */
-    }
-    return ret;
-}
-
 } // namespace hipObj

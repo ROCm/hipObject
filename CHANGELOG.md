@@ -100,16 +100,6 @@
     malformed tokens, and tokens after other statuses used to be accepted.
     A token whose transport byte is neither DC (`00`) nor RC (`01`) is
     rejected.
-  - `hipObjGetV2()` and `hipObjPutV2()`, which aren't implemented yet,
-    check their arguments before returning `hipObjNotSupported`. They
-    reject a NULL or empty bucket or key, a bucket longer than 255
-    characters or a key longer than 1024 bytes, a NULL pointer, a size of
-    0, an offset and size whose sum wraps, a query string that isn't
-    canonical, and a `hipObjOpsV2_t` without all three callbacks. A
-    canonical query is a list of `key=value` parameters, sorted by key and
-    then by value, in which every character except the RFC 3986
-    unreserved ones is percent-encoded with uppercase hex digits. A size
-    above 2^31-1 bytes returns `hipObjSizeTooLarge`.
 - The `hipobj.h` documentation of `hipObjGet()` and `hipObjPut()` now
   says that `offset` is a byte offset into the registered buffer. It
   used to describe it as an offset into the S3 object, but it has always
@@ -129,15 +119,14 @@
   `curl_global_init()` fails.
 - The public API can be called from multiple threads. Functions that use
   the library's state (`hipObjInit()`, `hipObjShutdown()`, buffer
-  registration, transfers, `hipObjBufSync()`, and `hipObjGetRdmaToken()`,
-  as well as `hipObjGetV2()` and `hipObjPutV2()`) are serialized: they
-  run one at a time across the process, and a call waits for the one in
-  progress to finish, so only one transfer runs at a time. They used to
-  have no synchronization, and calling them from more than one thread at
-  a time could corrupt the library's state or crash. The other functions
-  can be called from any thread at any time. Each function's
-  documentation now says which kind it is, and the new Thread Safety
-  section of the API reference explains both, along with what
+  registration, transfers, `hipObjBufSync()`, and `hipObjGetRdmaToken()`)
+  are serialized: they run one at a time across the process, and a call
+  waits for the one in progress to finish, so only one transfer runs at a
+  time. They used to have no synchronization, and calling them from more
+  than one thread at a time could corrupt the library's state or crash.
+  The other functions can be called from any thread at any time. Each
+  function's documentation now says which kind it is, and the new Thread
+  Safety section of the API reference explains both, along with what
   applications have to do themselves.
 - A `hipObjOps_t` callback that calls a serialized function now gets
   `hipObjInvalidValue`, since the callbacks run while the library holds
@@ -173,9 +162,13 @@
 - The `OFFLOAD_ARCH` CMake cache variable and its `rocminfo`-based GPU
   architecture detection. It was never used to set the target architecture
   and is unnecessary now that nothing is compiled for the GPU.
-- The `hipObjInitV2()` declaration in `hipobj.h`. The function was never
-  implemented, so calls to it failed at link time. They now fail to
-  compile.
+- The experimental V2 interface: `hipObjGetV2()`, `hipObjPutV2()`, the
+  types they took, the `hipObjNotSupported` and `hipObjBusy` error codes,
+  and the `HIPOBJECT_V2_API` CMake option. The V2 functions were never
+  implemented: they checked their arguments, returning an error such as
+  `hipObjInvalidValue` for bad ones, and otherwise returned
+  `hipObjNotSupported` without transferring anything. Use `hipObjGet()` and
+  `hipObjPut()` instead.
 - The `HIPOBJ_SUCCESS` macro from `hipobj.h`. It expanded to a compound
   literal, which isn't valid C++. Compare a `hipObjError_t`'s `opError`
   with `hipObjSuccess` instead.
@@ -190,15 +183,9 @@
   values for the libibverbs access flags, so the queue pair allowed remote
   and local writes instead of remote reads and writes. On a NIC that
   enforces a queue pair's access flags, `hipObjPut()` could fail.
-- The V2 final-reply parser rejected most valid CRC64NVME checksums whose
-  base64 text was not the all-zero value.
-- The V2 final-reply parser could accept an `X-Amz-Rdma-Bytes-Transferred`
-  value larger than `UINT64_MAX` after wrapping it to a smaller count.
 - The MinIO bridge read a malformed `X-Amz-Rdma-Bytes-Transferred` value
-  such as `12abc` as its leading number, and on the V2 path ignored a
-  value it couldn't read at all, reporting 0 bytes. A V1 GET also
-  accepted a count larger than the buffer. The transfer now fails
-  instead.
+  such as `12abc` as its leading number, and a GET accepted a count
+  larger than the buffer. The transfer now fails instead.
 - `HIPOBJ_STAGE_TIMEOUT_MS` accepted a leading `+` or whitespace, and a
   value too large for a `long` overflowed the staging copy's deadline.
   hipObject now uses the default 30-second timeout unless the value is a

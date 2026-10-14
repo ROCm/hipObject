@@ -57,18 +57,16 @@ defaults:
 jobs:
   build:
     name: >-
-      Build (V2 API ${{ matrix.v2_api }},
-      ${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }}${{ matrix.coverage == 'ON' && ', coverage' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
+      Build (${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }}${{ matrix.coverage == 'ON' && ', coverage' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
     runs-on: ubuntu-latest
     strategy:
-      # Every other workflow builds the default configuration (V2 API on,
-      # shared library, no sanitizers), so this is the only place the V2-off,
-      # static, sanitizer, and code coverage configurations get compiled and
-      # tested. Let every job finish so a failure in one doesn't hide the
-      # state of the others.
+      # Every other workflow builds the default configuration (shared
+      # library, no sanitizers), so this is the only place the static,
+      # sanitizer, and code coverage configurations get compiled and tested.
+      # Let every job finish so a failure in one doesn't hide the state of
+      # the others.
       fail-fast: false
       matrix:
-        v2_api: [ON, OFF]
         shared_libs: [ON, OFF]
         sanitizers: [OFF]
         coverage: [OFF]
@@ -79,8 +77,7 @@ jobs:
           # address) with the default configuration. It builds Debug, so
           # it's also the one place the library's assert()s are checked,
           # and sanitizer reports aren't muddied by optimization.
-          - v2_api: ON
-            shared_libs: ON
+          - shared_libs: ON
             sanitizers: ON
             coverage: OFF
             build_type: Debug
@@ -88,8 +85,7 @@ jobs:
           # needs Clang, so it builds with ROCm's, which makes it the one
           # job that doesn't use GCC. It builds Debug, so the report's
           # lines match the source.
-          - v2_api: ON
-            shared_libs: ON
+          - shared_libs: ON
             sanitizers: OFF
             coverage: ON
             build_type: Debug
@@ -149,7 +145,6 @@ jobs:
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON \
             -DHIPOBJ_MINIO_CLIENT=${{ matrix.coverage == 'ON' && 'OFF' || 'ON' }} \
-            -DHIPOBJECT_V2_API=${{ matrix.v2_api }} \
             -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }} \
             -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizers }} \
             -DHIPOBJ_USE_CODE_COVERAGE=${{ matrix.coverage }} \

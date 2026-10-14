@@ -23,8 +23,7 @@ namespace hipobj::test {
 struct HttpRequest {
     std::string                        method{};
     std::string                        path{};
-    std::map<std::string, std::string> headers{};    /* lower-case names */
-    std::string                        rawHeaders{}; /* original header block (credentials) */
+    std::map<std::string, std::string> headers{}; /* lower-case names */
     std::string                        body{};
     size_t contentLength = 0; /* Content-Length, which HttpServer validates; 0 if absent */
 };
@@ -33,11 +32,6 @@ struct HttpResponse {
     int                                status = 500;
     std::map<std::string, std::string> headers{};
     std::string                        body{};
-    /* Runs exactly once after the response bytes are sent (or the
-     * attempt fails). The finalizer is moved out before execution so
-     * no path can run it twice; exceptions from the callback are
-     * contained. */
-    std::function<void(bool sentOk)> afterSend{};
 };
 
 using HttpHandler = std::function<HttpResponse(const HttpRequest &)>;
@@ -55,11 +49,10 @@ public:
 
     void setHandler(HttpHandler handler);
 
-    /* v2 threaded mode: accepts connections until stop(), handling
-     * each on its own thread. Responses are completed with the
-     * afterSend finalizer contract. The loop always runs on the
-     * tracked thread created here, so stop() has a join barrier
-     * before waiting on the worker count.
+    /* Accepts connections until stop(), handling each on its own
+     * thread. The loop always runs on the tracked thread created
+     * here, so stop() has a join barrier before waiting on the
+     * worker count.
      *
      * Returns false when the constructor never got a listening socket.
      * Callers must not announce a port they are not listening on. */

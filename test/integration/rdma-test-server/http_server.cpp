@@ -384,26 +384,15 @@ HttpServer::handleConnection(int client)
     req.contentLength = contentLen;
     HttpResponse resp = handler_(req);
 
-    /* Response transmission deadline: 5s from handler completion. */
+    /* Response transmission deadline: 5s from handler completion. A
+     * response that can't be sent is dropped with the connection. */
     const auto txDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    bool       sentOk     = false;
     try {
-        std::string out = serializeResponse(resp);
-        sentOk          = sendAll(client, out, txDeadline);
+        const std::string out = serializeResponse(resp);
+        (void)sendAll(client, out, txDeadline);
     }
     catch (...) {
-        sentOk = false;
-    }
-    /* Finalizer: exactly once, exceptions contained. */
-    auto fin       = std::move(resp.afterSend);
-    resp.afterSend = nullptr;
-    if (fin) {
-        try {
-            fin(sentOk);
-        }
-        catch (...) {
-            /* logged upstream if needed */
-        }
+        /* Nothing to do: the connection closes either way */
     }
 }
 
@@ -420,8 +409,6 @@ parseRequest(const std::string &raw)
         std::istringstream ls(line);
         ls >> req.method >> req.path;
     }
-    size_t blockEnd = raw.find("\r\n\r\n");
-    req.rawHeaders  = blockEnd == std::string::npos ? raw : raw.substr(0, blockEnd);
     while (std::getline(iss, line) && line != "\r" && !line.empty()) {
         if (line.back() == '\r') {
             line.pop_back();

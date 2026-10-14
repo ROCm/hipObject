@@ -16,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <latch>
 #include <memory>
@@ -280,42 +281,15 @@ TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)
     EXPECT_TRUE(state_.initialized);
 }
 
-#ifdef HIPOBJECT_V2_API
-/* hipObjGetV2() and hipObjPutV2() check that these are set, but don't
- * call them yet */
-int
-unusedSendPrepare(void *, const hipObjTransferReqV2_t *, hipObjPrepareReplyV2_t *)
-{
-    return -1;
-}
-
-int
-unusedSendReady(void *, const hipObjTransferReqV2_t *, hipObjFinalReplyV2_t *)
-{
-    return -1;
-}
-
-int
-unusedSendCancel(void *, const hipObjTransferReqV2_t *)
-{
-    return -1;
-}
-
 /* The number of functions reentrantSendRequest() calls that take the
  * API lock */
-constexpr size_t kLockedFunctions = 11;
-#else
 constexpr size_t kLockedFunctions = 9;
-#endif
 
 /* What reentrantSendRequest() needs, and what it found */
 struct ReentryProbe {
     void       *registered   = nullptr;
     void       *unregistered = nullptr;
     hipObjOps_t plainOps     = {&plainSendRequest, &plainRecvReply};
-#ifdef HIPOBJECT_V2_API
-    hipObjOpsV2_t v2Ops = {{}, &unusedSendPrepare, &unusedSendReady, &unusedSendCancel};
-#endif
 
     std::vector<std::pair<std::string_view, hipObjOpError_t>> locked{};
     char                                                     *token       = nullptr;
@@ -344,14 +318,6 @@ reentrantSendRequest(void *ctx, const char *, size_t)
         {"hipObjGetRdmaToken",
          hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &probe->token).opError},
     };
-#ifdef HIPOBJECT_V2_API
-    void          *buf   = probe->registered;
-    hipObjOpsV2_t *v2Ops = &probe->v2Ops;
-    probe->locked.emplace_back("hipObjGetV2",
-                               hipObjGetV2("b", "k", buf, kBufSize, 0, nullptr, v2Ops, nullptr).opError);
-    probe->locked.emplace_back("hipObjPutV2",
-                               hipObjPutV2("b", "k", buf, kBufSize, 0, nullptr, v2Ops, nullptr).opError);
-#endif
 
     static constexpr std::string_view kReply = "200";
     probe->parseResult = hipObjParseRdmaReply(kReply.data(), kReply.size(), &probe->parsedCode).opError;

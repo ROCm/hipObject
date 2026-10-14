@@ -20,14 +20,6 @@ option(HIPOBJ_DOCS_ONLY
   "Only configure documentation targets (no HIP/ROCm)"
   OFF)
 
-# Declared out here, ahead of the HIPOBJ_DOCS_ONLY guard,
-# because the documentation module reads it on every
-# configure path: include/hipobj.h gates the v2 API
-# declarations on this macro, so Doxygen has to agree with
-# the library about whether that surface exists.
-option(HIPOBJECT_V2_API
-  "Build the hipobj-rc-v2 control protocol" ON)
-
 if(HIPOBJ_DOCS_ONLY)
   project(hipobj
     VERSION ${HIPOBJ_LIBRARY_VERSION}

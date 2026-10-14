@@ -53,7 +53,8 @@ private:
     std::string name_;
 };
 
-/* Declared like RcConnV2: second depends on first, so the destructor
+/* Declared like BufferMap::BufEntry, whose MR covers its staging
+ * buffer: second depends on first, so the destructor
  * releases second first. */
 struct Owner final {
     Probe first;

@@ -8,8 +8,7 @@
 # objects are never linked.
 #
 # The include directory isn't SYSTEM, since that would suppress
-# warnings from the header. HIPOBJECT_V2_API is defined whatever the
-# option is set to, so the whole header is checked.
+# warnings from the header.
 
 add_library(hipobj_header_check OBJECT
   header-check.c
@@ -25,9 +24,6 @@ set_target_properties(hipobj_header_check PROPERTIES
 
 target_include_directories(hipobj_header_check
   PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
-target_compile_definitions(hipobj_header_check
-  PRIVATE HIPOBJECT_V2_API)
 
 target_compile_options(hipobj_header_check
   PRIVATE -Wall -Wextra -Werror -pedantic)

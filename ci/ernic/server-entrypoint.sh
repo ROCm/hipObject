@@ -3,11 +3,10 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Run the pre-built hipobj-rdma-test-server inside an ernic guest VM, in v1
-# mode: the server answers S3 PUT/GET carrying x-amz-rdma-token and drives
-# the transfer over the verbs device. The v2 control protocol has its own
-# coverage in the unit tests and the v2-control-e2e ctest; this lane is here
-# for the v1 wire, which is what the minio-cpp bridge speaks.
+# Run the pre-built hipobj-rdma-test-server inside an ernic guest VM: the
+# server answers S3 PUT/GET carrying x-amz-rdma-token and drives the
+# transfer over the verbs device, which is the protocol the minio-cpp
+# bridge speaks.
 # The binary and its ROCm closure are built on the runner (ROCm container)
 # and copied into the guest at ${BUILD_DIR}; no compilation happens here.
 #

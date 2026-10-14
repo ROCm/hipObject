@@ -60,7 +60,6 @@ on:
       - ".github/actions/fetch-ionic-sources/**"
       - ".github/workflows/hipobject-hardware-test-two-vm-protocol.yml"
       - "!src/rdma/bnxt/**"
-      - "!test/integration/rdma-test-server/run-v2-e2e.sh"
       - "!**/*.md"
   push:
     branches: [develop]

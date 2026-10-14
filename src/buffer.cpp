@@ -5,7 +5,6 @@
 
 #include "buffer.h"
 
-#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -270,9 +269,6 @@ BufferMap::deregisterBuffer(void *devPtr)
     if (it == entries_.end()) {
         return -1;
     }
-    if (it->second.refCount > 0) {
-        return -1; /* pinned by a live v2 connection */
-    }
     /* Deregisters the MR, then frees any staging buffer */
     entries_.erase(it);
     return 0;
@@ -297,46 +293,6 @@ BufferMap::isRegistered(const void *devPtr) const
 {
     return find(devPtr) != nullptr;
 }
-
-#ifdef HIPOBJECT_V2_API
-bool
-BufferMap::acquireMrRef(void *devPtr)
-{
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
-    if (it == entries_.end()) {
-        return false;
-    }
-    ++it->second.refCount;
-    return true;
-}
-
-bool
-BufferMap::releaseMrRef(void *devPtr)
-{
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
-    if (it == entries_.end() || it->second.refCount == 0) {
-        return false;
-    }
-    --it->second.refCount;
-    return true;
-}
-
-size_t
-BufferMap::mrRefCount(void *devPtr) const
-{
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
-    return it == entries_.end() ? 0 : it->second.refCount;
-}
-
-bool
-BufferMap::anyPinned() const
-{
-    return std::ranges::any_of(entries_, [](const auto &kv) noexcept { return kv.second.refCount > 0; });
-}
-#endif /* HIPOBJECT_V2_API */
 
 size_t
 BufferMap::size() const

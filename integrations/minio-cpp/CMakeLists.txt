@@ -56,10 +56,6 @@ hipobj_add_library(
     src/rdma.cpp
     src/client.cpp)
 
-if(HIPOBJECT_V2_API)
-  target_compile_definitions(hipobj_minio PRIVATE HIPOBJECT_V2_API)
-endif()
-
 target_include_directories(hipobj_minio
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
