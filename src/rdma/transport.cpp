@@ -99,14 +99,29 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, const char
     return openRdmaDevice(verbs, topology, nicIndex);
 }
 
-int
-createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
+namespace {
+
+    int transitionQpToInit(RcConnection &conn)
+    {
+        struct ibv_qp_attr attr;
+        zeroObject(attr);
+        attr.qp_state        = IBV_QPS_INIT;
+        attr.pkey_index      = 0;
+        attr.port_num        = conn.device().portNum();
+        attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
+        int mask             = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
+        return conn.device().verbs().modify_qp(conn.qp(), &attr, mask);
+    }
+
+} // namespace
+
+std::optional<RcConnection>
+createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
 {
-    const RdmaDevice &device = conn.device();
-    const Verbs      &verbs  = device.verbs();
-    IbvCqPtr cq = own<IbvCqPtr>(verbs, verbs.create_cq(device.context(), cqSize, nullptr, nullptr, 0));
+    const Verbs &verbs = device.verbs();
+    IbvCqPtr     cq    = own<IbvCqPtr>(verbs, verbs.create_cq(device.context(), cqSize, nullptr, nullptr, 0));
     if (!cq) {
-        return -1;
+        return std::nullopt;
     }
     struct ibv_qp_init_attr initAttr;
     zeroObject(initAttr);
@@ -119,24 +134,15 @@ createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvW
     initAttr.qp_type          = IBV_QPT_RC;
     IbvQpPtr qp               = own<IbvQpPtr>(verbs, verbs.create_qp(device.pd(), &initAttr));
     if (!qp) {
-        return -1;
+        return std::nullopt;
     }
-    conn.qp = std::move(qp);
-    conn.cq = std::move(cq);
-    return 0;
-}
-
-int
-transitionQpToInit(RcConnection &conn)
-{
-    struct ibv_qp_attr attr;
-    zeroObject(attr);
-    attr.qp_state        = IBV_QPS_INIT;
-    attr.pkey_index      = 0;
-    attr.port_num        = conn.device().portNum();
-    attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-    int mask             = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
-    return conn.device().verbs().modify_qp(conn.qp.get(), &attr, mask);
+    /* Destroyed, releasing the QP and then the CQ, if the transition
+     * fails */
+    RcConnection conn(device, std::move(cq), std::move(qp));
+    if (transitionQpToInit(conn) != 0) {
+        return std::nullopt;
+    }
+    return conn;
 }
 
 static void
@@ -190,7 +196,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.grh.traffic_class = 0;
     int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-    return device.verbs().modify_qp(conn.qp.get(), &attr, mask);
+    return device.verbs().modify_qp(conn.qp(), &attr, mask);
 }
 
 int
@@ -207,13 +213,13 @@ transitionQpToRts(RcConnection &conn)
     attr.max_rd_atomic = 1;
     int mask           = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                IBV_QP_MAX_QP_RD_ATOMIC;
-    return conn.device().verbs().modify_qp(conn.qp.get(), &attr, mask);
+    return conn.device().verbs().modify_qp(conn.qp(), &attr, mask);
 }
 
 int
 connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
 {
-    if (!conn.qp || peerToken.transport != TransportType::RC) {
+    if (peerToken.transport != TransportType::RC) {
         return -1;
     }
     int ret = transitionQpToRtr(conn, peerToken.qpNum, peerToken.lid, toIbvGid(peerToken.gid));
@@ -226,14 +232,11 @@ connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
 int
 pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout)
 {
-    if (!conn.cq) {
-        return -1;
-    }
     const Verbs &verbs    = conn.device().verbs();
     const auto   deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         struct ibv_wc wc;
-        int           n = verbs.poll_cq(conn.cq.get(), 1, &wc);
+        int           n = verbs.poll_cq(conn.cq(), 1, &wc);
         if (n < 0) {
             return -1;
         }

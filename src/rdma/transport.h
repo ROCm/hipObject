@@ -90,21 +90,27 @@ private:
 };
 
 /* A reliable-connected QP, and the CQ its work completes on, on a device
- * that has to outlive it. createRcQp() creates them. qp is declared after
- * cq, so the QP is destroyed before its CQ. */
+ * that has to outlive it. createRcConnection() creates one, with its QP in
+ * INIT. qp_ is declared after cq_, so the QP is destroyed before its CQ. */
 class RcConnection final {
 public:
-    explicit RcConnection(const RdmaDevice &device) noexcept : device_(&device)
+    /* Owns cq and qp, which were created on device, and are both set */
+    RcConnection(const RdmaDevice &device, IbvCqPtr cq, IbvQpPtr qp) noexcept
+        : device_(&device), cq_(std::move(cq)), qp_(std::move(qp))
     {
     }
     /* A temporary device would be destroyed before the connection */
-    explicit RcConnection(const RdmaDevice &&) = delete;
-    ~RcConnection()                            = default;
+    RcConnection(const RdmaDevice &&, IbvCqPtr, IbvQpPtr) = delete;
+    ~RcConnection()                                       = default;
 
-    /* Lives in one place, and isn't copied or moved */
+    /* Moving leaves the device where it is, so the connection still refers
+     * to it. A defaulted move assignment would replace cq_ before qp_,
+     * destroying the old CQ while the old QP still used it, so there's
+     * none; replace a connection in a std::optional with reset() and
+     * emplace(). */
     RcConnection(const RcConnection &)            = delete;
     RcConnection &operator=(const RcConnection &) = delete;
-    RcConnection(RcConnection &&)                 = delete;
+    RcConnection(RcConnection &&) noexcept        = default;
     RcConnection &operator=(RcConnection &&)      = delete;
 
     const RdmaDevice &device() const noexcept
@@ -112,11 +118,20 @@ public:
         return *device_;
     }
 
-    IbvCqPtr cq{};
-    IbvQpPtr qp{};
+    struct ibv_cq *cq() const noexcept
+    {
+        return cq_.get();
+    }
+
+    struct ibv_qp *qp() const noexcept
+    {
+        return qp_.get();
+    }
 
 private:
     const RdmaDevice *device_;
+    IbvCqPtr          cq_;
+    IbvQpPtr          qp_;
 };
 
 /* Opens device nicIndex in verbs' device list, choosing its GID with the
@@ -127,8 +142,14 @@ std::optional<RdmaDevice> openRdmaDevice(const Verbs &verbs, const NicTopology &
 std::optional<RdmaDevice> openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology,
                                                const char *devName);
 
-int createRcQp(RcConnection &conn, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr);
-int transitionQpToInit(RcConnection &conn);
+/* A connection on device, which has to outlive it, with a CQ of cqSize
+ * entries and a QP in INIT that holds maxSendWr and maxRecvWr work
+ * requests. std::nullopt, with nothing left created, when a step fails. */
+std::optional<RcConnection> createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr,
+                                               uint32_t maxRecvWr);
+/* A temporary device would be destroyed before the connection */
+std::optional<RcConnection> createRcConnection(const RdmaDevice &&, int, uint32_t, uint32_t) = delete;
+
 int transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid);
 int transitionQpToRts(RcConnection &conn);
 int connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);

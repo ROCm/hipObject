@@ -574,11 +574,11 @@ TEST_F(FakeVerbsSeamTest, QpCreationAndTeardownUseTheSeam)
     {
         const hipObj::RdmaDevice rdma = makeDevice();
         {
-            hipObj::RcConnection conn(rdma);
-            EXPECT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
+            const std::optional<hipObj::RcConnection> conn = hipObj::createRcConnection(rdma, 16, 8, 8);
+            ASSERT_TRUE(conn);
             EXPECT_EQ(device_.log.createCq, 1);
             EXPECT_EQ(device_.log.createQp, 1);
-            EXPECT_NE(conn.qp, nullptr);
+            EXPECT_NE(conn->qp(), nullptr);
         }
 
         /* Destroying the connection releases its QP and CQ */
@@ -595,10 +595,7 @@ TEST_F(FakeVerbsSeamTest, QpCreationAndTeardownUseTheSeam)
 TEST_F(FakeVerbsSeamTest, InitTransitionGrantsRemoteReadAndWrite)
 {
     const hipObj::RdmaDevice rdma = makeDevice();
-    hipObj::RcConnection     conn(rdma);
-    ASSERT_EQ(hipObj::createRcQp(conn, 16, 8, 8), 0);
-
-    ASSERT_EQ(hipObj::transitionQpToInit(conn), 0);
+    ASSERT_TRUE(hipObj::createRcConnection(rdma, 16, 8, 8));
     ASSERT_EQ(device_.modifyQpCount, 1U);
     const hipObjTest::ModifyQpCall &call = device_.modifyQp[0];
     EXPECT_NE(call.mask & IBV_QP_ACCESS_FLAGS, 0);
@@ -653,8 +650,8 @@ namespace {
         EXPECT_EQ(err.opError, hipObjSuccess);
         const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
         ASSERT_NE(instance, nullptr);
-        EXPECT_EQ(instance->gpuDevice, -1);
-        EXPECT_EQ(instance->nicHint, "mlx5_0");
+        EXPECT_EQ(instance->config.gpuDevice, -1);
+        EXPECT_EQ(instance->config.nicHint, "mlx5_0");
     }
 
     TEST_F(InitAndTransferTest, HostTransfersSkipDeviceSynchronizeWithoutGpu)

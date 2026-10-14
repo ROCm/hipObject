@@ -157,7 +157,7 @@ TEST_F(ApiArgsTest, InitRejectsDeviceThatDoesNotExist)
     EXPECT_EQ(initFakes(config).opError, hipObjSuccess);
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     ASSERT_NE(instance, nullptr);
-    EXPECT_EQ(instance->gpuDevice, 1);
+    EXPECT_EQ(instance->config.gpuDevice, 1);
 }
 
 TEST_F(ApiArgsTest, InitRejectsExplicitDeviceWithoutGpus)

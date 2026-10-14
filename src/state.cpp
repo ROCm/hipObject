@@ -170,12 +170,13 @@ parseOptions(const EnvLookup &lookup)
 }
 
 /* The members are initialized in the order they're declared, so the
- * connection and the buffers use the members, not the arguments moved
- * into them */
+ * buffers use the members, not the arguments moved into them */
 Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
-                   RdmaDevice instanceDevice) noexcept
-    : platform(std::move(instancePlatform)), options(instanceOptions), device(std::move(instanceDevice)),
-      conn(device), buffers(platform->verbs(), platform->hip(), options.dmabuf, options.requireGpuDirect)
+                   ResolvedConfig instanceConfig, std::unique_ptr<const RdmaDevice> instanceDevice,
+                   RcConnection instanceConn) noexcept
+    : platform(std::move(instancePlatform)), options(instanceOptions), config(std::move(instanceConfig)),
+      device(std::move(instanceDevice)), conn(std::move(instanceConn)),
+      buffers(platform->verbs(), platform->hip(), options.dmabuf, options.requireGpuDirect)
 {
 }
 
@@ -243,24 +244,26 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         }
     }
 
-    /* The device and then the instance are built in locals, which release
-     * what they hold if anything fails or throws. The instance is only
-     * published once nothing else can. */
-    std::optional<RdmaDevice> device =
+    /* The device, the connection, and then the instance are built in
+     * locals, which release what they hold if anything fails or throws.
+     * The instance is only published once nothing else can. */
+    std::optional<RdmaDevice> opened =
         openRdmaDeviceByName(platform->verbs(), platform->topology(), nic->name.c_str());
-    if (!device) {
+    if (!opened) {
         return {hipObjRdmaError, 0};
     }
-    auto instance = std::make_shared<Instance>(std::move(platform), options, std::move(*device));
-    if (createRcQp(instance->conn, 256, 128, 128) != 0 || transitionQpToInit(instance->conn) != 0) {
+    auto                        device = std::make_unique<const RdmaDevice>(std::move(*opened));
+    std::optional<RcConnection> conn   = createRcConnection(*device, 256, 128, 128);
+    if (!conn) {
         return {hipObjRdmaError, 0};
     }
-    instance->gpuDevice = gpuDevice;
-    instance->endpoint  = config.endpoint ? config.endpoint : "";
-    instance->region    = config.region ? config.region : "";
-    instance->nicHint   = config.nicHint ? config.nicHint : "";
-    instance->nicIndex  = nic->index;
-    instance->flags     = config.flags;
+    ResolvedConfig resolved{
+        .gpuDevice = gpuDevice,
+        .nicHint   = config.nicHint ? config.nicHint : "",
+        .nicIndex  = nic->index,
+    };
+    auto instance = std::make_shared<Instance>(std::move(platform), options, std::move(resolved),
+                                               std::move(device), std::move(*conn));
 
     /* Can't throw */
     current() = std::move(instance);
