@@ -9,7 +9,10 @@
  * test-state.cpp tests.
  */
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 
 #include <gtest/gtest.h>
@@ -20,6 +23,7 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
+#include "state.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -122,13 +126,25 @@ TEST_F(RegistrationTest, LimitsNumberOfRegistrations)
 
 class StagingTest : public hipObjTest::FakeDeviceTest {
 protected:
-    /* Initializes and registers kBufSize bytes at kStagedBuf through a
-     * staging buffer */
-    void initAndRegisterStaged() const
+    /* Initializes with options, and registers kBufSize bytes at
+     * kStagedBuf through a staging buffer */
+    void initAndRegisterStaged(const hipObj::Options &options = {}) const
     {
-        ASSERT_NO_FATAL_FAILURE(init());
+        ASSERT_EQ(initFakes(makeConfig(), options).opError, hipObjSuccess);
         fake().fail.registerAddr = kStagedBuf;
         ASSERT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjSuccess);
+    }
+
+    /* initAndRegisterStaged(), and a copy that times out, and doesn't
+     * finish until the test sets fake().eventNeverCompletes to false */
+    void initAndTimeOut() const
+    {
+        hipObj::Options options;
+        options.stageTimeout = std::chrono::milliseconds(1);
+        ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged(options));
+        fake().eventNeverCompletes = true;
+        ASSERT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+        ASSERT_EQ(fake().log.memcpy, 1);
     }
 
     static hipObjError_t sync(int direction)
@@ -212,6 +228,73 @@ TEST_F(StagingTest, FailsAndReleasesEventWhenCopyFails)
     fake().eventQueryResult   = hipErrorLaunchFailure;
     EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
     EXPECT_EQ(fake().log.eventDestroy, 1);
+}
+
+// ---- Staging copies that time out --------------------------------
+
+/* A copy that timed out may still use the staging buffer, so hipObject
+ * keeps the buffer, and refuses to use it, until the copy is over */
+TEST_F(StagingTest, TimedOutCopyKeepsTheBufferUntilItsOver)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndTimeOut());
+
+    hipObjOps_t ops   = makeOps();
+    char       *token = nullptr;
+    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_DEVICE).opError, hipObjBusy);
+    EXPECT_EQ(hipObjGet(nullptr, kStagedBuf, kBufSize, 0, &ops, nullptr).opError, hipObjBusy);
+    EXPECT_EQ(hipObjPut(nullptr, kStagedBuf, kBufSize, 0, &ops, nullptr).opError, hipObjBusy);
+    EXPECT_EQ(hipObjGetRdmaToken(kStagedBuf, kBufSize, HIPOBJ_RDMA_OP_GET, &token).opError, hipObjBusy);
+    EXPECT_EQ(token, nullptr);
+    EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjBusy);
+
+    /* Nothing started another copy or transfer, or released anything */
+    EXPECT_EQ(fake().log.memcpy, 1);
+    EXPECT_EQ(fake().log.sendRequest, 0);
+    EXPECT_EQ(fake().log.eventDestroy, 0);
+    EXPECT_EQ(fake().log.deregMr, 0);
+    EXPECT_EQ(fake().log.hostFree, 0);
+
+    /* Once the copy is over, its event is destroyed, and the buffer works
+     * again */
+    fake().eventNeverCompletes = false;
+    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_DEVICE).opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.memcpy, 2);
+    EXPECT_EQ(fake().log.eventDestroy, 2);
+    EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.hostFree, 1);
+}
+
+/* A copy that failed after it timed out is over too, and deregistering
+ * releases it */
+TEST_F(StagingTest, DeregisterReleasesACopyThatsOver)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndTimeOut());
+    fake().eventNeverCompletes = false;
+    fake().eventQueryResult    = hipErrorLaunchFailure;
+
+    EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.eventDestroy, 1);
+    EXPECT_EQ(fake().log.deregMr, 1);
+    EXPECT_EQ(fake().log.hostFree, 1);
+}
+
+/* Shutdown can't wait for a copy that never finishes, so it leaks the
+ * staging buffer the copy uses, and releases everything else */
+TEST_F(StagingTest, ShutdownLeaksTheStagingBufferOfACopyThatsRunning)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndTimeOut());
+    void *const stagingBuf = fake().lastHostMalloc;
+
+    EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.hostFree, 0);
+    EXPECT_EQ(fake().log.eventDestroy, 0);
+    EXPECT_EQ(fake().log.deregMr, 1);
+    EXPECT_EQ(fake().log.destroyQp, 1);
+    EXPECT_EQ(fake().log.closeDevice, 1);
+
+    /* Frees what the library leaked, which the fake allocated with
+     * malloc(), so the leak checker doesn't report it */
+    std::free(stagingBuf);
 }
 
 } // namespace

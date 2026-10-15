@@ -8,6 +8,7 @@ set(HIPOBJ_SOURCES
   hipobj.cpp
   state.cpp
   buffer.cpp
+  abandoned-copies.cpp
   common/hip-seam.cpp
   common/ibv-wrapper.cpp
   common/rdma-topology.cpp

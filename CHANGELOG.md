@@ -37,6 +37,11 @@
 - With `CMAKE_EXPORT_COMPILE_COMMANDS` on, `compile_commands.json`
   lists the compiler's implicit include directories, so tools that read
   it, such as clangd, find the same system headers as the compiler.
+- The `hipObjBusy` error code, after `hipObjInternalError`, so no other
+  code's value changes. A call returns it when the buffer it's given is
+  in use: a staging copy of the buffer that timed out is still running.
+  It isn't the `hipObjBusy` that was removed with the V2 interface, and
+  cuObject has no equivalent.
 
 ### Changed
 
@@ -202,6 +207,16 @@
 - `hipObjGet()`, `hipObjPut()`, and `hipObjBufSync()` could accept an
   offset and size whose sum wrapped around, and advertise a range outside
   the registered buffer to the server or copy outside it.
+- When a staging copy didn't finish within `HIPOBJ_STAGE_TIMEOUT_MS`,
+  `hipObjBufDeregister()` and `hipObjShutdown()` freed the staging buffer
+  while the copy could still use it, and later transfers could use the
+  staging buffer at the same time as the copy. hipObject now keeps the
+  staging buffer until the copy finishes. Until then, `hipObjGet()`,
+  `hipObjPut()`, `hipObjBufSync()`, and `hipObjGetRdmaToken()` return
+  the new `hipObjBusy` error for the buffer, and `hipObjBufDeregister()`
+  returns `hipObjBusy` and leaves it registered; call it again once the
+  copy has finished. If the copy never finishes, the staging
+  buffer is never freed.
 - The queue pair `hipObjInit()` creates didn't allow remote reads, which
   the server needs to read a `hipObjPut()` buffer. hipObject used the wrong
   values for the libibverbs access flags, so the queue pair allowed remote

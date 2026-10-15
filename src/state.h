@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 
+#include "abandoned-copies.h"
 #include "buffer.h"
 #include "hipobj.h"
 #include "transport.h"
@@ -110,10 +111,17 @@ struct ResolvedConfig {
 };
 
 /* The library's state from hipObjInit() to hipObjShutdown(). It's
- * complete when it's built, and only the connection's QP state and the
- * buffers change after that. Members are destroyed in reverse order: the
- * buffers are deregistered, and the connection's QP and CQ destroyed,
- * before the device's protection domain is deallocated, and the platform
+ * complete when it's built, and only the connection's QP state, the
+ * buffers, and the abandoned staging copies change after that. The buffer
+ * map and the abandoned copies have locks of their own; the connection is
+ * only used by transfers, which hold the API lock (see ApiGuard).
+ *
+ * It lives in a shared_ptr, and each call that uses it holds a copy (see
+ * currentInstance()), so it's destroyed when hipObjShutdown() has removed
+ * it and the last of those calls has returned. Members are destroyed in
+ * reverse order: the abandoned copies that are over are released, and the
+ * buffers deregistered, and the connection's QP and CQ destroyed, before
+ * the device's protection domain is deallocated, and the platform
  * outlives them all. */
 struct Instance final {
     /* instanceDevice has to have come from instancePlatform's verbs, and
@@ -121,11 +129,11 @@ struct Instance final {
      * is on the heap so the connection can be created on it, at the
      * address it keeps, before the instance is built. */
     Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
-             ResolvedConfig instanceConfig, std::unique_ptr<const RdmaDevice> instanceDevice,
+             ResolvedConfig instanceConfig, std::shared_ptr<const RdmaDevice> instanceDevice,
              RcConnection instanceConn) noexcept;
     ~Instance() = default;
 
-    /* Lives in a unique_ptr, and isn't copied or moved */
+    /* Lives in a shared_ptr, and isn't copied or moved */
     Instance(const Instance &)            = delete;
     Instance &operator=(const Instance &) = delete;
     Instance(Instance &&)                 = delete;
@@ -134,38 +142,44 @@ struct Instance final {
     std::shared_ptr<const Platform>   platform;
     Options                           options;
     ResolvedConfig                    config;
-    std::unique_ptr<const RdmaDevice> device;
+    std::shared_ptr<const RdmaDevice> device;
     RcConnection                      conn;
     BufferMap                         buffers;
+    AbandonedCopies                   abandoned;
 };
 
-/* The library's instance, or null when it isn't initialized. Call it with
- * the API lock held (see ApiGuard), or while no other thread can call the
- * library. The pointer doesn't own the instance, and is valid until
- * shutdownInstance() destroys it. */
-Instance *currentInstance() noexcept;
+/* The library's instance, or null when it isn't initialized. The copy
+ * keeps the instance alive for as long as the caller holds it, even if
+ * another thread shuts the library down in the meantime. */
+std::shared_ptr<Instance> currentInstance();
 
 /* hipObjInit(), with its platform and options given: builds an Instance
- * that holds them, and makes it the current one. The caller holds the API
- * lock, and has checked config as hipObjInit() does. Returns
- * hipObjAlreadyInitialized if there's already an instance. Throws only
- * before anything changes.
+ * that holds them, and makes it the current one. The caller has checked
+ * config as hipObjInit() does. Returns hipObjAlreadyInitialized if there's
+ * already an instance. Throws only before anything changes.
+ *
+ * It runs one at a time with shutdownInstance(), so of several calls at
+ * once, only one opens a device and succeeds.
  *
  * Everything the instance does, from choosing the NIC to transfers, calls
  * the outside world through platform. */
 hipObjError_t initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
                        const Options &options);
 
-/* Destroys the current instance, if there is one, releasing what it holds.
- * The caller holds the API lock. */
-void shutdownInstance() noexcept;
+/* Removes the current instance, if there is one, so later calls find the
+ * library uninitialized. The instance, and what it holds, is released
+ * here if nothing else holds it, or else when the last call that holds it
+ * (see currentInstance()) lets it go. */
+void shutdownInstance();
 
 /* Holds the library-wide API lock for as long as it lives. Every public
  * function documented as serialized (see the "threads" group in
  * hipobj.h) takes it on its first line and holds it for the whole call,
  * so the library runs one such call at a time. That includes every
  * function that reads or changes library state, which is the current
- * Instance and everything it holds.
+ * Instance and everything it holds. The current instance and the buffer
+ * map have locks of their own, but the instance's connection relies on
+ * this one.
  *
  * hipObjGet() and hipObjPut() call the application's callbacks with the
  * lock held, and the lock isn't recursive, so a callback that called a

@@ -147,21 +147,56 @@ TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
     options.requireGpuDirect = true;
     ASSERT_EQ(initWith(options).opError, hipObjSuccess);
 
-    const hipObj::Instance *const instance = hipObj::currentInstance();
-    ASSERT_NE(instance, nullptr);
-    EXPECT_EQ(instance->platform, fakes_->platform());
-    EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
-    EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
-    EXPECT_TRUE(instance->options.requireGpuDirect);
-    EXPECT_EQ(instance->config.gpuDevice, -1);
-    EXPECT_EQ(instance->config.nicHint, "mlx5_0");
-    EXPECT_EQ(instance->config.nicIndex, 0);
+    {
+        const std::shared_ptr<const hipObj::Instance> instance = hipObj::currentInstance();
+        ASSERT_NE(instance, nullptr);
+        EXPECT_EQ(instance->platform, fakes_->platform());
+        EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
+        EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
+        EXPECT_TRUE(instance->options.requireGpuDirect);
+        EXPECT_EQ(instance->config.gpuDevice, -1);
+        EXPECT_EQ(instance->config.nicHint, "mlx5_0");
+        EXPECT_EQ(instance->config.nicIndex, 0);
+    }
 
     /* The instance's platform keeps the fakes alive until shutdown */
     EXPECT_EQ(fakes_.use_count(), 2);
     ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
     EXPECT_EQ(fakes_.use_count(), 1);
+}
+
+/* Shutdown removes the instance, so later calls find the library
+ * uninitialized, but a call that already holds the instance keeps it,
+ * and what it holds, until it lets it go */
+TEST_F(InitWithTest, ShutdownLeavesTheInstanceToItsLastHolder)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    std::shared_ptr<hipObj::Instance> held = hipObj::currentInstance();
+    ASSERT_NE(held, nullptr);
+
+    ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+    EXPECT_EQ(hipObjBufDeregister(hipObjTest::fakeDevBuf()).opError, hipObjNotInitialized);
+
+    /* Nothing has been released, and the held instance still works */
+    EXPECT_EQ(fake().log.deregMr, 0);
+    EXPECT_EQ(fake().log.destroyQp, 0);
+    EXPECT_EQ(fake().log.closeDevice, 0);
+    EXPECT_NE(held->buffers.find(hipObjTest::fakeDevBuf()), nullptr);
+    EXPECT_EQ(fakes_.use_count(), 2);
+
+    /* The library can be initialized again while the old instance lives */
+    ASSERT_NO_FATAL_FAILURE(init());
+    EXPECT_NE(hipObj::currentInstance(), held);
+    EXPECT_EQ(fake().log.openDevice, 2);
+    EXPECT_EQ(hipObjBufDeregister(hipObjTest::fakeDevBuf()).opError, hipObjBufNotRegistered);
+
+    /* Letting go of the old instance releases it */
+    held.reset();
+    EXPECT_EQ(fake().log.deregMr, 1);
+    EXPECT_EQ(fake().log.destroyQp, 1);
+    EXPECT_EQ(fake().log.closeDevice, 1);
 }
 
 TEST_F(InitWithTest, FailureLeavesNoInstance)
@@ -179,7 +214,7 @@ TEST_F(InitWithTest, FailureLeavesNoInstance)
 TEST_F(InitWithTest, AlreadyInitialized)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    const hipObj::Instance *const instance = hipObj::currentInstance();
+    const std::shared_ptr<const hipObj::Instance> instance = hipObj::currentInstance();
     EXPECT_EQ(initWith({}).opError, hipObjAlreadyInitialized);
     EXPECT_EQ(hipObj::currentInstance(), instance);
     EXPECT_EQ(fake().log.openDevice, 1);
@@ -219,6 +254,10 @@ TEST_F(InitWithTest, StageTimeoutLimitsTheWaitForACopy)
 
     /* The copy may still land, so the event that tracks it isn't destroyed */
     EXPECT_EQ(fake().log.eventDestroy, 0);
+
+    /* Lets the copy finish, so shutdown frees its staging buffer (see
+     * test-staging.cpp) */
+    fake().eventNeverCompletes = false;
 }
 
 TEST_F(InitWithTest, RequireGpuDirectRefusesStaging)

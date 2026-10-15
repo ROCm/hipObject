@@ -8,6 +8,10 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -23,11 +27,6 @@
 namespace hipObj {
 
 namespace {
-
-    [[nodiscard]] bool validateRegistration(bool isRegistered, size_t entryCount, size_t size)
-    {
-        return size <= MAX_MR_SIZE && !isRegistered && entryCount < BufferMap::kMaxEntries;
-    }
 
     /* Is this pointer device memory? Answered through the seam so unit tests can
      * drive both branches without a GPU. A pointer the runtime cannot classify is
@@ -146,12 +145,49 @@ HostBufDeleter::operator()(void *hostBuf) const noexcept
     (void)runtime->hostFree(hostBuf);
 }
 
-bool
+std::optional<BufferMap::RegisterResult>
+BufferMap::refusal(uintptr_t key) const
+{
+    if (entries_.contains(key)) {
+        return RegisterResult::AlreadyRegistered;
+    }
+    if (entries_.size() >= kMaxEntries) {
+        return RegisterResult::Failed;
+    }
+    return std::nullopt;
+}
+
+std::optional<BufferMap::RegisterResult>
+BufferMap::precheck(uintptr_t key) const
+{
+    const std::shared_lock<std::shared_mutex> lock(mutex_);
+    return refusal(key);
+}
+
+/* entry is a parameter, so it's destroyed after the lock, a local, is
+ * released */
+BufferMap::RegisterResult
+BufferMap::insert(uintptr_t key, std::shared_ptr<const BufEntry> entry)
+{
+    const std::scoped_lock<std::shared_mutex> lock(mutex_);
+    if (const auto refused = refusal(key)) {
+        return *refused;
+    }
+    /* Assigned rather than passed to try_emplace(), since clang-tidy
+     * doesn't see that try_emplace() moves from it */
+    entries_[key] = std::move(entry);
+    return RegisterResult::Registered;
+}
+
+BufferMap::RegisterResult
 BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 {
-    auto key = pointerToAddress(devPtr);
-    if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
-        return false;
+    if (size > MAX_MR_SIZE) {
+        return RegisterResult::Failed;
+    }
+    const auto key = pointerToAddress(devPtr);
+    if (const auto refused = precheck(key)) {
+        return *refused;
     }
     const Verbs      &verbs   = *verbs_;
     const HipRuntime &runtime = *runtime_;
@@ -160,8 +196,8 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (mr) {
         /* The NIC reaches the caller's memory, so there's no staging
          * buffer */
-        entries_.try_emplace(key, own<HostBufPtr>(runtime, nullptr), std::move(mr), size, true, key);
-        return true;
+        return insert(key, std::make_shared<const BufEntry>(own<HostBufPtr>(runtime, nullptr), std::move(mr),
+                                                            size, true, key));
     }
 
     const bool deviceMemory = isDevicePointer(runtime, devPtr);
@@ -172,7 +208,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
                     "HIPOBJ_REQUIRE_GPU_DIRECT is set; refusing to stage through "
                     "host memory.\n",
                     size, devPtr);
-            return false;
+            return RegisterResult::Failed;
         }
         fprintf(stderr,
                 "hipObj: GPU-direct registration of %zu bytes at %p failed; "
@@ -184,78 +220,82 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     void            *rawHostBuf = nullptr;
     const hipError_t err        = runtime.hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
     if (err != hipSuccess || rawHostBuf == nullptr) {
-        return false;
+        return RegisterResult::Failed;
     }
     auto hostBuf = own<HostBufPtr>(runtime, rawHostBuf);
-    mr           = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
-    if (!mr) {
-        return false;
+    /* Declared after hostBuf, so if building the entry throws, the MR is
+     * deregistered before the staging buffer it covers is freed */
+    auto stagingMr = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
+    if (!stagingMr) {
+        return RegisterResult::Failed;
     }
     /* Read the address before hostBuf is moved into the entry */
     const uint64_t remoteAddr = pointerToAddress(hostBuf.get());
-    /* Build the entry before inserting it. mr is declared before
-     * hostBuf, so if allocating the map node throws, unwinding would
-     * free the staging buffer while it's still registered; the entry
-     * deregisters its MR first. clang-tidy doesn't see that
-     * try_emplace() moves from entry, which couldn't be moved from if it
-     * were const. */
-    // NOLINTNEXTLINE(misc-const-correctness)
-    BufEntry entry(std::move(hostBuf), std::move(mr), size, false, remoteAddr);
-    entries_.try_emplace(key, std::move(entry));
-    return true;
+    return insert(key, std::make_shared<const BufEntry>(std::move(hostBuf), std::move(stagingMr), size, false,
+                                                        remoteAddr));
 }
 
-bool
+BufferMap::RegisterResult
 BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 {
+    if (size > MAX_MR_SIZE) {
+        return RegisterResult::Failed;
+    }
     const auto key = pointerToAddress(hostPtr);
-    if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
-        return false;
+    if (const auto refused = precheck(key)) {
+        return *refused;
     }
     const Verbs &verbs  = *verbs_;
     const int    access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    /* clang-tidy doesn't see that try_emplace() moves from mr, which
-     * couldn't be moved from if it were const */
-    // NOLINTNEXTLINE(misc-const-correctness)
-    auto mr = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
+    auto         mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
     if (!mr) {
-        return false;
+        return RegisterResult::Failed;
     }
-    entries_.try_emplace(key, own<HostBufPtr>(*runtime_, nullptr), std::move(mr), size, false,
-                         pointerToAddress(hostPtr));
-    return true;
+    return insert(key, std::make_shared<const BufEntry>(own<HostBufPtr>(*runtime_, nullptr), std::move(mr),
+                                                        size, false, pointerToAddress(hostPtr)));
 }
 
-bool
+BufferMap::DeregisterResult
 BufferMap::deregisterBuffer(void *devPtr)
 {
-    const auto key = pointerToAddress(devPtr);
-    const auto it  = entries_.find(key);
-    if (it == entries_.end()) {
-        return false;
+    const auto                      key = pointerToAddress(devPtr);
+    std::shared_ptr<const BufEntry> entry;
+    {
+        const std::scoped_lock<std::shared_mutex> lock(mutex_);
+        const auto                                it = entries_.find(key);
+        if (it == entries_.end()) {
+            return DeregisterResult::NotRegistered;
+        }
+        /* Other copies are only made by find(), under the lock this holds
+         * exclusively, so none can appear while it's held. One that's
+         * released while this checks can only make the entry look busy
+         * when it's not, never the reverse. */
+        if (it->second.use_count() > 1) {
+            return DeregisterResult::Busy;
+        }
+        entry = std::move(it->second);
+        entries_.erase(it);
     }
-    /* Deregisters the MR, then frees any staging buffer */
-    entries_.erase(it);
-    return true;
+
+    /* Deregisters the MR, then frees any staging buffer, without holding
+     * the lock */
+    entry.reset();
+    return DeregisterResult::Deregistered;
 }
 
-const BufferMap::BufEntry *
+std::shared_ptr<const BufferMap::BufEntry>
 BufferMap::find(const void *devPtr) const
 {
-    const auto key = pointerToAddress(devPtr);
-    const auto it  = entries_.find(key);
-    return it == entries_.end() ? nullptr : &it->second;
-}
-
-bool
-BufferMap::isRegistered(const void *devPtr) const
-{
-    return find(devPtr) != nullptr;
+    const auto                                key = pointerToAddress(devPtr);
+    const std::shared_lock<std::shared_mutex> lock(mutex_);
+    const auto                                it = entries_.find(key);
+    return it == entries_.end() ? nullptr : it->second;
 }
 
 size_t
 BufferMap::size() const
 {
+    const std::shared_lock<std::shared_mutex> lock(mutex_);
     return entries_.size();
 }
 } // namespace hipObj

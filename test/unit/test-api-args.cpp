@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -57,12 +58,19 @@ class ApiArgsTest : public hipObjTest::FakeDeviceTest {};
 TEST(ApiArgsErrorString, EveryCodeHasItsOwnString)
 {
     const std::vector<hipObjOpError_t> codes = {
-        hipObjSuccess,          hipObjInvalidValue,
-        hipObjNotInitialized,   hipObjAlreadyInitialized,
-        hipObjRdmaError,        hipObjS3Error,
-        hipObjBufNotRegistered, hipObjBufAlreadyRegistered,
-        hipObjNicNotFound,      hipObjDmabufNotSupported,
-        hipObjSizeTooLarge,     hipObjInternalError,
+        hipObjSuccess,
+        hipObjInvalidValue,
+        hipObjNotInitialized,
+        hipObjAlreadyInitialized,
+        hipObjRdmaError,
+        hipObjS3Error,
+        hipObjBufNotRegistered,
+        hipObjBufAlreadyRegistered,
+        hipObjNicNotFound,
+        hipObjDmabufNotSupported,
+        hipObjSizeTooLarge,
+        hipObjInternalError,
+        hipObjBusy,
     };
     std::vector<std::string> seen;
     for (const hipObjOpError_t code : codes) {
@@ -156,7 +164,7 @@ TEST_F(ApiArgsTest, InitRejectsDeviceThatDoesNotExist)
     hipObjConfig_t config = makeConfig();
     config.gpuDevice      = 1;
     EXPECT_EQ(initFakes(config).opError, hipObjSuccess);
-    const hipObj::Instance *const instance = hipObj::currentInstance();
+    const std::shared_ptr<const hipObj::Instance> instance = hipObj::currentInstance();
     ASSERT_NE(instance, nullptr);
     EXPECT_EQ(instance->config.gpuDevice, 1);
 }
