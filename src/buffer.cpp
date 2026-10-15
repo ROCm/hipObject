@@ -158,11 +158,12 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     int               access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr          mr      = registerDeviceMemory(verbs, runtime, pd, devPtr, size, access, dmabuf_);
     if (mr) {
-        BufEntry &entry  = entries_[key];
+        BufEntry entry;
         entry.mr         = std::move(mr);
         entry.size       = size;
         entry.isDmabuf   = true;
         entry.remoteAddr = key;
+        entries_.try_emplace(key, std::move(entry));
         return true;
     }
 
@@ -193,13 +194,14 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (!mr) {
         return false;
     }
-    BufEntry &entry = entries_[key];
+    BufEntry entry;
     /* Read the address before hostBuf is moved into the entry */
     entry.remoteAddr = reinterpret_cast<uint64_t>(hostBuf.get());
     entry.hostBuf    = std::move(hostBuf);
     entry.mr         = std::move(mr);
     entry.size       = size;
     entry.isDmabuf   = false;
+    entries_.try_emplace(key, std::move(entry));
     return true;
 }
 
@@ -216,11 +218,12 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
     if (!mr) {
         return false;
     }
-    BufEntry &entry  = entries_[key];
+    BufEntry entry;
     entry.mr         = std::move(mr);
     entry.size       = size;
     entry.isDmabuf   = false;
     entry.remoteAddr = reinterpret_cast<uint64_t>(hostPtr);
+    entries_.try_emplace(key, std::move(entry));
     return true;
 }
 
