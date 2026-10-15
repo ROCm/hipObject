@@ -261,6 +261,15 @@ BufferMap::deregisterBuffer(void *devPtr)
     return 0;
 }
 
+void
+BufferMap::deregisterAll()
+{
+    /* Serialized against the RC-CM listener's QP/CQ create/destroy on the
+     * same PD, as in deregisterBuffer() */
+    PdLockGuard pdLock;
+    entries_.clear();
+}
+
 const BufferMap::BufEntry *
 BufferMap::find(const void *devPtr) const
 {

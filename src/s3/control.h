@@ -31,8 +31,10 @@ int injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token);
  * replyBuf holds, or the reply is malformed. */
 std::optional<RdmaReply> receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf);
 
-/*! hipobj-rc-v3 counterpart of receiveRdmaReplyRaw(): reads the raw
- * reply via ops->recvReply() and decodes it as a v3::RdmaReplyV3. */
-int receiveRdmaReplyV3(hipObjOps_t* ops, void* ctx, v3::RdmaReplyV3& reply);
+/*! hipobj-rc-v3 counterpart of receiveRdmaReplyRaw(): receives the reply
+ * through recvReply and decodes it as a v3::RdmaReplyV3. Returns
+ * std::nullopt when the callback fails or reports more than the buffer
+ * holds, or the reply is malformed (see v3::decodeRdmaReplyV3()). */
+std::optional<v3::RdmaReplyV3> receiveRdmaReplyV3(hipObjOps_t* ops, void* ctx);
 
 } // namespace hipObj

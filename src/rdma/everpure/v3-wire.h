@@ -37,7 +37,8 @@
  *   Reply (peer -> hipObject, x-amz-rc-rdma-reply):
  *     <httpStatus>:<bytesTransferred-hex16>
  *
- *     httpStatus  decimal; 200/204/206 succeed, anything else fails
+ *     httpStatus  3 decimal digits, 100 to 599; 200/204/206 succeed,
+ *                 anything else fails
  *     bytesTransferred  16 hex digits, bytes the peer actually moved
  *
  * The peer is expected to already hold (or to establish, via the RC-CM
@@ -52,7 +53,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace hipObj::v3 {
 
@@ -88,22 +91,23 @@ using RdmaTokenV3Hex = std::array<char, kRdmaTokenV3HexLen + 1>;
 RdmaTokenV3Hex encodeRdmaTokenV3Hex(const RdmaTokenV3& token);
 
 /*!
- * Decodes an x-amz-rc-rdma-token header value produced by
- * encodeRdmaTokenV3Hex(). Returns false if any field is missing or fails
- * to parse.
+ * Decodes exactly kRdmaTokenV3HexLen characters, an x-amz-rc-rdma-token
+ * header value as encodeRdmaTokenV3Hex() writes it. Returns std::nullopt
+ * unless there are exactly five fields, each exactly its width in hex
+ * digits (no sign, whitespace or "0x" prefix).
  */
-bool decodeRdmaTokenV3(const char* headerValue, size_t headerValueLen,
-                       RdmaTokenV3& out);
+std::optional<RdmaTokenV3> decodeRdmaTokenV3(std::string_view headerValue);
 
-/*! Encodes a RdmaReplyV3 as the x-amz-rdma-reply header value. */
+/*! Encodes a RdmaReplyV3 as the x-amz-rc-rdma-reply header value. */
 std::string encodeRdmaReplyV3(const RdmaReplyV3& reply);
 
 /*!
- * Decodes an x-amz-rdma-reply header value produced by
- * encodeRdmaReplyV3(). Returns false if a field is missing or fails to
- * parse.
+ * Decodes an x-amz-rc-rdma-reply header value as encodeRdmaReplyV3() writes
+ * it. The value comes from the network, so anything else is rejected:
+ * std::nullopt unless there are exactly two fields, a 3-digit status from
+ * 100 to 599 and exactly 16 hex digits. Trailing NUL, CR and LF characters
+ * are ignored, as v1's reply parser does, for callbacks that report them.
  */
-bool decodeRdmaReplyV3(const char* replyValue, size_t replyValueLen,
-                       RdmaReplyV3& out);
+std::optional<RdmaReplyV3> decodeRdmaReplyV3(std::string_view replyValue);
 
 } // namespace hipObj::v3

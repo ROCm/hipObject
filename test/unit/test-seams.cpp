@@ -40,7 +40,6 @@
 #include "rdma-topology.h"
 #include "state.h"
 #include "transport.h"
-#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -531,6 +530,15 @@ TEST(PlatformTest, SystemPlatformUsesTheInstalledSeams)
     EXPECT_EQ(platform.use_count(), 1);
 }
 
+// ---- RC-CM listener seam -----------------------------------------
+
+/* Without a fake installed, startRcListener() is RdmaCmRcListener::Start(),
+ * which needs an address before it touches librdmacm */
+TEST(RcListenerSeamTest, RdmaCmRcListenerNeedsAnAddress)
+{
+    EXPECT_EQ(hipObj::startRcListener("", 0), nullptr);
+}
+
 // ---- libibverbs seam --------------------------------------------
 
 TEST(IbvSeamTest, OverrideRedirectsIbv)
@@ -619,9 +627,10 @@ namespace {
 
     ApiTransferLog g_apiTransferLog;
 
-    int fakeSendRequest(void *, const char *, size_t)
+    int fakeSendRequest(void *, const char *token, size_t tokenLen)
     {
         ++g_apiTransferLog.sendRequestCalls;
+        hipObjTest::noteSentToken(token, tokenLen);
         return 0;
     }
 
@@ -636,19 +645,18 @@ namespace {
         // its own special-cased success reply, with no peer QP/GID/LID.
         static const std::string kReply = "ok";
 #else
-        // v3 wire format (see v3-wire.h): built via encodeRdmaReplyV3() itself
-        // (which uses kFieldDelim) rather than a hand-rolled literal, so this
-        // fake can't drift from the real encoder if the format ever changes.
-        static const std::string kReply = hipObj::v3::encodeRdmaReplyV3({200, 0});
+        // v3 wire format (see v3-wire.h): the fake device's success reply,
+        // which reports the length the token named, as the real server does
+        const std::string kReply = hipObjTest::successReply();
 #endif
         if (!replyLen || *replyLen < kReply.size() + 1) {
             return -1;
         }
-        /* The reply and its NUL */
+        /* The reply and its NUL, but its length is the reply's alone */
         const std::span<char> out = hipObj::spanFromPointer(reply, *replyLen);
         std::ranges::copy(kReply, out.begin());
         out[kReply.size()] = '\0';
-        *replyLen          = kReply.size() + 1;
+        *replyLen          = kReply.size();
         return 0;
     }
 
@@ -662,6 +670,11 @@ namespace {
             fakeHip_.emplace(hip_);
 
             fakeIbv_.emplace(verbs_);
+            fakeRcListener_.emplace(rcListener_);
+#ifndef HIPOBJ_RDMA_WIRE_V1
+            /* v3's listener binds to the NIC's address */
+            hipDevice_.gid = hipObjTest::kFakeNicGid;
+#endif
 
             g_apiTransferLog = {};
         }
@@ -669,6 +682,7 @@ namespace {
         void TearDown() override
         {
             (void)hipObjShutdown();
+            fakeRcListener_.reset();
             fakeIbv_.reset();
             fakeHip_.reset();
             fakeTopology_.reset();
@@ -682,14 +696,16 @@ namespace {
             return config;
         }
 
-        TopologyState                                 topologyState_{};
-        FakeNicTopology                               topology_{topologyState_};
-        std::optional<hipObjTest::ScopedFakeTopology> fakeTopology_{};
-        hipObjTest::FakeDevice                        hipDevice_{};
-        hipObjTest::FakeVerbs                         verbs_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeIbv>      fakeIbv_{};
-        hipObjTest::FakeHip                           hip_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeHip>      fakeHip_{};
+        TopologyState                                   topologyState_{};
+        FakeNicTopology                                 topology_{topologyState_};
+        std::optional<hipObjTest::ScopedFakeTopology>   fakeTopology_{};
+        hipObjTest::FakeDevice                          hipDevice_{};
+        hipObjTest::FakeVerbs                           verbs_{hipDevice_};
+        std::optional<hipObjTest::ScopedFakeIbv>        fakeIbv_{};
+        hipObjTest::FakeHip                             hip_{hipDevice_};
+        std::optional<hipObjTest::ScopedFakeHip>        fakeHip_{};
+        hipObjTest::FakeRcListener                      rcListener_{hipDevice_};
+        std::optional<hipObjTest::ScopedFakeRcListener> fakeRcListener_{};
     };
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)

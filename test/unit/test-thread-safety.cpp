@@ -36,7 +36,6 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "state.h"
-#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -67,8 +66,9 @@ runThreads(int count, const std::function<void(int)> &body)
 // ---- Transfer callbacks ------------------------------------------------
 
 int
-plainSendRequest(void *, const char *, size_t)
+plainSendRequest(void *, const char *token, size_t tokenLen)
 {
+    hipObjTest::noteSentToken(token, tokenLen);
     return 0;
 }
 
@@ -78,10 +78,9 @@ plainRecvReply(void *, char *reply, size_t *replyLen)
 #ifdef HIPOBJ_RDMA_WIRE_V1
     static constexpr std::string_view kReply = "200";
 #else
-    // v3 wire format (see v3-wire.h): built via encodeRdmaReplyV3() itself
-    // (which uses kFieldDelim) rather than a hand-rolled literal, so this
-    // fake can't drift from the real encoder if the format ever changes.
-    const std::string kReply = hipObj::v3::encodeRdmaReplyV3({200, 0});
+    // v3 wire format (see v3-wire.h): the fake device's success reply, which
+    // reports the length the token named, as the real server does
+    const std::string kReply = hipObjTest::successReply();
 #endif
     if (!reply || !replyLen || *replyLen < kReply.size()) {
         return -1;
@@ -103,8 +102,9 @@ struct TransferProbe {
 };
 
 int
-probeSendRequest(void *ctx, const char *, size_t)
+probeSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
+    hipObjTest::noteSentToken(token, tokenLen);
     auto *probe = static_cast<TransferProbe *>(ctx);
     if (probe->active.fetch_add(1) != 0) {
         probe->overlaps.fetch_add(1);
@@ -144,6 +144,11 @@ protected:
         fakeHip_.emplace(hip_);
 
         fakeIbv_.emplace(verbs_);
+        fakeRcListener_.emplace(rcListener_);
+#ifndef HIPOBJ_RDMA_WIRE_V1
+        /* v3's listener binds to the NIC's address */
+        hipDevice_.gid = hipObjTest::kFakeNicGid;
+#endif
 
         probeOps_.sendRequest = &probeSendRequest;
         probeOps_.recvReply   = &probeRecvReply;
@@ -152,6 +157,7 @@ protected:
     void TearDown() override
     {
         (void)hipObjShutdown();
+        fakeRcListener_.reset();
         fakeIbv_.reset();
         fakeHip_.reset();
     }
@@ -163,14 +169,16 @@ protected:
         return std::span(pool_).subspan(static_cast<size_t>(index) * kBufSize, kBufSize).data();
     }
 
-    hipObjTest::FakeDevice                   hipDevice_{};
-    hipObjTest::FakeVerbs                    verbs_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeIbv> fakeIbv_{};
-    hipObjTest::FakeHip                      hip_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeHip> fakeHip_{};
-    std::vector<char>                        pool_ = std::vector<char>(kThreads * kBufSize);
-    TransferProbe                            probe_{};
-    hipObjOps_t                              probeOps_{};
+    hipObjTest::FakeDevice                          hipDevice_{};
+    hipObjTest::FakeVerbs                           verbs_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeIbv>        fakeIbv_{};
+    hipObjTest::FakeHip                             hip_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeHip>        fakeHip_{};
+    hipObjTest::FakeRcListener                      rcListener_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeRcListener> fakeRcListener_{};
+    std::vector<char>                               pool_ = std::vector<char>(kThreads * kBufSize);
+    TransferProbe                                   probe_{};
+    hipObjOps_t                                     probeOps_{};
 };
 
 TEST_F(ThreadSafetyTest, TransfersRunOneAtATime)
@@ -304,10 +312,11 @@ struct ReentryProbe {
  * make each one succeed or change something if it ran, and then one that
  * doesn't take the lock */
 int
-reentrantSendRequest(void *ctx, const char *, size_t)
+reentrantSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
     auto          *probe  = static_cast<ReentryProbe *>(ctx);
     hipObjConfig_t config = makeConfig();
+    hipObjTest::noteSentToken(token, tokenLen);
 
     probe->locked = {
         {"hipObjInit", hipObjInit(&config).opError},

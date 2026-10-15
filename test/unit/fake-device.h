@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -32,6 +33,8 @@
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
+#include "rc-listener.h"
+#include "state.h"
 #include "token.h"
 
 namespace hipObjTest {
@@ -67,6 +70,12 @@ struct CallLog {
     std::atomic<int> deviceSynchronize{0};
     std::atomic<int> exportDmabuf{0};
     std::atomic<int> closeDmabuf{0};
+
+    /* RC-CM listener (v3), from FakeRcListener: the times
+     * startRcListener() was called, including the ones fail.startListener
+     * made fail, and the times a started listener was stopped */
+    std::atomic<int> startListener{0};
+    std::atomic<int> stopListener{0};
 };
 
 /* Which fakes fail */
@@ -88,6 +97,8 @@ struct Faults {
     bool registerAll  = false;
     bool hostMalloc   = false;
     bool exportDmabuf = false;
+    /* The RC-CM listener doesn't start */
+    bool startListener = false;
 };
 
 /* One modify_qp() call */
@@ -155,10 +166,23 @@ struct FakeDevice {
     std::array<ModifyQpCall, 8> modifyQp{};
     std::atomic<size_t>         modifyQpCount{0};
     std::atomic<uint32_t>       nextQpNum{0x55};
+    /* The GID query_gid() reports for every index */
+    std::array<uint8_t, 16> gid{};
+
+    /* The RC-CM listener (v3): the device its bind resolves to, and its
+     * port */
+    std::string_view listenerDevice = "mlx5_0";
+    uint16_t         listenerPort   = 18515;
 
     /* The S3 server's reply to a transfer (see setReply()) */
     std::array<char, 128> reply    = {{'2', '0', '0', '\0'}};
     size_t                replyLen = 4;
+    /* Send successReply() rather than reply, until setReply() is called.
+     * FakeDeviceTest sets it for v3, whose success reply has to carry the
+     * transfer's length. */
+    bool replyWithSuccess = false;
+    /* The length the last token named (see noteSentToken()) */
+    std::atomic<uint64_t> lastTokenLength{0};
 };
 
 FakeDevice &fake();
@@ -166,9 +190,24 @@ FakeDevice &fake();
 /* Puts fake() back the way a new FakeDevice is */
 void resetFake();
 
+/* The GID FakeDeviceTest gives the fake NIC under v3: IPv4-mapped
+ * ::ffff:192.0.2.1, an address for the RC-CM listener to bind to */
+inline constexpr std::array<uint8_t, 16> kFakeNicGid = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 0, 2, 1}};
+
 /* Sets the reply the fake S3 server sends, with its NUL, as the default "200"
  * is sent */
 void setReply(std::string_view reply);
+
+/* Records the length the token a fake sendRequest was given names, as the
+ * real server learns it from the token. Every fake sendRequest calls it,
+ * so that successReply() can report it. */
+void noteSentToken(const char *token, size_t tokenLen);
+
+/* The fake S3 server's success reply for this wire: "200" for v1, and for
+ * v3 "200:" and the length noteSentToken() last recorded. hipObject only
+ * accepts a v3 reply that reports the whole transfer. */
+std::string successReply();
 
 /* A reply that carries a peer token, which makes the transfer connect the
  * QP to the peer */
@@ -358,6 +397,53 @@ private:
     const hipObj::NicTopology *previous_;
 };
 
+/* An RC-CM listener (v3) without librdmacm, which ScopedFakeRcListener
+ * makes startRcListener() return. It reports the device's listenerDevice
+ * and listenerPort, and counts start() and stop() calls in the device's
+ * log. */
+class FakeRcListener final : public hipObj::RcListener {
+public:
+    explicit FakeRcListener(FakeDevice &device) noexcept : device_(&device)
+    {
+    }
+    ~FakeRcListener() override = default;
+
+    FakeRcListener(const FakeRcListener &)            = delete;
+    FakeRcListener &operator=(const FakeRcListener &) = delete;
+    FakeRcListener(FakeRcListener &&)                 = delete;
+    FakeRcListener &operator=(FakeRcListener &&)      = delete;
+
+    /* This listener, or null with fail.startListener */
+    hipObj::RcListener *start();
+
+    uint16_t    port() const override;
+    int         connectionCount() const override;
+    void       *pd() const override;
+    std::string deviceName() const override;
+    void        stop() override;
+
+private:
+    FakeDevice *device_;
+};
+
+/* Makes startRcListener() start listener, and puts back the start function
+ * and listener that were installed before when it's destroyed */
+class ScopedFakeRcListener {
+public:
+    explicit ScopedFakeRcListener(FakeRcListener &listener);
+    ~ScopedFakeRcListener();
+
+    ScopedFakeRcListener(const ScopedFakeRcListener &)            = delete;
+    ScopedFakeRcListener &operator=(const ScopedFakeRcListener &) = delete;
+    ScopedFakeRcListener(ScopedFakeRcListener &&)                 = delete;
+    ScopedFakeRcListener &operator=(ScopedFakeRcListener &&)      = delete;
+
+private:
+    FakeRcListener         *listener_;
+    FakeRcListener         *previousListener_;
+    hipObj::RcListenerStart previousStart_;
+};
+
 /* Installs the fakes for each test, and restores the real functions after.
  * After each test, it shuts the library down and checks that the instance
  * is gone. */
@@ -374,12 +460,14 @@ protected:
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
     static void initAndRegister();
 
-    EmptyNicTopology                  topology_{};
-    std::optional<ScopedFakeTopology> fakeTopology_{};
-    FakeVerbs                         verbs_{fake()};
-    std::optional<ScopedFakeIbv>      fakeIbv_{};
-    FakeHip                           hip_{fake()};
-    std::optional<ScopedFakeHip>      fakeHip_{};
+    EmptyNicTopology                    topology_{};
+    std::optional<ScopedFakeTopology>   fakeTopology_{};
+    FakeVerbs                           verbs_{fake()};
+    std::optional<ScopedFakeIbv>        fakeIbv_{};
+    FakeHip                             hip_{fake()};
+    std::optional<ScopedFakeHip>        fakeHip_{};
+    FakeRcListener                      rcListener_{fake()};
+    std::optional<ScopedFakeRcListener> fakeRcListener_{};
 };
 
 } // namespace hipObjTest

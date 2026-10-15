@@ -96,6 +96,10 @@ public:
     int registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
     int registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
     int deregisterBuffer(void *devPtr);
+    /* Deregisters every buffer, as destroying the map does, but when the
+     * caller says: ~Instance() needs the MRs gone before the RC-CM listener
+     * deallocates its own PD */
+    void deregisterAll();
     /* The registration at devPtr, or null if there isn't one. Looked up
      * once per transfer and passed down. The entry stays valid until
      * devPtr is deregistered, which can't happen during a call that holds

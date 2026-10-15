@@ -20,12 +20,13 @@ Roles, which invert relative to a "normal" client/server picture:
       |                      |                              |                          |
       |--hipObjInit(config)->|                              |                          |
       |                      |--startRcListener(bindIp)---->|                          |
-      |                      |     (self-managed: PD from whichever device the bind    |
-      |                      |      resolves to)            | background accept-loop   |
+      |                      |     (bindIp: HIPOBJ_RC_LISTEN_IP or the chosen NIC's    |
+      |                      |      IPv4; its own PD on the context the bind resolves  |
+      |                      |      to)                     | background accept-loop   |
       |                      |                              | thread starts            |
       |                      |                              |                          |
       |--hipObjBufRegister(devPtr, size)-------------------->|                          |
-      |                      | ibv_reg_mr(pd, devPtr, size,  |                          |
+      |                      | ibv_reg_mr(listener's pd, devPtr, size,                  |
       |                      |   REMOTE_READ|REMOTE_WRITE|LOCAL_WRITE) -> rkey          |
       |                      |                              |                          |
       |--hipObjPut(devPtr, size, ops)------------------------|                          |
@@ -66,7 +67,8 @@ Roles, which invert relative to a "normal" client/server picture:
       |                      |<---HTTP 200 OK  x-amz-rc-rdma-reply: 200:0000000000001000-------|
       |                      |    ETag: "..."               |                          |
       |                      | receiveRdmaReplyV3() -> decodeRdmaReplyV3():             |
-      |                      |   httpStatus==200 -> success  |                          |
+      |                      |   httpStatus==200 and        |                          |
+      |                      |   bytesTransferred==size -> success                      |
       |<--hipObjPut() = HIPOBJ_SUCCESS--|                    |                          |
       |                      |                              |                          |
       |--hipObjBufDeregister(devPtr)------------------------>|                          |
@@ -115,7 +117,7 @@ operation.
       |--hipObjBufDeregister(devPtr)------------------------>|                          |
 ```
 
-## RC-CM listener lifecycle (self-managed mode)
+## RC-CM listener lifecycle
 
 How the pieces from the two flows above actually come up and go down, and
 which thread each step runs on -- relevant to the cross-thread PD-safety
@@ -125,12 +127,15 @@ fix (`PdLockGuard`, see `rc-listener.h`).
  Main thread (App/hipObj* calls)   Accept-loop thread (rc-listener.cpp)   RDMA CM / libibverbs
       |                                    |                                    |
       |--startRcListener(bindIp, port=0)-->|                                    |
-      |  HIPOBJ_RC_LISTEN_IP set ->        |                                    |
-      |  self-managed: pd/deviceCtx==null  |                                    |
+      |  bindIp: HIPOBJ_RC_LISTEN_IP, or   |                                    |
+      |  the chosen NIC's IPv4 GID. No     |                                    |
+      |  address, a failed start, or a     |                                    |
+      |  bind on another NIC: hipObjInit() |                                    |
+      |  fails with hipObjRdmaError        |                                    |
       |                                    |--rdma_bind_addr(bindIp)----------->|
       |                                    |    RDMA CM picks the device        |
-      |                                    |--ibv_alloc_pd(that device's ctx)-->|
-      |                                    |    g_ownsPd = true                 |
+      |                                    |--ibv_alloc_pd(listenId->verbs)---->|
+      |                                    |    buffers register on this PD     |
       |                                    | spawn background thread(acceptLoop)|
       |                                    |                                    |
       |          .-------- per accepted connection ------------------------.   |
@@ -147,9 +152,12 @@ fix (`PdLockGuard`, see `rc-listener.h`).
       |          |                         |--rdma_destroy_id(id)-------------->|
       |          '-----------------------------------------------------------'   |
       |                                    |                                    |
-      |--stopRcListener() (hipObjShutdown)>|                                    |
-      |                                    | g_stopping = true; join thread     |
-      |--[PdLockGuard] ibv_dealloc_pd(g_pd)---------------------------------->|
+      |--hipObjShutdown(): ~Instance() deregisters every buffer first--------->|
+      |    (their MRs are on the listener's PD, which can't be deallocated   |
+      |     with MRs left on it)           |                                    |
+      |--listener.reset(): Stop()--------->|                                    |
+      |                                    | stopping_ = true; join thread      |
+      |--[PdLockGuard] ibv_dealloc_pd(pd_)----------------------------------->|
       |    (only after the thread is joined -- no concurrent accept-loop      |
       |     activity left)                 |                                    |
 ```

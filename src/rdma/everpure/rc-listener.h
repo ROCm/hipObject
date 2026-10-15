@@ -21,7 +21,7 @@
  * GID or LID by hand the way v1 does.
  *
  * This header only forward-declares the librdmacm/libibverbs struct
- * *names* it needs for RcListener's own member pointers (never their
+ * *names* it needs for RdmaCmRcListener's own member pointers (never their
  * bodies -- no ibv-core.h, no transport.h): rc-listener.cpp links the
  * real librdmacm/libibverbs headers directly (a real link dependency
  * for anything that pulls this file in -- see CMakeLists.txt), which
@@ -61,8 +61,41 @@ namespace hipObj {
     using RcListenerEventCallback = void (*)(void* userCtx, void* qp);
 
     /*!
-     * One RDMA CM listener bound to a specific IP:port (or any-IP,
-     * INADDR_ANY, when bindIp is null/empty).
+     * Interface for a running RC-CM listener, as hipObject uses it: an
+     * RdmaCmRcListener, or a fake in the unit tests (see startRcListener()
+     * in state.h).
+     */
+    class RcListener {
+    public:
+        RcListener() = default;
+        virtual ~RcListener() = default;
+        RcListener(const RcListener&) = delete;
+        RcListener& operator=(const RcListener&) = delete;
+        RcListener(RcListener&&) = delete;
+        RcListener& operator=(RcListener&&) = delete;
+
+        /*! @return the TCP port this listener is bound to. */
+        virtual uint16_t port() const = 0;
+
+        /*! @return the number of peer connections currently ESTABLISHED. */
+        virtual int connectionCount() const = 0;
+
+        /*!
+         * @return the struct ibv_pd* to register buffers on, as a void*:
+         * accepted connections' QPs are on it
+         */
+        virtual void* pd() const = 0;
+
+        /*! @return the name of the device the bind resolved to, such as
+         *  "mlx5_0" */
+        virtual std::string deviceName() const = 0;
+
+        /*! Stops the listener. It mustn't be used afterwards. */
+        virtual void stop() = 0;
+    };
+
+    /*!
+     * One RDMA CM listener bound to a specific IP:port.
      *
      * Instances are never constructed directly -- go through the static
      * Start()/Stop() pair. Every currently-running instance lives in a
@@ -72,48 +105,38 @@ namespace hipObj {
      * already-running instance for that pair rather than starting a
      * second one.
      */
-    class RcListener {
+    class RdmaCmRcListener final : public RcListener {
     public:
-        RcListener(const RcListener&) = delete;
-        RcListener& operator=(const RcListener&) = delete;
-        ~RcListener();
+        RdmaCmRcListener(const RdmaCmRcListener&) = delete;
+        RdmaCmRcListener& operator=(const RdmaCmRcListener&) = delete;
+        ~RdmaCmRcListener() override;
 
         /*!
          * Starts (if not already running for this bindIp:port) an RDMA CM
-         * listener bound to `bindIp`:<port> (INADDR_ANY when `bindIp` is
-         * null/empty). `pd`/`deviceCtx` must be the real "struct ibv_pd *"
-         * and "struct ibv_context *" hipObject already opened (see
-         * transport.h's openRdmaDevice) -- an accepted connection gets a QP
-         * created on `pd`, so RDMA operations against MRs registered there
-         * (hipObjBufRegister) can be serviced by it. A CONNECT_REQUEST whose
-         * device does not match `deviceCtx` is rejected rather than accepted
-         * against the wrong PD -- callers should therefore pass the address
-         * they advertise to peers (see hipobj.cpp's localNicIp()) as
-         * `bindIp` and open `pd`/`deviceCtx` from the same address (see
-         * transport.h's openRdmaDeviceForIp()), so binding and the device
-         * check agree on which physical device services the connection.
+         * listener bound to `bindIp`:<port>. `bindIp` is required: it's the
+         * address peers dial (see initWith() in state.cpp), and binding to
+         * it is how RDMA CM picks the device.
+         *
+         * The listener takes its device context from that bind -- the
+         * context librdmacm opened, which every accepted connection arrives
+         * on -- and allocates its own PD there. Every accepted connection
+         * gets a QP on that PD, so register the buffers peers access on it
+         * too (see deviceCtx()/pd()).
          *
          * `port` == 0 resolves via rcListenerPortFromEnv(). `onConnected` /
          * `onDisconnected` may be null. Idempotent per bindIp:port: calling
          * this again for a pair that is already running returns that same
-         * instance untouched (new pd/deviceCtx/callback arguments are
-         * ignored in that case).
-         *
-         * Passing `pd == deviceCtx == nullptr` selects self-managed mode:
-         * the listener allocates its own PD from whatever device its bind
-         * resolves to (the only context an accepted connection's QP can
-         * ever validly use -- see the .cpp for why a caller-opened context
-         * never matches). Retrieve them afterwards with deviceCtx()/pd() to
-         * register buffers against the same device, e.g. for
-         * HIPOBJ_RC_LISTEN_IP.
+         * instance untouched (new callback arguments are ignored in that
+         * case).
          *
          * @return a non-owning pointer to the running listener (freshly
          * started, or already running for this bindIp:port) on success, or
-         * nullptr on failure (e.g. bind/listen error). The pointer remains
-         * valid until a matching Stop() call.
+         * nullptr on failure (no address, or a bind, listen or PD
+         * allocation error). The pointer remains valid until a matching
+         * Stop() call.
          */
-        static RcListener* Start(
-            void* pd, void* deviceCtx, const char* bindIp, uint16_t port,
+        static RdmaCmRcListener* Start(
+            const char* bindIp, uint16_t port,
             RcListenerEventCallback onConnected,
             RcListenerEventCallback onDisconnected, void* userCtx);
 
@@ -123,30 +146,35 @@ namespace hipObj {
          * the static registry. `listener` (and any raw pointer to it) is
          * invalid once this returns. Safe to call with nullptr (no-op).
          */
-        static void Stop(RcListener* listener);
+        static void Stop(RdmaCmRcListener* listener);
+
+        /*! Stop(this) */
+        void stop() override;
 
         /*! @return the TCP port this listener is bound to. */
-        uint16_t port() const;
+        uint16_t port() const override;
 
         /*! @return the number of peer connections currently ESTABLISHED. */
-        int connectionCount() const;
+        int connectionCount() const override;
 
         /*!
-         * @return the self-managed struct ibv_context* (see Start()'s
-         * self-managed mode) as a void*, or nullptr when the caller supplied
-         * its own pd/deviceCtx to Start() instead.
+         * @return the struct ibv_context* the bind resolved to (librdmacm's,
+         * see Start()), as a void*
          */
         void* deviceCtx() const;
 
         /*!
-         * @return the self-managed struct ibv_pd* (see Start()'s
-         * self-managed mode) as a void*, or nullptr when the caller supplied
-         * its own pd/deviceCtx to Start() instead.
+         * @return the struct ibv_pd* the listener allocated on that context,
+         * as a void*: the one to register buffers on
          */
-        void* pd() const;
+        void* pd() const override;
+
+        /*! @return the name of the device the bind resolved to, such as
+         *  "mlx5_0" */
+        std::string deviceName() const override;
 
     private:
-        RcListener() = default;
+        RdmaCmRcListener() = default;
 
         void AcceptLoop();
         void PollAsyncEvents();
@@ -162,14 +190,6 @@ namespace hipObj {
         uint16_t port_ = 0;
         struct ibv_pd* pd_ = nullptr;
         struct ibv_context* deviceCtx_ = nullptr;
-        /* True once deviceCtx_ is confirmed real (self-managed mode, or
-         * a matched CONNECT_REQUEST) -- gates AcceptLoop()'s async_fd
-         * polling against an unverified/bogus caller-provided pointer. */
-        bool deviceCtxVerified_ = false;
-        /* True when Start() allocated pd_ itself (self-managed mode, see
-         * Start()'s doc comment) rather than being handed one by the
-         * caller; only then does Stop() free it. */
-        bool ownsPd_ = false;
         RcListenerEventCallback onConnected_ = nullptr;
         RcListenerEventCallback onDisconnected_ = nullptr;
         void* userCtx_ = nullptr;
@@ -181,7 +201,7 @@ namespace hipObj {
 
         /* Every currently-running listener, guarded by s_registryMutex. */
         static std::mutex s_registryMutex;
-        static std::vector<RcListener*> s_listeners;
+        static std::vector<RdmaCmRcListener*> s_listeners;
     };
 
 } // namespace hipObj

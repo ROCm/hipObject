@@ -5,6 +5,7 @@
 
 #include "control.h"
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -45,20 +46,19 @@ receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf)
     return RdmaReply{received, *status};
 }
 
-int receiveRdmaReplyV3(hipObjOps_t* ops, void* ctx, v3::RdmaReplyV3& reply) {
+std::optional<v3::RdmaReplyV3> receiveRdmaReplyV3(hipObjOps_t* ops, void* ctx) {
   if (!ops || !ops->recvReply) {
-    return -1;
+    return std::nullopt;
   }
-  char replyBuf[512];
-  size_t replyLen = sizeof(replyBuf);
-  int ret = ops->recvReply(ctx, replyBuf, &replyLen);
-  if (ret != 0) {
-    return ret;
+  std::array<char, 512> replyBuf{};
+  size_t replyLen = replyBuf.size();
+  if (ops->recvReply(ctx, replyBuf.data(), &replyLen) != 0) {
+    return std::nullopt;
   }
-  if (replyLen > sizeof(replyBuf)) {
-    return -1;
+  if (replyLen > replyBuf.size()) {
+    return std::nullopt;
   }
-  return v3::decodeRdmaReplyV3(replyBuf, replyLen, reply) ? 0 : -1;
+  return v3::decodeRdmaReplyV3(asStringView(std::span(replyBuf).first(replyLen)));
 }
 
 } // namespace hipObj
