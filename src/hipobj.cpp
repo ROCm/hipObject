@@ -152,13 +152,9 @@ finishTransferAfterReply(const HipRuntime &runtime, RcConnection &conn, std::str
  * still land. The caller gets an error instead of a hang, which is the
  * whole point. */
 static hipObjError_t
-stageCopyWithDeadline(const HipRuntime &runtime, void *dev, void *host, size_t size, bool toDevice,
+stageCopyWithDeadline(const HipRuntime &runtime, void *dst, const void *src, size_t size, hipMemcpyKind kind,
                       std::chrono::milliseconds timeout)
 {
-    const hipMemcpyKind kind = toDevice ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
-    void               *dst  = toDevice ? dev : host;
-    const void         *src  = toDevice ? host : dev;
-
     hipEvent_t rawDone = nullptr;
     if (runtime.eventCreate(&rawDone) != hipSuccess) {
         return {hipObjInternalError, 0};
@@ -187,7 +183,7 @@ stageCopyWithDeadline(const HipRuntime &runtime, void *dev, void *host, size_t s
              * than destroyed */
             dropOwnership(done);
             const int64_t     timeoutMs = timeout.count();
-            const std::string direction = toDevice ? "host-to-device" : "device-to-host";
+            const std::string direction = kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";
             fprintf(stderr,
                     "hipObj: staging %s copy of %zu bytes did not complete within "
                     "%" PRId64 " ms; abandoning it. The GPU never signalled completion -- "
@@ -199,23 +195,46 @@ stageCopyWithDeadline(const HipRuntime &runtime, void *dev, void *host, size_t s
     }
 }
 
+/* Copies [offset, offset + size) of a host-staged registration from its
+ * staging buffer to the device memory at devPtr */
 static hipObjError_t
-stageBuffer(const HipRuntime &runtime, void *devPtr, const BufferMap::BufEntry &buf, size_t size,
-            off_t offset, bool toDevice, std::chrono::milliseconds timeout)
+stageToDevice(const HipRuntime &runtime, void *devPtr, const BufferMap::BufEntry &buf, size_t size,
+              off_t offset, std::chrono::milliseconds timeout)
 {
     if (!buf.hostBuf) {
-        /* the NIC reads and writes the caller's memory */
+        /* the NIC writes the caller's memory */
         return {hipObjSuccess, 0};
     }
     if (!rangeInRegistration(offset, size, buf.size)) {
         return {hipObjInvalidValue, 0};
     }
-    /* The device memory is only viewed for its bounds, never read here */
-    const std::span<std::byte> host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
-    const std::span<std::byte> dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
-    const auto                 start = static_cast<size_t>(offset);
+    /* The device memory is only viewed for its bounds, never accessed here */
+    const auto host  = spanFromPointer(static_cast<const std::byte *>(buf.hostBuf.get()), buf.size);
+    const auto dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
+    const auto start = static_cast<size_t>(offset);
     return stageCopyWithDeadline(runtime, dev.subspan(start, size).data(), host.subspan(start, size).data(),
-                                 size, toDevice, timeout);
+                                 size, hipMemcpyHostToDevice, timeout);
+}
+
+/* Copies [offset, offset + size) of a host-staged registration from the
+ * device memory at devPtr to its staging buffer */
+static hipObjError_t
+stageToHost(const HipRuntime &runtime, const void *devPtr, const BufferMap::BufEntry &buf, size_t size,
+            off_t offset, std::chrono::milliseconds timeout)
+{
+    if (!buf.hostBuf) {
+        /* the NIC reads the caller's memory */
+        return {hipObjSuccess, 0};
+    }
+    if (!rangeInRegistration(offset, size, buf.size)) {
+        return {hipObjInvalidValue, 0};
+    }
+    /* The device memory is only viewed for its bounds, never accessed here */
+    const auto host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
+    const auto dev   = spanFromPointer(static_cast<const std::byte *>(devPtr), buf.size);
+    const auto start = static_cast<size_t>(offset);
+    return stageCopyWithDeadline(runtime, host.subspan(start, size).data(), dev.subspan(start, size).data(),
+                                 size, hipMemcpyDeviceToHost, timeout);
 }
 
 static hipObjError_t
@@ -433,8 +452,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(instance->platform->hip(), devPtr, *buf, size, offset, true,
-                               instance->options.stageTimeout);
+    return hipObj::stageToDevice(instance->platform->hip(), devPtr, *buf, size, offset,
+                                 instance->options.stageTimeout);
 }
 catch (...) {
     return hipObj::handleException();
@@ -460,8 +479,8 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::stageBuffer(instance->platform->hip(), const_cast<void *>(devPtr), *buf, size, offset,
-                              false, instance->options.stageTimeout);
+    err = hipObj::stageToHost(instance->platform->hip(), devPtr, *buf, size, offset,
+                              instance->options.stageTimeout);
     if (err.opError != hipObjSuccess) {
         return err;
     }
@@ -490,8 +509,12 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageBuffer(instance->platform->hip(), devPtr, *buf, size, offset,
-                               direction == HIPOBJ_SYNC_TO_DEVICE, instance->options.stageTimeout);
+    if (direction == HIPOBJ_SYNC_TO_DEVICE) {
+        return hipObj::stageToDevice(instance->platform->hip(), devPtr, *buf, size, offset,
+                                     instance->options.stageTimeout);
+    }
+    return hipObj::stageToHost(instance->platform->hip(), devPtr, *buf, size, offset,
+                               instance->options.stageTimeout);
 }
 catch (...) {
     return hipObj::handleException();
