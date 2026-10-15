@@ -62,13 +62,18 @@ Checks:
   # initializer list or in its declaration, and this check reports exactly
   # those initializers as redundant, so the two can't both pass
   - -readability-redundant-member-init
+  # It reports every enum whose values fit in a smaller type than int,
+  # whether or not its size matters. hipObject's enums aren't sent over
+  # the wire or kept in large arrays, and padding takes up most of what a
+  # smaller type would save in a struct
+  - -performance-enum-size
 
   # TODO: These checks report problems in the current code. Fix the code
   # and delete the check's line here, or move it to "Not wanted" with a
   # reason. The count is the number of places clang-tidy 23 reports.
   - -bugprone-easily-swappable-parameters  # TODO(10)
   - -bugprone-empty-catch  # TODO(2)
-  - -bugprone-invalid-enum-default-initialization  # TODO(10): ibv_mtu{} is 0
+  - -bugprone-invalid-enum-default-initialization  # TODO(10): ibv_mtu{}, ibv_qp_type{}, ... are 0
   - -bugprone-not-null-terminated-result  # TODO(2)
   - -bugprone-signed-bitwise  # TODO(21): bitwise ops on int flags
   - -hicpp-signed-bitwise  # TODO: the same check
@@ -76,51 +81,35 @@ Checks:
   - -bugprone-throwing-static-initialization  # TODO(4)
   - -cert-err58-cpp  # TODO: the same check
   - -bugprone-unchecked-optional-access  # TODO(34)
-  - -cert-err33-c  # TODO(82): unchecked fprintf(), snprintf(), ...
-  - -cppcoreguidelines-avoid-magic-numbers  # TODO(486)
-  - -readability-magic-numbers  # TODO: the same check
-  - -cppcoreguidelines-avoid-non-const-global-variables  # TODO(36)
-  - -cppcoreguidelines-init-variables  # TODO(3)
+  - -cert-err33-c  # TODO(43): unchecked fprintf() and snprintf()
+  - -cppcoreguidelines-avoid-non-const-global-variables  # TODO(17)
   - -cppcoreguidelines-macro-usage  # TODO(4)
-  - -cppcoreguidelines-no-malloc  # TODO(21)
-  - -cppcoreguidelines-owning-memory  # TODO(48)
-  - -cppcoreguidelines-pro-bounds-array-to-pointer-decay  # TODO(87)
-  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access  # TODO(137)
-  - -cppcoreguidelines-pro-bounds-constant-array-index  # TODO(22)
-  - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(101)
-  - -cppcoreguidelines-pro-type-const-cast  # TODO(1)
-  - -cppcoreguidelines-pro-type-member-init  # TODO(38)
-  - -cppcoreguidelines-pro-type-union-access  # TODO(47)
-  - -cppcoreguidelines-pro-type-vararg  # TODO(92): printf(), ioctl(), ...
+  - -cppcoreguidelines-no-malloc  # TODO(12)
+  - -cppcoreguidelines-owning-memory  # TODO(13)
+  - -cppcoreguidelines-pro-bounds-array-to-pointer-decay  # TODO(5)
+  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access  # TODO(144)
+  - -cppcoreguidelines-pro-bounds-constant-array-index  # TODO(16)
+  - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(21)
+  - -cppcoreguidelines-pro-type-member-init  # TODO(7)
+  - -cppcoreguidelines-pro-type-union-access  # TODO(36)
+  - -cppcoreguidelines-pro-type-vararg  # TODO(53): fprintf(), snprintf(), fcntl()
   - -cppcoreguidelines-special-member-functions  # TODO(6)
-  - -google-runtime-int  # TODO(5): long and long long in the examples
-  - -misc-const-correctness  # TODO(462)
-  - -misc-misplaced-const  # TODO(1)
-  - -misc-non-private-member-variables-in-classes  # TODO(139)
+  - -google-runtime-int  # TODO(11): long and long long in the examples and MinIO bridge
+  - -misc-const-correctness  # TODO(183)
+  - -misc-non-private-member-variables-in-classes  # TODO(56)
   - -cppcoreguidelines-non-private-member-variables-in-classes  # TODO: the same check
-  - -performance-enum-size  # TODO(8)
-  - -performance-faster-string-find  # TODO(1)
-  - -performance-prefer-single-char-overloads  # TODO: the same check
-  - -performance-inefficient-string-concatenation  # TODO(3)
-  - -performance-inefficient-vector-operation  # TODO(2)
-  - -performance-unnecessary-copy-initialization  # TODO(2)
-  - -readability-braces-around-statements  # TODO(102)
-  - -readability-convert-member-functions-to-static  # TODO(5)
-  - -readability-function-cognitive-complexity  # TODO(31)
-  - -readability-implicit-bool-conversion  # TODO(117)
-  - -readability-isolate-declaration  # TODO(1)
-  - -readability-make-member-function-const  # TODO(21)
-  - -readability-math-missing-parentheses  # TODO(5)
-  - -readability-named-parameter  # TODO(124)
-  - -readability-redundant-nested-if  # TODO(1)
+  - -readability-braces-around-statements  # TODO(50)
+  - -readability-convert-member-functions-to-static  # TODO(3)
+  - -readability-function-cognitive-complexity  # TODO(14)
+  - -readability-implicit-bool-conversion  # TODO(64)
+  - -readability-magic-numbers  # TODO(289)
+  - -cppcoreguidelines-avoid-magic-numbers  # TODO: the same check
+  - -readability-math-missing-parentheses  # TODO(3)
+  - -readability-named-parameter  # TODO(50)
   - -readability-redundant-parentheses  # TODO(6)
-  - -readability-simplify-boolean-expr  # TODO(1)
-  - -readability-static-accessed-through-instance  # TODO(6)
-  - -readability-static-definition-in-anonymous-namespace  # TODO(1)
-  - -readability-trailing-comma  # TODO(13)
-  - -readability-use-anyofallof  # TODO(2)
-  - -readability-use-concise-preprocessor-directives  # TODO(8)
-  - -readability-use-std-min-max  # TODO(2)
+  - -readability-trailing-comma  # TODO(7)
+  - -readability-use-concise-preprocessor-directives  # TODO(9)
+  - -readability-use-std-min-max  # TODO(1)
 WarningsAsErrors: '*'
 
 CheckOptions:
