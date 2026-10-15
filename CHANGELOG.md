@@ -168,6 +168,18 @@
   limits how long the staging copy can take (`HIPOBJ_STAGE_TIMEOUT_MS`).
   They used to copy with `hipMemcpy()` instead, with no time limit, so a
   copy that never finished could hang the call.
+- The staging copies for a buffer that's staged through host memory run
+  on the calling thread's default stream (`hipStreamPerThread`), rather
+  than the null stream, so copies from different threads don't wait for
+  each other. As a result, they no longer wait for GPU work that the
+  application queued on streams it created. Before `hipObjPut()` or
+  `hipObjBufSync()` with `HIPOBJ_SYNC_TO_HOST`, make sure the GPU work
+  that writes the buffer has finished, as a buffer that the NIC reads
+  directly already requires. The documentation of `hipObjGet()`,
+  `hipObjPut()`, and `hipObjBufSync()` now says what GPU work has to
+  finish before each call. It also says that when a staging copy doesn't
+  finish within `HIPOBJ_STAGE_TIMEOUT_MS`, the call returns
+  `hipObjInternalError` while the copy may still be using the buffer.
 
 ### Removed
 

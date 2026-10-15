@@ -310,6 +310,18 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * offset; the request the callbacks make selects the
  * part of the object to fetch.
  *
+ * Make sure that no GPU work that reads or writes the
+ * buffer is still running when you call this. When it
+ * returns hipObjSuccess, the data is in the buffer.
+ *
+ * For a buffer that's staged through host memory (see
+ * hipObjBufSync()), if the copy into the buffer doesn't
+ * finish within the staging timeout (the
+ * HIPOBJ_STAGE_TIMEOUT_MS environment variable), this
+ * returns hipObjInternalError and leaves the copy
+ * running. It can still write the buffer after this
+ * returns.
+ *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
  * @param size    Number of bytes to transfer
@@ -333,6 +345,19 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * inside the buffer. hipObject doesn't send an object
  * offset; the request the callbacks make selects where
  * the data goes in the object.
+ *
+ * hipObject doesn't wait for GPU work that writes the
+ * buffer, on any stream. Make sure that it has finished,
+ * for example with hipStreamSynchronize(), before you
+ * call this.
+ *
+ * For a buffer that's staged through host memory (see
+ * hipObjBufSync()), if the copy out of the buffer
+ * doesn't finish within the staging timeout (the
+ * HIPOBJ_STAGE_TIMEOUT_MS environment variable), this
+ * returns hipObjInternalError and leaves the copy
+ * running. It can still read the buffer after this
+ * returns.
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
@@ -363,6 +388,17 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
  * HIPOBJ_SYNC_TO_HOST before a PUT and HIPOBJ_SYNC_TO_DEVICE after a
  * GET. It is a no-op, reporting success, for a directly registered
  * buffer; hipObjGet() and hipObjPut() do it themselves.
+ *
+ * When this returns hipObjSuccess, the copy has finished. If the copy
+ * doesn't finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS
+ * environment variable), this returns hipObjInternalError and leaves the
+ * copy running. It can still read or write the buffer after this returns.
+ *
+ * hipObject doesn't wait for GPU work that uses the buffer, on any
+ * stream. Before HIPOBJ_SYNC_TO_HOST,
+ * make sure that the GPU work that writes the buffer has finished, for
+ * example with hipStreamSynchronize(). Before HIPOBJ_SYNC_TO_DEVICE, make
+ * sure that no GPU work that reads or writes the buffer is still running.
  *
  * @serialized
  * @ingroup io

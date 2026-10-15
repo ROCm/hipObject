@@ -362,10 +362,11 @@ FakeHip::deviceSynchronize() const
 
 hipError_t
 FakeHip::memcpyAsync(void * /*dst*/, const void * /*src*/, size_t /*size*/, hipMemcpyKind kind,
-                     hipStream_t /*stream*/) const
+                     hipStream_t stream) const
 {
     ++device_->log.memcpy;
-    device_->lastMemcpyKind = kind;
+    device_->lastMemcpyKind   = kind;
+    device_->lastMemcpyStream = stream;
     return device_->memcpyErr;
 }
 
@@ -382,10 +383,11 @@ FakeHip::eventCreate(hipEvent_t *event) const
 }
 
 hipError_t
-FakeHip::eventRecord(hipEvent_t event, hipStream_t /*stream*/) const
+FakeHip::eventRecord(hipEvent_t event, hipStream_t stream) const
 {
     EXPECT_EQ(event, fakeEvent());
     ++device_->log.eventRecord;
+    device_->lastEventRecordStream = stream;
     return device_->eventRecordErr;
 }
 

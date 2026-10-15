@@ -130,12 +130,24 @@ Notes:
 
 ## Public API
 
-- **Don't change the public header, [`include/hipobj.h`](include/hipobj.h),
-  without explicit permission.** hipObject is in development, so the API is
-  expected to change, but only deliberately: don't rename, move, reorder, or
-  restyle declarations as a side effect of other work. If a change seems to
-  need a header change, ask first. Header changes are user-facing, so they also
-  need a [changelog](#changelog) entry.
+- **Don't change the API in the public header,
+  [`include/hipobj.h`](include/hipobj.h), without explicit permission.** The
+  API is everything that a consumer's code compiles or links against: the
+  functions and their signatures, the types and struct layouts, the
+  enumerators and their values, and the macros. hipObject is in development,
+  so the API is expected to change, but only deliberately: don't rename,
+  move, reorder, or restyle declarations as a side effect of other work. If a
+  change seems to need an API change, ask first.
+- **The header's documentation comments can change without asking**, and
+  should, whenever a change makes them wrong or incomplete, such as a new
+  requirement on callers or a new error a function can return. Change only
+  the comments, not the declarations they document, and check that the
+  documentation still builds (see
+  [Spelling and documentation](#spelling-and-documentation)).
+- **API changes are user-facing, and so are documentation changes that
+  change what callers can rely on or have to do**, so both need a
+  [changelog](#changelog) entry. Fixing a typo or rewording without changing
+  the meaning doesn't.
 - **The public header is C**, and C11 and C++11 consumers both have to be able
   to include it. Keep it free of C++-isms and of anything newer than C11 or
   C++11. Every build with `BUILD_TESTING=ON`, including CI's, compiles it as
@@ -636,8 +648,9 @@ Python code must run on **Python 3.10**. Don't use anything newer, such as
 
 **Every user-facing change needs an entry in [CHANGELOG.md](CHANGELOG.md),
 in the same change.** User-facing means anything someone building, installing,
-or calling hipObject could notice: the public header and API, library behavior,
-CMake options and variables, the installed files and packages, dependencies and
+or calling hipObject could notice: the public API, what its documentation
+promises or requires (see [Public API](#public-api)), library behavior, CMake
+options and variables, the installed files and packages, dependencies and
 supported platforms, and the examples. CI-only, test-only, and internal
 refactoring changes don't need an entry.
 

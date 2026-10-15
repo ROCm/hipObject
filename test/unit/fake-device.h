@@ -129,9 +129,12 @@ struct FakeDevice {
      * eventQuery() reports hipErrorNotReady for the first
      * eventNotReadyCount queries of each event, and then
      * eventQueryResult; with eventNeverCompletes, it reports
-     * hipErrorNotReady forever. */
+     * hipErrorNotReady forever. lastMemcpyStream and lastEventRecordStream
+     * hold the streams the last copy and the last eventRecord() used. */
     hipError_t                 memcpyErr = hipSuccess;
     std::atomic<hipMemcpyKind> lastMemcpyKind{hipMemcpyDefault};
+    std::atomic<hipStream_t>   lastMemcpyStream{nullptr};
+    std::atomic<hipStream_t>   lastEventRecordStream{nullptr};
     hipError_t                 eventCreateErr      = hipSuccess;
     hipError_t                 eventRecordErr      = hipSuccess;
     hipError_t                 eventQueryResult    = hipSuccess;
