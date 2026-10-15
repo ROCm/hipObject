@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include "fake-device.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
@@ -99,9 +100,11 @@ TEST(Span, DeviceSpanViewsTheList)
     std::array<struct ibv_device *, 3> devices{};
 
     /* The list is borrowed, so it's released rather than freed with
-     * libibverbs */
-    hipObj::IbvDeviceListPtr list(devices.data());
-    const auto               view = hipObj::deviceSpan(list, 2);
+     * verbs */
+    hipObjTest::FakeDevice      device{};
+    const hipObjTest::FakeVerbs verbs(device);
+    hipObj::IbvDeviceListPtr    list = hipObj::own<hipObj::IbvDeviceListPtr>(verbs, devices.data());
+    const auto                  view = hipObj::deviceSpan(list, 2);
     EXPECT_EQ(view.data(), devices.data());
     EXPECT_EQ(view.size(), 2U);
     EXPECT_TRUE(hipObj::deviceSpan(list, 0).empty());

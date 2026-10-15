@@ -13,7 +13,7 @@ namespace hipObj {
 bool
 isIonicDevice(uint32_t vendorId)
 {
-    return vendorId == VENDOR_ID_PENSANDO;
+    return vendorId == kVendorIdPensando;
 }
 
 void

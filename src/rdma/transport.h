@@ -42,40 +42,40 @@ public:
     RdmaDevice(RdmaDevice &&) noexcept        = default;
     RdmaDevice &operator=(RdmaDevice &&)      = delete;
 
-    const Verbs &verbs() const noexcept
+    [[nodiscard]] const Verbs &verbs() const noexcept
     {
         return *verbs_;
     }
 
-    struct ibv_context *context() const noexcept
+    [[nodiscard]] struct ibv_context *context() const noexcept
     {
         return ctx_.get();
     }
 
-    struct ibv_pd *pd() const noexcept
+    [[nodiscard]] struct ibv_pd *pd() const noexcept
     {
         return pd_.get();
     }
 
-    uint8_t portNum() const noexcept
+    [[nodiscard]] uint8_t portNum() const noexcept
     {
         return portNum_;
     }
 
     /* The index of localGid() in the port's GID table */
-    int gidIndex() const noexcept
+    [[nodiscard]] int gidIndex() const noexcept
     {
         return gidIndex_;
     }
 
-    const ibv_gid &localGid() const noexcept
+    [[nodiscard]] const ibv_gid &localGid() const noexcept
     {
         return localGid_;
     }
 
     /* The vendor ID the device reported when it opened, or std::nullopt if
      * it couldn't be queried */
-    std::optional<uint32_t> vendorId() const noexcept
+    [[nodiscard]] std::optional<uint32_t> vendorId() const noexcept
     {
         return vendorId_;
     }
@@ -114,17 +114,17 @@ public:
     RcConnection(RcConnection &&) noexcept        = default;
     RcConnection &operator=(RcConnection &&)      = delete;
 
-    const RdmaDevice &device() const noexcept
+    [[nodiscard]] const RdmaDevice &device() const noexcept
     {
         return *device_;
     }
 
-    struct ibv_cq *cq() const noexcept
+    [[nodiscard]] struct ibv_cq *cq() const noexcept
     {
         return cq_.get();
     }
 
-    struct ibv_qp *qp() const noexcept
+    [[nodiscard]] struct ibv_qp *qp() const noexcept
     {
         return qp_.get();
     }

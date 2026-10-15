@@ -59,7 +59,7 @@ public:
     bool startThreaded();
     void stop();
 
-    int fd() const
+    [[nodiscard]] int fd() const
     {
         return listen_fd_.get();
     }
@@ -81,7 +81,7 @@ private:
         Worker(Worker &&other) noexcept;
         Worker &operator=(Worker &&) = delete;
 
-        int fd() const
+        [[nodiscard]] int fd() const
         {
             return client_.get();
         }

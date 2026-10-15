@@ -45,7 +45,7 @@ def definition(name: str, body: str) -> str:
     """Return the definition of a public function with the given body"""
     return (
         f"hipObjError_t\n{name}(int x)\ntry {{\n{body}}}\n"
-        "catch (...) {\n    return hipObj::handleException();\n}\n\n"
+        "catch (...) {\n    return hipObj::kExceptionError;\n}\n\n"
     )
 
 

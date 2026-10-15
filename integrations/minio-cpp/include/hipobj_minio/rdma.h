@@ -6,18 +6,19 @@
 #pragma once
 
 #include <cstddef>
+#include <string_view>
 
 #include "hipobj_minio/context.h"
 
 namespace hipobj::minio {
 
-inline constexpr const char *kEmptySha256 =
+inline constexpr std::string_view kEmptySha256 =
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-inline constexpr const char *kUnsignedPayload = "UNSIGNED-PAYLOAD";
+inline constexpr std::string_view kUnsignedPayload = "UNSIGNED-PAYLOAD";
 
-inline constexpr const char *kAmzRdmaToken            = "x-amz-rdma-token";
-inline constexpr const char *kAmzRdmaReply            = "x-amz-rdma-reply";
-inline constexpr const char *kAmzRdmaBytesTransferred = "x-amz-rdma-bytes-transferred";
+inline constexpr std::string_view kAmzRdmaToken            = "x-amz-rdma-token";
+inline constexpr std::string_view kAmzRdmaReply            = "x-amz-rdma-reply";
+inline constexpr std::string_view kAmzRdmaBytesTransferred = "x-amz-rdma-bytes-transferred";
 
 inline constexpr int kRdmaReplySuccess        = 200;
 inline constexpr int kRdmaReplyNoContent      = 204;

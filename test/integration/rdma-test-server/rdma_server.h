@@ -32,7 +32,7 @@ public:
     RdmaTestServer(RdmaTestServer &&)                 = delete;
     RdmaTestServer &operator=(RdmaTestServer &&)      = delete;
 
-    bool isReady() const;
+    [[nodiscard]] bool isReady() const;
 
     /* What rdmaReadFromClient() read */
     struct ReadResult {

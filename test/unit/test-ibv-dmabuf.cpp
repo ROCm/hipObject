@@ -62,7 +62,7 @@ class DmabufVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    bool supportsDmabuf() const override
+    [[nodiscard]] bool supportsDmabuf() const override
     {
         return true;
     }
@@ -94,7 +94,7 @@ protected:
         resetFake();
     }
 
-    hipObj::IbvMrPtr registerFakeBuffer(const hipObj::DmabufPolicy &policy = {}) const
+    [[nodiscard]] hipObj::IbvMrPtr registerFakeBuffer(const hipObj::DmabufPolicy &policy = {}) const
     {
         return hipObj::registerDeviceMemory(verbs_, hip_, fakePd(), fakeDevBuf(), kBufSize, kAccess, policy);
     }

@@ -84,7 +84,7 @@ protected:
 
     /* A device on the fake context and protection domain, with gidIndex
      * as its GID index and no vendor ID */
-    hipObj::RdmaDevice deviceWithGidIndex(int gidIndex) const
+    [[nodiscard]] hipObj::RdmaDevice deviceWithGidIndex(int gidIndex) const
     {
         return {verbs(),
                 hipObj::own<hipObj::IbvContextPtr>(verbs(), verbs().open_device(nullptr)),
@@ -132,10 +132,10 @@ TEST_F(TransportTest, OpenSetsUpTheDevice)
 
 TEST_F(TransportTest, OpenRecordsTheVendorId)
 {
-    fake().vendorId                                = hipObj::VENDOR_ID_PENSANDO;
+    fake().vendorId                                = hipObj::kVendorIdPensando;
     const std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs(), topology(), 0);
     ASSERT_TRUE(device);
-    EXPECT_EQ(device->vendorId(), hipObj::VENDOR_ID_PENSANDO);
+    EXPECT_EQ(device->vendorId(), hipObj::kVendorIdPensando);
     EXPECT_EQ(fake().log.queryDevice, 1);
 }
 
@@ -309,7 +309,7 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
 TEST_F(TransportTest, ConnectDoesNotQueryTheDevice)
 {
     /* The vendor ID was read when the device opened */
-    fake().vendorId = hipObj::VENDOR_ID_BROADCOM;
+    fake().vendorId = hipObj::kVendorIdBroadcom;
     ASSERT_NO_FATAL_FAILURE(open());
     const int queries = fake().log.queryDevice;
     ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
@@ -397,10 +397,10 @@ TEST_P(VendorQpTest, RtrHasVendorAttributes)
 constexpr auto kVendorCases = std::to_array<VendorCase>({
     {"Unknown", 0x15b3, false},
 #ifdef HIPOBJ_BNXT
-    {"Broadcom", hipObj::VENDOR_ID_BROADCOM, true},
+    {"Broadcom", hipObj::kVendorIdBroadcom, true},
 #endif
 #ifdef HIPOBJ_IONIC
-    {"Pensando", hipObj::VENDOR_ID_PENSANDO, true},
+    {"Pensando", hipObj::kVendorIdPensando, true},
 #endif
     {"None", 0, false},
 });
@@ -413,7 +413,7 @@ INSTANTIATE_TEST_SUITE_P(Transport, VendorQpTest, ::testing::ValuesIn(kVendorCas
 TEST_F(TransportTest, NoVendorAttributesWhenDeviceQueryFails)
 {
     /* The query fails when the device opens */
-    fake().vendorId         = hipObj::VENDOR_ID_BROADCOM;
+    fake().vendorId         = hipObj::kVendorIdBroadcom;
     fake().fail.queryDevice = true;
     ASSERT_NO_FATAL_FAILURE(open());
     ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));

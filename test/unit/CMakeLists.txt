@@ -53,7 +53,7 @@ hipobj_add_test(test-rdma-token
 hipobj_add_test(test-parse-number
   test-parse-number.cpp)
 
-hipobj_add_test(test-span
+hipobj_add_fake_device_test(test-span
   test-span.cpp)
 
 # The MinIO bridge's header parsing doesn't need minio-cpp, so it's tested

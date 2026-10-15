@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <utility>
 
 #include "ibv-core.h"
 #include "ibv-ptr.h"
@@ -41,7 +42,10 @@ IbvMrPtr registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, str
  * allocated it, which has to outlive the pointer. Create the pointer with
  * own() (ibv-ptr.h). */
 struct HostBufDeleter {
-    const HipRuntime *runtime = nullptr;
+    explicit HostBufDeleter(const HipRuntime &deleterRuntime) noexcept : runtime(&deleterRuntime)
+    {
+    }
+    const HipRuntime *runtime;
     void              operator()(void *hostBuf) const noexcept;
 };
 
@@ -58,25 +62,31 @@ public:
     static constexpr size_t kMaxEntries = 256;
 
     /* hostBuf is declared before mr so the MR is deregistered before
-     * the staging buffer it covers is freed. Built complete and moved
-     * into the map, never assigned over, since a defaulted move
-     * assignment would free the target's staging buffer before
-     * deregistering its MR. */
+     * the staging buffer it covers is freed. An entry with a staging
+     * buffer is built complete before it goes into the map, so the two
+     * are released in that order if the insertion throws. Never assigned
+     * over, since a defaulted move assignment would free the target's
+     * staging buffer before deregistering its MR. */
     struct BufEntry {
         /* Host staging buffer, or null when the NIC reaches the caller's
          * memory directly */
-        HostBufPtr hostBuf = nullptr;
-        IbvMrPtr   mr      = nullptr;
-        size_t     size    = 0;
+        HostBufPtr hostBuf;
+        IbvMrPtr   mr;
+        size_t     size;
         /* The NIC reads and writes the caller's device memory, so a
          * transfer has to synchronize with the device */
-        bool isDmabuf = false;
+        bool isDmabuf;
         /* Address to advertise to the peer. Not mr->addr:
          * ibv_reg_dmabuf_mr leaves that NULL, and on the bounce path it
          * is the host staging buffer rather than the caller's pointer. */
-        uint64_t remoteAddr = 0;
+        uint64_t remoteAddr;
 
-        BufEntry()                            = default;
+        BufEntry(HostBufPtr entryHostBuf, IbvMrPtr entryMr, size_t entrySize, bool entryIsDmabuf,
+                 uint64_t entryRemoteAddr) noexcept
+            : hostBuf(std::move(entryHostBuf)), mr(std::move(entryMr)), size(entrySize),
+              isDmabuf(entryIsDmabuf), remoteAddr(entryRemoteAddr)
+        {
+        }
         ~BufEntry()                           = default;
         BufEntry(const BufEntry &)            = delete;
         BufEntry &operator=(const BufEntry &) = delete;
@@ -110,10 +120,10 @@ public:
      * once per transfer and passed down. The entry stays valid until
      * devPtr is deregistered, which can't happen during a call that holds
      * the API lock. */
-    const BufEntry *find(const void *devPtr) const;
-    bool            isRegistered(const void *devPtr) const;
+    [[nodiscard]] const BufEntry *find(const void *devPtr) const;
+    [[nodiscard]] bool            isRegistered(const void *devPtr) const;
 
-    size_t size() const;
+    [[nodiscard]] size_t size() const;
 
 private:
     const Verbs                  *verbs_;

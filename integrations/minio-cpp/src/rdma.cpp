@@ -13,6 +13,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <hipobj.h>
@@ -89,7 +90,7 @@ namespace {
 
     // A response header's value, or std::nullopt if the response doesn't
     // have the header. GetFront() alone returns "" for both.
-    std::optional<std::string> headerValue(const ::minio::utils::Multimap &headers, const char *name)
+    std::optional<std::string> headerValue(const ::minio::utils::Multimap &headers, std::string_view name)
     {
         if (!headers.Contains(name)) {
             return std::nullopt;
@@ -144,8 +145,8 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     ::minio::utils::Multimap sign_headers;
     sign_headers.Add("Host", host);
     sign_headers.Add("x-amz-date", date.ToAmzDate());
-    sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
-    sign_headers.Add(kAmzRdmaToken, rdma_token);
+    sign_headers.Add("x-amz-content-sha256", std::string(kUnsignedPayload));
+    sign_headers.Add(std::string(kAmzRdmaToken), rdma_token);
     sign_headers.Add("Content-Type", "application/octet-stream");
     sign_headers.Add("Content-Length", "0");
 
@@ -158,7 +159,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     }
 
     ::minio::signer::SignV4S3(::minio::http::Method::kPut, url.path, region, sign_headers, query_params,
-                              creds.access_key, creds.secret_key, kUnsignedPayload, date);
+                              creds.access_key, creds.secret_key, std::string(kUnsignedPayload), date);
 
     url.query_string = query_params.ToQueryString();
 
@@ -227,15 +228,15 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     ::minio::utils::Multimap sign_headers;
     sign_headers.Add("Host", host);
     sign_headers.Add("x-amz-date", date.ToAmzDate());
-    sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
-    sign_headers.Add(kAmzRdmaToken, rdma_token);
+    sign_headers.Add("x-amz-content-sha256", std::string(kUnsignedPayload));
+    sign_headers.Add(std::string(kAmzRdmaToken), rdma_token);
 
     if (!creds.session_token.empty()) {
         sign_headers.Add("X-Amz-Security-Token", creds.session_token);
     }
 
     ::minio::signer::SignV4S3(::minio::http::Method::kGet, url.path, region, sign_headers, query_params,
-                              creds.access_key, creds.secret_key, kUnsignedPayload, date);
+                              creds.access_key, creds.secret_key, std::string(kUnsignedPayload), date);
 
     ::minio::http::Request req(::minio::http::Method::kGet, url);
     req.headers              = std::move(sign_headers);

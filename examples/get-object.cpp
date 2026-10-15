@@ -26,6 +26,8 @@
 #include "s3_curl_ops.h"
 #endif
 
+namespace {
+
 // Frees device memory allocated with hipMalloc()
 struct HipFreeDeleter {
     void operator()(void *ptr) const noexcept
@@ -96,7 +98,7 @@ private:
 };
 #endif
 
-static int
+int
 stubSendRequest(void *, const char *, size_t tokenLen)
 {
     fprintf(stderr,
@@ -106,7 +108,7 @@ stubSendRequest(void *, const char *, size_t tokenLen)
     return 0;
 }
 
-static int
+int
 stubRecvReply(void *, char *reply, size_t *replyLen)
 {
     // No real server is contacted in stub mode; reply "501" (not
@@ -124,7 +126,7 @@ stubRecvReply(void *, char *reply, size_t *replyLen)
 
 // Parses a decimal byte count, and returns 0 when the argument isn't one
 // or doesn't fit in a size_t
-static size_t
+size_t
 parseSize(const char *arg)
 {
     // strtoull() would skip leading whitespace and accept a sign, and it
@@ -140,6 +142,8 @@ parseSize(const char *arg)
     }
     return static_cast<size_t>(n);
 }
+
+} // namespace
 
 int
 main(int argc, char *argv[])

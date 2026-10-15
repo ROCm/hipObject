@@ -142,7 +142,7 @@ protected:
     /* Initializes the library with the fakes. The fake HIP runtime has no
      * GPU, so with a NIC hint, initialization opens the hinted NIC
      * directly. */
-    hipObjOpError_t init() const
+    [[nodiscard]] hipObjOpError_t init() const
     {
         return hipObjTest::initWithPlatform(makeConfig(), fakes_->platform()).opError;
     }

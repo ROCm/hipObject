@@ -46,7 +46,7 @@ struct ServeResult {
     bool responseSent    = false;
     int  err             = 0;
 
-    bool ok() const
+    [[nodiscard]] bool ok() const
     {
         return accepted && requestComplete && responseSent && err == 0;
     }
@@ -110,7 +110,7 @@ public:
     StubHttpServer &operator=(StubHttpServer &&)      = delete;
 
     // Usable right after construction; the value never changes.
-    const std::string &endpoint() const
+    [[nodiscard]] const std::string &endpoint() const
     {
         return endpoint_;
     }
@@ -124,7 +124,7 @@ public:
     }
 
     // Only valid after waitDone() has joined the worker.
-    const std::string &lastRequest() const
+    [[nodiscard]] const std::string &lastRequest() const
     {
         return request_;
     }

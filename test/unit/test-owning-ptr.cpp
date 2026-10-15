@@ -8,6 +8,8 @@
  * through anything but its own interface would fail these tests.
  */
 
+#include <memory>
+#include <type_traits>
 #include <utility>
 
 #include <gtest/gtest.h>
@@ -23,6 +25,20 @@
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
+
+/* A pointer can't be built without the interface its deleter releases
+ * through, either empty or from a raw pointer alone */
+template <typename Ptr>
+constexpr bool kNeedsDeleter =
+    !std::is_default_constructible_v<Ptr> && !std::is_constructible_v<Ptr, typename Ptr::pointer>;
+static_assert(kNeedsDeleter<hipObj::IbvContextPtr>);
+static_assert(kNeedsDeleter<hipObj::IbvPdPtr>);
+static_assert(kNeedsDeleter<hipObj::IbvCqPtr>);
+static_assert(kNeedsDeleter<hipObj::IbvQpPtr>);
+static_assert(kNeedsDeleter<hipObj::IbvMrPtr>);
+static_assert(kNeedsDeleter<hipObj::IbvDeviceListPtr>);
+static_assert(kNeedsDeleter<hipObj::HostBufPtr>);
+static_assert(kNeedsDeleter<hipObj::HipEventPtr>);
 
 /* Each owning verbs pointer releases its object through the Verbs it was
  * created with */
@@ -95,25 +111,29 @@ TEST(OwningPtrTest, HipPointersReleaseThroughTheirRuntime)
     EXPECT_EQ(device.log.eventDestroy, 1);
 }
 
-/* A pointer's deleter moves with its object, so moving one into a
- * default-constructed pointer, as the library does to publish what it
- * built, releases the object through the right Verbs */
+/* A pointer's deleter moves with its object, so moving one into another
+ * pointer releases the target's object through the target's Verbs, and
+ * the moved object through the Verbs it came from */
 TEST(OwningPtrTest, MovingMovesTheDeleter)
 {
-    hipObjTest::FakeDevice      device{};
-    const hipObjTest::FakeVerbs verbs(device);
+    hipObjTest::FakeDevice      first{};
+    const hipObjTest::FakeVerbs firstVerbs(first);
+    hipObjTest::FakeDevice      second{};
+    const hipObjTest::FakeVerbs secondVerbs(second);
     {
-        hipObj::IbvQpPtr target;
-        EXPECT_EQ(target.get_deleter().verbs, nullptr);
+        hipObj::IbvQpPtr target =
+            hipObj::own<hipObj::IbvQpPtr>(firstVerbs, firstVerbs.create_qp(nullptr, nullptr));
         {
-            hipObj::IbvQpPtr source = hipObj::own<hipObj::IbvQpPtr>(verbs, verbs.create_qp(nullptr, nullptr));
-            ASSERT_TRUE(source);
+            hipObj::IbvQpPtr source =
+                hipObj::own<hipObj::IbvQpPtr>(secondVerbs, secondVerbs.create_qp(nullptr, nullptr));
+            ASSERT_TRUE(target && source);
             target = std::move(source);
         }
-        EXPECT_EQ(target.get_deleter().verbs, &verbs);
-        EXPECT_EQ(device.log.destroyQp, 0);
+        EXPECT_EQ(first.log.destroyQp, 1);
+        EXPECT_EQ(target.get_deleter().verbs, &secondVerbs);
+        EXPECT_EQ(second.log.destroyQp, 0);
     }
-    EXPECT_EQ(device.log.destroyQp, 1);
+    EXPECT_EQ(second.log.destroyQp, 1);
 }
 
 /* own() of a null pointer is empty, and releases nothing */

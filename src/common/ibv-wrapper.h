@@ -57,18 +57,18 @@ public:
 
     /* True when libibverbs has ibv_reg_dmabuf_mr(), which rdma-core 34
      * added. Without it, reg_dmabuf_mr() fails with EOPNOTSUPP. */
-    virtual bool           supportsDmabuf() const                                                       = 0;
-    virtual struct ibv_mr *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova,
-                                         int fd, int access) const                                      = 0;
-    virtual int            dereg_mr(struct ibv_mr *mr) const                                            = 0;
-    virtual struct ibv_cq *create_cq(struct ibv_context *context, int cqe, void *cq_context,
-                                     struct ibv_comp_channel *channel, int comp_vector) const           = 0;
-    virtual int            destroy_cq(struct ibv_cq *cq) const                                          = 0;
-    virtual struct ibv_qp *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const    = 0;
-    virtual int            modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const  = 0;
-    virtual int            destroy_qp(struct ibv_qp *qp) const                                          = 0;
-    virtual int            poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const         = 0;
-    virtual int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const = 0;
+    [[nodiscard]] virtual bool supportsDmabuf() const                                                    = 0;
+    virtual struct ibv_mr     *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova,
+                                             int fd, int access) const                                   = 0;
+    virtual int                dereg_mr(struct ibv_mr *mr) const                                         = 0;
+    virtual struct ibv_cq     *create_cq(struct ibv_context *context, int cqe, void *cq_context,
+                                         struct ibv_comp_channel *channel, int comp_vector) const        = 0;
+    virtual int                destroy_cq(struct ibv_cq *cq) const                                       = 0;
+    virtual struct ibv_qp     *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const = 0;
+    virtual int modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const              = 0;
+    virtual int destroy_qp(struct ibv_qp *qp) const                                                      = 0;
+    virtual int poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const                     = 0;
+    virtual int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const  = 0;
 };
 
 /* libibverbs, through the functions loadLibibverbs() loads from it */
@@ -115,20 +115,20 @@ public:
                    struct ibv_port_attr *port_attr) const override;
     int query_gid(struct ibv_context *context, uint8_t port_num, int index,
                   union ibv_gid *gid) const override;
-    struct ibv_pd *alloc_pd(struct ibv_context *context) const override;
-    int            dealloc_pd(struct ibv_pd *pd) const override;
-    struct ibv_mr *reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const override;
-    bool           supportsDmabuf() const override;
-    struct ibv_mr *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
-                                 int access) const override;
-    int            dereg_mr(struct ibv_mr *mr) const override;
-    struct ibv_cq *create_cq(struct ibv_context *context, int cqe, void *cq_context,
-                             struct ibv_comp_channel *channel, int comp_vector) const override;
-    int            destroy_cq(struct ibv_cq *cq) const override;
-    struct ibv_qp *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const override;
-    int            modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const override;
-    int            destroy_qp(struct ibv_qp *qp) const override;
-    int            poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
+    struct ibv_pd     *alloc_pd(struct ibv_context *context) const override;
+    int                dealloc_pd(struct ibv_pd *pd) const override;
+    struct ibv_mr     *reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const override;
+    [[nodiscard]] bool supportsDmabuf() const override;
+    struct ibv_mr     *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                                     int access) const override;
+    int                dereg_mr(struct ibv_mr *mr) const override;
+    struct ibv_cq     *create_cq(struct ibv_context *context, int cqe, void *cq_context,
+                                 struct ibv_comp_channel *channel, int comp_vector) const override;
+    int                destroy_cq(struct ibv_cq *cq) const override;
+    struct ibv_qp     *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const override;
+    int                modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const override;
+    int                destroy_qp(struct ibv_qp *qp) const override;
+    int                poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
     int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const override;
 
 private:

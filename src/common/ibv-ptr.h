@@ -13,10 +13,10 @@
  * deleter only reads its own pointer, so pointers can be destroyed on
  * different threads whenever their Verbs can be called from them.
  *
- * A default-constructed deleter has no Verbs, so a default-constructed
- * pointer can hold nothing. Create a pointer that owns an object with
- * own(), never with Ptr(raw) or ptr.reset(raw), which would keep a
- * deleter with no Verbs to release the object through.
+ * A deleter can't be built without its Verbs, so neither can a pointer:
+ * Ptr() and Ptr(raw) don't compile. Create a pointer with own(), which
+ * may own null, and never with ptr.reset(raw), which would release raw
+ * through the Verbs ptr already holds, even when raw came from another.
  *
  * Never assign nullptr to one of these pointers after destroying the
  * object by hand: the assignment runs the deleter and destroys it a
@@ -39,32 +39,50 @@ class Verbs;
 /* The deleters are defined in ibv-wrapper.cpp so this header doesn't
  * pull in the verbs seam. */
 struct IbvContextDeleter {
-    const Verbs *verbs = nullptr;
+    explicit IbvContextDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+    {
+    }
+    const Verbs *verbs;
     void         operator()(struct ibv_context *ctx) const noexcept;
 };
 
 struct IbvPdDeleter {
-    const Verbs *verbs = nullptr;
+    explicit IbvPdDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+    {
+    }
+    const Verbs *verbs;
     void         operator()(struct ibv_pd *pd) const noexcept;
 };
 
 struct IbvCqDeleter {
-    const Verbs *verbs = nullptr;
+    explicit IbvCqDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+    {
+    }
+    const Verbs *verbs;
     void         operator()(struct ibv_cq *cq) const noexcept;
 };
 
 struct IbvQpDeleter {
-    const Verbs *verbs = nullptr;
+    explicit IbvQpDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+    {
+    }
+    const Verbs *verbs;
     void         operator()(struct ibv_qp *qp) const noexcept;
 };
 
 struct IbvMrDeleter {
-    const Verbs *verbs = nullptr;
+    explicit IbvMrDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+    {
+    }
+    const Verbs *verbs;
     void         operator()(struct ibv_mr *mr) const noexcept;
 };
 
 struct IbvDeviceListDeleter {
-    const Verbs *verbs = nullptr;
+    explicit IbvDeviceListDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+    {
+    }
+    const Verbs *verbs;
     void         operator()(struct ibv_device **list) const noexcept;
 };
 
@@ -96,7 +114,7 @@ template <typename Ptr, typename Dependency>
 Ptr
 own(const Dependency &dependency, typename Ptr::pointer raw) noexcept
 {
-    return Ptr(raw, typename Ptr::deleter_type{&dependency});
+    return Ptr(raw, typename Ptr::deleter_type(dependency));
 }
 
 /* Gives up ownership without running the deleter, for an object that

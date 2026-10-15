@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <exception>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -39,227 +38,216 @@
 
 namespace hipObj {
 
-static hipObjError_t
-handleException()
-{
-    try {
-        throw;
-    }
-    catch (const std::exception &) {
-        return {hipObjInternalError, 0};
-    }
-    catch (...) {
-        return {hipObjInternalError, 0};
-    }
-}
+namespace {
 
-/* Returned by a locked entry point when a callback calls it, where taking
- * the API lock again would deadlock (see ApiGuard) */
-constexpr hipObjError_t kReentryError = {hipObjInvalidValue, 0};
+    /* Returned by a public function when it catches an exception, whatever
+     * its type */
+    constexpr hipObjError_t kExceptionError = {hipObjInternalError, 0};
 
-/* True when [offset, offset + size) lies inside a registration of regSize
- * bytes. Compares without computing offset + size, which could wrap. */
-static bool
-rangeInRegistration(off_t offset, size_t size, size_t regSize)
-{
-    if (offset < 0 || std::cmp_greater(offset, regSize)) {
-        return false;
-    }
-    return size <= regSize - static_cast<size_t>(offset);
-}
+    /* Returned by a locked entry point when a callback calls it, where taking
+     * the API lock again would deadlock (see ApiGuard) */
+    constexpr hipObjError_t kReentryError = {hipObjInvalidValue, 0};
 
-/* Checks the arguments to a call that registers [ptr, ptr + size) */
-static hipObjError_t
-checkRegistrationArgs(const void *ptr, size_t size)
-{
-    if (!ptr || size == 0) {
-        return {hipObjInvalidValue, 0};
-    }
-    if (size > MAX_MR_SIZE) {
-        return {hipObjSizeTooLarge, 0};
-    }
-    /* The end of the buffer, ptr + size, must not wrap */
-    if (size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr)) {
-        return {hipObjInvalidValue, 0};
-    }
-    return {hipObjSuccess, 0};
-}
-
-/* Checks the arguments to a call that uses [offset, offset + size) of the
- * buffer registered at devPtr. buf is the instance's buffers.find(devPtr). */
-static hipObjError_t
-checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size, off_t offset)
-{
-    if (!devPtr || size == 0 || offset < 0) {
-        return {hipObjInvalidValue, 0};
-    }
-    if (!buf) {
-        return {hipObjBufNotRegistered, 0};
-    }
-    if (!rangeInRegistration(offset, size, buf->size)) {
-        return {hipObjInvalidValue, 0};
-    }
-    return {hipObjSuccess, 0};
-}
-
-static std::optional<RdmaToken>
-buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf, size_t size, off_t offset)
-{
-    if (!buf.mr) {
-        return std::nullopt;
-    }
-    if (!rangeInRegistration(offset, size, buf.size)) {
-        return std::nullopt;
-    }
-    RdmaToken token;
-    token.transport  = TransportType::RC;
-    token.qpNum      = conn.qp()->qp_num;
-    token.gid        = toGid(conn.device().localGid());
-    token.rkey       = buf.mr->rkey;
-    token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
-    token.length     = size;
-    token.portNum    = conn.device().portNum();
-    token.lid        = 0;
-    return token;
-}
-
-[[nodiscard]] static bool
-finishTransferAfterReply(const HipRuntime &runtime, RcConnection &conn, std::string_view reply,
-                         bool requiresDeviceSync, std::chrono::milliseconds pollTimeout)
-{
-    if (const auto peerToken = parsePeerTokenFromReply(reply)) {
-        if (!connectRcPeer(conn, *peerToken)) {
+    /* True when [offset, offset + size) lies inside a registration of regSize
+     * bytes. Compares without computing offset + size, which could wrap. */
+    bool rangeInRegistration(off_t offset, size_t size, size_t regSize)
+    {
+        if (offset < 0 || std::cmp_greater(offset, regSize)) {
             return false;
         }
-    }
-    // A poll timeout or error completion is a failure: the transfer outcome
-    // is unknown. With the current one-sided protocol the responder side
-    // may not observe a completion at all (see issue #22), so this check
-    // reports "no evidence of failure" rather than "transfer verified".
-    if (!pollCompletion(conn, std::nullopt, pollTimeout)) {
-        return false;
-    }
-    if (!requiresDeviceSync) {
-        return true;
-    }
-    return runtime.deviceSynchronize() == hipSuccess;
-}
-
-/* hipMemcpy with a deadline (see Options::stageTimeout). Async copy plus a
- * recorded event polled to a wall-clock bound: on timeout the event and the
- * copy are abandoned deliberately -- the copy owns the staging buffer and
- * the stream, and there is no safe way to reclaim either while the DMA may
- * still land. The caller gets an error instead of a hang, which is the
- * whole point. */
-static hipObjError_t
-stageCopyWithDeadline(const HipRuntime &runtime, void *dst, const void *src, size_t size, hipMemcpyKind kind,
-                      std::chrono::milliseconds timeout)
-{
-    hipEvent_t rawDone = nullptr;
-    if (runtime.eventCreate(&rawDone) != hipSuccess) {
-        return {hipObjInternalError, 0};
-    }
-    HipEventPtr done = own<HipEventPtr>(runtime, rawDone);
-
-    hipError_t err = runtime.memcpyAsync(dst, src, size, kind, nullptr);
-    if (err == hipSuccess) {
-        err = runtime.eventRecord(done.get(), nullptr);
-    }
-    if (err != hipSuccess) {
-        return {hipObjInternalError, 0};
+        return size <= regSize - static_cast<size_t>(offset);
     }
 
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    for (;;) {
-        hipError_t q = runtime.eventQuery(done.get());
-        if (q == hipSuccess) {
+    /* Checks the arguments to a call that registers [ptr, ptr + size) */
+    hipObjError_t checkRegistrationArgs(const void *ptr, size_t size)
+    {
+        if (!ptr || size == 0) {
+            return {hipObjInvalidValue, 0};
+        }
+        if (size > MAX_MR_SIZE) {
+            return {hipObjSizeTooLarge, 0};
+        }
+        /* The end of the buffer, ptr + size, must not wrap */
+        if (size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr)) {
+            return {hipObjInvalidValue, 0};
+        }
+        return {hipObjSuccess, 0};
+    }
+
+    /* Checks the arguments to a call that uses [offset, offset + size) of the
+     * buffer registered at devPtr. buf is the instance's buffers.find(devPtr). */
+    hipObjError_t checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size,
+                                  off_t offset)
+    {
+        if (!devPtr || size == 0 || offset < 0) {
+            return {hipObjInvalidValue, 0};
+        }
+        if (!buf) {
+            return {hipObjBufNotRegistered, 0};
+        }
+        if (!rangeInRegistration(offset, size, buf->size)) {
+            return {hipObjInvalidValue, 0};
+        }
+        return {hipObjSuccess, 0};
+    }
+
+    std::optional<RdmaToken> buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf,
+                                            size_t size, off_t offset)
+    {
+        if (!buf.mr) {
+            return std::nullopt;
+        }
+        if (!rangeInRegistration(offset, size, buf.size)) {
+            return std::nullopt;
+        }
+        return RdmaToken{
+            .qpNum      = conn.qp()->qp_num,
+            .gid        = toGid(conn.device().localGid()),
+            .rkey       = buf.mr->rkey,
+            .remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset),
+            .length     = size,
+            .transport  = TransportType::RC,
+            .portNum    = conn.device().portNum(),
+            .lid        = 0,
+        };
+    }
+
+    [[nodiscard]] bool finishTransferAfterReply(const HipRuntime &runtime, RcConnection &conn,
+                                                std::string_view reply, bool requiresDeviceSync,
+                                                std::chrono::milliseconds pollTimeout)
+    {
+        if (const auto peerToken = parsePeerTokenFromReply(reply)) {
+            if (!connectRcPeer(conn, *peerToken)) {
+                return false;
+            }
+        }
+        // A poll timeout or error completion is a failure: the transfer outcome
+        // is unknown. With the current one-sided protocol the responder side
+        // may not observe a completion at all (see issue #22), so this check
+        // reports "no evidence of failure" rather than "transfer verified".
+        if (!pollCompletion(conn, std::nullopt, pollTimeout)) {
+            return false;
+        }
+        if (!requiresDeviceSync) {
+            return true;
+        }
+        return runtime.deviceSynchronize() == hipSuccess;
+    }
+
+    /* hipMemcpy with a deadline (see Options::stageTimeout). Async copy plus a
+     * recorded event polled to a wall-clock bound: on timeout the event and the
+     * copy are abandoned deliberately -- the copy owns the staging buffer and
+     * the stream, and there is no safe way to reclaim either while the DMA may
+     * still land. The caller gets an error instead of a hang, which is the
+     * whole point. */
+    hipObjError_t stageCopyWithDeadline(const HipRuntime &runtime, void *dst, const void *src, size_t size,
+                                        hipMemcpyKind kind, std::chrono::milliseconds timeout)
+    {
+        hipEvent_t rawDone = nullptr;
+        if (runtime.eventCreate(&rawDone) != hipSuccess) {
+            return {hipObjInternalError, 0};
+        }
+        HipEventPtr done = own<HipEventPtr>(runtime, rawDone);
+
+        hipError_t err = runtime.memcpyAsync(dst, src, size, kind, nullptr);
+        if (err == hipSuccess) {
+            err = runtime.eventRecord(done.get(), nullptr);
+        }
+        if (err != hipSuccess) {
+            return {hipObjInternalError, 0};
+        }
+
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        for (;;) {
+            hipError_t q = runtime.eventQuery(done.get());
+            if (q == hipSuccess) {
+                return {hipObjSuccess, 0};
+            }
+            if (q != hipErrorNotReady) {
+                return {hipObjInternalError, 0};
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                /* The copy may still signal the event, so it's leaked rather
+                 * than destroyed */
+                dropOwnership(done);
+                const int64_t     timeoutMs = timeout.count();
+                const std::string direction =
+                    kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";
+                fprintf(stderr,
+                        "hipObj: staging %s copy of %zu bytes did not complete within "
+                        "%" PRId64 " ms; abandoning it. The GPU never signalled completion -- "
+                        "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
+                        direction.c_str(), size, timeoutMs);
+                return {hipObjInternalError, 0};
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    /* Copies [offset, offset + size) of a host-staged registration from its
+     * staging buffer to the device memory at devPtr */
+    hipObjError_t stageToDevice(const HipRuntime &runtime, void *devPtr, const BufferMap::BufEntry &buf,
+                                size_t size, off_t offset, std::chrono::milliseconds timeout)
+    {
+        if (!buf.hostBuf) {
+            /* the NIC writes the caller's memory */
             return {hipObjSuccess, 0};
         }
-        if (q != hipErrorNotReady) {
-            return {hipObjInternalError, 0};
+        if (!rangeInRegistration(offset, size, buf.size)) {
+            return {hipObjInvalidValue, 0};
         }
-        if (std::chrono::steady_clock::now() >= deadline) {
-            /* The copy may still signal the event, so it's leaked rather
-             * than destroyed */
-            dropOwnership(done);
-            const int64_t     timeoutMs = timeout.count();
-            const std::string direction = kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";
-            fprintf(stderr,
-                    "hipObj: staging %s copy of %zu bytes did not complete within "
-                    "%" PRId64 " ms; abandoning it. The GPU never signalled completion -- "
-                    "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
-                    direction.c_str(), size, timeoutMs);
-            return {hipObjInternalError, 0};
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        /* The device memory is only viewed for its bounds, never accessed here */
+        const auto host  = spanFromPointer(static_cast<const std::byte *>(buf.hostBuf.get()), buf.size);
+        const auto dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
+        const auto start = static_cast<size_t>(offset);
+        return stageCopyWithDeadline(runtime, dev.subspan(start, size).data(),
+                                     host.subspan(start, size).data(), size, hipMemcpyHostToDevice, timeout);
     }
-}
 
-/* Copies [offset, offset + size) of a host-staged registration from its
- * staging buffer to the device memory at devPtr */
-static hipObjError_t
-stageToDevice(const HipRuntime &runtime, void *devPtr, const BufferMap::BufEntry &buf, size_t size,
-              off_t offset, std::chrono::milliseconds timeout)
-{
-    if (!buf.hostBuf) {
-        /* the NIC writes the caller's memory */
+    /* Copies [offset, offset + size) of a host-staged registration from the
+     * device memory at devPtr to its staging buffer */
+    hipObjError_t stageToHost(const HipRuntime &runtime, const void *devPtr, const BufferMap::BufEntry &buf,
+                              size_t size, off_t offset, std::chrono::milliseconds timeout)
+    {
+        if (!buf.hostBuf) {
+            /* the NIC reads the caller's memory */
+            return {hipObjSuccess, 0};
+        }
+        if (!rangeInRegistration(offset, size, buf.size)) {
+            return {hipObjInvalidValue, 0};
+        }
+        /* The device memory is only viewed for its bounds, never accessed here */
+        const auto host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
+        const auto dev   = spanFromPointer(static_cast<const std::byte *>(devPtr), buf.size);
+        const auto start = static_cast<size_t>(offset);
+        return stageCopyWithDeadline(runtime, host.subspan(start, size).data(),
+                                     dev.subspan(start, size).data(), size, hipMemcpyDeviceToHost, timeout);
+    }
+
+    hipObjError_t runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
+                                  off_t offset, const hipObjOps_t &ops, void *ctx)
+    {
+        const auto token = buildRdmaToken(instance.conn, buf, size, offset);
+        if (!token) {
+            return {hipObjRdmaError, 0};
+        }
+        const RdmaTokenHex encoded = encodeRdmaTokenHex(*token);
+        if (!injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>()))) {
+            return {hipObjS3Error, 0};
+        }
+        std::array<char, 512> replyBuf{};
+        const auto            reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
+        if (!reply || reply->status != RdmaReplyStatus::Success) {
+            return {hipObjS3Error, 0};
+        }
+        if (!finishTransferAfterReply(instance.platform->hip(), instance.conn, reply->text, buf.isDmabuf,
+                                      instance.options.pollTimeout)) {
+            return {hipObjRdmaError, 0};
+        }
         return {hipObjSuccess, 0};
     }
-    if (!rangeInRegistration(offset, size, buf.size)) {
-        return {hipObjInvalidValue, 0};
-    }
-    /* The device memory is only viewed for its bounds, never accessed here */
-    const auto host  = spanFromPointer(static_cast<const std::byte *>(buf.hostBuf.get()), buf.size);
-    const auto dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
-    const auto start = static_cast<size_t>(offset);
-    return stageCopyWithDeadline(runtime, dev.subspan(start, size).data(), host.subspan(start, size).data(),
-                                 size, hipMemcpyHostToDevice, timeout);
-}
 
-/* Copies [offset, offset + size) of a host-staged registration from the
- * device memory at devPtr to its staging buffer */
-static hipObjError_t
-stageToHost(const HipRuntime &runtime, const void *devPtr, const BufferMap::BufEntry &buf, size_t size,
-            off_t offset, std::chrono::milliseconds timeout)
-{
-    if (!buf.hostBuf) {
-        /* the NIC reads the caller's memory */
-        return {hipObjSuccess, 0};
-    }
-    if (!rangeInRegistration(offset, size, buf.size)) {
-        return {hipObjInvalidValue, 0};
-    }
-    /* The device memory is only viewed for its bounds, never accessed here */
-    const auto host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
-    const auto dev   = spanFromPointer(static_cast<const std::byte *>(devPtr), buf.size);
-    const auto start = static_cast<size_t>(offset);
-    return stageCopyWithDeadline(runtime, host.subspan(start, size).data(), dev.subspan(start, size).data(),
-                                 size, hipMemcpyDeviceToHost, timeout);
-}
-
-static hipObjError_t
-runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size, off_t offset,
-                const hipObjOps_t &ops, void *ctx)
-{
-    const auto token = buildRdmaToken(instance.conn, buf, size, offset);
-    if (!token) {
-        return {hipObjRdmaError, 0};
-    }
-    const RdmaTokenHex encoded = encodeRdmaTokenHex(*token);
-    if (!injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>()))) {
-        return {hipObjS3Error, 0};
-    }
-    std::array<char, 512> replyBuf{};
-    const auto            reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
-    if (!reply || reply->status != RdmaReplyStatus::Success) {
-        return {hipObjS3Error, 0};
-    }
-    if (!finishTransferAfterReply(instance.platform->hip(), instance.conn, reply->text, buf.isDmabuf,
-                                  instance.options.pollTimeout)) {
-        return {hipObjRdmaError, 0};
-    }
-    return {hipObjSuccess, 0};
-}
+} // namespace
 
 } // namespace hipObj
 
@@ -328,7 +316,7 @@ try {
     }));
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -342,7 +330,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -372,7 +360,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -399,7 +387,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -425,7 +413,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -456,7 +444,7 @@ try {
                                  instance->options.stageTimeout);
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -487,7 +475,7 @@ try {
     return hipObj::runRdmaTransfer(*instance, *buf, size, offset, *ops, ctx);
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -517,7 +505,7 @@ try {
                                instance->options.stageTimeout);
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -553,7 +541,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -566,7 +554,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -584,7 +572,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 hipObjError_t
@@ -601,7 +589,7 @@ try {
     return {hipObjSuccess, 0};
 }
 catch (...) {
-    return hipObj::handleException();
+    return hipObj::kExceptionError;
 }
 
 const char *

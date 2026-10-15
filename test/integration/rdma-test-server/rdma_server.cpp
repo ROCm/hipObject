@@ -45,16 +45,16 @@ namespace {
 
     hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, struct ibv_mr *mr, size_t size)
     {
-        hipObj::RdmaToken token{};
-        token.transport  = hipObj::TransportType::RC;
-        token.qpNum      = conn.qp()->qp_num;
-        token.gid        = hipObj::toGid(conn.device().localGid());
-        token.rkey       = mr->rkey;
-        token.remoteAddr = reinterpret_cast<uint64_t>(mr->addr);
-        token.length     = size;
-        token.portNum    = conn.device().portNum();
-        token.lid        = 0;
-        return token;
+        return hipObj::RdmaToken{
+            .qpNum      = conn.qp()->qp_num,
+            .gid        = hipObj::toGid(conn.device().localGid()),
+            .rkey       = mr->rkey,
+            .remoteAddr = reinterpret_cast<uint64_t>(mr->addr),
+            .length     = size,
+            .transport  = hipObj::TransportType::RC,
+            .portNum    = conn.device().portNum(),
+            .lid        = 0,
+        };
     }
 
     [[nodiscard]] bool postRdmaWrite(hipObj::RcConnection &conn, struct ibv_mr *localMr, size_t size,
