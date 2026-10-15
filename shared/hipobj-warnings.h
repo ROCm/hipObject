@@ -40,7 +40,7 @@
 #endif
 /* clang-format on */
 
-#if defined(__clang__)
+#ifdef __clang__
 #define HIPOBJ_WARN_NO_EXIT_DTOR_OFF HIPOBJ_WARN_OFF("exit-time-destructors")
 #define HIPOBJ_WARN_NO_EXIT_DTOR_ON  HIPOBJ_WARN_ON("exit-time-destructors")
 #else
@@ -48,7 +48,7 @@
 #define HIPOBJ_WARN_NO_EXIT_DTOR_ON
 #endif
 
-#if defined(__clang__)
+#ifdef __clang__
 #define HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF HIPOBJ_WARN_OFF("global-constructors")
 #define HIPOBJ_WARN_NO_GLOBAL_CTOR_ON  HIPOBJ_WARN_ON("global-constructors")
 #else
@@ -58,7 +58,7 @@
 
 /* Also turns off the -Wunsafe-buffer-usage-in-* warnings, which are in
  * its group */
-#if defined(__clang__)
+#ifdef __clang__
 #define HIPOBJ_WARN_UNSAFE_BUFFER_OFF HIPOBJ_WARN_OFF("unsafe-buffer-usage")
 #define HIPOBJ_WARN_UNSAFE_BUFFER_ON  HIPOBJ_WARN_ON("unsafe-buffer-usage")
 #else

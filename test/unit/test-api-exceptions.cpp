@@ -64,7 +64,7 @@ class ThrowingGetDeviceHip : public hipObjTest::FakeHip {
 public:
     using FakeHip::FakeHip;
 
-    hipError_t getDevice(int *) const override
+    hipError_t getDevice(int * /*device*/) const override
     {
         throwIt();
     }
@@ -75,7 +75,8 @@ class ThrowingMemcpyHip : public hipObjTest::FakeHip {
 public:
     using FakeHip::FakeHip;
 
-    hipError_t memcpyAsync(void *, const void *, size_t, hipMemcpyKind, hipStream_t) const override
+    hipError_t memcpyAsync(void * /*dst*/, const void * /*src*/, size_t /*size*/, hipMemcpyKind /*kind*/,
+                           hipStream_t /*stream*/) const override
     {
         throwIt();
     }
@@ -86,7 +87,8 @@ class ThrowingCreateQpVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    struct ibv_qp *create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const override
+    struct ibv_qp *create_qp(struct ibv_pd * /*pd*/,
+                             struct ibv_qp_init_attr * /*qp_init_attr*/) const override
     {
         throwIt();
     }
@@ -97,20 +99,21 @@ class ThrowingRegMrVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    struct ibv_mr *reg_mr(struct ibv_pd *, void *, size_t, int) const override
+    struct ibv_mr *reg_mr(struct ibv_pd * /*pd*/, void * /*addr*/, size_t /*length*/,
+                          int /*access*/) const override
     {
         throwIt();
     }
 };
 
 int
-throwingSendRequest(void *, const char *, size_t)
+throwingSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
 {
     throwIt();
 }
 
 int
-throwingRecvReply(void *, char *, size_t *)
+throwingRecvReply(void * /*ctx*/, char * /*reply*/, size_t * /*replyLen*/)
 {
     throwIt();
 }

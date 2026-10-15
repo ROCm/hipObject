@@ -98,18 +98,9 @@ Checks:
   - -misc-const-correctness  # TODO(183)
   - -misc-non-private-member-variables-in-classes  # TODO(56)
   - -cppcoreguidelines-non-private-member-variables-in-classes  # TODO: the same check
-  - -readability-braces-around-statements  # TODO(50)
-  - -readability-convert-member-functions-to-static  # TODO(3)
   - -readability-function-cognitive-complexity  # TODO(14)
-  - -readability-implicit-bool-conversion  # TODO(64)
   - -readability-magic-numbers  # TODO(289)
   - -cppcoreguidelines-avoid-magic-numbers  # TODO: the same check
-  - -readability-math-missing-parentheses  # TODO(3)
-  - -readability-named-parameter  # TODO(50)
-  - -readability-redundant-parentheses  # TODO(6)
-  - -readability-trailing-comma  # TODO(7)
-  - -readability-use-concise-preprocessor-directives  # TODO(9)
-  - -readability-use-std-min-max  # TODO(1)
 WarningsAsErrors: '*'
 
 CheckOptions:
@@ -122,6 +113,16 @@ CheckOptions:
   # changes to the environment, and its dlerror() keeps per-thread state.
   # Revisit this if hipObject is built with another C library.
   concurrency-mt-unsafe.FunctionSet: glibc
+  # The default, Remove, mistakes the comma after an empty {} argument for
+  # a trailing comma, as in {a, b, {}, c}, and its fix doesn't compile.
+  # Multi-line lists still need a trailing comma, which also keeps
+  # clang-format from packing several elements onto a line
+  readability-trailing-comma.SingleLineCommaPolicy: Ignore
+  # curl.h defines these as macros that expand to themselves, which trips
+  # Clang's -Wdisabled-macro-expansion, so the examples parenthesize the
+  # names to call the functions directly. std::max and std::min are the
+  # default
+  readability-redundant-parentheses.AllowedDecls: 'std::max;std::min;curl_easy_getinfo;curl_easy_setopt'
 
 # Report problems in every header that isn't a system header, except:
 #   - Third-party code that FetchContent pulls into the build directory

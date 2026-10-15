@@ -20,7 +20,7 @@
 
 #include "hipobj.h"
 
-#if defined(HIPOBJ_HAVE_CURL)
+#ifdef HIPOBJ_HAVE_CURL
 #include <curl/curl.h>
 
 #include "s3_curl_ops.h"
@@ -71,7 +71,7 @@ private:
     void *devPtr_;
 };
 
-#if defined(HIPOBJ_HAVE_CURL)
+#ifdef HIPOBJ_HAVE_CURL
 // Initializes libcurl for as long as it's in scope, when asked to
 class CurlGlobal {
 public:
@@ -99,7 +99,7 @@ private:
 #endif
 
 int
-stubSendRequest(void *, const char *, size_t tokenLen)
+stubSendRequest(void * /*ctx*/, const char * /*token*/, size_t tokenLen)
 {
     fprintf(stderr,
             "[put-object] would send RDMA token "
@@ -109,7 +109,7 @@ stubSendRequest(void *, const char *, size_t tokenLen)
 }
 
 int
-stubRecvReply(void *, char *reply, size_t *replyLen)
+stubRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 {
     // No real server is contacted in stub mode; reply "501" (not
     // implemented) so the transfer is reported as unsupported rather
@@ -208,7 +208,7 @@ main(int argc, char *argv[])
 
     hipObjOps_t ops;
     void       *opsCtx = nullptr;
-#if defined(HIPOBJ_HAVE_CURL)
+#ifdef HIPOBJ_HAVE_CURL
     CurlGlobal curl(live);
     if (live && !curl.ok()) {
         fprintf(stderr, "curl_global_init failed\n");

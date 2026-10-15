@@ -88,24 +88,25 @@ FakeVerbs::get_device_list(int *num_devices) const
     if (device_->fail.getDeviceList) {
         return nullptr;
     }
-    if (num_devices) {
+    if (num_devices != nullptr) {
         *num_devices = 1;
     }
     /* Local, so it's initialized on first use rather than by a global
      * constructor */
     static std::array<struct ibv_device *, 2> devices = {
-        {hipObj::addressToPointer<struct ibv_device *>(0x1), nullptr}};
+        {hipObj::addressToPointer<struct ibv_device *>(0x1), nullptr},
+    };
     return devices.data();
 }
 
 void
-FakeVerbs::free_device_list(struct ibv_device **) const
+FakeVerbs::free_device_list(struct ibv_device ** /*list*/) const
 {
     ++device_->log.freeDeviceList;
 }
 
 struct ibv_context *
-FakeVerbs::open_device(struct ibv_device *) const
+FakeVerbs::open_device(struct ibv_device * /*device*/) const
 {
     if (device_->fail.openDevice) {
         return nullptr;
@@ -115,20 +116,20 @@ FakeVerbs::open_device(struct ibv_device *) const
 }
 
 int
-FakeVerbs::close_device(struct ibv_context *) const
+FakeVerbs::close_device(struct ibv_context * /*context*/) const
 {
     ++device_->log.closeDevice;
     return 0;
 }
 
 const char *
-FakeVerbs::get_device_name(struct ibv_device *) const
+FakeVerbs::get_device_name(struct ibv_device * /*device*/) const
 {
     return "mlx5_0";
 }
 
 int
-FakeVerbs::query_device(struct ibv_context *, struct ibv_device_attr *attr) const
+FakeVerbs::query_device(struct ibv_context * /*context*/, struct ibv_device_attr *attr) const
 {
     ++device_->log.queryDevice;
     if (device_->fail.queryDevice) {
@@ -141,31 +142,33 @@ FakeVerbs::query_device(struct ibv_context *, struct ibv_device_attr *attr) cons
 
 /* An empty GID table, so GID selection never looks at the device */
 int
-FakeVerbs::query_port(struct ibv_context *, uint8_t, struct ibv_port_attr *attr) const
+FakeVerbs::query_port(struct ibv_context * /*context*/, uint8_t /*port_num*/,
+                      struct ibv_port_attr *attr) const
 {
     if (device_->fail.queryPort) {
         return -1;
     }
-    if (attr) {
+    if (attr != nullptr) {
         hipObj::zeroObject(*attr);
     }
     return 0;
 }
 
 int
-FakeVerbs::query_gid(struct ibv_context *, uint8_t, int, union ibv_gid *gid) const
+FakeVerbs::query_gid(struct ibv_context * /*context*/, uint8_t /*port_num*/, int /*index*/,
+                     union ibv_gid *gid) const
 {
     if (device_->fail.queryGid) {
         return -1;
     }
-    if (gid) {
+    if (gid != nullptr) {
         hipObj::zeroObject(*gid);
     }
     return 0;
 }
 
 struct ibv_pd *
-FakeVerbs::alloc_pd(struct ibv_context *) const
+FakeVerbs::alloc_pd(struct ibv_context * /*context*/) const
 {
     if (device_->fail.allocPd) {
         return nullptr;
@@ -175,14 +178,14 @@ FakeVerbs::alloc_pd(struct ibv_context *) const
 }
 
 int
-FakeVerbs::dealloc_pd(struct ibv_pd *) const
+FakeVerbs::dealloc_pd(struct ibv_pd * /*pd*/) const
 {
     ++device_->log.deallocPd;
     return 0;
 }
 
 struct ibv_mr *
-FakeVerbs::reg_mr(struct ibv_pd *, void *addr, size_t, int access) const
+FakeVerbs::reg_mr(struct ibv_pd * /*pd*/, void *addr, size_t /*length*/, int access) const
 {
     ++device_->log.registerMr;
     device_->log.mrAccess = access;
@@ -190,7 +193,7 @@ FakeVerbs::reg_mr(struct ibv_pd *, void *addr, size_t, int access) const
         return nullptr;
     }
     auto *mr = static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
-    if (mr) {
+    if (mr != nullptr) {
         mr->addr = addr;
         mr->rkey = 0x1234;
     }
@@ -204,7 +207,8 @@ FakeVerbs::supportsDmabuf() const
 }
 
 struct ibv_mr *
-FakeVerbs::reg_dmabuf_mr(struct ibv_pd *, uint64_t, size_t, uint64_t, int, int) const
+FakeVerbs::reg_dmabuf_mr(struct ibv_pd * /*pd*/, uint64_t /*offset*/, size_t /*length*/, uint64_t /*iova*/,
+                         int /*fd*/, int /*access*/) const
 {
     errno = EOPNOTSUPP;
     return nullptr;
@@ -219,13 +223,14 @@ FakeVerbs::dereg_mr(struct ibv_mr *mr) const
 }
 
 struct ibv_cq *
-FakeVerbs::create_cq(struct ibv_context *, int, void *, struct ibv_comp_channel *, int) const
+FakeVerbs::create_cq(struct ibv_context * /*context*/, int /*cqe*/, void * /*cq_context*/,
+                     struct ibv_comp_channel * /*channel*/, int /*comp_vector*/) const
 {
     if (device_->fail.createCq) {
         return nullptr;
     }
     auto *cq = static_cast<struct ibv_cq *>(std::calloc(1, sizeof(struct ibv_cq)));
-    if (cq) {
+    if (cq != nullptr) {
         ++device_->log.createCq;
     }
     return cq;
@@ -240,13 +245,13 @@ FakeVerbs::destroy_cq(struct ibv_cq *cq) const
 }
 
 struct ibv_qp *
-FakeVerbs::create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const
+FakeVerbs::create_qp(struct ibv_pd * /*pd*/, struct ibv_qp_init_attr * /*qp_init_attr*/) const
 {
     if (device_->fail.createQp) {
         return nullptr;
     }
     auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
-    if (qp) {
+    if (qp != nullptr) {
         ++device_->log.createQp;
         qp->qp_num = device_->nextQpNum++;
     }
@@ -254,7 +259,7 @@ FakeVerbs::create_qp(struct ibv_pd *, struct ibv_qp_init_attr *) const
 }
 
 int
-FakeVerbs::modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask) const
+FakeVerbs::modify_qp(struct ibv_qp * /*qp*/, struct ibv_qp_attr *attr, int mask) const
 {
     /* Each call records into its own element */
     const size_t call = device_->modifyQpCount++;
@@ -273,7 +278,7 @@ FakeVerbs::destroy_qp(struct ibv_qp *qp) const
 }
 
 int
-FakeVerbs::poll_cq(struct ibv_cq *, int, struct ibv_wc *wc) const
+FakeVerbs::poll_cq(struct ibv_cq * /*cq*/, int /*num_entries*/, struct ibv_wc *wc) const
 {
     if (device_->pollResult <= 0) {
         return device_->pollResult;
@@ -285,7 +290,8 @@ FakeVerbs::poll_cq(struct ibv_cq *, int, struct ibv_wc *wc) const
 }
 
 int
-FakeVerbs::post_send(struct ibv_qp *, struct ibv_send_wr *, struct ibv_send_wr **) const
+FakeVerbs::post_send(struct ibv_qp * /*qp*/, struct ibv_send_wr * /*wr*/,
+                     struct ibv_send_wr ** /*bad_wr*/) const
 {
     ++device_->log.postSend;
     return 0;
@@ -311,7 +317,7 @@ FakeHip::getDeviceCount(int *count) const
 }
 
 hipError_t
-FakeHip::deviceGetPCIBusId(char *pciBusId, int len, int) const
+FakeHip::deviceGetPCIBusId(char *pciBusId, int len, int /*device*/) const
 {
     const std::string_view busId = device_->gpuBusId;
     if (busId.empty()) {
@@ -327,7 +333,7 @@ FakeHip::deviceGetPCIBusId(char *pciBusId, int len, int) const
 }
 
 hipError_t
-FakeHip::hostMalloc(void **ptr, size_t size, unsigned int) const
+FakeHip::hostMalloc(void **ptr, size_t size, unsigned int /*flags*/) const
 {
     ++device_->log.hostMalloc;
     if (device_->fail.hostMalloc) {
@@ -335,7 +341,7 @@ FakeHip::hostMalloc(void **ptr, size_t size, unsigned int) const
     }
     *ptr                    = std::malloc(size);
     device_->lastHostMalloc = *ptr;
-    return *ptr ? hipSuccess : hipErrorOutOfMemory;
+    return *ptr != nullptr ? hipSuccess : hipErrorOutOfMemory;
 }
 
 hipError_t
@@ -355,7 +361,8 @@ FakeHip::deviceSynchronize() const
 }
 
 hipError_t
-FakeHip::memcpyAsync(void *, const void *, size_t, hipMemcpyKind kind, hipStream_t) const
+FakeHip::memcpyAsync(void * /*dst*/, const void * /*src*/, size_t /*size*/, hipMemcpyKind kind,
+                     hipStream_t /*stream*/) const
 {
     ++device_->log.memcpy;
     device_->lastMemcpyKind = kind;
@@ -375,7 +382,7 @@ FakeHip::eventCreate(hipEvent_t *event) const
 }
 
 hipError_t
-FakeHip::eventRecord(hipEvent_t event, hipStream_t) const
+FakeHip::eventRecord(hipEvent_t event, hipStream_t /*stream*/) const
 {
     EXPECT_EQ(event, fakeEvent());
     ++device_->log.eventRecord;
@@ -402,7 +409,7 @@ FakeHip::eventDestroy(hipEvent_t event) const
 }
 
 hipError_t
-FakeHip::pointerGetAttributes(hipPointerAttribute_t *attributes, const void *) const
+FakeHip::pointerGetAttributes(hipPointerAttribute_t *attributes, const void * /*ptr*/) const
 {
     *attributes      = {};
     attributes->type = device_->memoryType;
@@ -410,7 +417,7 @@ FakeHip::pointerGetAttributes(hipPointerAttribute_t *attributes, const void *) c
 }
 
 hipError_t
-FakeHip::memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t) const
+FakeHip::memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t /*ptr*/) const
 {
     ++device_->addressRangeCalls;
     if (device_->addressRangeErr != hipSuccess) {
@@ -424,7 +431,7 @@ FakeHip::memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t) 
 // ---- HSA -------------------------------------------------------------
 
 int
-FakeHip::exportDmabuf(const void *, size_t, int *fd, uint64_t *offset) const
+FakeHip::exportDmabuf(const void * /*ptr*/, size_t /*size*/, int *fd, uint64_t *offset) const
 {
     ++device_->log.exportDmabuf;
     if (device_->fail.exportDmabuf) {
@@ -447,18 +454,18 @@ FakeHip::closeDmabuf(int fd) const
 // ---- S3 callbacks ----------------------------------------------------
 
 int
-fakeSendRequest(void *, const char *, size_t)
+fakeSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
 {
     ++fake().log.sendRequest;
     return 0;
 }
 
 int
-fakeRecvReply(void *, char *reply, size_t *replyLen)
+fakeRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 {
     FakeDevice &f = fake();
     ++f.log.recvReply;
-    if (!replyLen || *replyLen < f.replyLen) {
+    if (replyLen == nullptr || *replyLen < f.replyLen) {
         return -1;
     }
     std::ranges::copy(std::span(f.reply).first(f.replyLen),
@@ -477,13 +484,13 @@ makeOps()
 }
 
 std::vector<hipObj::NicInfo>
-EmptyNicTopology::enumerate(std::string_view) const
+EmptyNicTopology::enumerate(std::string_view /*hcaList*/) const
 {
     return {};
 }
 
 hipObj::RoceVersion
-EmptyNicTopology::roceVersion(std::string_view, uint8_t, int) const
+EmptyNicTopology::roceVersion(std::string_view /*devName*/, uint8_t /*portNum*/, int /*gidIndex*/) const
 {
     return hipObj::RoceVersion::Unknown;
 }

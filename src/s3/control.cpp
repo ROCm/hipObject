@@ -18,7 +18,7 @@ namespace hipObj {
 bool
 injectRdmaToken(const hipObjOps_t &ops, void *ctx, std::string_view token)
 {
-    if (!ops.sendRequest) {
+    if (ops.sendRequest == nullptr) {
         return false;
     }
     return ops.sendRequest(ctx, token.data(), token.size()) == 0;
@@ -27,7 +27,7 @@ injectRdmaToken(const hipObjOps_t &ops, void *ctx, std::string_view token)
 std::optional<RdmaReply>
 receiveRdmaReplyRaw(const hipObjOps_t &ops, void *ctx, std::span<char> replyBuf)
 {
-    if (!ops.recvReply || replyBuf.empty()) {
+    if (ops.recvReply == nullptr || replyBuf.empty()) {
         return std::nullopt;
     }
     size_t replyLen = replyBuf.size();

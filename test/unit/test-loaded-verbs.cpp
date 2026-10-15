@@ -306,7 +306,7 @@ TEST(LoadLibibverbsTest, LoadsWhatTheLibraryNeeds)
 
     int                 num  = -1;
     struct ibv_device **list = verbs->get_device_list(&num);
-    if (list) {
+    if (list != nullptr) {
         EXPECT_GE(num, 0);
         verbs->free_device_list(list);
     }

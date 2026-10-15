@@ -43,7 +43,7 @@ struct Callbacks {
 Callbacks g_callbacks;
 
 int
-fakeSendRequest(void *ctx, const char *, size_t tokenLen)
+fakeSendRequest(void *ctx, const char * /*token*/, size_t tokenLen)
 {
     g_callbacks.ctx      = ctx;
     g_callbacks.tokenLen = tokenLen;

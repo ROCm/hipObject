@@ -177,8 +177,12 @@ TEST_F(TransportTest, OpenByNameFindsOnlyThatDevice)
 
 TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
 {
-    for (bool hipObjTest::Faults::*fault : {&hipObjTest::Faults::openDevice, &hipObjTest::Faults::allocPd,
-                                            &hipObjTest::Faults::queryPort, &hipObjTest::Faults::queryGid}) {
+    for (bool hipObjTest::Faults::*fault : {
+             &hipObjTest::Faults::openDevice,
+             &hipObjTest::Faults::allocPd,
+             &hipObjTest::Faults::queryPort,
+             &hipObjTest::Faults::queryGid,
+         }) {
         resetFake();
         fake().fail.*fault = true;
         EXPECT_FALSE(hipObj::openRdmaDevice(verbs(), topology(), 0));
@@ -461,10 +465,15 @@ TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
 
 TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
 {
-    for (bool hipObjTest::Faults::*fault :
-         {&hipObjTest::Faults::getDeviceList, &hipObjTest::Faults::openDevice, &hipObjTest::Faults::allocPd,
-          &hipObjTest::Faults::queryPort, &hipObjTest::Faults::queryGid, &hipObjTest::Faults::createCq,
-          &hipObjTest::Faults::createQp}) {
+    for (bool hipObjTest::Faults::*fault : {
+             &hipObjTest::Faults::getDeviceList,
+             &hipObjTest::Faults::openDevice,
+             &hipObjTest::Faults::allocPd,
+             &hipObjTest::Faults::queryPort,
+             &hipObjTest::Faults::queryGid,
+             &hipObjTest::Faults::createCq,
+             &hipObjTest::Faults::createQp,
+         }) {
         resetFake();
         fake().fail.*fault    = true;
         hipObjConfig_t config = makeConfig();
@@ -517,13 +526,13 @@ callPut(hipObjOps_t *ops)
 }
 
 int
-failSendRequest(void *, const char *, size_t)
+failSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
 {
     return -1;
 }
 
 int
-failRecvReply(void *, char *, size_t *)
+failRecvReply(void * /*ctx*/, char * /*reply*/, size_t * /*replyLen*/)
 {
     return 5;
 }
@@ -548,7 +557,7 @@ recordSendRequest(void *ctx, const char *token, size_t tokenLen)
 
 class TransportTransferTest : public TransportTest, public ::testing::WithParamInterface<TransferFn> {
 protected:
-    hipObjError_t transfer()
+    static hipObjError_t transfer()
     {
         hipObjOps_t ops = makeOps();
         return GetParam()(&ops);

@@ -89,7 +89,7 @@ namespace {
     std::string_view lookupValue(const EnvLookup &lookup, const char *name)
     {
         const char *value = lookup(name);
-        return value ? std::string_view(value) : std::string_view();
+        return value != nullptr ? std::string_view(value) : std::string_view();
     }
 
     /* Whether value starts with one of chars */
@@ -203,9 +203,10 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         return makeError(hipObjAlreadyInitialized);
     }
     const HipRuntime      &runtime = platform->hip();
-    const std::string_view nicHint = config.nicHint ? std::string_view(config.nicHint) : std::string_view();
-    const bool             haveNicHint = !nicHint.empty();
-    int                    gpuDevice   = config.gpuDevice;
+    const std::string_view nicHint =
+        config.nicHint != nullptr ? std::string_view(config.nicHint) : std::string_view();
+    const bool haveNicHint = !nicHint.empty();
+    int        gpuDevice   = config.gpuDevice;
     if (gpuDevice < 0) {
         hipError_t err = runtime.getDevice(&gpuDevice);
         if (err != hipSuccess) {

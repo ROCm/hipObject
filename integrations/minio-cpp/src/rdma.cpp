@@ -119,7 +119,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     // ":<addr>:<len>" suffix would override the address the token already
     // advertises, and on the staging path the caller's pointer is not that
     // address. See docs/interop.rst.
-    const std::string rdma_token(token ? token : "");
+    const std::string rdma_token(token != nullptr ? token : "");
 
     ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
     ::minio::creds::Credentials creds = sctx->provider->Fetch();
@@ -210,7 +210,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     // ":<addr>:<len>" suffix would override the address the token already
     // advertises, and on the staging path the caller's pointer is not that
     // address. See docs/interop.rst.
-    const std::string rdma_token(token ? token : "");
+    const std::string rdma_token(token != nullptr ? token : "");
 
     ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
     ::minio::creds::Credentials creds = sctx->provider->Fetch();

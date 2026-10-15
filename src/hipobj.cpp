@@ -62,7 +62,7 @@ namespace {
     /* Checks the arguments to a call that registers [ptr, ptr + size) */
     hipObjError_t checkRegistrationArgs(const void *ptr, size_t size)
     {
-        if (!ptr || size == 0) {
+        if (ptr == nullptr || size == 0) {
             return makeError(hipObjInvalidValue);
         }
         if (size > MAX_MR_SIZE) {
@@ -80,10 +80,10 @@ namespace {
     hipObjError_t checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size,
                                   off_t offset)
     {
-        if (!devPtr || size == 0 || offset < 0) {
+        if (devPtr == nullptr || size == 0 || offset < 0) {
             return makeError(hipObjInvalidValue);
         }
-        if (!buf) {
+        if (buf == nullptr) {
             return makeError(hipObjBufNotRegistered);
         }
         if (!rangeInRegistration(offset, size, buf->size)) {
@@ -300,10 +300,10 @@ try {
         return hipObj::kReentryError;
     }
     // flags is reserved, and -1 is the only negative gpuDevice
-    if (!config || config->flags != 0 || config->gpuDevice < -1) {
+    if (config == nullptr || config->flags != 0 || config->gpuDevice < -1) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    if (hipObj::currentInstance()) {
+    if (hipObj::currentInstance() != nullptr) {
         return hipObj::makeError(hipObjAlreadyInitialized);
     }
     std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
@@ -342,7 +342,7 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
-    if (!instance) {
+    if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
@@ -372,7 +372,7 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
-    if (!instance) {
+    if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     hipObjError_t err = hipObj::checkRegistrationArgs(hostPtr, size);
@@ -399,10 +399,10 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
-    if (!instance) {
+    if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    if (!devPtr) {
+    if (devPtr == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     if (!instance->buffers.isRegistered(devPtr)) {
@@ -426,10 +426,10 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
-    if (!instance) {
+    if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    if (!ops || !ops->sendRequest || !ops->recvReply) {
+    if (ops == nullptr || ops->sendRequest == nullptr || ops->recvReply == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     const auto   *buf = instance->buffers.find(devPtr);
@@ -457,10 +457,10 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
-    if (!instance) {
+    if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    if (!ops || !ops->sendRequest || !ops->recvReply) {
+    if (ops == nullptr || ops->sendRequest == nullptr || ops->recvReply == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     const auto   *buf = instance->buffers.find(devPtr);
@@ -487,7 +487,7 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
-    if (!instance) {
+    if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     if (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE) {
@@ -517,10 +517,10 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
-    if (!instance) {
+    if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    if (!outToken || (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET)) {
+    if (outToken == nullptr || (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET)) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     const auto   *buf = instance->buffers.find(devPtr);
@@ -534,7 +534,7 @@ try {
     }
     const hipObj::RdmaTokenHex encoded = hipObj::encodeRdmaTokenHex(*token);
     char                      *copy    = static_cast<char *>(std::malloc(encoded.size()));
-    if (!copy) {
+    if (copy == nullptr) {
         return hipObj::makeError(hipObjInternalError);
     }
     std::ranges::copy(encoded, hipObj::spanFromPointer(copy, encoded.size()).begin());
@@ -548,7 +548,7 @@ catch (...) {
 hipObjError_t
 hipObjPutRdmaToken(char *token)
 try {
-    if (!token) {
+    if (token == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     std::free(token);
@@ -561,7 +561,7 @@ catch (...) {
 hipObjError_t
 hipObjParseRdmaReply(const char *reply, size_t replyLen, int *httpCode)
 try {
-    if (!reply || !httpCode) {
+    if (reply == nullptr || httpCode == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     const auto code =
@@ -579,7 +579,7 @@ catch (...) {
 hipObjError_t
 hipObjTokenClientNic(const char *token, char *nicIp, size_t nicIpLen)
 try {
-    if (!token || !nicIp || nicIpLen == 0) {
+    if (token == nullptr || nicIp == nullptr || nicIpLen == 0) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     /* Bound the scan: anything longer than a token is rejected anyway */

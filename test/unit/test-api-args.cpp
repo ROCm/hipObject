@@ -392,7 +392,8 @@ callPut(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops)
 
 class TransferArgsTest : public ApiArgsTest, public ::testing::WithParamInterface<TransferFn> {
 protected:
-    void expectRejected(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops, hipObjOpError_t expected)
+    static void expectRejected(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops,
+                               hipObjOpError_t expected)
     {
         EXPECT_EQ(GetParam()(devPtr, size, offset, ops).opError, expected)
             << "size " << size << ", offset " << offset;
@@ -494,7 +495,7 @@ TEST_P(TransferArgsTest, ChecksStagedBuffersBeforeCopying)
 
 /* Writes a valid reply but reports one more byte than the buffer holds */
 int
-overlongRecvReply(void *, char *reply, size_t *replyLen)
+overlongRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 {
     constexpr std::string_view kReply = "200";
     std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).first(kReply.size()).begin());
