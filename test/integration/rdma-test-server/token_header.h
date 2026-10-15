@@ -35,7 +35,7 @@ parseTokenHeader(std::string_view header)
     if (!decoded) {
         return std::nullopt;
     }
-    TokenHeader out{*decoded, 0};
+    TokenHeader out{.token = *decoded, .length = 0};
     if (c1 == std::string_view::npos) {
         return out;
     }

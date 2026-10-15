@@ -395,14 +395,14 @@ TEST_P(VendorQpTest, RtrHasVendorAttributes)
 
 /* Only the backends that were built configure the QP */
 constexpr auto kVendorCases = std::to_array<VendorCase>({
-    {"Unknown", 0x15b3, false},
+    {.name = "Unknown", .vendorId = 0x15b3, .configured = false},
 #ifdef HIPOBJ_BNXT
-    {"Broadcom", hipObj::kVendorIdBroadcom, true},
+    {.name = "Broadcom", .vendorId = hipObj::kVendorIdBroadcom, .configured = true},
 #endif
 #ifdef HIPOBJ_IONIC
-    {"Pensando", hipObj::kVendorIdPensando, true},
+    {.name = "Pensando", .vendorId = hipObj::kVendorIdPensando, .configured = true},
 #endif
-    {"None", 0, false},
+    {.name = "None", .vendorId = 0, .configured = false},
 });
 
 INSTANTIATE_TEST_SUITE_P(Transport, VendorQpTest, ::testing::ValuesIn(kVendorCases),

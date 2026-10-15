@@ -172,9 +172,9 @@ RdmaTestServer::RdmaTestServer(const hipObj::Verbs *verbsPtr)
     /* Zeroed, since the MR lets the client read all of it, not just what
      * a transfer copies in */
     std::vector<uint8_t> stagingBuf(kStagingSize);
-    hipObj::IbvMrPtr     stagingMr = hipObj::own<hipObj::IbvMrPtr>(
+    auto                 stagingMr = hipObj::own<hipObj::IbvMrPtr>(
         verbs, verbs.reg_mr(device->pd(), stagingBuf.data(), stagingBuf.size(),
-                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+                                            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
     if (!stagingMr) {
         return;
     }

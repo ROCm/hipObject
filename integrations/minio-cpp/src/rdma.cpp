@@ -130,14 +130,14 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     if (!sctx->uploadId.empty()) {
         query_params.Add("uploadId", sctx->uploadId);
         if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
-            return {RdmaStatus::Failed};
+            return {.status = RdmaStatus::Failed};
         }
         query_params.Add("partNumber", std::to_string(sctx->partNumber));
     }
 
     if (::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kPut, region, query_params,
                                                        sctx->bucket, sctx->object)) {
-        return {RdmaStatus::Failed};
+        return {.status = RdmaStatus::Failed};
     }
 
     std::string host = url.HostHeaderValue();
@@ -176,22 +176,22 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
         rdmaTrace("put: http failed (status=", res.status_code, " error='", res.error, "')");
-        return {RdmaStatus::Failed};
+        return {.status = RdmaStatus::Failed};
     }
 
     std::string etag = res.headers.GetFront("etag");
     if (res.status_code == 200 && !etag.empty()) {
         sctx->etag = ::minio::utils::Trim(etag, '"');
-        return {RdmaStatus::Ok, size};
+        return {.status = RdmaStatus::Ok, .bytes = size};
     }
 
     const auto reply_code = parseRdmaReply(res.headers.GetFront(kAmzRdmaReply));
     if (reply_code == kRdmaReplyNotImplemented) {
-        return {RdmaStatus::NotSupported};
+        return {.status = RdmaStatus::NotSupported};
     }
     if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyNoContent) {
         rdmaTrace("put: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
-        return {RdmaStatus::Failed};
+        return {.status = RdmaStatus::Failed};
     }
 
     std::string resp_checksum = res.headers.GetFront("x-amz-checksum-crc64nvme");
@@ -200,7 +200,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     }
 
     sctx->etag = ::minio::utils::Trim(etag, '"');
-    return {RdmaStatus::Ok, size};
+    return {.status = RdmaStatus::Ok, .bytes = size};
 }
 
 RdmaResult
@@ -220,7 +220,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
 
     if (::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kGet, region, query_params,
                                                        sctx->bucket, sctx->object)) {
-        return {RdmaStatus::Failed};
+        return {.status = RdmaStatus::Failed};
     }
 
     std::string host = url.HostHeaderValue();
@@ -251,16 +251,16 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
         rdmaTrace("get: http failed (status=", res.status_code, " error='", res.error, "')");
-        return {RdmaStatus::Failed};
+        return {.status = RdmaStatus::Failed};
     }
 
     const auto reply_code = parseRdmaReply(res.headers.GetFront(kAmzRdmaReply));
     if (reply_code == kRdmaReplyNotImplemented) {
-        return {RdmaStatus::NotSupported};
+        return {.status = RdmaStatus::NotSupported};
     }
     if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyPartialContent) {
         rdmaTrace("get: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
-        return {RdmaStatus::Failed};
+        return {.status = RdmaStatus::Failed};
     }
 
     // Without the header, the whole buffer was transferred. The server can't
@@ -268,22 +268,22 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), size);
     if (!bytes || *bytes > size) {
         rdmaTrace("get: malformed or out-of-range ", kAmzRdmaBytesTransferred, " header");
-        return {RdmaStatus::Failed};
+        return {.status = RdmaStatus::Failed};
     }
-    return {RdmaStatus::Ok, static_cast<size_t>(*bytes)};
+    return {.status = RdmaStatus::Ok, .bytes = static_cast<size_t>(*bytes)};
 }
 
 RdmaResult
 rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
-    RdmaResult ret{RdmaStatus::Failed};
+    RdmaResult ret{.status = RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
         char               *rawToken = nullptr;
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
             rdmaTrace("put: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
+            return {.status = RdmaStatus::Failed};
         }
         // A buffer the NIC cannot reach directly is registered as a host
         // staging buffer, so the bytes have to be there before the server
@@ -291,7 +291,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
             rdmaTrace("put: stage to host: ", hipObjGetErrorString(serr.opError));
-            return {RdmaStatus::Failed};
+            return {.status = RdmaStatus::Failed};
         }
         ret = rdmaPut(ctx, token.get(), size);
         if ((ret.status == RdmaStatus::Ok && ret.bytes > 0) || ret.status == RdmaStatus::NotSupported) {
@@ -304,21 +304,21 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 RdmaResult
 rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
-    RdmaResult ret{RdmaStatus::Failed};
+    RdmaResult ret{.status = RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
         char               *rawToken = nullptr;
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
             rdmaTrace("get: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
+            return {.status = RdmaStatus::Failed};
         }
         ret = rdmaGet(ctx, token.get(), size);
         if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
             hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
             if (serr.opError != hipObjSuccess) {
                 rdmaTrace("get: stage to device: ", hipObjGetErrorString(serr.opError));
-                return {RdmaStatus::Failed};
+                return {.status = RdmaStatus::Failed};
             }
             return ret;
         }

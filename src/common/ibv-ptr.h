@@ -92,7 +92,10 @@ using IbvCqPtr      = std::unique_ptr<struct ibv_cq, IbvCqDeleter>;
 using IbvQpPtr      = std::unique_ptr<struct ibv_qp, IbvQpDeleter>;
 using IbvMrPtr      = std::unique_ptr<struct ibv_mr, IbvMrDeleter>;
 
-/* The NULL-terminated array returned by ibv_get_device_list() */
+/* The NULL-terminated array returned by ibv_get_device_list(). The []
+ * is std::unique_ptr's form for an array allocated at run time, which
+ * std::array can't replace, not a C array. */
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 using IbvDeviceListPtr = std::unique_ptr<struct ibv_device *[], IbvDeviceListDeleter>;
 
 /* Views the devices in list, given the count ibv_get_device_list()

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -32,8 +33,8 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
     /* Connections use the device's first port */
     constexpr uint8_t kPortNum = 1;
 
-    int              numDevs = 0;
-    IbvDeviceListPtr devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
+    int  numDevs = 0;
+    auto devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
     if (!devList || numDevs <= 0 || nicIndex < 0 || nicIndex >= numDevs) {
         return std::nullopt;
     }
@@ -41,12 +42,12 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
     if (!dev) {
         return std::nullopt;
     }
-    IbvContextPtr ctx = own<IbvContextPtr>(verbs, verbs.open_device(dev));
+    auto ctx = own<IbvContextPtr>(verbs, verbs.open_device(dev));
     devList.reset();
     if (!ctx) {
         return std::nullopt;
     }
-    IbvPdPtr pd = own<IbvPdPtr>(verbs, verbs.alloc_pd(ctx.get()));
+    auto pd = own<IbvPdPtr>(verbs, verbs.alloc_pd(ctx.get()));
     if (!pd) {
         return std::nullopt;
     }
@@ -77,8 +78,8 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, std::strin
     if (devName.empty()) {
         return std::nullopt;
     }
-    int              numDevs = 0;
-    IbvDeviceListPtr devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
+    int  numDevs = 0;
+    auto devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
     if (!devList || numDevs <= 0) {
         return std::nullopt;
     }
@@ -135,7 +136,7 @@ std::optional<RcConnection>
 createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uint32_t maxRecvWr)
 {
     const Verbs &verbs = device.verbs();
-    IbvCqPtr     cq    = own<IbvCqPtr>(verbs, verbs.create_cq(device.context(), cqSize, nullptr, nullptr, 0));
+    auto         cq    = own<IbvCqPtr>(verbs, verbs.create_cq(device.context(), cqSize, nullptr, nullptr, 0));
     if (!cq) {
         return std::nullopt;
     }
@@ -148,7 +149,7 @@ createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uin
     initAttr.cap.max_send_sge = 1;
     initAttr.cap.max_recv_sge = 1;
     initAttr.qp_type          = IBV_QPT_RC;
-    IbvQpPtr qp               = own<IbvQpPtr>(verbs, verbs.create_qp(device.pd(), &initAttr));
+    auto qp                   = own<IbvQpPtr>(verbs, verbs.create_qp(device.pd(), &initAttr));
     if (!qp) {
         return std::nullopt;
     }

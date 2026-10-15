@@ -227,9 +227,9 @@ TEST(RdmaReply, LegacyOkHasNoPeerToken)
 TEST(RdmaReply, ParsePeerTokenRejectsMalformedReply)
 {
     hipObj::RdmaToken peer;
-    peer.transport            = hipObj::TransportType::RC;
-    const std::string token   = hipObj::encodeRdmaToken(peer);
-    const std::string cases[] = {
+    peer.transport          = hipObj::TransportType::RC;
+    const std::string token = hipObj::encodeRdmaToken(peer);
+    const auto        cases = std::to_array<std::string>({
         "200",
         "+200:" + token,
         "0200:" + token,
@@ -240,7 +240,7 @@ TEST(RdmaReply, ParsePeerTokenRejectsMalformedReply)
         "200:" + token.substr(1),
         "200:" + token + "0",
         "200:03" + token.substr(2),
-    };
+    });
     for (const std::string &reply : cases) {
         EXPECT_FALSE(hipObj::parsePeerTokenFromReply(reply)) << "reply \"" << reply << "\"";
     }
@@ -278,10 +278,9 @@ TEST(RdmaToken, DecodeAcceptsUppercaseHex)
 TEST(RdmaToken, DecodeRejectsBytesThatArentTwoHexDigits)
 {
     hipObj::RdmaToken token;
-    token.transport              = hipObj::TransportType::RC;
-    const std::string encoded    = hipObj::encodeRdmaToken(token);
-    const char *const badBytes[] = {"+1", "-1", " 1", "1 ", "0x", "g0", "0g"};
-    for (const char *bad : badBytes) {
+    token.transport           = hipObj::TransportType::RC;
+    const std::string encoded = hipObj::encodeRdmaToken(token);
+    for (const char *bad : {"+1", "-1", " 1", "1 ", "0x", "g0", "0g"}) {
         /* Replace a byte in the middle of the token, in the GID */
         std::string mangled = encoded;
         mangled.replace(20, 2, bad);

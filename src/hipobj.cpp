@@ -42,11 +42,11 @@ namespace {
 
     /* Returned by a public function when it catches an exception, whatever
      * its type */
-    constexpr hipObjError_t kExceptionError = {hipObjInternalError, 0};
+    constexpr hipObjError_t kExceptionError = makeError(hipObjInternalError);
 
     /* Returned by a locked entry point when a callback calls it, where taking
      * the API lock again would deadlock (see ApiGuard) */
-    constexpr hipObjError_t kReentryError = {hipObjInvalidValue, 0};
+    constexpr hipObjError_t kReentryError = makeError(hipObjInvalidValue);
 
     /* True when [offset, offset + size) lies inside a registration of regSize
      * bytes. Compares without computing offset + size, which could wrap. */
@@ -62,16 +62,16 @@ namespace {
     hipObjError_t checkRegistrationArgs(const void *ptr, size_t size)
     {
         if (!ptr || size == 0) {
-            return {hipObjInvalidValue, 0};
+            return makeError(hipObjInvalidValue);
         }
         if (size > MAX_MR_SIZE) {
-            return {hipObjSizeTooLarge, 0};
+            return makeError(hipObjSizeTooLarge);
         }
         /* The end of the buffer, ptr + size, must not wrap */
         if (size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr)) {
-            return {hipObjInvalidValue, 0};
+            return makeError(hipObjInvalidValue);
         }
-        return {hipObjSuccess, 0};
+        return makeError(hipObjSuccess);
     }
 
     /* Checks the arguments to a call that uses [offset, offset + size) of the
@@ -80,15 +80,15 @@ namespace {
                                   off_t offset)
     {
         if (!devPtr || size == 0 || offset < 0) {
-            return {hipObjInvalidValue, 0};
+            return makeError(hipObjInvalidValue);
         }
         if (!buf) {
-            return {hipObjBufNotRegistered, 0};
+            return makeError(hipObjBufNotRegistered);
         }
         if (!rangeInRegistration(offset, size, buf->size)) {
-            return {hipObjInvalidValue, 0};
+            return makeError(hipObjInvalidValue);
         }
-        return {hipObjSuccess, 0};
+        return makeError(hipObjSuccess);
     }
 
     std::optional<RdmaToken> buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf,
@@ -145,26 +145,26 @@ namespace {
     {
         hipEvent_t rawDone = nullptr;
         if (runtime.eventCreate(&rawDone) != hipSuccess) {
-            return {hipObjInternalError, 0};
+            return makeError(hipObjInternalError);
         }
-        HipEventPtr done = own<HipEventPtr>(runtime, rawDone);
+        auto done = own<HipEventPtr>(runtime, rawDone);
 
         hipError_t err = runtime.memcpyAsync(dst, src, size, kind, nullptr);
         if (err == hipSuccess) {
             err = runtime.eventRecord(done.get(), nullptr);
         }
         if (err != hipSuccess) {
-            return {hipObjInternalError, 0};
+            return makeError(hipObjInternalError);
         }
 
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         for (;;) {
             hipError_t q = runtime.eventQuery(done.get());
             if (q == hipSuccess) {
-                return {hipObjSuccess, 0};
+                return makeError(hipObjSuccess);
             }
             if (q != hipErrorNotReady) {
-                return {hipObjInternalError, 0};
+                return makeError(hipObjInternalError);
             }
             if (std::chrono::steady_clock::now() >= deadline) {
                 /* The copy may still signal the event, so it's leaked rather
@@ -178,7 +178,7 @@ namespace {
                         "%" PRId64 " ms; abandoning it. The GPU never signalled completion -- "
                         "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
                         direction.c_str(), size, timeoutMs);
-                return {hipObjInternalError, 0};
+                return makeError(hipObjInternalError);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -191,10 +191,10 @@ namespace {
     {
         if (!buf.hostBuf) {
             /* the NIC writes the caller's memory */
-            return {hipObjSuccess, 0};
+            return makeError(hipObjSuccess);
         }
         if (!rangeInRegistration(offset, size, buf.size)) {
-            return {hipObjInvalidValue, 0};
+            return makeError(hipObjInvalidValue);
         }
         /* The device memory is only viewed for its bounds, never accessed here */
         const auto host  = spanFromPointer(static_cast<const std::byte *>(buf.hostBuf.get()), buf.size);
@@ -211,10 +211,10 @@ namespace {
     {
         if (!buf.hostBuf) {
             /* the NIC reads the caller's memory */
-            return {hipObjSuccess, 0};
+            return makeError(hipObjSuccess);
         }
         if (!rangeInRegistration(offset, size, buf.size)) {
-            return {hipObjInvalidValue, 0};
+            return makeError(hipObjInvalidValue);
         }
         /* The device memory is only viewed for its bounds, never accessed here */
         const auto host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
@@ -229,22 +229,22 @@ namespace {
     {
         const auto token = buildRdmaToken(instance.conn, buf, size, offset);
         if (!token) {
-            return {hipObjRdmaError, 0};
+            return makeError(hipObjRdmaError);
         }
         const RdmaTokenHex encoded = encodeRdmaTokenHex(*token);
         if (!injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>()))) {
-            return {hipObjS3Error, 0};
+            return makeError(hipObjS3Error);
         }
         std::array<char, 512> replyBuf{};
         const auto            reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
         if (!reply || reply->status != RdmaReplyStatus::Success) {
-            return {hipObjS3Error, 0};
+            return makeError(hipObjS3Error);
         }
         if (!finishTransferAfterReply(instance.platform->hip(), instance.conn, reply->text, buf.isDmabuf,
                                       instance.options.pollTimeout)) {
-            return {hipObjRdmaError, 0};
+            return makeError(hipObjRdmaError);
         }
-        return {hipObjSuccess, 0};
+        return makeError(hipObjSuccess);
     }
 
 } // namespace
@@ -300,14 +300,14 @@ try {
     }
     // flags is reserved, and -1 is the only negative gpuDevice
     if (!config || config->flags != 0 || config->gpuDevice < -1) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     if (hipObj::currentInstance()) {
-        return {hipObjAlreadyInitialized, 0};
+        return hipObj::makeError(hipObjAlreadyInitialized);
     }
     std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
     if (!platform) {
-        return {hipObjRdmaError, 0};
+        return hipObj::makeError(hipObjRdmaError);
     }
     /* std::getenv is called through a lambda, since C++ doesn't allow
      * taking the address of most standard library functions */
@@ -327,7 +327,7 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::shutdownInstance();
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -342,22 +342,22 @@ try {
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
-        return {hipObjNotInitialized, 0};
+        return hipObj::makeError(hipObjNotInitialized);
     }
     hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
     }
     if (!hipObj::isValidDeviceRange(instance->platform->hip(), devPtr, size)) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     if (instance->buffers.isRegistered(devPtr)) {
-        return {hipObjBufAlreadyRegistered, 0};
+        return hipObj::makeError(hipObjBufAlreadyRegistered);
     }
     if (!instance->buffers.registerBuffer(devPtr, size, instance->device->pd())) {
-        return {hipObjRdmaError, 0};
+        return hipObj::makeError(hipObjRdmaError);
     }
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -372,19 +372,19 @@ try {
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
-        return {hipObjNotInitialized, 0};
+        return hipObj::makeError(hipObjNotInitialized);
     }
     hipObjError_t err = hipObj::checkRegistrationArgs(hostPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
     }
     if (instance->buffers.isRegistered(hostPtr)) {
-        return {hipObjBufAlreadyRegistered, 0};
+        return hipObj::makeError(hipObjBufAlreadyRegistered);
     }
     if (!instance->buffers.registerHostBuffer(hostPtr, size, instance->device->pd())) {
-        return {hipObjRdmaError, 0};
+        return hipObj::makeError(hipObjRdmaError);
     }
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -399,18 +399,18 @@ try {
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
-        return {hipObjNotInitialized, 0};
+        return hipObj::makeError(hipObjNotInitialized);
     }
     if (!devPtr) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     if (!instance->buffers.isRegistered(devPtr)) {
-        return {hipObjBufNotRegistered, 0};
+        return hipObj::makeError(hipObjBufNotRegistered);
     }
     if (!instance->buffers.deregisterBuffer(devPtr)) {
-        return {hipObjRdmaError, 0};
+        return hipObj::makeError(hipObjRdmaError);
     }
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -426,10 +426,10 @@ try {
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
-        return {hipObjNotInitialized, 0};
+        return hipObj::makeError(hipObjNotInitialized);
     }
     if (!ops || !ops->sendRequest || !ops->recvReply) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
@@ -457,10 +457,10 @@ try {
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
-        return {hipObjNotInitialized, 0};
+        return hipObj::makeError(hipObjNotInitialized);
     }
     if (!ops || !ops->sendRequest || !ops->recvReply) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
@@ -487,10 +487,10 @@ try {
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
-        return {hipObjNotInitialized, 0};
+        return hipObj::makeError(hipObjNotInitialized);
     }
     if (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
@@ -517,10 +517,10 @@ try {
     }
     hipObj::Instance *const instance = hipObj::currentInstance();
     if (!instance) {
-        return {hipObjNotInitialized, 0};
+        return hipObj::makeError(hipObjNotInitialized);
     }
     if (!outToken || (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET)) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     const auto   *buf = instance->buffers.find(devPtr);
     hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, 0);
@@ -529,16 +529,16 @@ try {
     }
     const auto token = hipObj::buildRdmaToken(instance->conn, *buf, size, 0);
     if (!token) {
-        return {hipObjRdmaError, 0};
+        return hipObj::makeError(hipObjRdmaError);
     }
     const hipObj::RdmaTokenHex encoded = hipObj::encodeRdmaTokenHex(*token);
     char                      *copy    = static_cast<char *>(std::malloc(encoded.size()));
     if (!copy) {
-        return {hipObjInternalError, 0};
+        return hipObj::makeError(hipObjInternalError);
     }
     std::ranges::copy(encoded, hipObj::spanFromPointer(copy, encoded.size()).begin());
     *outToken = copy;
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -548,10 +548,10 @@ hipObjError_t
 hipObjPutRdmaToken(char *token)
 try {
     if (!token) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     std::free(token);
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -561,15 +561,15 @@ hipObjError_t
 hipObjParseRdmaReply(const char *reply, size_t replyLen, int *httpCode)
 try {
     if (!reply || !httpCode) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     const auto code =
         hipObj::parseRdmaReplyHttpCode(hipObj::asStringView(hipObj::spanFromPointer(reply, replyLen)));
     if (!code) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     *httpCode = *code;
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -579,14 +579,14 @@ hipObjError_t
 hipObjTokenClientNic(const char *token, char *nicIp, size_t nicIpLen)
 try {
     if (!token || !nicIp || nicIpLen == 0) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
     /* Bound the scan: anything longer than a token is rejected anyway */
     if (!hipObj::parseClientNicFromTokenHex(hipObj::cStringView(token, hipObj::kRdmaTokenHexLen + 1),
                                             hipObj::spanFromPointer(nicIp, nicIpLen))) {
-        return {hipObjInvalidValue, 0};
+        return hipObj::makeError(hipObjInvalidValue);
     }
-    return {hipObjSuccess, 0};
+    return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
     return hipObj::kExceptionError;

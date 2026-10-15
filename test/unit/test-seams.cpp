@@ -198,9 +198,9 @@ protected:
 TEST_F(NicSeamTest, ClosestBusIdWins)
 {
     state_.nics = {
-        {"mlx5_0", "0000:18:00.0", 0, 1},
-        {"mlx5_1", "0000:43:00.0", 1, 1},
-        {"mlx5_2", "0000:11:00.0", 0, 1},
+        {.dev_name = "mlx5_0", .pcie_bus_id = "0000:18:00.0", .numa_node = 0, .port_num = 1},
+        {.dev_name = "mlx5_1", .pcie_bus_id = "0000:43:00.0", .numa_node = 1, .port_num = 1},
+        {.dev_name = "mlx5_2", .pcie_bus_id = "0000:11:00.0", .numa_node = 0, .port_num = 1},
     };
 
     const auto nic = closestNic();
@@ -218,8 +218,8 @@ TEST_F(NicSeamTest, EmptyEnumerationFails)
 TEST_F(NicSeamTest, NoKnownBusIdFails)
 {
     state_.nics = {
-        {"mlx5_0", "", 0, 1},
-        {"mlx5_1", "", 1, 1},
+        {.dev_name = "mlx5_0", .pcie_bus_id = "", .numa_node = 0, .port_num = 1},
+        {.dev_name = "mlx5_1", .pcie_bus_id = "", .numa_node = 1, .port_num = 1},
     };
 
     EXPECT_FALSE(closestNic());
@@ -228,7 +228,7 @@ TEST_F(NicSeamTest, NoKnownBusIdFails)
 /* The GPU's bus id comes from the runtime */
 TEST_F(NicSeamTest, UnknownGpuBusIdFails)
 {
-    state_.nics      = {{"mlx5_0", "0000:43:00.0", 0, 1}};
+    state_.nics      = {{.dev_name = "mlx5_0", .pcie_bus_id = "0000:43:00.0", .numa_node = 0, .port_num = 1}};
     device_.gpuBusId = {};
     EXPECT_FALSE(closestNic());
 }
@@ -236,9 +236,9 @@ TEST_F(NicSeamTest, UnknownGpuBusIdFails)
 TEST_F(NicSeamTest, FirstOfClosestWins)
 {
     state_.nics = {
-        {"mlx5_0", "", 0, 1},
-        {"mlx5_1", "0000:43:00.0", 1, 1},
-        {"mlx5_2", "0000:43:00.1", 1, 1},
+        {.dev_name = "mlx5_0", .pcie_bus_id = "", .numa_node = 0, .port_num = 1},
+        {.dev_name = "mlx5_1", .pcie_bus_id = "0000:43:00.0", .numa_node = 1, .port_num = 1},
+        {.dev_name = "mlx5_2", .pcie_bus_id = "0000:43:00.1", .numa_node = 1, .port_num = 1},
     };
 
     const auto nic = closestNic();
@@ -249,7 +249,7 @@ TEST_F(NicSeamTest, FirstOfClosestWins)
 
 TEST_F(NicSeamTest, HcaFilterIsForwarded)
 {
-    state_.nics = {{"mlx5_0", "0000:18:00.0", 0, 1}};
+    state_.nics = {{.dev_name = "mlx5_0", .pcie_bus_id = "0000:18:00.0", .numa_node = 0, .port_num = 1}};
     /* Only the list the topology was given matters here */
     std::ignore = closestNic("mlx5_0,mlx5_1");
     EXPECT_EQ(state_.lastHcaList, "mlx5_0,mlx5_1");
@@ -282,8 +282,8 @@ public:
 TEST_F(NicSeamTest, BusIdThatFillsTheBufferIsUsedWhole)
 {
     state_.nics = {
-        {"mlx5_0", std::string(kGpuBusId), 0, 1},
-        {"mlx5_1", std::string(kFullBufferBusId), 1, 1},
+        {.dev_name = "mlx5_0", .pcie_bus_id = std::string(kGpuBusId), .numa_node = 0, .port_num = 1},
+        {.dev_name = "mlx5_1", .pcie_bus_id = std::string(kFullBufferBusId), .numa_node = 1, .port_num = 1},
     };
 
     const FullBufferBusIdHip hip(device_);
@@ -705,14 +705,14 @@ namespace {
     {
         ASSERT_NO_FATAL_FAILURE(init());
 
-        char hostBuf[32]{};
-        ASSERT_EQ(hipObjBufRegisterHost(hostBuf, sizeof(hostBuf)).opError, hipObjSuccess);
+        std::array<char, 32> hostBuf{};
+        ASSERT_EQ(hipObjBufRegisterHost(hostBuf.data(), hostBuf.size()).opError, hipObjSuccess);
 
         hipObjOps_t ops{};
         ops.sendRequest = &fakeSendRequest;
         ops.recvReply   = &fakeRecvReply;
 
-        hipObjError_t err = hipObjGet(nullptr, hostBuf, sizeof(hostBuf), 0, &ops, nullptr);
+        hipObjError_t err = hipObjGet(nullptr, hostBuf.data(), hostBuf.size(), 0, &ops, nullptr);
 
         EXPECT_EQ(err.opError, hipObjSuccess);
         EXPECT_EQ(g_apiTransferLog.sendRequestCalls, 1);

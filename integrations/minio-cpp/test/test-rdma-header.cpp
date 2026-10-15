@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <array>
+
 #include <gtest/gtest.h>
 #include <hipobj.h>
 
@@ -43,10 +45,10 @@ TEST(HipObjMinioHeader, TokenClientNicFromGid)
     token.gid[14]   = 0;
     token.gid[15]   = 5;
 
-    std::string encoded = hipObj::encodeRdmaToken(token);
-    char        nicIp[32];
-    EXPECT_EQ(hipObjTokenClientNic(encoded.c_str(), nicIp, sizeof(nicIp)).opError, hipObjSuccess);
-    EXPECT_STREQ(nicIp, "10.0.0.5");
+    std::string          encoded = hipObj::encodeRdmaToken(token);
+    std::array<char, 32> nicIp{};
+    EXPECT_EQ(hipObjTokenClientNic(encoded.c_str(), nicIp.data(), nicIp.size()).opError, hipObjSuccess);
+    EXPECT_STREQ(nicIp.data(), "10.0.0.5");
 }
 
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

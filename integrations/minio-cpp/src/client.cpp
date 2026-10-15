@@ -105,7 +105,7 @@ namespace {
             std::scoped_lock<std::mutex> lock(mutex_);
             std::string                  key = base_url.host + ":" + base_url.region;
             if (initialized_ && key == active_key_) {
-                return {hipObjSuccess, 0};
+                return {.opError = hipObjSuccess, .hipError = 0};
             }
             if (initialized_) {
                 hipObjShutdown();

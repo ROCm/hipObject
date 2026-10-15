@@ -6,6 +6,7 @@
 /* The RDMA test server's HttpServer, in test/integration/rdma-test-server */
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -101,9 +102,9 @@ protected:
             sent += static_cast<size_t>(n);
         }
 
-        const auto  deadline = std::chrono::steady_clock::now() + kDeadline;
-        std::string reply;
-        char        buf[4096];
+        const auto             deadline = std::chrono::steady_clock::now() + kDeadline;
+        std::string            reply;
+        std::array<char, 4096> buf{};
         for (;;) {
             pollfd pfd{};
             pfd.fd     = fd.get();
@@ -111,9 +112,9 @@ protected:
             if (poll(&pfd, 1, remainingMs(deadline)) <= 0) {
                 return std::nullopt;
             }
-            const ssize_t n = recv(fd.get(), buf, sizeof(buf), 0);
+            const ssize_t n = recv(fd.get(), buf.data(), buf.size(), 0);
             if (n > 0) {
-                reply.append(buf, static_cast<size_t>(n));
+                reply.append(buf.data(), static_cast<size_t>(n));
             }
             /* A reset is a close too: it's what the peer sends if it closes
              * with unread data */
