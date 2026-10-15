@@ -325,10 +325,14 @@ class CurlGlobalEnv : public ::testing::Environment {
 public:
     void SetUp() override
     {
-        // Keep loopback requests away from any configured proxy. glibc
-        // setenv() is not thread-safe; no worker threads exist yet.
+        // Keep loopback requests away from any configured proxy. The test
+        // sets these itself, rather than relying on ctest to, so they apply
+        // when the program is run directly too. setenv() isn't thread-safe,
+        // but no other threads exist yet.
+        // NOLINTBEGIN(concurrency-mt-unsafe)
         setenv("no_proxy", "127.0.0.1", 1);
         setenv("NO_PROXY", "127.0.0.1", 1);
+        // NOLINTEND(concurrency-mt-unsafe)
         CURLcode rc = curl_global_init(CURL_GLOBAL_DEFAULT);
         if (rc != CURLE_OK) {
             initialized_ = false;
