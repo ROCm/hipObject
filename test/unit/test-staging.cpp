@@ -311,7 +311,7 @@ TEST_F(StagingTest, ShutdownLeaksTheStagingBufferOfACopyThatsRunning)
     EXPECT_EQ(fake().log.hostFree, 0);
     EXPECT_EQ(fake().log.eventDestroy, 0);
     EXPECT_EQ(fake().log.deregMr, 1);
-    EXPECT_EQ(fake().log.destroyQp, 1);
+    EXPECT_EQ(fake().log.destroyQp, fake().log.createQp);
     EXPECT_EQ(fake().log.closeDevice, 1);
 
     /* Frees what the library leaked, which the fake allocated with

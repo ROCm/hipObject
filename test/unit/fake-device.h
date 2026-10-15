@@ -54,6 +54,7 @@ struct CallLog {
     std::atomic<int> createQp{0};
     std::atomic<int> destroyQp{0};
     std::atomic<int> postSend{0};
+    std::atomic<int> pollCq{0};
 
     /* HIP and HSA */
     std::atomic<int> memcpy{0}; /* memcpyAsync() */
@@ -78,6 +79,8 @@ struct Faults {
     bool queryDevice   = false;
     bool createCq      = false;
     bool createQp      = false;
+    /* create_qp fails once it's created this many QPs, if it's set */
+    int qpLimit = -1;
     /* modify_qp fails for a transition to this state */
     int modifyQpToState = -1;
     /* reg_mr fails for this address, so hipObjBufRegister() falls back to a
@@ -231,7 +234,10 @@ private:
  * It has one device, and no ibv_reg_dmabuf_mr(). reg_mr(), create_cq(),
  * and create_qp() allocate real objects, each distinct, which dereg_mr(),
  * destroy_cq(), and destroy_qp() free; the other objects are made-up
- * addresses. A test can derive from it to change some of its methods. */
+ * addresses. A CQ's cqe is the size it was created with. modify_qp()
+ * keeps each QP's state in its state member, and rejects a transition
+ * that real verbs would, such as RTS to RTR. A test can derive from it to
+ * change some of its methods. */
 class FakeVerbs : public hipObj::Verbs {
 public:
     explicit FakeVerbs(FakeDevice &device) noexcept : device_(&device)

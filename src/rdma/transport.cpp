@@ -226,6 +226,43 @@ connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
     return transitionQpToRts(conn);
 }
 
+namespace {
+
+    [[nodiscard]] bool transitionQpToReset(RcConnection &conn)
+    {
+        struct ibv_qp_attr attr;
+        zeroObject(attr);
+        attr.qp_state = IBV_QPS_RESET;
+        return conn.device().verbs().modify_qp(conn.qp(), &attr, IBV_QP_STATE) == 0;
+    }
+
+    /* Polls conn's CQ until it's empty, and false if polling fails. Once
+     * the QP is in RESET, nothing more completes on it, and the CQ holds
+     * at most cqe completions, so that's as many polls as it can take. */
+    [[nodiscard]] bool drainCompletions(RcConnection &conn)
+    {
+        const Verbs &verbs = conn.device().verbs();
+        for (int left = conn.cq()->cqe; left > 0; --left) {
+            ibv_wc    wc{};
+            const int n = verbs.poll_cq(conn.cq(), 1, &wc);
+            if (n < 0) {
+                return false;
+            }
+            if (n == 0) {
+                break;
+            }
+        }
+        return true;
+    }
+
+} // namespace
+
+bool
+resetRcConnection(RcConnection &conn)
+{
+    return transitionQpToReset(conn) && drainCompletions(conn) && transitionQpToInit(conn);
+}
+
 bool
 pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
                std::chrono::milliseconds timeout)

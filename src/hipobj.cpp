@@ -21,11 +21,13 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <variant>
 
 #include <hip/hip_runtime_api.h>
 
 #include "abandoned-copies.h"
 #include "buffer.h"
+#include "connection-pool.h"
 #include "control.h"
 #include "hip-seam.h"
 #include "hipobj-address.h"
@@ -126,12 +128,12 @@ namespace {
         };
     }
 
-    [[nodiscard]] bool finishTransferAfterReply(const HipRuntime &runtime, RcConnection &conn,
+    [[nodiscard]] bool finishTransferAfterReply(const HipRuntime &runtime, ConnectionPool::Lease &lease,
                                                 std::string_view reply, bool requiresDeviceSync,
                                                 std::chrono::milliseconds pollTimeout)
     {
         if (const auto peerToken = parsePeerTokenFromReply(reply)) {
-            if (!connectRcPeer(conn, *peerToken)) {
+            if (!lease.connect(*peerToken)) {
                 return false;
             }
         }
@@ -139,7 +141,7 @@ namespace {
         // is unknown. With the current one-sided protocol the responder side
         // may not observe a completion at all (see issue #22), so this check
         // reports "no evidence of failure" rather than "transfer verified".
-        if (!pollCompletion(conn, std::nullopt, pollTimeout)) {
+        if (!pollCompletion(lease.connection(), std::nullopt, pollTimeout)) {
             return false;
         }
         if (!requiresDeviceSync) {
@@ -262,7 +264,18 @@ namespace {
     hipObjError_t runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
                                   off_t offset, const hipObjOps_t &ops, void *ctx)
     {
-        const auto token = buildRdmaToken(instance.conn, buf, size, offset);
+        /* Waits for a connection if every one is leased. The lease returns
+         * it when it's destroyed, after the transfer, resetting it if it
+         * was connected. A pool that's closed belongs to an instance that
+         * hipObjShutdown() has removed. */
+        auto acquired = instance.pool.acquire();
+        if (const auto *err = std::get_if<ConnectionPool::AcquireError>(&acquired)) {
+            return makeError(*err == ConnectionPool::AcquireError::Closed ? hipObjNotInitialized
+                                                                          : hipObjRdmaError);
+        }
+        auto &lease = std::get<ConnectionPool::Lease>(acquired);
+
+        const auto token = buildRdmaToken(lease.connection(), buf, size, offset);
         if (!token) {
             return makeError(hipObjRdmaError);
         }
@@ -275,7 +288,7 @@ namespace {
         if (!reply || reply->status != RdmaReplyStatus::Success) {
             return makeError(hipObjS3Error);
         }
-        if (!finishTransferAfterReply(instance.platform->hip(), instance.conn, reply->text, buf.isDmabuf,
+        if (!finishTransferAfterReply(instance.platform->hip(), lease, reply->text, buf.isDmabuf,
                                       instance.options.pollTimeout)) {
             return makeError(hipObjRdmaError);
         }
@@ -583,7 +596,7 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    const auto token = hipObj::buildRdmaToken(instance->conn, *buf, size, 0);
+    const auto token = hipObj::buildRdmaToken(instance->tokenConn, *buf, size, 0);
     if (!token) {
         return hipObj::makeError(hipObjRdmaError);
     }

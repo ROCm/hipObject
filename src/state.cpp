@@ -17,6 +17,7 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include "connection-pool.h"
 #include "hip-seam.h"
 #include "hipobj-private.h"
 #include "hipobj-parse.h"
@@ -99,6 +100,11 @@ namespace {
      * the clock */
     constexpr std::chrono::milliseconds kMaxStageTimeout = std::chrono::hours(24);
 
+    /* The most connections hipObjInit() creates for transfers. Far more
+     * transfers than a NIC can keep busy, and few enough that creating
+     * the connections doesn't make initialization slow. */
+    constexpr size_t kMaxTransfers = 1024;
+
     /* The value of environment variable name, or an empty string when it
      * isn't set */
     std::string_view lookupValue(const EnvLookup &lookup, const char *name)
@@ -178,6 +184,13 @@ parseOptions(const EnvLookup &lookup)
         }
     }
 
+    /* So is a value that isn't a whole number from 1 to kMaxTransfers */
+    if (const auto n = parseNumber<size_t>(lookupValue(lookup, "HIPOBJ_MAX_TRANSFERS"))) {
+        if (*n > 0 && *n <= kMaxTransfers) {
+            options.maxTransfers = *n;
+        }
+    }
+
     const std::string_view requireGpuDirect = lookupValue(lookup, "HIPOBJ_REQUIRE_GPU_DIRECT");
     options.requireGpuDirect = !requireGpuDirect.empty() && !startsWithOneOf(requireGpuDirect, "0nN");
 
@@ -189,12 +202,14 @@ parseOptions(const EnvLookup &lookup)
 }
 
 /* The members are initialized in the order they're declared, so the
- * buffers use the members, not the arguments moved into them */
+ * pool and the buffers use the members, not the arguments moved into
+ * them */
 Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
                    ResolvedConfig instanceConfig, std::shared_ptr<const RdmaDevice> instanceDevice,
-                   RcConnection instanceConn) noexcept
+                   RcConnection instanceTokenConn)
     : platform(std::move(instancePlatform)), options(instanceOptions), config(std::move(instanceConfig)),
-      device(std::move(instanceDevice)), conn(std::move(instanceConn)),
+      device(std::move(instanceDevice)), tokenConn(std::move(instanceTokenConn)),
+      pool(device, options.maxTransfers),
       buffers(platform->verbs(), platform->hip(), options.dmabuf, options.requireGpuDirect),
       abandoned(platform->hip())
 {
@@ -223,7 +238,11 @@ shutdownInstance()
     }
 
     /* Releases the instance if nothing else holds it, without holding
-     * the lock that calls take to find it */
+     * the lock that calls take to find it. Calls that hold it, and wait
+     * for a connection, stop waiting. */
+    if (instance) {
+        instance->pool.close();
+    }
     instance.reset();
 }
 
@@ -283,17 +302,19 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         }
     }
 
-    /* The device, the connection, and then the instance are built in
-     * locals, which release what they hold if anything fails or throws.
-     * The instance is only published once nothing else can. */
+    /* The device, the token connection, and then the instance and its
+     * pool are built in locals, which release what they hold if anything
+     * fails or throws. The instance is only published once nothing else
+     * can. */
     std::optional<RdmaDevice> opened =
         openRdmaDeviceByName(platform->verbs(), platform->topology(), nic->name);
     if (!opened) {
         return makeError(hipObjRdmaError);
     }
-    auto                        device = std::make_shared<const RdmaDevice>(std::move(*opened));
-    std::optional<RcConnection> conn   = createRcConnection(*device, 256, 128, 128);
-    if (!conn) {
+    auto                        device    = std::make_shared<const RdmaDevice>(std::move(*opened));
+    std::optional<RcConnection> tokenConn = createRcConnection(
+        *device, ConnectionPool::kCqSize, ConnectionPool::kMaxSendWr, ConnectionPool::kMaxRecvWr);
+    if (!tokenConn) {
         return makeError(hipObjRdmaError);
     }
     ResolvedConfig resolved{
@@ -302,7 +323,11 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         .nicIndex  = nic->index,
     };
     auto instance = std::make_shared<Instance>(std::move(platform), options, std::move(resolved),
-                                               std::move(device), std::move(*conn));
+                                               std::move(device), std::move(*tokenConn));
+    /* The pool stops at the first connection it can't create */
+    if (instance->pool.size() != options.maxTransfers) {
+        return makeError(hipObjRdmaError);
+    }
 
     /* If taking the lock throws, the instance is released, and nothing
      * has changed. Moving the instance in can't throw. */

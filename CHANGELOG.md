@@ -42,6 +42,17 @@
   in use: a staging copy of the buffer that timed out is still running.
   It isn't the `hipObjBusy` that was removed with the V2 interface, and
   cuObject has no equivalent.
+- The `HIPOBJ_MAX_TRANSFERS` environment variable sets how many RDMA
+  connections (a queue pair and its completion queue each)
+  `hipObjInit()` creates for transfers. Each `hipObjGet()` and
+  `hipObjPut()` uses one of them, rather than every transfer sharing one
+  queue pair, so it's the most transfers that can be in progress at
+  once. The value is a whole number from 1 to 1024, and a value that
+  isn't one is ignored, leaving the default of 16. Like the other
+  environment variables, it's read each time `hipObjInit()` runs, which
+  fails with `hipObjRdmaError` if it can't create them all.
+  `hipObjGetRdmaToken()` still advertises a queue pair of its own, which
+  no transfer uses.
 
 ### Changed
 
@@ -258,6 +269,12 @@
   the buffer hipObject passed it, `hipObjGet()` and `hipObjPut()` read
   past the end of the buffer. The transfer now fails with
   `hipObjS3Error` instead.
+- On a real NIC, once a server's reply to `hipObjGet()` or `hipObjPut()`
+  had named its queue pair, which connects the client's queue pair to
+  it, every later transfer whose reply did the same failed with
+  `hipObjRdmaError`, since a connected queue pair can't connect again.
+  hipObject now resets a queue pair after each transfer that connected
+  it, so the next transfer can connect it to another peer.
 - The `get-object` and `put-object` examples read a size argument such
   as `12abc` as its leading number, and a negative one such as `-1` as
   a huge size. They now reject anything but a plain decimal number of
