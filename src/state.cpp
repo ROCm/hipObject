@@ -26,16 +26,19 @@
 
 namespace hipObj {
 
-// True while the calling thread holds the API lock. Each thread has its
-// own copy, so it needs no synchronization.
-static thread_local bool t_holdsApiLock = false;
+namespace {
 
-static std::mutex &
-apiMutex()
-{
-    static std::mutex lock;
-    return lock;
-}
+    // True while the calling thread holds the API lock. Each thread has its
+    // own copy, so it needs no synchronization.
+    thread_local bool t_holdsApiLock = false;
+
+    std::mutex &apiMutex()
+    {
+        static std::mutex lock;
+        return lock;
+    }
+
+} // namespace
 
 ApiGuard::ApiGuard() : lock_(apiMutex(), std::defer_lock)
 {
@@ -104,7 +107,7 @@ namespace {
         {
         }
 
-        const Platform &platform() const noexcept
+        [[nodiscard]] const Platform &platform() const noexcept
         {
             return platform_;
         }

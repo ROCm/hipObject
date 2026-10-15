@@ -130,7 +130,7 @@ namespace {
             return err;
         }
 
-        bool IsReady() const
+        [[nodiscard]] bool IsReady() const
         {
             std::scoped_lock<std::mutex> lock(mutex_);
             return initialized_;

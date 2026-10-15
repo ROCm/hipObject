@@ -111,6 +111,24 @@ namespace {
         return conn.device().verbs().modify_qp(conn.qp(), &attr, mask) == 0;
     }
 
+    void applyVendorQpAttrs(const RdmaDevice &device, struct ibv_qp_attr &attr)
+    {
+        const std::optional<uint32_t> vendorId = device.vendorId();
+        if (!vendorId) {
+            return;
+        }
+#ifdef HIPOBJ_BNXT
+        if (isBnxtDevice(*vendorId)) {
+            configureBnxtQp(attr);
+        }
+#endif
+#ifdef HIPOBJ_IONIC
+        if (isIonicDevice(*vendorId)) {
+            configureIonicQp(attr);
+        }
+#endif
+    }
+
 } // namespace
 
 std::optional<RcConnection>
@@ -141,25 +159,6 @@ createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uin
         return std::nullopt;
     }
     return conn;
-}
-
-static void
-applyVendorQpAttrs(const RdmaDevice &device, struct ibv_qp_attr &attr)
-{
-    const std::optional<uint32_t> vendorId = device.vendorId();
-    if (!vendorId) {
-        return;
-    }
-#ifdef HIPOBJ_BNXT
-    if (isBnxtDevice(*vendorId)) {
-        configureBnxtQp(attr);
-    }
-#endif
-#ifdef HIPOBJ_IONIC
-    if (isIonicDevice(*vendorId)) {
-        configureIonicQp(attr);
-    }
-#endif
 }
 
 bool

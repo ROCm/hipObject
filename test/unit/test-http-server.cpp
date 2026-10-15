@@ -81,7 +81,7 @@ protected:
     /* Sends request on a new connection and returns everything the server
      * sends back before it closes the connection, or std::nullopt if the
      * exchange fails or the server doesn't close it in time */
-    std::optional<std::string> exchange(std::string_view request) const
+    [[nodiscard]] std::optional<std::string> exchange(std::string_view request) const
     {
         const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM, 0));
         sockaddr_in            addr{};

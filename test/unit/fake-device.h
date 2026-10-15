@@ -201,22 +201,22 @@ public:
     FakeHip(FakeHip &&)                 = delete;
     FakeHip &operator=(FakeHip &&)      = delete;
 
-    hipError_t getDevice(int *device) const override;
-    hipError_t getDeviceCount(int *count) const override;
-    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
-    hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
-    hipError_t hostFree(void *ptr) const override;
-    hipError_t deviceSynchronize() const override;
-    hipError_t memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
-                           hipStream_t stream) const override;
-    hipError_t eventCreate(hipEvent_t *event) const override;
-    hipError_t eventRecord(hipEvent_t event, hipStream_t stream) const override;
-    hipError_t eventQuery(hipEvent_t event) const override;
-    hipError_t eventDestroy(hipEvent_t event) const override;
+    hipError_t               getDevice(int *device) const override;
+    hipError_t               getDeviceCount(int *count) const override;
+    hipError_t               deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
+    hipError_t               hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
+    hipError_t               hostFree(void *ptr) const override;
+    [[nodiscard]] hipError_t deviceSynchronize() const override;
+    hipError_t               memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+                                         hipStream_t stream) const override;
+    hipError_t               eventCreate(hipEvent_t *event) const override;
+    hipError_t               eventRecord(hipEvent_t event, hipStream_t stream) const override;
+    hipError_t               eventQuery(hipEvent_t event) const override;
+    hipError_t               eventDestroy(hipEvent_t event) const override;
     hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr) const override;
     hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr) const override;
     int        exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const override;
-    int        closeDmabuf(int fd) const override;
+    [[nodiscard]] int closeDmabuf(int fd) const override;
 
 private:
     /* A pointer, so the const methods can change what it points to */
@@ -250,20 +250,20 @@ public:
                    struct ibv_port_attr *port_attr) const override;
     int query_gid(struct ibv_context *context, uint8_t port_num, int index,
                   union ibv_gid *gid) const override;
-    struct ibv_pd *alloc_pd(struct ibv_context *context) const override;
-    int            dealloc_pd(struct ibv_pd *pd) const override;
-    struct ibv_mr *reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const override;
-    bool           supportsDmabuf() const override;
-    struct ibv_mr *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
-                                 int access) const override;
-    int            dereg_mr(struct ibv_mr *mr) const override;
-    struct ibv_cq *create_cq(struct ibv_context *context, int cqe, void *cq_context,
-                             struct ibv_comp_channel *channel, int comp_vector) const override;
-    int            destroy_cq(struct ibv_cq *cq) const override;
-    struct ibv_qp *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const override;
-    int            modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const override;
-    int            destroy_qp(struct ibv_qp *qp) const override;
-    int            poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
+    struct ibv_pd     *alloc_pd(struct ibv_context *context) const override;
+    int                dealloc_pd(struct ibv_pd *pd) const override;
+    struct ibv_mr     *reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const override;
+    [[nodiscard]] bool supportsDmabuf() const override;
+    struct ibv_mr     *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                                     int access) const override;
+    int                dereg_mr(struct ibv_mr *mr) const override;
+    struct ibv_cq     *create_cq(struct ibv_context *context, int cqe, void *cq_context,
+                                 struct ibv_comp_channel *channel, int comp_vector) const override;
+    int                destroy_cq(struct ibv_cq *cq) const override;
+    struct ibv_qp     *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const override;
+    int                modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const override;
+    int                destroy_qp(struct ibv_qp *qp) const override;
+    int                poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
     int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const override;
 
 private:
@@ -299,8 +299,9 @@ constexpr size_t kFakeBufSize = 64;
 /* A NIC topology with no NICs, and no RoCE version for any GID */
 class EmptyNicTopology : public hipObj::NicTopology {
 public:
-    std::vector<hipObj::NicInfo> enumerate(std::string_view hcaList) const override;
-    hipObj::RoceVersion roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const override;
+    [[nodiscard]] std::vector<hipObj::NicInfo> enumerate(std::string_view hcaList) const override;
+    [[nodiscard]] hipObj::RoceVersion          roceVersion(std::string_view devName, uint8_t portNum,
+                                                           int gidIndex) const override;
 };
 
 /* Fakes of the outside world over a FakeDevice, and a platform over them
@@ -326,7 +327,7 @@ public:
     FakePlatform &operator=(FakePlatform &&)      = delete;
 
     /* The platform over the fakes, which keeps this alive */
-    std::shared_ptr<const hipObj::Platform> platform() const
+    [[nodiscard]] std::shared_ptr<const hipObj::Platform> platform() const
     {
         /* Points to the platform, and shares ownership of this. The base
          * class depends on the template's arguments, so its members are
@@ -334,17 +335,17 @@ public:
         return {this->shared_from_this(), &platform_};
     }
 
-    const Hip &hip() const noexcept
+    [[nodiscard]] const Hip &hip() const noexcept
     {
         return hip_;
     }
 
-    const Verbs &verbs() const noexcept
+    [[nodiscard]] const Verbs &verbs() const noexcept
     {
         return verbs_;
     }
 
-    const EmptyNicTopology &topology() const noexcept
+    [[nodiscard]] const EmptyNicTopology &topology() const noexcept
     {
         return topology_;
     }
@@ -373,7 +374,8 @@ protected:
     static hipObjConfig_t makeConfig();
 
     /* initWithPlatform() with the fakes */
-    hipObjError_t initFakes(const hipObjConfig_t &config, const hipObj::Options &options = {}) const;
+    [[nodiscard]] hipObjError_t initFakes(const hipObjConfig_t  &config,
+                                          const hipObj::Options &options = {}) const;
 
     /* Initializes the library with the fakes */
     void init() const;
@@ -381,12 +383,12 @@ protected:
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
     void initAndRegister() const;
 
-    const hipObj::Verbs &verbs() const noexcept
+    [[nodiscard]] const hipObj::Verbs &verbs() const noexcept
     {
         return fakes_->verbs();
     }
 
-    const hipObj::NicTopology &topology() const noexcept
+    [[nodiscard]] const hipObj::NicTopology &topology() const noexcept
     {
         return fakes_->topology();
     }

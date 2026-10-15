@@ -39,18 +39,18 @@ public:
     HipRuntime(HipRuntime &&)                 = delete;
     HipRuntime &operator=(HipRuntime &&)      = delete;
 
-    virtual hipError_t getDevice(int *device) const                                                     = 0;
-    virtual hipError_t getDeviceCount(int *count) const                                                 = 0;
-    virtual hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const                     = 0;
-    virtual hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const                    = 0;
-    virtual hipError_t hostFree(void *ptr) const                                                        = 0;
-    virtual hipError_t deviceSynchronize() const                                                        = 0;
-    virtual hipError_t memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
-                                   hipStream_t stream) const                                            = 0;
-    virtual hipError_t eventCreate(hipEvent_t *event) const                                             = 0;
-    virtual hipError_t eventRecord(hipEvent_t event, hipStream_t stream) const                          = 0;
-    virtual hipError_t eventQuery(hipEvent_t event) const                                               = 0;
-    virtual hipError_t eventDestroy(hipEvent_t event) const                                             = 0;
+    virtual hipError_t               getDevice(int *device) const                                       = 0;
+    virtual hipError_t               getDeviceCount(int *count) const                                   = 0;
+    virtual hipError_t               deviceGetPCIBusId(char *pciBusId, int len, int device) const       = 0;
+    virtual hipError_t               hostMalloc(void **ptr, size_t size, unsigned int flags) const      = 0;
+    virtual hipError_t               hostFree(void *ptr) const                                          = 0;
+    [[nodiscard]] virtual hipError_t deviceSynchronize() const                                          = 0;
+    virtual hipError_t               memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+                                                 hipStream_t stream) const                              = 0;
+    virtual hipError_t               eventCreate(hipEvent_t *event) const                               = 0;
+    virtual hipError_t               eventRecord(hipEvent_t event, hipStream_t stream) const            = 0;
+    virtual hipError_t               eventQuery(hipEvent_t event) const                                 = 0;
+    virtual hipError_t               eventDestroy(hipEvent_t event) const                               = 0;
     virtual hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr) const   = 0;
     virtual hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr) const = 0;
 
@@ -58,35 +58,38 @@ public:
      * hsa_amd_portable_close_dmabuf(). They return 0 or the failing
      * hsa_status_t as an int, so this header doesn't need the HSA
      * headers. */
-    virtual int exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const = 0;
-    virtual int closeDmabuf(int fd) const                                                   = 0;
+    virtual int               exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const = 0;
+    [[nodiscard]] virtual int closeDmabuf(int fd) const                                                   = 0;
 };
 
 /* The real HIP runtime */
 class SystemHip final : public HipRuntime {
 public:
-    hipError_t getDevice(int *device) const override;
-    hipError_t getDeviceCount(int *count) const override;
-    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
-    hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
-    hipError_t hostFree(void *ptr) const override;
-    hipError_t deviceSynchronize() const override;
-    hipError_t memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
-                           hipStream_t stream) const override;
-    hipError_t eventCreate(hipEvent_t *event) const override;
-    hipError_t eventRecord(hipEvent_t event, hipStream_t stream) const override;
-    hipError_t eventQuery(hipEvent_t event) const override;
-    hipError_t eventDestroy(hipEvent_t event) const override;
+    hipError_t               getDevice(int *device) const override;
+    hipError_t               getDeviceCount(int *count) const override;
+    hipError_t               deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
+    hipError_t               hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
+    hipError_t               hostFree(void *ptr) const override;
+    [[nodiscard]] hipError_t deviceSynchronize() const override;
+    hipError_t               memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+                                         hipStream_t stream) const override;
+    hipError_t               eventCreate(hipEvent_t *event) const override;
+    hipError_t               eventRecord(hipEvent_t event, hipStream_t stream) const override;
+    hipError_t               eventQuery(hipEvent_t event) const override;
+    hipError_t               eventDestroy(hipEvent_t event) const override;
     hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr) const override;
     hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr) const override;
     int        exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const override;
-    int        closeDmabuf(int fd) const override;
+    [[nodiscard]] int closeDmabuf(int fd) const override;
 };
 
 /* Destroys a HIP event through the runtime that created it, which has to
  * outlive the pointer. Create the pointer with own() (ibv-ptr.h). */
 struct HipEventDeleter {
-    const HipRuntime *runtime = nullptr;
+    explicit HipEventDeleter(const HipRuntime &deleterRuntime) noexcept : runtime(&deleterRuntime)
+    {
+    }
+    const HipRuntime *runtime;
     void              operator()(hipEvent_t event) const noexcept
     {
         (void)runtime->eventDestroy(event);

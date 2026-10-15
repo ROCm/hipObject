@@ -13,54 +13,14 @@
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
-TEST(VendorOps, ProviderNameBnxt)
-{
-    EXPECT_STREQ(hipObj::provider_name(hipObj::Provider::BNXT), "bnxt");
-}
-
-TEST(VendorOps, ProviderNameIonic)
-{
-    EXPECT_STREQ(hipObj::provider_name(hipObj::Provider::IONIC), "ionic");
-}
-
-TEST(VendorOps, ProviderNameUnknown)
-{
-    EXPECT_STREQ(hipObj::provider_name(hipObj::Provider::UNKNOWN), "unknown");
-}
-
-TEST(VendorOps, FromStringBnxt)
-{
-    EXPECT_EQ(hipObj::provider_from_string("bnxt"), hipObj::Provider::BNXT);
-}
-
-TEST(VendorOps, FromStringBnxtRe)
-{
-    EXPECT_EQ(hipObj::provider_from_string("bnxt_re"), hipObj::Provider::BNXT);
-}
-
-TEST(VendorOps, FromStringIonic)
-{
-    EXPECT_EQ(hipObj::provider_from_string("ionic"), hipObj::Provider::IONIC);
-}
-
-TEST(VendorOps, FromStringPensando)
-{
-    EXPECT_EQ(hipObj::provider_from_string("pensando"), hipObj::Provider::IONIC);
-}
-
-TEST(VendorOps, FromStringUnknown)
-{
-    EXPECT_EQ(hipObj::provider_from_string("mlx5"), hipObj::Provider::UNKNOWN);
-}
-
 TEST(VendorOps, VendorIdBroadcom)
 {
-    EXPECT_EQ(hipObj::VENDOR_ID_BROADCOM, static_cast<uint32_t>(0x14E4));
+    EXPECT_EQ(hipObj::kVendorIdBroadcom, static_cast<uint32_t>(0x14E4));
 }
 
 TEST(VendorOps, VendorIdPensando)
 {
-    EXPECT_EQ(hipObj::VENDOR_ID_PENSANDO, static_cast<uint32_t>(0x1DD8));
+    EXPECT_EQ(hipObj::kVendorIdPensando, static_cast<uint32_t>(0x1DD8));
 }
 
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

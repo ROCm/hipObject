@@ -31,17 +31,17 @@ public:
     {
     }
 
-    const HipRuntime &hip() const noexcept
+    [[nodiscard]] const HipRuntime &hip() const noexcept
     {
         return *hip_;
     }
 
-    const Verbs &verbs() const noexcept
+    [[nodiscard]] const Verbs &verbs() const noexcept
     {
         return *verbs_;
     }
 
-    const NicTopology &topology() const noexcept
+    [[nodiscard]] const NicTopology &topology() const noexcept
     {
         return *topology_;
     }

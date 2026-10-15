@@ -62,7 +62,7 @@ namespace {
         DmabufFd(DmabufFd &&)                 = delete;
         DmabufFd &operator=(DmabufFd &&)      = delete;
 
-        int get() const noexcept
+        [[nodiscard]] int get() const noexcept
         {
             return fd_;
         }
@@ -158,12 +158,9 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     int               access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr          mr      = registerDeviceMemory(verbs, runtime, pd, devPtr, size, access, dmabuf_);
     if (mr) {
-        BufEntry entry;
-        entry.mr         = std::move(mr);
-        entry.size       = size;
-        entry.isDmabuf   = true;
-        entry.remoteAddr = key;
-        entries_.try_emplace(key, std::move(entry));
+        /* The NIC reaches the caller's memory, so there's no staging
+         * buffer */
+        entries_.try_emplace(key, own<HostBufPtr>(runtime, nullptr), std::move(mr), size, true, key);
         return true;
     }
 
@@ -194,13 +191,13 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (!mr) {
         return false;
     }
-    BufEntry entry;
     /* Read the address before hostBuf is moved into the entry */
-    entry.remoteAddr = reinterpret_cast<uint64_t>(hostBuf.get());
-    entry.hostBuf    = std::move(hostBuf);
-    entry.mr         = std::move(mr);
-    entry.size       = size;
-    entry.isDmabuf   = false;
+    const auto remoteAddr = reinterpret_cast<uint64_t>(hostBuf.get());
+    /* Build the entry before inserting it. mr is declared before
+     * hostBuf, so if allocating the map node throws, unwinding would
+     * free the staging buffer while it's still registered; the entry
+     * deregisters its MR first. */
+    BufEntry entry(std::move(hostBuf), std::move(mr), size, false, remoteAddr);
     entries_.try_emplace(key, std::move(entry));
     return true;
 }
@@ -218,12 +215,8 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
     if (!mr) {
         return false;
     }
-    BufEntry entry;
-    entry.mr         = std::move(mr);
-    entry.size       = size;
-    entry.isDmabuf   = false;
-    entry.remoteAddr = reinterpret_cast<uint64_t>(hostPtr);
-    entries_.try_emplace(key, std::move(entry));
+    entries_.try_emplace(key, own<HostBufPtr>(*runtime_, nullptr), std::move(mr), size, false,
+                         reinterpret_cast<uint64_t>(hostPtr));
     return true;
 }
 

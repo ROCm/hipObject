@@ -13,7 +13,7 @@ namespace hipObj {
 bool
 isBnxtDevice(uint32_t vendorId)
 {
-    return vendorId == VENDOR_ID_BROADCOM;
+    return vendorId == kVendorIdBroadcom;
 }
 
 void

@@ -56,11 +56,12 @@ public:
     /* The NICs with an active port, each with its first active port,
      * among those that hcaList (comma-separated device names, or empty for
      * all) allows */
-    virtual std::vector<NicInfo> enumerate(std::string_view hcaList) const = 0;
+    [[nodiscard]] virtual std::vector<NicInfo> enumerate(std::string_view hcaList) const = 0;
 
     /* The RoCE version of entry gidIndex in the GID table of port portNum
      * on device devName */
-    virtual RoceVersion roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const = 0;
+    [[nodiscard]] virtual RoceVersion roceVersion(std::string_view devName, uint8_t portNum,
+                                                  int gidIndex) const = 0;
 };
 
 /* The system's topology: the devices from verbs, and the rest from
@@ -78,8 +79,9 @@ public:
     SysfsTopology(SysfsTopology &&)                 = delete;
     SysfsTopology &operator=(SysfsTopology &&)      = delete;
 
-    std::vector<NicInfo> enumerate(std::string_view hcaList) const override;
-    RoceVersion          roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const override;
+    [[nodiscard]] std::vector<NicInfo> enumerate(std::string_view hcaList) const override;
+    [[nodiscard]] RoceVersion          roceVersion(std::string_view devName, uint8_t portNum,
+                                                   int gidIndex) const override;
 
 private:
     const Verbs *verbs_;

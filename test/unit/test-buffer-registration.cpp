@@ -22,7 +22,7 @@ namespace {
 /* BufferMap with the fake verbs and HIP runtime */
 class BufferRegistrationTest : public ::testing::Test {
 protected:
-    hipObj::BufferMap makeBuffers() const
+    [[nodiscard]] hipObj::BufferMap makeBuffers() const
     {
         return {verbs_, hip_, {}, false};
     }

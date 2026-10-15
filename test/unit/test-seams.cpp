@@ -20,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -153,13 +154,14 @@ public:
     FakeNicTopology(FakeNicTopology &&)                 = delete;
     FakeNicTopology &operator=(FakeNicTopology &&)      = delete;
 
-    std::vector<hipObj::NicInfo> enumerate(std::string_view hcaList) const override
+    [[nodiscard]] std::vector<hipObj::NicInfo> enumerate(std::string_view hcaList) const override
     {
         state_->lastHcaList = hcaList;
         return state_->nics;
     }
 
-    hipObj::RoceVersion roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const override
+    [[nodiscard]] hipObj::RoceVersion roceVersion(std::string_view devName, uint8_t portNum,
+                                                  int gidIndex) const override
     {
         state_->lastDevName = devName;
         state_->lastPortNum = portNum;
@@ -182,7 +184,7 @@ protected:
     }
 
     /* The NIC closest to GPU 0, with the fakes */
-    std::optional<hipObj::RdmaNic> closestNic(std::string_view hcaList = {}) const
+    [[nodiscard]] std::optional<hipObj::RdmaNic> closestNic(std::string_view hcaList = {}) const
     {
         return hipObj::GetClosestNicToGpu(hip_, topology_, 0, hcaList);
     }
@@ -248,7 +250,8 @@ TEST_F(NicSeamTest, FirstOfClosestWins)
 TEST_F(NicSeamTest, HcaFilterIsForwarded)
 {
     state_.nics = {{"mlx5_0", "0000:18:00.0", 0, 1}};
-    closestNic("mlx5_0,mlx5_1");
+    /* Only the list the topology was given matters here */
+    std::ignore = closestNic("mlx5_0,mlx5_1");
     EXPECT_EQ(state_.lastHcaList, "mlx5_0,mlx5_1");
 }
 
@@ -598,7 +601,7 @@ TEST(PlatformTest, InitUsesTheSystemPlatform)
  * only reach through the device */
 class FakeVerbsSeamTest : public ::testing::Test {
 protected:
-    hipObj::RdmaDevice makeDevice() const
+    [[nodiscard]] hipObj::RdmaDevice makeDevice() const
     {
         return {verbs_,
                 hipObj::own<hipObj::IbvContextPtr>(verbs_, reinterpret_cast<struct ibv_context *>(0x1234)),

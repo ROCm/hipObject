@@ -67,7 +67,7 @@ public:
     ::minio::s3::PutObjectResponse PutObject(::minio::s3::PutObjectArgs args);
     ::minio::s3::GetObjectResponse GetObject(::minio::s3::GetObjectArgs args);
 
-    bool RdmaAvailable() const;
+    [[nodiscard]] bool RdmaAvailable() const;
 
 private:
     ::minio::s3::BaseUrl      base_url_;

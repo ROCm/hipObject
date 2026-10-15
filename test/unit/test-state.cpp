@@ -132,7 +132,7 @@ constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 class InitWithTest : public hipObjTest::FakeDeviceTest {
 protected:
     /* Initializes the library with the fakes and options */
-    hipObjError_t initWith(const hipObj::Options &options) const
+    [[nodiscard]] hipObjError_t initWith(const hipObj::Options &options) const
     {
         return initFakes(makeConfig(), options);
     }
