@@ -24,6 +24,7 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include "abandoned-copies.h"
 #include "buffer.h"
 #include "control.h"
 #include "hip-seam.h"
@@ -73,6 +74,18 @@ namespace {
             return makeError(hipObjInvalidValue);
         }
         return makeError(hipObjSuccess);
+    }
+
+    /* What a registration call returns for what the buffer map did */
+    hipObjError_t registrationError(BufferMap::RegisterResult result)
+    {
+        if (result == BufferMap::RegisterResult::Registered) {
+            return makeError(hipObjSuccess);
+        }
+        if (result == BufferMap::RegisterResult::AlreadyRegistered) {
+            return makeError(hipObjBufAlreadyRegistered);
+        }
+        return makeError(hipObjRdmaError);
     }
 
     /* Checks the arguments to a call that uses [offset, offset + size) of the
@@ -135,16 +148,22 @@ namespace {
         return runtime.deviceSynchronize() == hipSuccess;
     }
 
-    /* hipMemcpy with a deadline (see Options::stageTimeout). Async copy plus a
-     * recorded event polled to a wall-clock bound: on timeout the event and the
-     * copy are abandoned deliberately -- the copy owns the staging buffer and
-     * the stream, and there is no safe way to reclaim either while the DMA may
-     * still land. The caller gets an error instead of a hang, which is the
-     * whole point. */
-    hipObjError_t stageCopyWithDeadline(const HipRuntime &runtime, void *dst, const void *src, size_t size,
-                                        hipMemcpyKind kind, std::chrono::milliseconds timeout)
+    /* hipMemcpy with a deadline (see Options::stageTimeout), between the
+     * caller's memory and the staging buffer of buf. Async copy plus a
+     * recorded event polled to a wall-clock bound. On timeout, the caller
+     * gets an error instead of a hang, which is the whole point. The copy
+     * may still land, and there's no safe way to stop it, so the event and
+     * the registration are handed to the instance's abandoned copies,
+     * which keep the staging buffer until the copy is over. Room for that
+     * is set aside before the copy starts, so handing them over can't
+     * fail and leave a running copy untracked. */
+    hipObjError_t stageCopyWithDeadline(Instance                                         &instance,
+                                        const std::shared_ptr<const BufferMap::BufEntry> &buf, void *dst,
+                                        const void *src, size_t size, hipMemcpyKind kind)
     {
-        hipEvent_t rawDone = nullptr;
+        AbandonedCopies::Slot slot    = instance.abandoned.reserve();
+        const HipRuntime     &runtime = instance.platform->hip();
+        hipEvent_t            rawDone = nullptr;
         if (runtime.eventCreate(&rawDone) != hipSuccess) {
             return makeError(hipObjInternalError);
         }
@@ -161,7 +180,8 @@ namespace {
             return makeError(hipObjInternalError);
         }
 
-        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        const std::chrono::milliseconds timeout  = instance.options.stageTimeout;
+        const auto                      deadline = std::chrono::steady_clock::now() + timeout;
         for (;;) {
             const hipError_t q = runtime.eventQuery(done.get());
             if (q == hipSuccess) {
@@ -171,9 +191,7 @@ namespace {
                 return makeError(hipObjInternalError);
             }
             if (std::chrono::steady_clock::now() >= deadline) {
-                /* The copy may still signal the event, so it's leaked rather
-                 * than destroyed */
-                dropOwnership(done);
+                instance.abandoned.add(slot, std::move(done), buf);
                 const int64_t     timeoutMs = timeout.count();
                 const std::string direction =
                     kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";
@@ -188,44 +206,57 @@ namespace {
         }
     }
 
+    /* hipObjBusy when a staging copy of buf that timed out is still
+     * running, since a copy or transfer that used the staging buffer could
+     * mix its data with the old copy's */
+    hipObjError_t checkNoAbandonedCopy(Instance &instance, const BufferMap::BufEntry &buf)
+    {
+        if (buf.hostBuf && instance.abandoned.running(buf)) {
+            return makeError(hipObjBusy);
+        }
+        return makeError(hipObjSuccess);
+    }
+
     /* Copies [offset, offset + size) of a host-staged registration from its
      * staging buffer to the device memory at devPtr */
-    hipObjError_t stageToDevice(const HipRuntime &runtime, void *devPtr, const BufferMap::BufEntry &buf,
-                                size_t size, off_t offset, std::chrono::milliseconds timeout)
+    hipObjError_t stageToDevice(Instance &instance, void *devPtr,
+                                const std::shared_ptr<const BufferMap::BufEntry> &buf, size_t size,
+                                off_t offset)
     {
-        if (!buf.hostBuf) {
+        if (!buf->hostBuf) {
             /* the NIC writes the caller's memory */
             return makeError(hipObjSuccess);
         }
-        if (!rangeInRegistration(offset, size, buf.size)) {
+        if (!rangeInRegistration(offset, size, buf->size)) {
             return makeError(hipObjInvalidValue);
         }
         /* The device memory is only viewed for its bounds, never accessed here */
-        const auto host  = spanFromPointer(static_cast<const std::byte *>(buf.hostBuf.get()), buf.size);
-        const auto dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf.size);
+        const auto host  = spanFromPointer(static_cast<const std::byte *>(buf->hostBuf.get()), buf->size);
+        const auto dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf->size);
         const auto start = static_cast<size_t>(offset);
-        return stageCopyWithDeadline(runtime, dev.subspan(start, size).data(),
-                                     host.subspan(start, size).data(), size, hipMemcpyHostToDevice, timeout);
+        return stageCopyWithDeadline(instance, buf, dev.subspan(start, size).data(),
+                                     host.subspan(start, size).data(), size, hipMemcpyHostToDevice);
     }
 
     /* Copies [offset, offset + size) of a host-staged registration from the
      * device memory at devPtr to its staging buffer */
-    hipObjError_t stageToHost(const HipRuntime &runtime, const void *devPtr, const BufferMap::BufEntry &buf,
-                              size_t size, off_t offset, std::chrono::milliseconds timeout)
+    hipObjError_t stageToHost(Instance &instance, const void *devPtr,
+                              const std::shared_ptr<const BufferMap::BufEntry> &buf, size_t size,
+                              off_t offset)
     {
-        if (!buf.hostBuf) {
+        if (!buf->hostBuf) {
             /* the NIC reads the caller's memory */
             return makeError(hipObjSuccess);
         }
-        if (!rangeInRegistration(offset, size, buf.size)) {
+        if (!rangeInRegistration(offset, size, buf->size)) {
             return makeError(hipObjInvalidValue);
         }
         /* The device memory is only viewed for its bounds, never accessed here */
-        const auto host  = spanFromPointer(static_cast<std::byte *>(buf.hostBuf.get()), buf.size);
-        const auto dev   = spanFromPointer(static_cast<const std::byte *>(devPtr), buf.size);
+        const auto host  = spanFromPointer(static_cast<std::byte *>(buf->hostBuf.get()), buf->size);
+        const auto dev   = spanFromPointer(static_cast<const std::byte *>(devPtr), buf->size);
         const auto start = static_cast<size_t>(offset);
-        return stageCopyWithDeadline(runtime, host.subspan(start, size).data(),
-                                     dev.subspan(start, size).data(), size, hipMemcpyDeviceToHost, timeout);
+        return stageCopyWithDeadline(instance, buf, host.subspan(start, size).data(),
+                                     dev.subspan(start, size).data(), size, hipMemcpyDeviceToHost);
     }
 
     hipObjError_t runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
@@ -286,6 +317,8 @@ hipObjGetErrorString(hipObjOpError_t err)
                 return "Size too large";
             case hipObjInternalError:
                 return "Internal error";
+            case hipObjBusy:
+                return "Busy";
             default:
                 return "Unknown error";
         }
@@ -348,24 +381,18 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::Instance *const instance = hipObj::currentInstance();
-    if (instance == nullptr) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
+    const hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
     }
     if (!hipObj::isValidDeviceRange(instance->platform->hip(), devPtr, size)) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    if (instance->buffers.isRegistered(devPtr)) {
-        return hipObj::makeError(hipObjBufAlreadyRegistered);
-    }
-    if (!instance->buffers.registerBuffer(devPtr, size, instance->device->pd())) {
-        return hipObj::makeError(hipObjRdmaError);
-    }
-    return hipObj::makeError(hipObjSuccess);
+    return hipObj::registrationError(instance->buffers.registerBuffer(devPtr, size, instance->device->pd()));
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -378,21 +405,16 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::Instance *const instance = hipObj::currentInstance();
-    if (instance == nullptr) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    hipObjError_t err = hipObj::checkRegistrationArgs(hostPtr, size);
+    const hipObjError_t err = hipObj::checkRegistrationArgs(hostPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    if (instance->buffers.isRegistered(hostPtr)) {
-        return hipObj::makeError(hipObjBufAlreadyRegistered);
-    }
-    if (!instance->buffers.registerHostBuffer(hostPtr, size, instance->device->pd())) {
-        return hipObj::makeError(hipObjRdmaError);
-    }
-    return hipObj::makeError(hipObjSuccess);
+    return hipObj::registrationError(
+        instance->buffers.registerHostBuffer(hostPtr, size, instance->device->pd()));
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -405,20 +427,26 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::Instance *const instance = hipObj::currentInstance();
-    if (instance == nullptr) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     if (devPtr == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    if (!instance->buffers.isRegistered(devPtr)) {
+    /* Releases the staging copies that timed out and have finished since,
+     * so the buffers they used can be deregistered */
+    instance->abandoned.reclaim();
+    const auto result = instance->buffers.deregisterBuffer(devPtr);
+    if (result == hipObj::BufferMap::DeregisterResult::Deregistered) {
+        return hipObj::makeError(hipObjSuccess);
+    }
+    if (result == hipObj::BufferMap::DeregisterResult::NotRegistered) {
         return hipObj::makeError(hipObjBufNotRegistered);
     }
-    if (!instance->buffers.deregisterBuffer(devPtr)) {
-        return hipObj::makeError(hipObjRdmaError);
-    }
-    return hipObj::makeError(hipObjSuccess);
+    /* Busy: a staging copy that timed out is still using the buffer. No
+     * other call can be, since this one holds the API lock. */
+    return hipObj::makeError(hipObjBusy);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -436,15 +464,19 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::Instance *const instance = hipObj::currentInstance();
-    if (instance == nullptr) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     if (ops == nullptr || ops->sendRequest == nullptr || ops->recvReply == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    const auto   *buf = instance->buffers.find(devPtr);
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
+    const auto    buf = instance->buffers.find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf.get(), size, offset);
+    if (err.opError != hipObjSuccess) {
+        return err;
+    }
+    err = hipObj::checkNoAbandonedCopy(*instance, *buf);
     if (err.opError != hipObjSuccess) {
         return err;
     }
@@ -452,8 +484,7 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::stageToDevice(instance->platform->hip(), devPtr, *buf, size, offset,
-                                 instance->options.stageTimeout);
+    return hipObj::stageToDevice(*instance, devPtr, buf, size, offset);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -471,20 +502,23 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::Instance *const instance = hipObj::currentInstance();
-    if (instance == nullptr) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     if (ops == nullptr || ops->sendRequest == nullptr || ops->recvReply == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    const auto   *buf = instance->buffers.find(devPtr);
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
+    const auto    buf = instance->buffers.find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf.get(), size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::stageToHost(instance->platform->hip(), devPtr, *buf, size, offset,
-                              instance->options.stageTimeout);
+    err = hipObj::checkNoAbandonedCopy(*instance, *buf);
+    if (err.opError != hipObjSuccess) {
+        return err;
+    }
+    err = hipObj::stageToHost(*instance, devPtr, buf, size, offset);
     if (err.opError != hipObjSuccess) {
         return err;
     }
@@ -501,24 +535,26 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const hipObj::Instance *const instance = hipObj::currentInstance();
-    if (instance == nullptr) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     if (direction != HIPOBJ_SYNC_TO_HOST && direction != HIPOBJ_SYNC_TO_DEVICE) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    const auto   *buf = instance->buffers.find(devPtr);
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, offset);
+    const auto    buf = instance->buffers.find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf.get(), size, offset);
+    if (err.opError != hipObjSuccess) {
+        return err;
+    }
+    err = hipObj::checkNoAbandonedCopy(*instance, *buf);
     if (err.opError != hipObjSuccess) {
         return err;
     }
     if (direction == HIPOBJ_SYNC_TO_DEVICE) {
-        return hipObj::stageToDevice(instance->platform->hip(), devPtr, *buf, size, offset,
-                                     instance->options.stageTimeout);
+        return hipObj::stageToDevice(*instance, devPtr, buf, size, offset);
     }
-    return hipObj::stageToHost(instance->platform->hip(), devPtr, *buf, size, offset,
-                               instance->options.stageTimeout);
+    return hipObj::stageToHost(*instance, devPtr, buf, size, offset);
 }
 catch (...) {
     return hipObj::kExceptionError;
@@ -531,15 +567,19 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    const hipObj::Instance *const instance = hipObj::currentInstance();
-    if (instance == nullptr) {
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
     if (outToken == nullptr || (op != HIPOBJ_RDMA_OP_PUT && op != HIPOBJ_RDMA_OP_GET)) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    const auto   *buf = instance->buffers.find(devPtr);
-    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf, size, 0);
+    const auto    buf = instance->buffers.find(devPtr);
+    hipObjError_t err = hipObj::checkBufferArgs(devPtr, buf.get(), size, 0);
+    if (err.opError != hipObjSuccess) {
+        return err;
+    }
+    err = hipObj::checkNoAbandonedCopy(*instance, *buf);
     if (err.opError != hipObjSuccess) {
         return err;
     }

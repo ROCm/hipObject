@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -66,17 +67,31 @@ ApiGuard::owns() const noexcept
 
 namespace {
 
-    /* The current instance, which the API lock guards. Never destroyed:
-     * destroying an instance releases verbs and HIP resources, which isn't
-     * safe during static destruction, so hipObjShutdown() is what releases
-     * it. Clang still warns, since NoDestructor's empty destructor isn't
-     * trivial. */
-    std::unique_ptr<Instance> &current()
+    /* The current instance, and the locks that guard it. They're taken in
+     * the order they're declared. */
+    struct Current {
+        /* Held for the whole of initWith() and shutdownInstance(), so they
+         * run one at a time. Calls that only read the instance never take
+         * it. */
+        std::mutex initMutex{};
+        /* Guards instance. Calls that read it take it shared, so they
+         * don't wait for each other, and only initWith() and
+         * shutdownInstance(), which change it, take it exclusively. */
+        std::shared_mutex         mutex{};
+        std::shared_ptr<Instance> instance{};
+    };
+
+    /* Never destroyed: destroying an instance releases verbs and HIP
+     * resources, which isn't safe during static destruction, so
+     * hipObjShutdown() is what releases it. std::shared_mutex has a
+     * destructor, so it's never destroyed either. Clang still warns, since
+     * NoDestructor's empty destructor isn't trivial. */
+    Current &current()
     {
         HIPOBJ_WARN_NO_EXIT_DTOR_OFF
-        static NoDestructor<std::unique_ptr<Instance>> instance;
+        static NoDestructor<Current> state;
         HIPOBJ_WARN_NO_EXIT_DTOR_ON
-        return *instance;
+        return *state;
     }
 
     /* The longest staging copy timeout: longer than any copy could take,
@@ -176,30 +191,48 @@ parseOptions(const EnvLookup &lookup)
 /* The members are initialized in the order they're declared, so the
  * buffers use the members, not the arguments moved into them */
 Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
-                   ResolvedConfig instanceConfig, std::unique_ptr<const RdmaDevice> instanceDevice,
+                   ResolvedConfig instanceConfig, std::shared_ptr<const RdmaDevice> instanceDevice,
                    RcConnection instanceConn) noexcept
     : platform(std::move(instancePlatform)), options(instanceOptions), config(std::move(instanceConfig)),
       device(std::move(instanceDevice)), conn(std::move(instanceConn)),
-      buffers(platform->verbs(), platform->hip(), options.dmabuf, options.requireGpuDirect)
+      buffers(platform->verbs(), platform->hip(), options.dmabuf, options.requireGpuDirect),
+      abandoned(platform->hip())
 {
 }
 
-Instance *
-currentInstance() noexcept
+std::shared_ptr<Instance>
+currentInstance()
 {
-    return current().get();
+    Current                                  &state = current();
+    const std::shared_lock<std::shared_mutex> lock(state.mutex);
+    return state.instance;
 }
 
 void
-shutdownInstance() noexcept
+shutdownInstance()
 {
-    current().reset();
+    Current                           &state = current();
+    const std::scoped_lock<std::mutex> initLock(state.initMutex);
+
+    /* Moving the instance out leaves state.instance null. Calls that
+     * already hold a copy keep the instance alive. */
+    std::shared_ptr<Instance> instance;
+    {
+        const std::scoped_lock<std::shared_mutex> lock(state.mutex);
+        instance = std::move(state.instance);
+    }
+
+    /* Releases the instance if nothing else holds it, without holding
+     * the lock that calls take to find it */
+    instance.reset();
 }
 
 hipObjError_t
 initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform, const Options &options)
 {
-    if (current()) {
+    Current                           &state = current();
+    const std::scoped_lock<std::mutex> initLock(state.initMutex);
+    if (currentInstance()) {
         return makeError(hipObjAlreadyInitialized);
     }
     const HipRuntime      &runtime = platform->hip();
@@ -258,7 +291,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     if (!opened) {
         return makeError(hipObjRdmaError);
     }
-    auto                        device = std::make_unique<const RdmaDevice>(std::move(*opened));
+    auto                        device = std::make_shared<const RdmaDevice>(std::move(*opened));
     std::optional<RcConnection> conn   = createRcConnection(*device, 256, 128, 128);
     if (!conn) {
         return makeError(hipObjRdmaError);
@@ -268,11 +301,13 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         .nicHint   = std::string(nicHint),
         .nicIndex  = nic->index,
     };
-    auto instance = std::make_unique<Instance>(std::move(platform), options, std::move(resolved),
+    auto instance = std::make_shared<Instance>(std::move(platform), options, std::move(resolved),
                                                std::move(device), std::move(*conn));
 
-    /* Can't throw */
-    current() = std::move(instance);
+    /* If taking the lock throws, the instance is released, and nothing
+     * has changed. Moving the instance in can't throw. */
+    const std::scoped_lock<std::shared_mutex> lock(state.mutex);
+    state.instance = std::move(instance);
     return makeError(hipObjSuccess);
 }
 

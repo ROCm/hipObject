@@ -125,6 +125,12 @@ typedef enum {
     hipObjDmabufNotSupported,
     hipObjSizeTooLarge,
     hipObjInternalError,
+    /*!
+     * The buffer is in use: a staging copy of it that timed out is still
+     * running (see hipObjBufSync()). Try again later. hipObject added
+     * this code; cuObject doesn't have it.
+     */
+    hipObjBusy,
 } hipObjOpError_t;
 
 /*!
@@ -241,6 +247,9 @@ HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t *config);
  * Releases all RDMA resources.  All registered
  * buffers are implicitly deregistered.
  *
+ * A staging buffer that a copy that timed out may
+ * still use (see hipObjBufSync()) isn't freed.
+ *
  * @return hipObjError_t
  * @serialized
  * @ingroup core
@@ -287,6 +296,12 @@ HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void *hostPtr, size_t size);
 /*!
  * @brief Deregister a previously registered buffer
  *
+ * While a staging copy of the buffer that timed out
+ * is still running (see hipObjBufSync()), this
+ * returns hipObjBusy and leaves the buffer
+ * registered. Call it again once the copy has
+ * finished, and don't free the buffer until then.
+ *
  * @param devPtr  Pointer previously passed to
  *                hipObjBufRegister or hipObjBufRegisterHost
  * @return hipObjError_t
@@ -320,7 +335,8 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * HIPOBJ_STAGE_TIMEOUT_MS environment variable), this
  * returns hipObjInternalError and leaves the copy
  * running. It can still write the buffer after this
- * returns.
+ * returns, and until it finishes, the buffer can't be
+ * used or deregistered (see hipObjBufSync()).
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
@@ -357,7 +373,8 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * HIPOBJ_STAGE_TIMEOUT_MS environment variable), this
  * returns hipObjInternalError and leaves the copy
  * running. It can still read the buffer after this
- * returns.
+ * returns, and until it finishes, the buffer can't be
+ * used or deregistered (see hipObjBufSync()).
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
@@ -393,6 +410,12 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
  * doesn't finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS
  * environment variable), this returns hipObjInternalError and leaves the
  * copy running. It can still read or write the buffer after this returns.
+ * Until it finishes, hipObject keeps the staging buffer it uses, and the
+ * buffer can't be used: hipObjGet(), hipObjPut(), hipObjBufSync(), and
+ * hipObjGetRdmaToken() return hipObjBusy for it, and
+ * hipObjBufDeregister() returns hipObjBusy and leaves it registered.
+ * Once the copy has finished, the buffer can be used and deregistered
+ * again. If it never finishes, the staging buffer is never freed.
  *
  * hipObject doesn't wait for GPU work that uses the buffer, on any
  * stream. Before HIPOBJ_SYNC_TO_HOST,
@@ -410,6 +433,9 @@ HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, 
  *
  * The caller must release @p *outToken with hipObjPutRdmaToken().
  * @p op is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved).
+ *
+ * Returns hipObjBusy while a staging copy of the buffer that timed out
+ * is still running (see hipObjBufSync()).
  *
  * @serialized
  * @ingroup io
