@@ -21,12 +21,12 @@
 
 namespace hipObj {
 
-    std::mutex RcListener::s_registryMutex;
-    std::vector<RcListener*> RcListener::s_listeners;
+    std::mutex RdmaCmRcListener::s_registryMutex;
+    std::vector<RdmaCmRcListener*> RdmaCmRcListener::s_listeners;
 
-    RcListener::~RcListener() = default;
+    RdmaCmRcListener::~RdmaCmRcListener() = default;
 
-    void RcListener::DestroyConnection(struct rdma_cm_id* id) {
+    void RdmaCmRcListener::DestroyConnection(struct rdma_cm_id* id) {
         if (id->qp) {
             struct ibv_qp* qp = id->qp;
             struct ibv_cq* sendCq = qp->send_cq;
@@ -41,7 +41,7 @@ namespace hipObj {
         rdma_destroy_id(id);
     }
 
-    void RcListener::RemoveActiveConn(struct rdma_cm_id* id) {
+    void RdmaCmRcListener::RemoveActiveConn(struct rdma_cm_id* id) {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto it = activeConns_.begin(); it != activeConns_.end(); ++it) {
             if (*it == id) {
@@ -54,20 +54,29 @@ namespace hipObj {
     /* CONNECT_REQUEST: build a QP on our existing PD (so it can service
      * RDMA READ/WRITE against MRs registered there) and accept. RDMA CM
      * handles the INIT/RTR/RTS transitions itself as part of accept. */
-    void RcListener::HandleConnectRequest(struct rdma_cm_id* id) {
+    void RdmaCmRcListener::HandleConnectRequest(struct rdma_cm_id* id) {
+        /* Start() took deviceCtx_ from the listen id, so every connection
+         * RDMA CM accepts on it should arrive on the same context. Kept as a
+         * guard: a QP, CQ or MR from one context can't be used through
+         * another, even on the same device. */
         if (id->verbs != deviceCtx_) {
             LOG_ERROR(
-                "rc-listener: rejecting CONNECT_REQUEST: id->verbs=%p != "
-                "deviceCtx=%p (device %s != %s)",
-                static_cast<void*>(id->verbs), static_cast<void*>(deviceCtx_),
+                "rc-listener: rejecting CONNECT_REQUEST: it arrived on %s:%p, "
+                "but the listener's PD and CQs are on %s:%p",
                 id->verbs ? ibv_get_device_name(id->verbs->device) : "(null)",
-                deviceCtx_ ? ibv_get_device_name(deviceCtx_->device)
-                           : "(null)");
+                static_cast<void*>(id->verbs),
+                deviceCtx_ ? ibv_get_device_name(deviceCtx_->device) : "(null)",
+                static_cast<void*>(deviceCtx_));
             rdma_reject(id, nullptr, 0);
             rdma_destroy_id(id);
             return;
         }
-        deviceCtxVerified_ = true;
+
+        /* TODO: limit the connections. Every connect request gets a CQ and
+         * a QP here, with no cap and no timeout, so any host that can reach
+         * the port can use up the verbs resources. Cap how many can be
+         * active at once, rejecting a request here before its CQ is
+         * created, and tear down connections older than a time limit. */
 
         /* hipObject never posts its own send/recv on this QP -- the peer
          * performs one-sided RDMA READ/WRITE against our MRs, which
@@ -132,7 +141,7 @@ namespace hipObj {
         activeConns_.push_back(id);
     }
 
-    void RcListener::HandleTeardown(struct rdma_cm_id* id) {
+    void RdmaCmRcListener::HandleTeardown(struct rdma_cm_id* id) {
         RemoveActiveConn(id);
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -161,13 +170,20 @@ namespace hipObj {
      * connection reaching one of these states is already unusable, and
      * the caller's own token/reply-based error handling covers the
      * resulting request failure).
+     *
+     * Takes one event per call. ibv_get_async_event() blocks, so draining in
+     * a loop would block after the last event, stalling the accept loop and
+     * Stop()'s join(). The async fd is in AcceptLoop()'s epoll set
+     * level-triggered, so epoll_wait() wakes the loop again while events
+     * remain. The fd isn't made nonblocking instead: the context is
+     * librdmacm's, not hipObject's.
      */
-    void RcListener::PollAsyncEvents() {
-        if (!deviceCtx_ || !deviceCtxVerified_) {
+    void RdmaCmRcListener::PollAsyncEvents() {
+        if (!deviceCtx_) {
             return;
         }
         struct ibv_async_event event;
-        while (ibv_get_async_event(deviceCtx_, &event) == 0) {
+        if (ibv_get_async_event(deviceCtx_, &event) == 0) {
             uint32_t qpNum = 0;
             switch (event.event_type) {
                 case IBV_EVENT_QP_FATAL:
@@ -190,7 +206,7 @@ namespace hipObj {
         }
     }
 
-    void RcListener::AcceptLoop() {
+    void RdmaCmRcListener::AcceptLoop() {
         int epollFd = epoll_create1(0);
         if (epollFd < 0) {
             LOG_ERROR("rc-listener: epoll_create1 failed: %s", std::strerror(errno));
@@ -206,19 +222,15 @@ namespace hipObj {
             return;
         }
 
-        // deviceCtx_ only becomes verified partway through the loop (the
-        // first CONNECT_REQUEST HandleConnectRequest() confirms it against),
-        // so async_fd is added to the epoll set lazily once that happens.
-        bool asyncFdAdded = false;
+        // Level-triggered (no EPOLLET), which PollAsyncEvents() relies on
+        if (deviceCtx_) {
+            epoll_event asyncEv{};
+            asyncEv.events = EPOLLIN;
+            asyncEv.data.fd = deviceCtx_->async_fd;
+            epoll_ctl(epollFd, EPOLL_CTL_ADD, deviceCtx_->async_fd, &asyncEv);
+        }
 
         while (!stopping_.load()) {
-            if (!asyncFdAdded && deviceCtx_ && deviceCtxVerified_) {
-                epoll_event asyncEv{};
-                asyncEv.events = EPOLLIN;
-                asyncEv.data.fd = deviceCtx_->async_fd;
-                epoll_ctl(epollFd, EPOLL_CTL_ADD, deviceCtx_->async_fd, &asyncEv);
-                asyncFdAdded = true;
-            }
 
             epoll_event events[2];
             int ready = epoll_wait(epollFd, events, 2,
@@ -229,8 +241,7 @@ namespace hipObj {
 
             bool channelReady = false;
             for (int i = 0; i < ready; ++i) {
-                if (deviceCtx_ && deviceCtxVerified_ &&
-                    events[i].data.fd == deviceCtx_->async_fd) {
+                if (deviceCtx_ && events[i].data.fd == deviceCtx_->async_fd) {
                     PollAsyncEvents();
                 } else if (events[i].data.fd == channel_->fd) {
                     channelReady = true;
@@ -297,52 +308,40 @@ namespace hipObj {
         return kRcListenerDefaultPort;
     }
 
-    RcListener* RcListener::Start(
-        void* pd, void* deviceCtx, const char* bindIp, uint16_t port,
+    RdmaCmRcListener* RdmaCmRcListener::Start(
+        const char* bindIp, uint16_t port,
         RcListenerEventCallback onConnected,
         RcListenerEventCallback onDisconnected, void* userCtx) {
-        std::string key = (bindIp && bindIp[0] != '\0') ? bindIp : "";
+        /* A specific address: bound to INADDR_ANY, RDMA CM resolves no
+         * device, so there'd be no context to allocate the PD on */
+        if (!bindIp || bindIp[0] == '\0') {
+            LOG_ERROR("rc-listener: Start() needs an address to bind to");
+            return nullptr;
+        }
+        std::string key = bindIp;
         uint16_t resolvedPort = (port != 0) ? port : rcListenerPortFromEnv();
-        LOG_INFO(
-            "rc-listener: Start() requested bindIp=%s port=%u "
-            "(selfManage=%d pd=%p deviceCtx=%p)",
-            key.empty() ? "(any)" : key.c_str(), resolvedPort, !pd && !deviceCtx,
-            pd, deviceCtx);
+        LOG_INFO("rc-listener: Start() requested bindIp=%s port=%u",
+                 key.c_str(), resolvedPort);
 
         std::lock_guard<std::mutex> registryLock(s_registryMutex);
-        for (RcListener* existing : s_listeners) {
+        for (RdmaCmRcListener* existing : s_listeners) {
             if (existing->bindIp_ == key && existing->port_ == resolvedPort) {
                 LOG_INFO(
                     "rc-listener: Start() found already-running listener for "
                     "%s:%u -- returning existing instance %p",
-                    key.empty() ? "(any)" : key.c_str(), resolvedPort,
-                    static_cast<void*>(existing));
+                    key.c_str(), resolvedPort, static_cast<void*>(existing));
                 return existing; /* already running for this bindIp:port */
             }
         }
 
-        /* Self-managed mode (pd == deviceCtx == nullptr): librdmacm opens
-         * its own struct ibv_context internally when a listener binds --
-         * it is never pointer-equal to a context the caller opened
-         * separately via ibv_open_device(), even for the identical
-         * physical device, and an accepted connection's id->verbs is
-         * always that internally-managed context. So a PD allocated from
-         * a caller-supplied deviceCtx can never validly back a QP RDMA CM
-         * creates for an accepted connection. Instead, let the bind below
-         * pick the device, then allocate our own PD from *that* context
-         * and hand both back via deviceCtx()/pd() for the caller to
-         * register buffers against -- see hipobj.cpp's HIPOBJ_RC_LISTEN_IP
-         * handling. */
-        bool selfManage = !pd && !deviceCtx;
-        if (!selfManage && (!pd || !deviceCtx)) {
-            LOG_ERROR(
-                "rc-listener: Start() rejected: exactly one of pd/deviceCtx "
-                "is null (pd=%p deviceCtx=%p) -- must be both null "
-                "(self-managed) or both non-null",
-                pd, deviceCtx);
-            return nullptr;
-        }
-
+        /* librdmacm opens its own struct ibv_context for the device a bind
+         * resolves to, and an accepted connection's id->verbs is always that
+         * context. It's never pointer-equal to a context opened separately
+         * with ibv_open_device(), even for the same device, and verbs objects
+         * from one context can't be used through another. So the listener
+         * takes the context from its own bind, allocates its PD on it, and
+         * hands both back through deviceCtx()/pd(): hipObject registers its
+         * buffers on that PD (registrationPd() in hipobj.cpp). */
         struct rdma_event_channel* channel = rdma_create_event_channel();
         if (!channel) {
             LOG_ERROR("rc-listener: rdma_create_event_channel failed: %s",
@@ -361,10 +360,9 @@ namespace hipObj {
 
         /* key (bindIp) decides the family: an IPv6 literal always contains
          * ':' (dotted-quad IPv4 never does), so that's enough to pick
-         * between sockaddr_in/sockaddr_in6 -- no key (bind-any) keeps the
-         * historical IPv4 INADDR_ANY behavior. */
+         * between sockaddr_in/sockaddr_in6. */
         sockaddr_storage addr{};
-        if (!key.empty() && key.find(':') != std::string::npos) {
+        if (key.find(':') != std::string::npos) {
             auto* addr6 = reinterpret_cast<sockaddr_in6*>(&addr);
             addr6->sin6_family = AF_INET6;
             addr6->sin6_port = htons(resolvedPort);
@@ -378,10 +376,8 @@ namespace hipObj {
         } else {
             auto* addr4 = reinterpret_cast<sockaddr_in*>(&addr);
             addr4->sin_family = AF_INET;
-            addr4->sin_addr.s_addr = INADDR_ANY;
             addr4->sin_port = htons(resolvedPort);
-            if (!key.empty() &&
-                inet_pton(AF_INET, key.c_str(), &addr4->sin_addr) != 1) {
+            if (inet_pton(AF_INET, key.c_str(), &addr4->sin_addr) != 1) {
                 LOG_ERROR("rc-listener: inet_pton failed for bindIp=\"%s\"",
                           key.c_str());
                 rdma_destroy_id(listenId);
@@ -391,14 +387,13 @@ namespace hipObj {
         }
         if (rdma_bind_addr(listenId, reinterpret_cast<sockaddr*>(&addr)) != 0) {
             LOG_ERROR("rc-listener: rdma_bind_addr(%s:%u) failed: %s",
-                      key.empty() ? "0.0.0.0" : key.c_str(), resolvedPort,
-                      std::strerror(errno));
+                      key.c_str(), resolvedPort, std::strerror(errno));
             rdma_destroy_id(listenId);
             rdma_destroy_event_channel(channel);
             return nullptr;
         }
         LOG_DEBUG("rc-listener: bound to %s:%u (device %s)",
-                  key.empty() ? "0.0.0.0" : key.c_str(), resolvedPort,
+                  key.c_str(), resolvedPort,
                   listenId->verbs
                       ? ibv_get_device_name(listenId->verbs->device)
                       : "(null verbs)");
@@ -418,62 +413,56 @@ namespace hipObj {
         }
         LOG_DEBUG("rc-listener: listening (backlog=128)");
 
-        struct ibv_pd* resolvedPd = reinterpret_cast<struct ibv_pd*>(pd);
-        struct ibv_context* resolvedCtx =
-            reinterpret_cast<struct ibv_context*>(deviceCtx);
-        if (selfManage) {
-            if (!listenId->verbs) {
-                LOG_ERROR(
-                    "rc-listener: self-managed mode but listenId->verbs is "
-                    "null after bind -- no device resolved");
-                rdma_destroy_id(listenId);
-                rdma_destroy_event_channel(channel);
-                return nullptr;
-            }
-            resolvedCtx = listenId->verbs;
+        if (!listenId->verbs) {
+            LOG_ERROR(
+                "rc-listener: listenId->verbs is null after bind -- no "
+                "device resolved for %s", key.c_str());
+            rdma_destroy_id(listenId);
+            rdma_destroy_event_channel(channel);
+            return nullptr;
+        }
+        struct ibv_context* resolvedCtx = listenId->verbs;
+        struct ibv_pd* resolvedPd = nullptr;
+        {
             PdLockGuard pdLock;
             resolvedPd = ibv_alloc_pd(resolvedCtx);
-            if (!resolvedPd) {
-                LOG_ERROR("rc-listener: self-managed ibv_alloc_pd failed: %s",
-                          std::strerror(errno));
-                rdma_destroy_id(listenId);
-                rdma_destroy_event_channel(channel);
-                return nullptr;
-            }
-            LOG_DEBUG(
-                "rc-listener: self-managed PD allocated pd=%p on device %s",
-                static_cast<void*>(resolvedPd),
-                ibv_get_device_name(resolvedCtx->device));
         }
+        if (!resolvedPd) {
+            LOG_ERROR("rc-listener: ibv_alloc_pd failed: %s",
+                      std::strerror(errno));
+            rdma_destroy_id(listenId);
+            rdma_destroy_event_channel(channel);
+            return nullptr;
+        }
+        LOG_DEBUG("rc-listener: PD allocated pd=%p on device %s",
+                  static_cast<void*>(resolvedPd),
+                  ibv_get_device_name(resolvedCtx->device));
 
-        RcListener* listener = new RcListener();
+        RdmaCmRcListener* listener = new RdmaCmRcListener();
         listener->bindIp_ = std::move(key);
         listener->channel_ = channel;
         listener->listenId_ = listenId;
         listener->port_ = resolvedPort;
         listener->pd_ = resolvedPd;
         listener->deviceCtx_ = resolvedCtx;
-        listener->deviceCtxVerified_ = selfManage;
-        listener->ownsPd_ = selfManage;
         listener->onConnected_ = onConnected;
         listener->onDisconnected_ = onDisconnected;
         listener->userCtx_ = userCtx;
         listener->stopping_.store(false);
-        listener->thread_ = std::thread(&RcListener::AcceptLoop, listener);
+        listener->thread_ = std::thread(&RdmaCmRcListener::AcceptLoop, listener);
 
         s_listeners.push_back(listener);
         LOG_INFO(
             "rc-listener: Start() succeeded listener=%p bindIp=%s port=%u "
-            "pd=%p deviceCtx=%p ownsPd=%d (registry size=%zu)",
+            "pd=%p deviceCtx=%p (registry size=%zu)",
             static_cast<void*>(listener),
-            listener->bindIp_.empty() ? "(any)" : listener->bindIp_.c_str(),
+            listener->bindIp_.c_str(),
             listener->port_, static_cast<void*>(listener->pd_),
-            static_cast<void*>(listener->deviceCtx_), listener->ownsPd_,
-            s_listeners.size());
+            static_cast<void*>(listener->deviceCtx_), s_listeners.size());
         return listener;
     }
 
-    void RcListener::Stop(RcListener* listener) {
+    void RdmaCmRcListener::Stop(RdmaCmRcListener* listener) {
         if (!listener) {
             LOG_DEBUG("rc-listener: Stop(nullptr) -- no-op");
             return;
@@ -520,11 +509,12 @@ namespace hipObj {
             listener->activeConns_.clear();
             listener->establishedCount_ = 0;
         }
-        if (listener->ownsPd_ && listener->pd_) {
+        if (listener->pd_) {
             PdLockGuard pdLock;
-            ibv_dealloc_pd(listener->pd_);
-            LOG_DEBUG("rc-listener: self-managed PD dealloc'd for listener=%p",
-                      static_cast<void*>(listener));
+            if (ibv_dealloc_pd(listener->pd_) != 0) {
+                LOG_ERROR("rc-listener: ibv_dealloc_pd failed for listener=%p",
+                          static_cast<void*>(listener));
+            }
         }
         rdma_destroy_id(listener->listenId_);
         rdma_destroy_event_channel(listener->channel_);
@@ -533,24 +523,35 @@ namespace hipObj {
         delete listener;
     }
 
-    uint16_t RcListener::port() const {
+    uint16_t RdmaCmRcListener::port() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return port_;
     }
 
-    int RcListener::connectionCount() const {
+    int RdmaCmRcListener::connectionCount() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return establishedCount_;
     }
 
-    void* RcListener::deviceCtx() const {
+    void* RdmaCmRcListener::deviceCtx() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return deviceCtx_;
     }
 
-    void* RcListener::pd() const {
+    void* RdmaCmRcListener::pd() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return pd_;
+    }
+
+    std::string RdmaCmRcListener::deviceName() const {
+        std::scoped_lock<std::mutex> lock(mutex_);
+        const char* name =
+            deviceCtx_ ? ibv_get_device_name(deviceCtx_->device) : nullptr;
+        return name ? std::string(name) : std::string();
+    }
+
+    void RdmaCmRcListener::stop() {
+        Stop(this);
     }
 
 } // namespace hipObj

@@ -8,7 +8,7 @@ namespace hipObj {
 /*!
  * RAII guard serializing ibverbs object-lifecycle calls (QP/CQ/MR
  * create/destroy) against a PD shared across threads -- e.g. an
- * RcListener's background accept-loop thread (rc-listener.cpp) and
+ * RdmaCmRcListener's background accept-loop thread (rc-listener.cpp) and
  * BufferMap's ibv_reg_mr()/ibv_dereg_mr() (buffer.cpp), which can run
  * concurrently against the same PD. libibverbs/mlx5 do not guarantee
  * thread safety for concurrent object creation/destruction sharing one

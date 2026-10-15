@@ -185,8 +185,8 @@ int HipObjAwsS3Client::SendControlRequest(RdmaControlCtx& ctx, const char* token
   ctx.lastReply[0] = '\0';
 
   Aws::Http::URI uri(BuildObjectUrl(endpointOverride_, ctx.bucket, ctx.key));
-  LOG_DEBUG("%s %s  x-amz-rc-rdma-token=\"%.*s\"", ctx.isPut ? "PUT" : "GET",
-           uri.GetURIString().c_str(), static_cast<int>(tokenLen), token);
+  LOG_DEBUG("%s %s  x-amz-rc-rdma-token (%zu bytes)", ctx.isPut ? "PUT" : "GET",
+           uri.GetURIString().c_str(), tokenLen);
 
   if (ctx.isPut) {
     Aws::S3::Model::PutObjectRequest request;

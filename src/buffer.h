@@ -134,25 +134,14 @@ public:
         : verbs_(&verbs), runtime_(&runtime), dmabuf_(dmabuf), requireGpuDirect_(requireGpuDirect)
     {
     }
-    ~BufferMap() = default;
 
-    /* Lives in one place, and isn't copied or moved */
-    BufferMap(const BufferMap &)            = delete;
-    BufferMap &operator=(const BufferMap &) = delete;
-    BufferMap(BufferMap &&)                 = delete;
-    BufferMap &operator=(BufferMap &&)      = delete;
-
-    /* Register with the NIC, and allocate any staging buffer, without
-     * holding the map's lock. When two threads register the same address
-     * at once, one gets Registered, and the other AlreadyRegistered, and
-     * its registration is released. */
-    [[nodiscard]] RegisterResult registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
-        HIPOBJ_REQUIRES(!mutex_);
-    [[nodiscard]] RegisterResult registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
-        HIPOBJ_REQUIRES(!mutex_);
-    /* Removes the entry, and releases its registration and any staging
-     * buffer without holding the map's lock */
-    [[nodiscard]] DeregisterResult deregisterBuffer(void *devPtr) HIPOBJ_REQUIRES(!mutex_);
+    int registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
+    int registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
+    int deregisterBuffer(void *devPtr);
+    /* Deregisters every buffer, as destroying the map does, but when the
+     * caller says: ~Instance() needs the MRs gone before the RC-CM listener
+     * deallocates its own PD */
+    void deregisterAll();
     /* The registration at devPtr, or null if there isn't one. Looked up
      * once per transfer and passed down. The copy keeps the entry alive,
      * and makes deregisterBuffer() report Busy, until it's released. */

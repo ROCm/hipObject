@@ -6,68 +6,64 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+#include <array>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <sstream>
+#include <string_view>
+
+#include "hipobj-parse.h"
 
 namespace hipObj::v3 {
 
 namespace {
 
-/* Splits `s` on `delim` into up to `maxFields` pieces; returns the number
- * actually found. A trailing empty field (s ends with delim) counts. */
-size_t splitFields(const char* s, size_t len, char delim, std::string* fields,
-                   size_t maxFields) {
-  size_t count = 0;
-  size_t start = 0;
-  for (size_t i = 0; i <= len && count < maxFields; ++i) {
-    if (i == len || s[i] == delim) {
-      fields[count++].assign(s + start, i - start);
-      start = i + 1;
+/* The kFieldDelim-separated fields of `s`, or std::nullopt unless there are
+ * exactly N: fewer is a missing field, more is input the decoder would
+ * otherwise ignore. */
+template <size_t N>
+std::optional<std::array<std::string_view, N>> splitExactly(std::string_view s) {
+  std::array<std::string_view, N> fields{};
+  for (size_t i = 0; i + 1 < N; ++i) {
+    const size_t delim = s.find(kFieldDelim);
+    if (delim == std::string_view::npos) {
+      return std::nullopt;
     }
+    fields[i] = s.substr(0, delim);
+    s.remove_prefix(delim + 1);
   }
-  return count;
+  if (s.find(kFieldDelim) != std::string_view::npos) {
+    return std::nullopt;
+  }
+  fields[N - 1] = s;
+  return fields;
 }
 
-bool parseHex64(const std::string& s, uint64_t& out) {
-  if (s.empty()) {
-    return false;
+/* Exactly `width` hex digits as a T. parseNumber() rejects a sign,
+ * whitespace and a "0x" prefix, and a value that doesn't fit in T. */
+template <typename T>
+std::optional<T> hexField(std::string_view s, size_t width) {
+  if (s.size() != width) {
+    return std::nullopt;
   }
-  char* end = nullptr;
-  out = std::strtoull(s.c_str(), &end, 16);
-  return end != nullptr && *end == '\0' && end != s.c_str();
+  return parseNumber<T>(s, 16);
 }
 
-bool parseHex32(const std::string& s, uint32_t& out) {
-  uint64_t v = 0;
-  if (!parseHex64(s, v) || v > 0xffffffffULL) {
-    return false;
+/* The 16 bytes of the token's ip field: exactly 32 hex digits */
+std::optional<std::array<uint8_t, 16>> ipBytesField(std::string_view s) {
+  std::array<uint8_t, 16> bytes{};
+  if (s.size() != 2 * bytes.size()) {
+    return std::nullopt;
   }
-  out = static_cast<uint32_t>(v);
-  return true;
-}
-
-bool parseHex16(const std::string& s, uint16_t& out) {
-  uint64_t v = 0;
-  if (!parseHex64(s, v) || v > 0xffffULL) {
-    return false;
+  for (size_t i = 0; i < bytes.size(); ++i) {
+    const auto byte = hexField<uint8_t>(s.substr(2 * i, 2), 2);
+    if (!byte) {
+      return std::nullopt;
+    }
+    bytes[i] = *byte;
   }
-  out = static_cast<uint16_t>(v);
-  return true;
-}
-
-bool parseDecimalInt(const std::string& s, int& out) {
-  if (s.empty()) {
-    return false;
-  }
-  char* end = nullptr;
-  long v = std::strtol(s.c_str(), &end, 10);
-  if (end == nullptr || *end != '\0') {
-    return false;
-  }
-  out = static_cast<int>(v);
-  return true;
+  return bytes;
 }
 
 void bytesToHex(const uint8_t* bytes, size_t n, char* out /* n*2+1 bytes */) {
@@ -79,28 +75,12 @@ void bytesToHex(const uint8_t* bytes, size_t n, char* out /* n*2+1 bytes */) {
   out[2 * n] = '\0';
 }
 
-bool hexToBytes(const std::string& s, uint8_t* out, size_t n) {
-  if (s.size() != 2 * n) {
-    return false;
-  }
-  for (size_t i = 0; i < n; ++i) {
-    char hex[3] = {s[2 * i], s[2 * i + 1], '\0'};
-    char* end = nullptr;
-    unsigned long v = std::strtoul(hex, &end, 16);
-    if (end != hex + 2) {
-      return false;
-    }
-    out[i] = static_cast<uint8_t>(v);
-  }
-  return true;
-}
-
 /* IPv4-mapped IPv6 prefix (RFC 4291 2.5.5.2): bytes[0..9]=0, bytes[10..11]=
  * 0xff. */
 constexpr uint8_t kV4MappedPrefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
 
 /* token.listenIp (empty, dotted-quad IPv4, or colon-form IPv6) -> 16 raw
- * bytes in network order. Empty/unparseable -> all-zero ("::", unspecified).
+ * bytes in network order. Empty/unparsable -> all-zero ("::", unspecified).
  */
 void ipStringToBytes(const std::string& ip, uint8_t out[16]) {
   std::memset(out, 0, 16);
@@ -165,44 +145,34 @@ RdmaTokenV3Hex encodeRdmaTokenV3Hex(const RdmaTokenV3& token) {
   return out;
 }
 
-bool decodeRdmaTokenV3(const char* headerValue, size_t headerValueLen,
-                       RdmaTokenV3& out) {
-  if (!headerValue) {
-    return false;
-  }
-
+std::optional<RdmaTokenV3> decodeRdmaTokenV3(std::string_view headerValue) {
   /* ip-hex32 : port-hex4 : rkey-hex8 : remoteAddr-hex16 : length-hex16 --
    * 5 fields, all hex, kFieldDelim-delimited (see the file comment). */
-  std::string fields[5];
-  if (splitFields(headerValue, headerValueLen, kFieldDelim, fields, 5) != 5) {
-    return false;
+  if (headerValue.size() != kRdmaTokenV3HexLen) {
+    return std::nullopt;
+  }
+  const auto fields = splitExactly<5>(headerValue);
+  if (!fields) {
+    return std::nullopt;
+  }
+  const auto ipBytes = ipBytesField((*fields)[0]);
+  const auto port = hexField<uint16_t>((*fields)[1], 4);
+  const auto rkey = hexField<uint32_t>((*fields)[2], 8);
+  const auto remoteAddr = hexField<uint64_t>((*fields)[3], 16);
+  const auto length = hexField<uint64_t>((*fields)[4], 16);
+  if (!ipBytes || !port || !rkey || !remoteAddr || !length) {
+    return std::nullopt;
   }
 
-  uint8_t ipBytes[16];
-  if (!hexToBytes(fields[0], ipBytes, 16)) {
-    return false;
+  RdmaTokenV3 token;
+  if (!bytesToIpString(ipBytes->data(), token.listenIp)) {
+    return std::nullopt;
   }
-  std::string ipStr;
-  if (!bytesToIpString(ipBytes, ipStr)) {
-    return false;
-  }
-
-  RdmaTokenV3 parsed;
-  parsed.listenIp = ipStr;
-  if (!parseHex16(fields[1], parsed.listenPort)) {
-    return false;
-  }
-  if (!parseHex32(fields[2], parsed.rkey)) {
-    return false;
-  }
-  if (!parseHex64(fields[3], parsed.remoteAddr)) {
-    return false;
-  }
-  if (!parseHex64(fields[4], parsed.length)) {
-    return false;
-  }
-  out = parsed;
-  return true;
+  token.listenPort = *port;
+  token.rkey = *rkey;
+  token.remoteAddr = *remoteAddr;
+  token.length = *length;
+  return token;
 }
 
 std::string encodeRdmaReplyV3(const RdmaReplyV3& reply) {
@@ -214,26 +184,36 @@ std::string encodeRdmaReplyV3(const RdmaReplyV3& reply) {
   return oss.str();
 }
 
-bool decodeRdmaReplyV3(const char* replyValue, size_t replyValueLen,
-                       RdmaReplyV3& out) {
-  if (!replyValue) {
-    return false;
+std::optional<RdmaReplyV3> decodeRdmaReplyV3(std::string_view replyValue) {
+  /* A callback may report trailing NUL, CR and LF characters; v1's reply
+   * parser (token.cpp) ignores them too */
+  while (!replyValue.empty() &&
+         (replyValue.back() == '\0' || replyValue.back() == '\n' ||
+          replyValue.back() == '\r')) {
+    replyValue.remove_suffix(1);
   }
-
-  std::string fields[2];
-  if (splitFields(replyValue, replyValueLen, kFieldDelim, fields, 2) != 2) {
-    return false;
+  /* httpStatus-decimal3 : bytesTransferred-hex16 */
+  const auto fields = splitExactly<2>(replyValue);
+  if (!fields) {
+    return std::nullopt;
   }
-
-  RdmaReplyV3 parsed;
-  if (!parseDecimalInt(fields[0], parsed.httpStatus)) {
-    return false;
+  /* Exactly 3 digits, as HTTP status codes are; unsigned, so a sign is
+   * rejected too */
+  const std::string_view statusField = (*fields)[0];
+  const auto status = statusField.size() == 3
+                          ? parseNumber<unsigned>(statusField)
+                          : std::nullopt;
+  if (!status || *status < 100 || *status > 599) {
+    return std::nullopt;
   }
-  if (!parseHex64(fields[1], parsed.bytesTransferred)) {
-    return false;
+  const auto bytesTransferred = hexField<uint64_t>((*fields)[1], 16);
+  if (!bytesTransferred) {
+    return std::nullopt;
   }
-  out = parsed;
-  return true;
+  RdmaReplyV3 reply;
+  reply.httpStatus = static_cast<int>(*status);
+  reply.bytesTransferred = *bytesTransferred;
+  return reply;
 }
 
 } // namespace hipObj::v3

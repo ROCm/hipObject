@@ -14,7 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
-#include <memory>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -42,6 +42,7 @@
 #include "state.h"
 #include "token.h"
 #include "transport.h"
+#include "v3-wire.h"
 #include "vendor-ops.h"
 
 /* Google Test registers each test with a global constructor */
@@ -882,6 +883,75 @@ TEST_P(TransportTransferTest, ReportsS3Failures)
     EXPECT_EQ(fake().modifyQpCount, 1U);
 #endif
 }
+
+#ifndef HIPOBJ_RDMA_WIRE_V1
+/* A transfer succeeds only when the server moved the whole range, since
+ * hipObjGet() and hipObjPut() can't report that fewer bytes moved */
+TEST_P(TransportTransferTest, SucceedsOnlyWhenTheWholeRangeMoved)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    for (const uint64_t bytes : {uint64_t{0}, uint64_t{kBufSize - 1}, uint64_t{kBufSize + 1},
+                                 std::numeric_limits<uint64_t>::max()}) {
+        setReply(hipObj::v3::encodeRdmaReplyV3({200, bytes}));
+        EXPECT_EQ(transfer().opError, hipObjS3Error) << bytes << " bytes";
+    }
+    setReply(hipObj::v3::encodeRdmaReplyV3({200, kBufSize}));
+    EXPECT_EQ(transfer().opError, hipObjSuccess);
+}
+
+/* Records the v3 token a transfer sends, decoded, in the
+ * std::optional<RdmaTokenV3> ctx points to */
+int
+recordV3SendRequest(void *ctx, const char *token, size_t tokenLen)
+{
+    hipObjTest::noteSentToken(token, tokenLen);
+    auto *sent = static_cast<std::optional<hipObj::v3::RdmaTokenV3> *>(ctx);
+    *sent = hipObj::v3::decodeRdmaTokenV3(hipObj::asStringView(hipObj::spanFromPointer(token, tokenLen)));
+    return 0;
+}
+
+/* The listener binds to the chosen NIC's address, and the token
+ * advertises that address and the listener's port */
+TEST_F(TransportTest, TokenAdvertisesTheListener)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    hipObjOps_t ops = makeOps();
+    ops.sendRequest = &recordV3SendRequest;
+    std::optional<hipObj::v3::RdmaTokenV3> sent;
+    ASSERT_EQ(hipObjGet(nullptr, kDevBuf, kBufSize, 0, &ops, &sent).opError, hipObjSuccess);
+    ASSERT_TRUE(sent);
+    EXPECT_EQ(sent->listenIp, "192.0.2.1");
+    EXPECT_EQ(sent->listenPort, fake().listenerPort);
+    EXPECT_EQ(fake().log.startListener, 1);
+}
+
+/* The server dials the listener, so without one no transfer could work:
+ * hipObjInit() fails, and releases what it acquired, when the NIC has no
+ * IPv4 address to bind to, the listener doesn't start, or its bind resolves
+ * to another NIC */
+TEST_F(TransportTest, InitFailsWhenTheListenerCannotStart)
+{
+    hipObjConfig_t config = makeConfig();
+
+    fake().gid = {};
+    EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.startListener, 0);
+
+    fake().gid                = hipObjTest::kFakeNicGid;
+    fake().fail.startListener = true;
+    EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.startListener, 1);
+
+    fake().fail.startListener = false;
+    fake().listenerDevice     = "mlx5_1";
+    EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.startListener, 2);
+    EXPECT_EQ(fake().log.stopListener, 1);
+
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+    expectNothingLeaked();
+}
+#endif /* HIPOBJ_RDMA_WIRE_V1 */
 
 #ifdef HIPOBJ_RDMA_WIRE_V1
 TEST_F(TransportTest, SendsTokenForTheRegisteredRange)

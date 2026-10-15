@@ -152,18 +152,21 @@ buildRdmaTokenV3(const Instance &instance, const BufferMap::BufEntry &buf, size_
     if (!rangeInRegistration(offset, size, buf.size)) {
         return std::nullopt;
     }
+    /* hipObjInit() only succeeds with the listener running, but a token
+     * without one would send the server nowhere */
+    if (!instance.listener) {
+        return std::nullopt;
+    }
     v3::RdmaTokenV3 token;
-    token.listenIp   = localNicIp(instance.conn.localGid);
-    token.listenPort = instance.listener ? instance.listener->port() : 0;
+    token.listenIp   = instance.listenIp;
+    token.listenPort = instance.listener->port();
     token.rkey       = buf.mr->rkey;
     token.remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset);
     token.length     = static_cast<uint64_t>(size);
-    LOG_DEBUG("built RDMA token listenIp=%s listenPort=%u rkey=0x%x "
-              "remoteAddr=0x%llx length=%llu (rcListenerConnectionCount=%d)",
-              token.listenIp.empty() ? "(empty!)" : token.listenIp.c_str(), token.listenPort, token.rkey,
-              static_cast<unsigned long long>(token.remoteAddr),
-              static_cast<unsigned long long>(token.length),
-              instance.listener ? instance.listener->connectionCount() : 0);
+    LOG_DEBUG("built RDMA token listenIp=%s listenPort=%u length=%llu "
+              "(rcListenerConnectionCount=%d)",
+              token.listenIp.empty() ? "(empty!)" : token.listenIp.c_str(), token.listenPort,
+              static_cast<unsigned long long>(token.length), instance.listener->connectionCount());
     return token;
 }
 
@@ -323,19 +326,20 @@ runRdmaTransferV3(Instance &instance, const BufferMap::BufEntry &buf, size_t siz
         return {hipObjRdmaError, 0};
     }
     const v3::RdmaTokenV3Hex encodedToken = v3::encodeRdmaTokenV3Hex(*token);
-    LOG_DEBUG("encoded token = \"%s\" (%zu bytes)", encodedToken.data(), v3::kRdmaTokenV3HexLen);
+    LOG_DEBUG("encoded token (%zu bytes)", v3::kRdmaTokenV3HexLen);
     if (injectRdmaToken(ops, ctx, asStringView(std::span(encodedToken).first<v3::kRdmaTokenV3HexLen>())) !=
         0) {
         LOG_ERROR("injectRdmaToken (sendRequest) failed -- HTTP control request "
                   "itself did not complete");
         return {hipObjS3Error, 0};
     }
-    v3::RdmaReplyV3 reply;
-    if (receiveRdmaReplyV3(ops, ctx, reply) != 0) {
+    const auto received = receiveRdmaReplyV3(ops, ctx);
+    if (!received) {
         LOG_ERROR("receiveRdmaReplyV3 failed -- reply header missing or "
                   "unparsable");
         return {hipObjS3Error, 0};
     }
+    const v3::RdmaReplyV3 &reply = *received;
     LOG_DEBUG("reply httpStatus=%d bytesTransferred=%llu "
               "(rcListenerConnectionCount=%d)",
               reply.httpStatus, static_cast<unsigned long long>(reply.bytesTransferred),
@@ -347,6 +351,15 @@ runRdmaTransferV3(Instance &instance, const BufferMap::BufEntry &buf, size_t siz
     // v1's finishTransferAfterReply() needed. The HTTP reply status is
     // the only signal hipObject gets.
     if (reply.httpStatus != 200 && reply.httpStatus != 204 && reply.httpStatus != 206) {
+        return {hipObjS3Error, 0};
+    }
+    // The peer reports the bytes it moved. Anything but the whole range is a
+    // failure: a GET left part of the buffer unwritten, or a PUT stored a
+    // truncated object, and hipObjGet()/hipObjPut() can't report a partial
+    // count.
+    if (reply.bytesTransferred != size) {
+        LOG_ERROR("the server transferred %llu of %zu bytes",
+                  static_cast<unsigned long long>(reply.bytesTransferred), size);
         return {hipObjS3Error, 0};
     }
     // v1's finishTransferAfterReply() ran this same check after its local
@@ -402,17 +415,15 @@ runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
                        : runRdmaTransferV3(instance, buf, size, offset, ops, ctx);
 }
 
-/* The PD to register buffers against. In HIPOBJ_RC_LISTEN_IP self-managed
- * mode (see initWith()) instance.conn.pd is never populated -- it would have
- * to alias the RC-CM listener's own PD, and RcConnection::pd is an owning
- * IbvPdPtr, so aliasing it here would double-free once RcListener::Stop()
- * releases the same PD (see ~Instance()). Read it from the listener
- * directly in that mode instead. */
+/* The PD to register buffers against. In v3, the RC-CM listener's own PD:
+ * an accepted connection's QP is on it, and a QP can only reach MRs in its
+ * own PD. The listener owns that PD and frees it when it stops, after
+ * ~Instance() has deregistered the buffers. In v1, the connection's. */
 static struct ibv_pd *
 registrationPd(const Instance &instance)
 {
-    return instance.listenerSelfManaged ? reinterpret_cast<struct ibv_pd *>(instance.listener->pd())
-                                        : instance.conn.pd.get();
+    return instance.listener ? reinterpret_cast<struct ibv_pd *>(instance.listener->pd())
+                             : instance.conn.pd.get();
 }
 
 } // namespace hipObj
@@ -756,12 +767,13 @@ try {
     if (!reply || !httpCode || !bytesTransferred) {
         return {hipObjInvalidValue, 0};
     }
-    hipObj::v3::RdmaReplyV3 parsed;
-    if (!hipObj::v3::decodeRdmaReplyV3(reply, replyLen, parsed)) {
+    const auto parsed =
+        hipObj::v3::decodeRdmaReplyV3(hipObj::asStringView(hipObj::spanFromPointer(reply, replyLen)));
+    if (!parsed) {
         return {hipObjInvalidValue, 0};
     }
-    *httpCode         = parsed.httpStatus;
-    *bytesTransferred = parsed.bytesTransferred;
+    *httpCode         = parsed->httpStatus;
+    *bytesTransferred = parsed->bytesTransferred;
     return {hipObjSuccess, 0};
 }
 catch (...) {

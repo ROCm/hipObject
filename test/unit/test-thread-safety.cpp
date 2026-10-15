@@ -40,7 +40,6 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "state.h"
-#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -87,8 +86,9 @@ runThreads(int count, const std::function<void(int)> &body)
 // ---- Transfer callbacks ------------------------------------------------
 
 int
-plainSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
+plainSendRequest(void *, const char *token, size_t tokenLen)
 {
+    hipObjTest::noteSentToken(token, tokenLen);
     return 0;
 }
 
@@ -98,10 +98,9 @@ plainRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 #ifdef HIPOBJ_RDMA_WIRE_V1
     static constexpr std::string_view kReply = "200";
 #else
-    // v3 wire format (see v3-wire.h): built via encodeRdmaReplyV3() itself
-    // (which uses kFieldDelim) rather than a hand-rolled literal, so this
-    // fake can't drift from the real encoder if the format ever changes.
-    const std::string kReply = hipObj::v3::encodeRdmaReplyV3({200, 0});
+    // v3 wire format (see v3-wire.h): the fake device's success reply, which
+    // reports the length the token named, as the real server does
+    const std::string kReply = hipObjTest::successReply();
 #endif
     if (!reply || !replyLen || *replyLen < kReply.size()) {
         return -1;
@@ -198,10 +197,18 @@ private:
 };
 
 int
-gateSendRequest(void *ctx, const char *token, size_t tokenLen)
+probeSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
-    return static_cast<TransferGate *>(ctx)->enter(
-        hipObj::asStringView(hipObj::spanFromPointer(token, tokenLen)));
+    hipObjTest::noteSentToken(token, tokenLen);
+    auto *probe = static_cast<TransferProbe *>(ctx);
+    if (probe->active.fetch_add(1) != 0) {
+        probe->overlaps.fetch_add(1);
+    }
+    ++probe->transfers;
+    /* Holds the transfer open long enough that, without the lock, other
+     * threads' transfers would start inside it */
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    return 0;
 }
 
 int
@@ -235,8 +242,19 @@ class ThreadSafetyTest : public ::testing::Test {
 protected:
     void TearDown() override
     {
-        (void)hipObjShutdown();
-        EXPECT_EQ(fakes_.use_count(), 1);
+        /* The fake HIP runtime has no GPU, so with a NIC hint,
+         * hipObjInit() opens the hinted NIC directly */
+        fakeHip_.emplace(hip_);
+
+        fakeIbv_.emplace(verbs_);
+        fakeRcListener_.emplace(rcListener_);
+#ifndef HIPOBJ_RDMA_WIRE_V1
+        /* v3's listener binds to the NIC's address */
+        hipDevice_.gid = hipObjTest::kFakeNicGid;
+#endif
+
+        probeOps_.sendRequest = &probeSendRequest;
+        probeOps_.recvReply   = &probeRecvReply;
     }
 
     /* Initializes the library with the fakes. The fake HIP runtime has no
@@ -244,7 +262,10 @@ protected:
      * directly. */
     [[nodiscard]] hipObjOpError_t init(const hipObj::Options &options = {}) const
     {
-        return hipObjTest::initWithPlatform(makeConfig(), fakes_->platform(), options).opError;
+        (void)hipObjShutdown();
+        fakeRcListener_.reset();
+        fakeIbv_.reset();
+        fakeHip_.reset();
     }
 
     /* The buffer for thread index, kBufSize bytes, distinct from every
@@ -254,21 +275,16 @@ protected:
         return std::span(pool_).subspan(static_cast<size_t>(index) * kBufSize, kBufSize).data();
     }
 
-    /* Registers count buffers, from buffer(0) on */
-    void registerBuffers(int count)
-    {
-        for (int i = 0; i < count; ++i) {
-            ASSERT_EQ(hipObjBufRegisterHost(buffer(i), kBufSize).opError, hipObjSuccess);
-        }
-    }
-
-    hipObjTest::FakeDevice                      hipDevice_{};
-    std::shared_ptr<hipObjTest::FakePlatform<>> fakes_ =
-        std::make_shared<hipObjTest::FakePlatform<>>(hipDevice_);
-    std::vector<char> pool_        = std::vector<char>(kThreads * kBufSize);
-    hipObjOps_t       plainOps_    = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
-    hipObjOps_t       countingOps_ = {.sendRequest = &countingSendRequest, .recvReply = &plainRecvReply};
-    hipObjOps_t       gateOps_     = {.sendRequest = &gateSendRequest, .recvReply = &gateRecvReply};
+    hipObjTest::FakeDevice                          hipDevice_{};
+    hipObjTest::FakeVerbs                           verbs_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeIbv>        fakeIbv_{};
+    hipObjTest::FakeHip                             hip_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeHip>        fakeHip_{};
+    hipObjTest::FakeRcListener                      rcListener_{hipDevice_};
+    std::optional<hipObjTest::ScopedFakeRcListener> fakeRcListener_{};
+    std::vector<char>                               pool_ = std::vector<char>(kThreads * kBufSize);
+    TransferProbe                                   probe_{};
+    hipObjOps_t                                     probeOps_{};
 };
 
 // ---- Transfers ---------------------------------------------------------
@@ -597,43 +613,27 @@ struct ReentryProbe {
  * ran on its own. registered is the transfer's buffer, and device and host
  * aren't registered. */
 int
-reentrantSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
+reentrantSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
-    auto                 *probe  = static_cast<ReentryProbe *>(ctx);
-    hipObjConfig_t        config = makeConfig();
-    char                 *token  = nullptr;
-    std::array<char, 32>  nicIp{};
-    int                   code   = 0;
-    unsigned              major  = 0;
-    unsigned              minor  = 0;
-    unsigned              patch  = 0;
-    static constexpr auto kReply = std::string_view("206");
+    auto          *probe  = static_cast<ReentryProbe *>(ctx);
+    hipObjConfig_t config = makeConfig();
+    hipObjTest::noteSentToken(token, tokenLen);
 
-    probe->errorString = hipObjGetErrorString(hipObjBusy);
-    probe->version     = hipObjGetVersionString();
+    probe->locked = {
+        {"hipObjInit", hipObjInit(&config).opError},
+        {"hipObjShutdown", hipObjShutdown().opError},
+        {"hipObjBufRegister", hipObjBufRegister(probe->unregistered, kBufSize).opError},
+        {"hipObjBufRegisterHost", hipObjBufRegisterHost(probe->unregistered, kBufSize).opError},
+        {"hipObjBufDeregister", hipObjBufDeregister(probe->registered).opError},
+        {"hipObjGet", hipObjGet(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
+        {"hipObjPut", hipObjPut(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
+        {"hipObjBufSync", hipObjBufSync(probe->registered, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError},
+        {"hipObjGetRdmaToken",
+         hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &probe->token).opError},
+    };
 
-    probe->record("hipObjInit", hipObjInit(&config), hipObjAlreadyInitialized);
-    probe->record("hipObjBufRegister", hipObjBufRegister(probe->device, kBufSize), hipObjSuccess);
-    probe->record("hipObjBufRegisterHost", hipObjBufRegisterHost(probe->host, kBufSize), hipObjSuccess);
-    /* The transfer that's calling this holds it */
-    probe->record("hipObjBufDeregister", hipObjBufDeregister(probe->registered), hipObjBusy);
-    probe->record("hipObjGet", hipObjGet(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr),
-                  hipObjSuccess);
-    probe->record("hipObjPut", hipObjPut(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr),
-                  hipObjSuccess);
-    probe->record("hipObjBufSync", hipObjBufSync(probe->registered, kBufSize, 0, HIPOBJ_SYNC_TO_HOST),
-                  hipObjSuccess);
-    probe->record("hipObjGetRdmaToken",
-                  hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &token), hipObjSuccess);
-    probe->record("hipObjTokenClientNic", hipObjTokenClientNic(token, nicIp.data(), nicIp.size()),
-                  hipObjSuccess);
-    probe->record("hipObjPutRdmaToken", hipObjPutRdmaToken(token), hipObjSuccess);
-    probe->record("hipObjParseRdmaReply", hipObjParseRdmaReply(kReply.data(), kReply.size(), &code),
-                  hipObjSuccess);
-    probe->record("hipObjGetVersion", hipObjGetVersion(&major, &minor, &patch), hipObjSuccess);
-    probe->record("hipObjShutdown", hipObjShutdown(), hipObjSuccess);
-    probe->record("hipObjBufDeregister after hipObjShutdown", hipObjBufDeregister(probe->device),
-                  hipObjNotInitialized);
+    static constexpr std::string_view kReply = "200";
+    probe->parseResult = hipObjParseRdmaReply(kReply.data(), kReply.size(), &probe->parsedCode).opError;
     return 0;
 }
 

@@ -188,6 +188,33 @@ TEST_F(BufferRegistrationTest, DestroyingFreesOwnedFallbackHostBuffers)
     EXPECT_EQ(hipDevice_.log.deregMr, 1);
 }
 
+/* deregisterAll() releases what destroying the map does, and leaves it
+ * usable. ~Instance() calls it before the RC-CM listener deallocates its own
+ * PD, which may be the one the buffers are registered on. */
+TEST_F(BufferRegistrationTest, DeregisterAllReleasesEverything)
+{
+    hipObj::BufferMap buffers({}, false);
+    auto             *pd = reinterpret_cast<struct ibv_pd *>(1);
+    char              hostBuf[32]{};
+    void             *gpuBuf     = reinterpret_cast<void *>(0x3000);
+    hipDevice_.fail.registerAddr = gpuBuf;
+
+    ASSERT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), pd), 0);
+    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), 0);
+    ASSERT_EQ(buffers.size(), 2U);
+
+    buffers.deregisterAll();
+    EXPECT_EQ(buffers.size(), 0U);
+    EXPECT_FALSE(buffers.isRegistered(hostBuf));
+    EXPECT_FALSE(buffers.isRegistered(gpuBuf));
+    EXPECT_EQ(hipDevice_.log.deregMr, 2);
+    EXPECT_EQ(hipDevice_.log.hostFree, 1);
+    EXPECT_EQ(hipDevice_.lastHostFree, hipDevice_.lastHostMalloc);
+
+    EXPECT_EQ(buffers.registerHostBuffer(hostBuf, sizeof(hostBuf), pd), 0);
+    EXPECT_TRUE(buffers.isRegistered(hostBuf));
+}
+
 /* The public API checks these first, so the map's own checks are only
  * reached directly */
 TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)

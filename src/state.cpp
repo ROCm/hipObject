@@ -5,15 +5,19 @@
 
 #include "state.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include <netinet/in.h>
 
 #include "hip-seam.h"
 #include "hipobj-private.h"
@@ -174,7 +178,11 @@ Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Optio
 
 Instance::~Instance()
 {
-    RcListener::Stop(listener);
+    /* The buffers first: with the RC-CM listener running, their MRs are on
+     * its PD (registrationPd() in hipobj.cpp), which Stop() deallocates, and
+     * a PD with MRs left on it can't be */
+    buffers.deregisterAll();
+    listener.reset();
 }
 
 std::shared_ptr<Instance>
@@ -211,18 +219,19 @@ shutdownInstance()
 std::string
 localNicIp(const ibv_gid &localGid)
 {
-    const char *envIp = std::getenv("HIPOBJ_RC_LISTEN_IP");
-    if (envIp && envIp[0] != '\0') {
-        LOG_DEBUG("using HIPOBJ_RC_LISTEN_IP override: %s", envIp);
-        return std::string(envIp);
-    }
-    const uint8_t *gid = localGid.raw;
+    /* Only an IPv4-mapped GID (::ffff:a.b.c.d, RoCEv2) carries an address */
+    const std::span<const uint8_t, 16> gid(localGid.raw);
     if (gid[10] != 0xff || gid[11] != 0xff) {
         return std::string();
     }
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u", gid[12], gid[13], gid[14], gid[15]);
-    return std::string(buf);
+    std::array<char, INET_ADDRSTRLEN> buf{};
+    const int n = std::snprintf(buf.data(), buf.size(), "%u.%u.%u.%u", static_cast<unsigned>(gid[12]),
+                                static_cast<unsigned>(gid[13]), static_cast<unsigned>(gid[14]),
+                                static_cast<unsigned>(gid[15]));
+    if (n < 0 || static_cast<size_t>(n) >= buf.size()) {
+        return std::string();
+    }
+    return std::string(buf.data());
 }
 
 // Invoked from the RC-CM listener's background thread (rc-listener.h).
@@ -239,6 +248,33 @@ onRcListenerConnected(void * /*userCtx*/, void * /*qp*/)
 static void
 onRcListenerDisconnected(void * /*userCtx*/, void * /*qp*/)
 {
+}
+
+/* The function installed with setRcListenerStartForTest(), or null */
+static RcListenerStart g_rcListenerStartOverride = nullptr;
+
+void
+RcListenerDeleter::operator()(RcListener *listener) const noexcept
+{
+    listener->stop();
+}
+
+RcListenerPtr
+startRcListener(const char *bindIp, uint16_t port)
+{
+    if (g_rcListenerStartOverride) {
+        return RcListenerPtr(g_rcListenerStartOverride(bindIp, port));
+    }
+    return RcListenerPtr(
+        RdmaCmRcListener::Start(bindIp, port, &onRcListenerConnected, &onRcListenerDisconnected, nullptr));
+}
+
+RcListenerStart
+setRcListenerStartForTest(RcListenerStart start)
+{
+    const RcListenerStart previous = g_rcListenerStartOverride;
+    g_rcListenerStartOverride      = start;
+    return previous;
 }
 
 hipObjError_t
@@ -286,43 +322,32 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
      * can. */
     auto instance = std::make_shared<Instance>(std::move(platform), options);
 
-    bool listenerSelfManaged = false;
-    // HIPOBJ_RC_LISTEN_IP (see localNicIp() in state.h) is the address
-    // the RC-CM listener will advertise and bind to. A struct ibv_context
-    // this process opens on its own via ibv_open_device() (as
-    // openRdmaDevice()/openRdmaDeviceByName() do) is never the same
-    // context RDMA CM hands an accepted connection as id->verbs, even for
-    // the identical physical device -- libibverbs gives every open() its
-    // own context, and a PD from one can't back a QP on another. So when
-    // the override is set, start the RC-CM listener FIRST in
-    // self-managed mode (see RcListener::Start()): it binds to this IP,
-    // lets RDMA CM pick the device, and allocates its own PD from that
-    // exact context. instance->conn.ctx/pd are NOT pointed at the
-    // listener's device/PD here: RcConnection now owns them through
-    // IbvContextPtr/IbvPdPtr, and aliasing an owning smart pointer at a PD
-    // the listener itself owns would double-free once RcListener::Stop()
-    // releases it (see ~Instance()). registrationPd()/registrationCtx() in
-    // hipobj.cpp consult listenerSelfManaged to read the real device/PD
-    // from instance->listener instead, so buffer registration still
-    // matches what accepted connections get.
-    // HIPOBJ_RC_LISTEN_IP and the RC-CM listener are v3-only concepts (v1
-    // has no listener, and its peer dials back via QP/GID/LID exchanged
-    // directly in the token) -- v1 mode always takes the plain
-    // NIC/GPU-topology device-open path below instead.
+    // The RC-CM listener and HIPOBJ_RC_LISTEN_IP are v3-only. v1 has no
+    // listener: its peer dials back with the QP number, GID and LID in the
+    // token, so v1 always takes the NIC/GPU-topology path below.
     const char *rcListenIpOverride = useV1Wire() ? nullptr : std::getenv("HIPOBJ_RC_LISTEN_IP");
-    if (rcListenIpOverride && rcListenIpOverride[0] != '\0') {
-        instance->listener = RcListener::Start(nullptr, nullptr, rcListenIpOverride, 0,
-                                               &onRcListenerConnected, &onRcListenerDisconnected, nullptr);
-        listenerSelfManaged =
-            instance->listener && instance->listener->deviceCtx() && instance->listener->pd();
-        if (!listenerSelfManaged) {
-            LOG_WARN("hipObjInit: failed to self-manage RC-CM listener for "
-                     "HIPOBJ_RC_LISTEN_IP=%s; falling back to NIC/GPU topology",
-                     rcListenIpOverride);
+    const bool  haveListenIp       = rcListenIpOverride && rcListenIpOverride[0] != '\0';
+    // The listener binds to the address peers dial, and that bind picks the
+    // device: librdmacm opens its own context for it, every accepted
+    // connection arrives on that context, and the listener allocates its PD
+    // there (see RdmaCmRcListener::Start()). A context hipObject opens itself is
+    // never that one, so buffers register on the listener's PD
+    // (registrationPd() in hipobj.cpp). With HIPOBJ_RC_LISTEN_IP set, start
+    // the listener on it first: once it's running, hipObject needs no
+    // device of its own. Without the listener the server can't dial in, so
+    // no v3 transfer could work, and init fails: returning releases what the
+    // instance holds.
+    if (haveListenIp) {
+        instance->listenIp = rcListenIpOverride;
+        instance->listener = startRcListener(rcListenIpOverride, 0);
+        if (!instance->listener) {
+            LOG_ERROR("hipObjInit: failed to start the RC-CM listener for HIPOBJ_RC_LISTEN_IP=%s",
+                      rcListenIpOverride);
+            return {hipObjRdmaError, 0};
         }
     }
     std::optional<RdmaNic> nic;
-    if (!listenerSelfManaged) {
+    if (!instance->listener) {
         if (gpuDevice >= 0) {
             nic = GetClosestNicToGpu(gpuDevice, config.nicHint);
         }
@@ -349,31 +374,37 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
             }
         }
         else {
-            // hipobj-rc-v3: the RC-CM listener creates one QP per
-            // accepted connection (see rc-listener.h), against
-            // this same PD so it can service RDMA READ/WRITE against MRs
-            // registered via hipObjBufRegister(). Non-fatal: a bind failure
-            // only disables the server dial-in path, not hipObjBufRegister
-            // or the rest of hipObjInit.
-            std::string rcListenIp = localNicIp(instance->conn.localGid);
-            instance->listener =
-                RcListener::Start(instance->conn.pd.get(), instance->conn.ctx.get(),
-                                  rcListenIp.empty() ? nullptr : rcListenIp.c_str(), 0,
-                                  &onRcListenerConnected, &onRcListenerDisconnected, nullptr);
+            // hipobj-rc-v3: the RC-CM listener creates one QP per accepted
+            // connection (see rc-listener.h), on its own PD, so it can
+            // service RDMA READ/WRITE against MRs registered via
+            // hipObjBufRegister(). It binds to this NIC's address, and has to
+            // end up on this NIC.
+            instance->listenIp = localNicIp(instance->conn.localGid);
+            if (instance->listenIp.empty()) {
+                LOG_ERROR("hipObjInit: %s has no IPv4-mapped GID to bind the RC-CM "
+                          "listener to; set HIPOBJ_RC_LISTEN_IP",
+                          nic->name.c_str());
+                return {hipObjRdmaError, 0};
+            }
+            instance->listener = startRcListener(instance->listenIp.c_str(), 0);
             if (!instance->listener) {
-                LOG_WARN("hipObjInit: failed to start RC-CM listener on port %u; "
-                         "continuing without it",
-                         rcListenerPortFromEnv());
+                LOG_ERROR("hipObjInit: failed to start the RC-CM listener on %s port %u",
+                          instance->listenIp.c_str(), rcListenerPortFromEnv());
+                return {hipObjRdmaError, 0};
+            }
+            if (instance->listener->deviceName() != nic->name) {
+                LOG_ERROR("hipObjInit: %s is on %s, not the chosen NIC %s", instance->listenIp.c_str(),
+                          instance->listener->deviceName().c_str(), nic->name.c_str());
+                return {hipObjRdmaError, 0};
             }
         }
     }
-    instance->gpuDevice           = gpuDevice;
-    instance->endpoint            = config.endpoint ? config.endpoint : "";
-    instance->region              = config.region ? config.region : "";
-    instance->nicHint             = config.nicHint ? config.nicHint : "";
-    instance->nicIndex            = nic ? nic->index : -1;
-    instance->flags               = config.flags;
-    instance->listenerSelfManaged = listenerSelfManaged;
+    instance->gpuDevice = gpuDevice;
+    instance->endpoint  = config.endpoint ? config.endpoint : "";
+    instance->region    = config.region ? config.region : "";
+    instance->nicHint   = config.nicHint ? config.nicHint : "";
+    instance->nicIndex  = nic ? nic->index : -1;
+    instance->flags     = config.flags;
 
     /* Can't throw */
     current() = std::move(instance);

@@ -259,10 +259,21 @@ BufferMap::deregisterBuffer(void *devPtr)
     return 0;
 }
 
-    /* Deregisters the MR, then frees any staging buffer, without holding
-     * the lock */
-    entry.reset();
-    return DeregisterResult::Deregistered;
+void
+BufferMap::deregisterAll()
+{
+    /* Serialized against the RC-CM listener's QP/CQ create/destroy on the
+     * same PD, as in deregisterBuffer() */
+    PdLockGuard pdLock;
+    entries_.clear();
+}
+
+const BufferMap::BufEntry *
+BufferMap::find(const void *devPtr) const
+{
+    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+    auto      it  = entries_.find(key);
+    return it == entries_.end() ? nullptr : &it->second;
 }
 
 std::shared_ptr<const BufferMap::BufEntry>

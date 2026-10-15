@@ -24,6 +24,13 @@ class NicTopology;
 class RcListener;
 class Verbs;
 
+/* Stops an RC-CM listener, which is how one is released */
+struct RcListenerDeleter {
+    void operator()(RcListener *listener) const noexcept;
+};
+
+using RcListenerPtr = std::unique_ptr<RcListener, RcListenerDeleter>;
+
 /* The outside world the library calls: the HIP runtime, libibverbs, and
  * the NIC topology. It refers to them, and doesn't own them, so whatever
  * owns it has to keep them alive for as long as it lives. */
@@ -134,8 +141,10 @@ struct ResolvedConfig {
  * outlives them all. */
 struct Instance final {
     Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions) noexcept;
-    /* Stops the RC-CM listener, before the members are destroyed: before
-     * the buffers are deregistered and the connection is closed */
+    /* Deregisters the buffers, then stops the RC-CM listener, before the
+     * members are destroyed: the buffers' MRs can be on the listener's own
+     * PD, which Stop() deallocates, and the connection is closed after the
+     * listener's QPs on its PD are gone */
     ~Instance();
 
     /* Lives in a shared_ptr, and isn't copied or moved */
@@ -155,16 +164,21 @@ struct Instance final {
     std::string nicHint{};
     int         nicIndex = -1;
     uint32_t    flags    = 0;
-    /* True when initWith() ran the HIPOBJ_RC_LISTEN_IP self-managed path,
-     * where conn.ctx/pd just alias the RC-CM listener's own device/PD
-     * rather than being independently owned by conn (see initWith()). */
-    bool listenerSelfManaged = false;
+    /* v3: the address the RC-CM listener binds to and tokens advertise,
+     * HIPOBJ_RC_LISTEN_IP or the chosen NIC's. Worked out once, in
+     * initWith(). */
+    std::string listenIp{};
 
     // hipObject only ever manages one RC-CM listener at a time (one per
-    // Instance, see initWith()) even though RcListener itself supports
-    // several concurrently -- this is that one instance's handle.
-    RcListener *listener = nullptr;
+    // Instance, see initWith()) even though RdmaCmRcListener supports
+    // several concurrently -- this is that one instance's handle, from
+    // startRcListener(). In v3, hipObjInit() only succeeds with it running,
+    // and buffers register on its PD (registrationPd() in hipobj.cpp).
+    RcListenerPtr listener{};
 
+    /* v1's device, PD and QP. In v3 it's only opened to choose the NIC and
+     * read its GID, and isn't opened at all when HIPOBJ_RC_LISTEN_IP is
+     * set. */
     RcConnection conn{};
     BufferMap    buffers;
 };
@@ -191,19 +205,25 @@ useV1Wire()
 #endif
 }
 
-// Best-effort extraction of the IPv4 address hipObject's own GID
-// encodes (RoCEv2 IPv4-mapped GIDs only); empty when not available.
-// Mirrors parseClientNicFromTokenHex()'s convention (token.cpp), just
-// read straight off the live connection instead of a decoded v1 token.
-//
-// HIPOBJ_RC_LISTEN_IP overrides this outright: conn.localGid isn't
-// always populated by the time the v3 token is built (there is no
-// longer an active QP handshake to source it from -- the RC-CM
-// listener is passive, see rc-listener.h), and even when it is, GID
-// extraction only works for RoCEv2 IPv4-mapped GIDs. Set it to the
-// address the peer should actually dial back to when auto-detection
-// comes up empty or picks the wrong interface.
+// The IPv4 address a GID encodes (RoCEv2 IPv4-mapped GIDs only), or empty
+// when it has none. initWith() binds the RC-CM listener to the chosen
+// NIC's, unless HIPOBJ_RC_LISTEN_IP names the address peers should dial
+// instead, for a NIC whose GID has none or when this picks the wrong
+// interface. Mirrors parseClientNicFromTokenHex()'s convention (token.cpp).
 std::string localNicIp(const ibv_gid &localGid);
+
+/* Starts hipObject's RC-CM listener (v3) on bindIp and port (0 for
+ * rcListenerPortFromEnv()): RdmaCmRcListener::Start(), or the function a
+ * test installed with setRcListenerStartForTest(). Null when it can't
+ * start. */
+RcListenerPtr startRcListener(const char *bindIp, uint16_t port);
+
+/* A function that starts an RC-CM listener, as startRcListener() does */
+using RcListenerStart = RcListener *(*)(const char *bindIp, uint16_t port);
+
+/* Makes startRcListener() call start, or RdmaCmRcListener::Start() when
+ * it's null. Returns the function installed before. */
+RcListenerStart setRcListenerStartForTest(RcListenerStart start);
 
 /* hipObjInit(), with its platform and options given: builds an Instance
  * that holds them, and makes it the current one. The caller has checked

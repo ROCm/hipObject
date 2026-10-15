@@ -47,6 +47,28 @@ setReply(std::string_view reply)
     std::ranges::copy(reply, f.reply.begin());
     f.reply[reply.size()] = '\0';
     f.replyLen            = reply.size() + 1;
+    f.replyWithSuccess    = false;
+}
+
+void
+noteSentToken([[maybe_unused]] const char *token, [[maybe_unused]] size_t tokenLen)
+{
+#ifndef HIPOBJ_RDMA_WIRE_V1
+    const auto decoded =
+        token ? hipObj::v3::decodeRdmaTokenV3(hipObj::asStringView(hipObj::spanFromPointer(token, tokenLen)))
+              : std::nullopt;
+    fake().lastTokenLength = decoded ? decoded->length : 0;
+#endif
+}
+
+std::string
+successReply()
+{
+#ifdef HIPOBJ_RDMA_WIRE_V1
+    return "200";
+#else
+    return hipObj::v3::encodeRdmaReplyV3({200, fake().lastTokenLength.load()});
+#endif
 }
 
 hipObj::RdmaToken
@@ -185,6 +207,7 @@ FakeVerbs::query_gid(ibv_context * /*context*/, uint8_t /*port_num*/, int /*inde
     }
     if (gid != nullptr) {
         hipObj::zeroObject(*gid);
+        std::ranges::copy(device_->gid, std::span(gid->raw).begin());
     }
     return 0;
 }
@@ -497,9 +520,10 @@ FakeHip::closeDmabuf(int fd) const
 // ---- S3 callbacks ----------------------------------------------------
 
 int
-fakeSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
+fakeSendRequest(void *, const char *token, size_t tokenLen)
 {
     ++fake().log.sendRequest;
+    noteSentToken(token, tokenLen);
     return 0;
 }
 
@@ -508,7 +532,19 @@ fakeRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 {
     FakeDevice &f = fake();
     ++f.log.recvReply;
-    if (replyLen == nullptr || *replyLen < f.replyLen) {
+    if (f.replyWithSuccess) {
+        /* With its NUL, as setReply() stores a reply */
+        const std::string success = successReply();
+        if (!replyLen || *replyLen < success.size() + 1) {
+            return -1;
+        }
+        const std::span<char> out = hipObj::spanFromPointer(reply, *replyLen);
+        std::ranges::copy(success, out.begin());
+        out[success.size()] = '\0';
+        *replyLen           = success.size() + 1;
+        return 0;
+    }
+    if (!replyLen || *replyLen < f.replyLen) {
         return -1;
     }
     std::ranges::copy(std::span(f.reply).first(f.replyLen),
@@ -549,15 +585,93 @@ initWithPlatform(const hipObjConfig_t &config, std::shared_ptr<const hipObj::Pla
 
 // ---- Fixture ---------------------------------------------------------
 
+namespace {
+
+    /* The fake startRcListener() returns while a ScopedFakeRcListener is
+     * installed. Each ScopedFakeRcListener sets it, and puts back the one
+     * before it when it's destroyed, so they can nest. */
+    FakeRcListener *g_fakeRcListener = nullptr;
+
+    /* What ScopedFakeRcListener installs with setRcListenerStartForTest().
+     * The seam is a plain function, so it finds the fake through
+     * g_fakeRcListener. */
+    hipObj::RcListener *startFakeRcListener(const char *, uint16_t)
+    {
+        return g_fakeRcListener ? g_fakeRcListener->start() : nullptr;
+    }
+
+} // namespace
+
+hipObj::RcListener *
+FakeRcListener::start()
+{
+    ++device_->log.startListener;
+    return device_->fail.startListener ? nullptr : this;
+}
+
+uint16_t
+FakeRcListener::port() const
+{
+    return device_->listenerPort;
+}
+
+int
+FakeRcListener::connectionCount() const
+{
+    return 0;
+}
+
+/* Not one alloc_pd() returns, so registering on the wrong PD would show */
+void *
+FakeRcListener::pd() const
+{
+    return reinterpret_cast<void *>(0x4);
+}
+
+std::string
+FakeRcListener::deviceName() const
+{
+    return std::string(device_->listenerDevice);
+}
+
+void
+FakeRcListener::stop()
+{
+    ++device_->log.stopListener;
+}
+
+ScopedFakeRcListener::ScopedFakeRcListener(FakeRcListener &listener)
+    : listener_(&listener), previousListener_(g_fakeRcListener),
+      previousStart_(hipObj::setRcListenerStartForTest(&startFakeRcListener))
+{
+    g_fakeRcListener = &listener;
+}
+
+ScopedFakeRcListener::~ScopedFakeRcListener()
+{
+    /* Restored in the reverse order they were installed */
+    EXPECT_EQ(g_fakeRcListener, listener_);
+    g_fakeRcListener = previousListener_;
+    EXPECT_EQ(hipObj::setRcListenerStartForTest(previousStart_), &startFakeRcListener);
+}
+
 void
 FakeDeviceTest::SetUp()
 {
+    fakeTopology_.emplace(topology_);
+    fakeHip_.emplace(hip_);
+    fakeIbv_.emplace(verbs_);
+    fakeRcListener_.emplace(rcListener_);
+
     resetFake();
 #ifndef HIPOBJ_RDMA_WIRE_V1
     /* FakeDevice's default reply, "200", is a v1 reply. hipObject is built
      * for one wire format (see useV1Wire() in state.h), so under v3 the
-     * success reply is the encoder's own, which can't drift from the format. */
-    setReply(hipObj::v3::encodeRdmaReplyV3({200, 0}));
+     * success reply is the encoder's own, which can't drift from the format,
+     * and reports the transfer's length (see successReply()). */
+    fake().replyWithSuccess = true;
+    /* v3's listener binds to the NIC's address */
+    fake().gid = kFakeNicGid;
 #endif
 }
 
@@ -566,8 +680,10 @@ FakeDeviceTest::TearDown()
 {
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
-    /* An instance that outlived its shutdown would still hold them */
-    EXPECT_EQ(fakes_.use_count(), 1);
+    fakeRcListener_.reset();
+    fakeIbv_.reset();
+    fakeHip_.reset();
+    fakeTopology_.reset();
 }
 
 hipObjConfig_t

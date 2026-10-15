@@ -7,12 +7,11 @@
 
 #include "rc-listener.h"
 
-/* RcListener::Start() now binds via RDMA CM against a real
- * struct ibv_pd/struct ibv_context, which needs real RDMA hardware --
- * this environment has none (see the hipobj-rdma-test-server
- * RDMA-availability check). What's covered here without hardware:
- * the pure port-resolution helper, and the null-pd/deviceCtx guard,
- * which returns before touching any RDMA CM API. */
+/* RdmaCmRcListener::Start() binds via RDMA CM to a local RDMA device's address,
+ * which needs real RDMA hardware -- this environment has none (see the
+ * hipobj-rdma-test-server RDMA-availability check). What's covered here
+ * without hardware: the pure port-resolution helper, and the missing
+ * bindIp guard, which returns before touching any RDMA CM API. */
 
 TEST(RcListenerPortFromEnv, DefaultsWhenUnset) {
     unsetenv("HIPOBJ_RC_LISTEN_PORT");
@@ -31,17 +30,15 @@ TEST(RcListenerPortFromEnv, IgnoresInvalidValue) {
     unsetenv("HIPOBJ_RC_LISTEN_PORT");
 }
 
-TEST(RcListener, RejectsNullPdOrDeviceCtx) {
-    int dummy = 0;
-    EXPECT_EQ(hipObj::RcListener::Start(nullptr, &dummy, nullptr, 18281,
-                                         nullptr, nullptr, nullptr),
+TEST(RdmaCmRcListener, RejectsMissingBindIp) {
+    EXPECT_EQ(hipObj::RdmaCmRcListener::Start(nullptr, 18281, nullptr, nullptr,
+                                         nullptr),
               nullptr);
-    EXPECT_EQ(hipObj::RcListener::Start(&dummy, nullptr, nullptr, 18281,
-                                         nullptr, nullptr, nullptr),
+    EXPECT_EQ(hipObj::RdmaCmRcListener::Start("", 18281, nullptr, nullptr, nullptr),
               nullptr);
 }
 
-TEST(RcListener, StopWithNullptrIsSafe) {
-    hipObj::RcListener::Stop(nullptr);
-    hipObj::RcListener::Stop(nullptr);
+TEST(RdmaCmRcListener, StopWithNullptrIsSafe) {
+    hipObj::RdmaCmRcListener::Stop(nullptr);
+    hipObj::RdmaCmRcListener::Stop(nullptr);
 }
