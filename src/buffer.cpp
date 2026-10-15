@@ -33,7 +33,7 @@ namespace {
      * drive both branches without a GPU. A pointer the runtime cannot classify is
      * treated as "not device memory": the strict check below must not fail a host
      * buffer it merely failed to classify. */
-    bool isDevicePointer(const HipRuntime &runtime, void *ptr)
+    bool isDevicePointer(const HipRuntime &runtime, const void *ptr)
     {
         hipPointerAttribute_t attr{};
         if (runtime.pointerGetAttributes(&attr, ptr) != hipSuccess) {
@@ -130,8 +130,8 @@ isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
     if (runtime.memGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
         return false;
     }
-    auto start = pointerToAddress(base);
-    auto addr  = pointerToAddress(ptr);
+    const auto start = pointerToAddress(base);
+    const auto addr  = pointerToAddress(ptr);
     if (addr < start || addr - start >= allocSize) {
         return false;
     }
@@ -155,7 +155,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     }
     const Verbs      &verbs   = *verbs_;
     const HipRuntime &runtime = *runtime_;
-    int               access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    const int         access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr          mr      = registerDeviceMemory(verbs, runtime, pd, devPtr, size, access, dmabuf_);
     if (mr) {
         /* The NIC reaches the caller's memory, so there's no staging
@@ -181,8 +181,8 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
                 size, devPtr);
     }
 
-    void      *rawHostBuf = nullptr;
-    hipError_t err        = runtime.hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
+    void            *rawHostBuf = nullptr;
+    const hipError_t err        = runtime.hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
     if (err != hipSuccess || rawHostBuf == nullptr) {
         return false;
     }
@@ -196,7 +196,10 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     /* Build the entry before inserting it. mr is declared before
      * hostBuf, so if allocating the map node throws, unwinding would
      * free the staging buffer while it's still registered; the entry
-     * deregisters its MR first. */
+     * deregisters its MR first. clang-tidy doesn't see that
+     * try_emplace() moves from entry, which couldn't be moved from if it
+     * were const. */
+    // NOLINTNEXTLINE(misc-const-correctness)
     BufEntry entry(std::move(hostBuf), std::move(mr), size, false, remoteAddr);
     entries_.try_emplace(key, std::move(entry));
     return true;
@@ -205,13 +208,16 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 bool
 BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 {
-    auto key = pointerToAddress(hostPtr);
+    const auto key = pointerToAddress(hostPtr);
     if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
         return false;
     }
     const Verbs &verbs  = *verbs_;
-    int          access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    auto         mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
+    const int    access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
+    /* clang-tidy doesn't see that try_emplace() moves from mr, which
+     * couldn't be moved from if it were const */
+    // NOLINTNEXTLINE(misc-const-correctness)
+    auto mr = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
     if (!mr) {
         return false;
     }
@@ -223,8 +229,8 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 bool
 BufferMap::deregisterBuffer(void *devPtr)
 {
-    auto key = pointerToAddress(devPtr);
-    auto it  = entries_.find(key);
+    const auto key = pointerToAddress(devPtr);
+    const auto it  = entries_.find(key);
     if (it == entries_.end()) {
         return false;
     }
@@ -236,8 +242,8 @@ BufferMap::deregisterBuffer(void *devPtr)
 const BufferMap::BufEntry *
 BufferMap::find(const void *devPtr) const
 {
-    auto key = pointerToAddress(devPtr);
-    auto it  = entries_.find(key);
+    const auto key = pointerToAddress(devPtr);
+    const auto it  = entries_.find(key);
     return it == entries_.end() ? nullptr : &it->second;
 }
 

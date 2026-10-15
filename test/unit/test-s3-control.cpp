@@ -124,7 +124,7 @@ TEST_F(S3ControlTest, ReceiveDecodesStatus)
 
 TEST_F(S3ControlTest, ReceiveRejectsMalformedReply)
 {
-    for (std::string_view reply : {"", "2000", "abc", "200x"}) {
+    for (const std::string_view reply : {"", "2000", "abc", "200x"}) {
         g_callbacks.reply = reply;
         EXPECT_FALSE(receive()) << "reply \"" << reply << "\"";
     }

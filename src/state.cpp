@@ -208,7 +208,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     const bool haveNicHint = !nicHint.empty();
     int        gpuDevice   = config.gpuDevice;
     if (gpuDevice < 0) {
-        hipError_t err = runtime.getDevice(&gpuDevice);
+        const hipError_t err = runtime.getDevice(&gpuDevice);
         if (err != hipSuccess) {
             // No GPU to infer a device from. That is only fatal when we also have
             // no NIC hint -- with a hint the topology lookup below is skipped
@@ -222,8 +222,8 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     else {
         // An explicit device has to exist, even when a NIC hint means its
         // topology isn't needed
-        int        deviceCount = 0;
-        hipError_t err         = runtime.getDeviceCount(&deviceCount);
+        int              deviceCount = 0;
+        const hipError_t err         = runtime.getDeviceCount(&deviceCount);
         if (err == hipErrorNoDevice) {
             deviceCount = 0;
         }

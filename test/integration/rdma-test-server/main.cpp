@@ -107,7 +107,7 @@ main(int argc, char *argv[])
         }
 
         const std::string key     = objectKey(req.path);
-        auto              tokenIt = req.headers.find("x-amz-rdma-token");
+        const auto        tokenIt = req.headers.find("x-amz-rdma-token");
 
         // HTTP-only mode: RDMA token absent or RDMA not available.
         if (tokenIt == req.headers.end() || !rdma.isReady()) {
@@ -120,7 +120,7 @@ main(int argc, char *argv[])
             }
             if (req.method == "GET") {
                 std::scoped_lock<std::mutex> lk(objects_mu);
-                auto                         it = objects.find(key);
+                const auto                   it = objects.find(key);
                 if (it == objects.end()) {
                     resp.status = 404;
                     resp.body   = "not found";
@@ -165,7 +165,7 @@ main(int argc, char *argv[])
             std::vector<uint8_t> data;
             {
                 std::scoped_lock<std::mutex> lk(objects_mu);
-                auto                         it = objects.find(key);
+                const auto                   it = objects.find(key);
                 if (it == objects.end()) {
                     resp.status = 404;
                     resp.body   = "not found";

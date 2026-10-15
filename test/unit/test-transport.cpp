@@ -153,7 +153,7 @@ TEST_F(TransportTest, OpenSucceedsWithoutVendorIdWhenDeviceQueryFails)
 
 TEST_F(TransportTest, OpenRejectsIndexOutsideDeviceList)
 {
-    for (int index : {-1, 1}) {
+    for (const int index : {-1, 1}) {
         EXPECT_FALSE(hipObj::openRdmaDevice(verbs(), topology(), index)) << "index " << index;
     }
     EXPECT_EQ(fake().log.openDevice, 0);
@@ -177,7 +177,7 @@ TEST_F(TransportTest, OpenByNameFindsOnlyThatDevice)
 
 TEST_F(TransportTest, OpenReleasesWhatItAcquiredWhenAStepFails)
 {
-    for (bool hipObjTest::Faults::*fault : {
+    for (bool hipObjTest::Faults::*const fault : {
              &hipObjTest::Faults::openDevice,
              &hipObjTest::Faults::allocPd,
              &hipObjTest::Faults::queryPort,
@@ -345,8 +345,8 @@ TEST_F(TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
 {
     /* The address handle holds the GID index in a uint8_t, so anything
      * outside [0, 255] must be refused, not truncated */
-    ibv_gid gid{};
-    for (int index : {-1, 256, 0x10000}) {
+    const ibv_gid gid{};
+    for (const int index : {-1, 256, 0x10000}) {
         const hipObj::RdmaDevice            device = deviceWithGidIndex(index);
         std::optional<hipObj::RcConnection> conn   = hipObj::createRcConnection(device, 16, 8, 8);
         ASSERT_TRUE(conn);
@@ -465,7 +465,7 @@ TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
 
 TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
 {
-    for (bool hipObjTest::Faults::*fault : {
+    for (bool hipObjTest::Faults::*const fault : {
              &hipObjTest::Faults::getDeviceList,
              &hipObjTest::Faults::openDevice,
              &hipObjTest::Faults::allocPd,
@@ -475,8 +475,8 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
              &hipObjTest::Faults::createQp,
          }) {
         resetFake();
-        fake().fail.*fault    = true;
-        hipObjConfig_t config = makeConfig();
+        fake().fail.*fault          = true;
+        const hipObjConfig_t config = makeConfig();
         EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
         EXPECT_EQ(hipObj::currentInstance(), nullptr);
         expectNothingLeaked();
@@ -486,7 +486,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
 TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenInitTransitionFails)
 {
     fake().fail.modifyQpToState = IBV_QPS_INIT;
-    hipObjConfig_t config       = makeConfig();
+    const hipObjConfig_t config = makeConfig();
     EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
     expectNothingLeaked();
@@ -649,10 +649,10 @@ TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
 
     hipObjOps_t ops = makeOps();
     ops.sendRequest = &recordSendRequest;
-    for (bool isGet : {true, false}) {
-        SentToken     sent;
-        hipObjError_t err = isGet ? hipObjGet(nullptr, kDevBuf, kSize, kOffset, &ops, &sent)
-                                  : hipObjPut(nullptr, kDevBuf, kSize, kOffset, &ops, &sent);
+    for (const bool isGet : {true, false}) {
+        SentToken           sent;
+        const hipObjError_t err = isGet ? hipObjGet(nullptr, kDevBuf, kSize, kOffset, &ops, &sent)
+                                        : hipObjPut(nullptr, kDevBuf, kSize, kOffset, &ops, &sent);
         ASSERT_EQ(err.opError, hipObjSuccess) << (isGet ? "get" : "put");
 
         /* Callbacks that treat the token as a C string still work */

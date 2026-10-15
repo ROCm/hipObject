@@ -141,7 +141,7 @@ TEST(RdmaToken, EncodeRcTransportByte)
     hipObj::RdmaToken token;
     token.transport = hipObj::TransportType::RC;
 
-    std::string enc = hipObj::encodeRdmaToken(token);
+    const std::string enc = hipObj::encodeRdmaToken(token);
     EXPECT_GE(enc.size(), 2U);
     EXPECT_EQ(enc.substr(0, 2), "01");
 }
@@ -151,7 +151,7 @@ TEST(RdmaToken, EncodeDcTransportByte)
     hipObj::RdmaToken token;
     token.transport = hipObj::TransportType::DC;
 
-    std::string enc = hipObj::encodeRdmaToken(token);
+    const std::string enc = hipObj::encodeRdmaToken(token);
     EXPECT_GE(enc.size(), 2U);
     EXPECT_EQ(enc.substr(0, 2), "00");
 }
@@ -192,15 +192,15 @@ TEST(RdmaReply, ParseHttp206)
 TEST(RdmaReply, ParseHttp200WithPeerToken)
 {
     hipObj::RdmaToken peer;
-    peer.qpNum        = 7;
-    std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
+    peer.qpNum              = 7;
+    const std::string reply = hipObj::encodeReplyWithPeerToken(200, peer);
     EXPECT_EQ(hipObj::parseRdmaReplyHttpCode(reply), 200);
 }
 
 TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue)
 {
-    hipObj::RdmaToken token{};
-    std::string       encoded = hipObj::encodeRdmaToken(token);
+    const hipObj::RdmaToken token{};
+    const std::string       encoded = hipObj::encodeRdmaToken(token);
 
     EXPECT_FALSE(hipObj::decodeRdmaTokenHex(encoded + ":1:2"));
     EXPECT_FALSE(hipObj::decodeRdmaTokenHex(encoded + ":00007f0000001000:0000000000001000"));
@@ -210,10 +210,10 @@ TEST(RdmaToken, DecodeRejectsColonSuffixedHeaderValue)
 TEST(RdmaReply, ParsePeerTokenFromReply)
 {
     hipObj::RdmaToken peer;
-    peer.transport     = hipObj::TransportType::RC;
-    peer.qpNum         = 99;
-    std::string reply  = hipObj::encodeReplyWithPeerToken(200, peer);
-    const auto  parsed = hipObj::parsePeerTokenFromReply(reply);
+    peer.transport           = hipObj::TransportType::RC;
+    peer.qpNum               = 99;
+    const std::string reply  = hipObj::encodeReplyWithPeerToken(200, peer);
+    const auto        parsed = hipObj::parsePeerTokenFromReply(reply);
     ASSERT_TRUE(parsed);
     EXPECT_EQ(parsed->qpNum, 99U);
     EXPECT_EQ(parsed->transport, hipObj::TransportType::RC);
@@ -307,7 +307,7 @@ TEST(RdmaToken, ParseClientNicFromGid)
     token.gid[14]   = 1;
     token.gid[15]   = 42;
 
-    std::string          encoded = hipObj::encodeRdmaToken(token);
+    const std::string    encoded = hipObj::encodeRdmaToken(token);
     std::array<char, 32> nicIp{};
     EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded, nicIp));
     EXPECT_STREQ(nicIp.data(), "192.168.1.42");

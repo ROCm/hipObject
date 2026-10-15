@@ -694,7 +694,7 @@ namespace {
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)
     {
-        hipObjError_t err = initFakes(makeConfig());
+        const hipObjError_t err = initFakes(makeConfig());
 
         EXPECT_EQ(err.opError, hipObjSuccess);
         const hipObj::Instance *const instance = hipObj::currentInstance();
@@ -714,7 +714,7 @@ namespace {
         ops.sendRequest = &fakeSendRequest;
         ops.recvReply   = &fakeRecvReply;
 
-        hipObjError_t err = hipObjGet(nullptr, hostBuf.data(), hostBuf.size(), 0, &ops, nullptr);
+        const hipObjError_t err = hipObjGet(nullptr, hostBuf.data(), hostBuf.size(), 0, &ops, nullptr);
 
         EXPECT_EQ(err.opError, hipObjSuccess);
         EXPECT_EQ(g_apiTransferLog.sendRequestCalls, 1);
@@ -735,7 +735,7 @@ namespace {
         ops.sendRequest = &fakeSendRequest;
         ops.recvReply   = &fakeRecvReply;
 
-        hipObjError_t err = hipObjPut(nullptr, gpuBuf, 64, 0, &ops, nullptr);
+        const hipObjError_t err = hipObjPut(nullptr, gpuBuf, 64, 0, &ops, nullptr);
 
         EXPECT_EQ(err.opError, hipObjSuccess);
         EXPECT_EQ(hipObjTest::fake().log.deviceSynchronize, 1);

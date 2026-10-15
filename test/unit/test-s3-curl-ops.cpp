@@ -57,8 +57,8 @@ struct ServeResult {
 int
 remainingMs(const std::chrono::steady_clock::time_point &deadline)
 {
-    auto left = deadline - std::chrono::steady_clock::now();
-    auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(left).count();
+    const auto left = deadline - std::chrono::steady_clock::now();
+    const auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(left).count();
     return static_cast<int>(std::clamp<decltype(ms)>(ms, 0, std::numeric_limits<int>::max()));
 }
 
@@ -153,10 +153,10 @@ private:
                 return;
             }
             struct pollfd pfd;
-            pfd.fd      = listenFd_.get();
-            pfd.events  = POLLIN;
-            pfd.revents = 0;
-            int pr      = poll(&pfd, 1, remainingMs(deadline));
+            pfd.fd       = listenFd_.get();
+            pfd.events   = POLLIN;
+            pfd.revents  = 0;
+            const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
                     continue;
@@ -193,10 +193,10 @@ private:
                 return;
             }
             struct pollfd pfd;
-            pfd.fd      = fd.get();
-            pfd.events  = POLLIN;
-            pfd.revents = 0;
-            int pr      = poll(&pfd, 1, remainingMs(deadline));
+            pfd.fd       = fd.get();
+            pfd.events   = POLLIN;
+            pfd.revents  = 0;
+            const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
                     continue;
@@ -208,7 +208,7 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            ssize_t n = recv(fd.get(), buf.data(), buf.size(), 0);
+            const ssize_t n = recv(fd.get(), buf.data(), buf.size(), 0);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
@@ -232,10 +232,10 @@ private:
                 return;
             }
             struct pollfd pfd;
-            pfd.fd      = fd.get();
-            pfd.events  = POLLOUT;
-            pfd.revents = 0;
-            int pr      = poll(&pfd, 1, remainingMs(deadline));
+            pfd.fd       = fd.get();
+            pfd.events   = POLLOUT;
+            pfd.revents  = 0;
+            const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
                     continue;
@@ -248,7 +248,7 @@ private:
                 return;
             }
             const std::string_view rest = std::string_view(response_).substr(sent);
-            ssize_t                n    = send(fd.get(), rest.data(), rest.size(), MSG_NOSIGNAL);
+            const ssize_t          n    = send(fd.get(), rest.data(), rest.size(), MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
@@ -316,7 +316,7 @@ expectSendResult(std::string_view response, int expectedRc)
     StubHttpServer  server(response);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int actualRc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
+    const int actualRc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(expectedRc, actualRc);
 }
@@ -333,7 +333,7 @@ public:
         setenv("no_proxy", "127.0.0.1", 1);
         setenv("NO_PROXY", "127.0.0.1", 1);
         // NOLINTEND(concurrency-mt-unsafe)
-        CURLcode rc = curl_global_init(CURL_GLOBAL_DEFAULT);
+        const CURLcode rc = curl_global_init(CURL_GLOBAL_DEFAULT);
         if (rc != CURLE_OK) {
             initialized_ = false;
             FAIL() << "curl_global_init failed: " << static_cast<int>(rc);
@@ -386,7 +386,7 @@ TEST(S3CurlOps, ReplyHeaderMixedCase)
     StubHttpServer  server(kR200ErrMixed);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
+    const int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
@@ -402,7 +402,7 @@ TEST(S3CurlOps, ReplyHeaderAllCaps)
     StubHttpServer  server(kR200OkCaps);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
+    const int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
@@ -418,7 +418,7 @@ TEST(S3CurlOps, RequestContract)
     StubHttpServer  server(kR200OkCaps);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
+    const int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
@@ -445,7 +445,7 @@ TEST(S3CurlOps, ConnectionRefusedFails)
 
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, url);
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
+    const int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     EXPECT_EQ(-1, rc);
 }
 

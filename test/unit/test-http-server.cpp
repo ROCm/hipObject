@@ -48,8 +48,8 @@ constexpr auto kDeadline = std::chrono::seconds(10);
 int
 remainingMs(const std::chrono::steady_clock::time_point &deadline)
 {
-    auto left = deadline - std::chrono::steady_clock::now();
-    auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(left).count();
+    const auto left = deadline - std::chrono::steady_clock::now();
+    const auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(left).count();
     return static_cast<int>(std::clamp<decltype(ms)>(ms, 0, std::numeric_limits<int>::max()));
 }
 
