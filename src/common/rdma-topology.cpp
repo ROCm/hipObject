@@ -71,16 +71,16 @@ namespace {
     std::optional<int> AutoSelectGidIndex(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx,
                                           uint8_t port_num)
     {
-        ibv_port_attr port_attr;
+        ibv_port_attr port_attr{};
         if (verbs.query_port(ctx, port_num, &port_attr) != 0)
             return std::nullopt;
 
         std::vector<GidCandidate> candidates;
         for (int i = 0; i < port_attr.gid_tbl_len; ++i) {
-            ibv_gid gid;
+            ibv_gid gid{};
             if (verbs.query_gid(ctx, port_num, i, &gid) != 0)
                 continue;
-            GidCandidate c;
+            GidCandidate c{};
             c.index = i;
             c.gid   = toGid(gid);
             if (!IsConfiguredGid(c.gid))
@@ -156,13 +156,13 @@ SysfsTopology::enumerate(std::string_view hcaList) const
         if (!ctx)
             continue;
 
-        ibv_device_attr attr;
+        ibv_device_attr attr{};
         if (verbs_->query_device(ctx.get(), &attr) != 0) {
             continue;
         }
 
         for (uint8_t p = 1; p <= attr.phys_port_cnt; ++p) {
-            ibv_port_attr port_attr;
+            ibv_port_attr port_attr{};
             if (verbs_->query_port(ctx.get(), p, &port_attr) != 0)
                 continue;
             if (port_attr.state != IBV_PORT_ACTIVE && port_attr.state != IBV_PORT_ACTIVE_DEFER)
@@ -218,12 +218,13 @@ std::optional<RdmaNic>
 GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int gpuIndex,
                    std::string_view hcaList)
 {
-    char       gpu_bus_id[32];
-    hipError_t err = runtime.deviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id), gpuIndex);
-    if (err != hipSuccess)
+    std::array<char, 32> gpu_bus_id{};
+    const int            len = static_cast<int>(gpu_bus_id.size());
+    if (runtime.deviceGetPCIBusId(gpu_bus_id.data(), len, gpuIndex) != hipSuccess)
         return std::nullopt;
 
-    std::string gpu_bus(gpu_bus_id);
+    /* Up to the first NUL, or the whole array if HIP didn't write one */
+    std::string gpu_bus(gpu_bus_id.begin(), std::ranges::find(gpu_bus_id, '\0'));
     auto        devices = topology.enumerate(hcaList);
     if (devices.empty())
         return std::nullopt;
