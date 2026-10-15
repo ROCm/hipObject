@@ -15,6 +15,7 @@
 #include <string_view>
 #include <utility>
 
+#include "hipobj-address.h"
 #include "hipobj-span.h"
 #include "hipobj.h"
 #include "state.h"
@@ -81,12 +82,6 @@ modifyQpCalls()
 
 // ---- ibverbs -------------------------------------------------------
 
-namespace {
-
-    std::array<struct ibv_device *, 2> g_devices = {{reinterpret_cast<struct ibv_device *>(0x1), nullptr}};
-
-} // namespace
-
 struct ibv_device **
 FakeVerbs::get_device_list(int *num_devices) const
 {
@@ -96,7 +91,11 @@ FakeVerbs::get_device_list(int *num_devices) const
     if (num_devices) {
         *num_devices = 1;
     }
-    return g_devices.data();
+    /* Local, so it's initialized on first use rather than by a global
+     * constructor */
+    static std::array<struct ibv_device *, 2> devices = {
+        {hipObj::addressToPointer<struct ibv_device *>(0x1), nullptr}};
+    return devices.data();
 }
 
 void
@@ -112,7 +111,7 @@ FakeVerbs::open_device(struct ibv_device *) const
         return nullptr;
     }
     ++device_->log.openDevice;
-    return reinterpret_cast<struct ibv_context *>(0x2);
+    return hipObj::addressToPointer<struct ibv_context *>(0x2);
 }
 
 int
@@ -172,7 +171,7 @@ FakeVerbs::alloc_pd(struct ibv_context *) const
         return nullptr;
     }
     ++device_->log.allocPd;
-    return reinterpret_cast<struct ibv_pd *>(0x3);
+    return hipObj::addressToPointer<struct ibv_pd *>(0x3);
 }
 
 int
@@ -417,7 +416,7 @@ FakeHip::memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t) 
     if (device_->addressRangeErr != hipSuccess) {
         return device_->addressRangeErr;
     }
-    *base = reinterpret_cast<hipDeviceptr_t>(device_->allocBase);
+    *base = hipObj::addressToPointer<hipDeviceptr_t>(device_->allocBase);
     *size = device_->allocSize;
     return hipSuccess;
 }

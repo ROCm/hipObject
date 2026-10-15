@@ -11,6 +11,7 @@
 
 #include "buffer.h"
 #include "fake-device.h"
+#include "hipobj-address.h"
 #include "hipobj-private.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
@@ -38,14 +39,14 @@ TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
     hipObj::BufferMap    buffers = makeBuffers();
     std::array<char, 32> hostBuf{};
 
-    EXPECT_TRUE(
-        buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), reinterpret_cast<struct ibv_pd *>(1)));
+    EXPECT_TRUE(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(),
+                                           hipObj::addressToPointer<struct ibv_pd *>(1)));
     const auto *entry = buffers.find(hostBuf.data());
     ASSERT_NE(entry, nullptr);
     ASSERT_NE(entry->mr, nullptr);
     EXPECT_EQ(entry->mr->addr, hostBuf.data());
     EXPECT_EQ(entry->hostBuf, nullptr);
-    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(hostBuf.data()));
+    EXPECT_EQ(entry->remoteAddr, hipObj::pointerToAddress(hostBuf.data()));
     EXPECT_EQ(entry->size, hostBuf.size());
     EXPECT_FALSE(entry->isDmabuf);
     EXPECT_EQ(hipDevice_.log.hostMalloc, 0);
@@ -57,14 +58,14 @@ TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
 TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
 {
     hipObj::BufferMap buffers = makeBuffers();
-    void             *gpuBuf  = reinterpret_cast<void *>(0x4000);
+    void             *gpuBuf  = hipObj::addressToPointer<void *>(0x4000);
 
-    EXPECT_TRUE(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)));
+    EXPECT_TRUE(buffers.registerBuffer(gpuBuf, 64, hipObj::addressToPointer<struct ibv_pd *>(1)));
     const auto *entry = buffers.find(gpuBuf);
     ASSERT_NE(entry, nullptr);
     EXPECT_TRUE(entry->isDmabuf);
     EXPECT_EQ(entry->hostBuf, nullptr);
-    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(gpuBuf));
+    EXPECT_EQ(entry->remoteAddr, hipObj::pointerToAddress(gpuBuf));
 
     EXPECT_TRUE(buffers.deregisterBuffer(gpuBuf));
 }
@@ -72,16 +73,16 @@ TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
 TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
 {
     hipObj::BufferMap buffers    = makeBuffers();
-    void             *gpuBuf     = reinterpret_cast<void *>(0x1000);
+    void             *gpuBuf     = hipObj::addressToPointer<void *>(0x1000);
     hipDevice_.fail.registerAddr = gpuBuf;
 
-    EXPECT_TRUE(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)));
+    EXPECT_TRUE(buffers.registerBuffer(gpuBuf, 64, hipObj::addressToPointer<struct ibv_pd *>(1)));
     const auto *entry = buffers.find(gpuBuf);
     ASSERT_NE(entry, nullptr);
     ASSERT_NE(entry->mr, nullptr);
     EXPECT_EQ(entry->mr->addr, hipDevice_.lastHostMalloc);
     EXPECT_EQ(entry->hostBuf.get(), hipDevice_.lastHostMalloc);
-    EXPECT_EQ(entry->remoteAddr, reinterpret_cast<uint64_t>(hipDevice_.lastHostMalloc.load()));
+    EXPECT_EQ(entry->remoteAddr, hipObj::pointerToAddress(hipDevice_.lastHostMalloc.load()));
     EXPECT_FALSE(entry->isDmabuf);
     EXPECT_EQ(hipDevice_.log.hostMalloc, 1);
 
@@ -96,10 +97,10 @@ TEST_F(BufferRegistrationTest, DestroyingFreesOwnedFallbackHostBuffers)
 {
     {
         hipObj::BufferMap buffers    = makeBuffers();
-        void             *gpuBuf     = reinterpret_cast<void *>(0x2000);
+        void             *gpuBuf     = hipObj::addressToPointer<void *>(0x2000);
         hipDevice_.fail.registerAddr = gpuBuf;
 
-        EXPECT_TRUE(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)));
+        EXPECT_TRUE(buffers.registerBuffer(gpuBuf, 64, hipObj::addressToPointer<struct ibv_pd *>(1)));
         ASSERT_NE(hipDevice_.lastHostMalloc, nullptr);
         EXPECT_EQ(hipDevice_.log.hostFree, 0);
     }
@@ -114,8 +115,8 @@ TEST_F(BufferRegistrationTest, DestroyingFreesOwnedFallbackHostBuffers)
 TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
 {
     hipObj::BufferMap    buffers = makeBuffers();
-    auto                *pd      = reinterpret_cast<struct ibv_pd *>(1);
-    void                *gpuBuf  = reinterpret_cast<void *>(0x3000);
+    auto                *pd      = hipObj::addressToPointer<struct ibv_pd *>(1);
+    void                *gpuBuf  = hipObj::addressToPointer<void *>(0x3000);
     std::array<char, 32> hostBuf{};
 
     EXPECT_FALSE(buffers.registerBuffer(gpuBuf, hipObj::MAX_MR_SIZE + 1, pd));
@@ -137,16 +138,16 @@ TEST_F(BufferRegistrationTest, FindsOnlyRegisteredBuffers)
      * it, and there's no object there to do pointer arithmetic in */
     constexpr uintptr_t kGpuAddr = 0x5000;
     hipObj::BufferMap   buffers  = makeBuffers();
-    void               *gpuBuf   = reinterpret_cast<void *>(kGpuAddr);
+    void               *gpuBuf   = hipObj::addressToPointer<void *>(kGpuAddr);
 
     EXPECT_EQ(buffers.find(gpuBuf), nullptr);
     EXPECT_FALSE(buffers.isRegistered(gpuBuf));
 
-    ASSERT_TRUE(buffers.registerBuffer(gpuBuf, 64, reinterpret_cast<struct ibv_pd *>(1)));
+    ASSERT_TRUE(buffers.registerBuffer(gpuBuf, 64, hipObj::addressToPointer<struct ibv_pd *>(1)));
     EXPECT_NE(buffers.find(gpuBuf), nullptr);
     EXPECT_TRUE(buffers.isRegistered(gpuBuf));
     /* Only the start of a registration finds it */
-    EXPECT_EQ(buffers.find(reinterpret_cast<void *>(kGpuAddr + 1)), nullptr);
+    EXPECT_EQ(buffers.find(hipObj::addressToPointer<void *>(kGpuAddr + 1)), nullptr);
 
     ASSERT_TRUE(buffers.deregisterBuffer(gpuBuf));
     EXPECT_EQ(buffers.find(gpuBuf), nullptr);

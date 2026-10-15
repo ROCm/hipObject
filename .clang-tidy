@@ -67,26 +67,16 @@ Checks:
   - -android-cloexec-accept  # TODO(1): accept() without SOCK_CLOEXEC
   - -android-cloexec-dup  # TODO(1): dup() without F_DUPFD_CLOEXEC
   - -android-cloexec-pipe  # TODO(1): pipe() without O_CLOEXEC
-  - -bugprone-bitwise-pointer-cast  # TODO(1): std::bit_cast between pointers
-  - -bugprone-branch-clone  # TODO(1)
-  - -bugprone-easily-swappable-parameters  # TODO(24)
+  - -bugprone-easily-swappable-parameters  # TODO(10)
   - -bugprone-empty-catch  # TODO(2)
-  - -bugprone-implicit-widening-of-multiplication-result  # TODO(6)
-  - -bugprone-invalid-enum-default-initialization  # TODO(7): ibv_mtu{} is 0
-  - -bugprone-macro-parentheses  # TODO(1): LLVM 20 and 21 only
-  - -bugprone-not-null-terminated-result  # TODO(3)
-  - -bugprone-signed-bitwise  # TODO(63): bitwise ops on int flags
+  - -bugprone-invalid-enum-default-initialization  # TODO(10): ibv_mtu{} is 0
+  - -bugprone-not-null-terminated-result  # TODO(2)
+  - -bugprone-signed-bitwise  # TODO(21): bitwise ops on int flags
   - -hicpp-signed-bitwise  # TODO: the same check
   - -bugprone-sizeof-expression  # TODO(24)
-  - -bugprone-std-exception-baseclass  # TODO(1)
-  - -hicpp-exception-baseclass  # TODO: the same check
-  - -bugprone-suspicious-stringview-data-usage  # TODO(3)
-  - -bugprone-throwing-static-initialization  # TODO(5)
+  - -bugprone-throwing-static-initialization  # TODO(4)
   - -cert-err58-cpp  # TODO: the same check
-  - -bugprone-unchecked-optional-access  # TODO(13)
-  - -bugprone-unchecked-string-to-number-conversion  # TODO(3): atoi()
-  - -cert-err34-c  # TODO: the same check
-  - -bugprone-use-after-move  # TODO(2)
+  - -bugprone-unchecked-optional-access  # TODO(34)
   - -cert-err33-c  # TODO(82): unchecked fprintf(), snprintf(), ...
   - -concurrency-mt-unsafe  # TODO(27): getenv(), strerror(), dlerror(), ...
   - -cppcoreguidelines-avoid-magic-numbers  # TODO(486)
@@ -102,7 +92,6 @@ Checks:
   - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(101)
   - -cppcoreguidelines-pro-type-const-cast  # TODO(1)
   - -cppcoreguidelines-pro-type-member-init  # TODO(38)
-  - -cppcoreguidelines-pro-type-reinterpret-cast  # TODO(87)
   - -cppcoreguidelines-pro-type-union-access  # TODO(47)
   - -cppcoreguidelines-pro-type-vararg  # TODO(92): printf(), ioctl(), ...
   - -cppcoreguidelines-special-member-functions  # TODO(6)
@@ -116,7 +105,6 @@ Checks:
   - -performance-prefer-single-char-overloads  # TODO: the same check
   - -performance-inefficient-string-concatenation  # TODO(3)
   - -performance-inefficient-vector-operation  # TODO(2)
-  - -performance-no-int-to-ptr  # TODO(5)
   - -performance-unnecessary-copy-initialization  # TODO(2)
   - -readability-braces-around-statements  # TODO(102)
   - -readability-convert-member-functions-to-static  # TODO(5)
@@ -136,6 +124,11 @@ Checks:
   - -readability-use-concise-preprocessor-directives  # TODO(8)
   - -readability-use-std-min-max  # TODO(2)
 WarningsAsErrors: '*'
+
+CheckOptions:
+  # std::from_chars takes an end pointer, so it never needs the
+  # string_view's data() to be NUL-terminated
+  bugprone-suspicious-stringview-data-usage.AllowedCallees: '::std::from_chars'
 
 # Report problems in every header that isn't a system header, except:
 #   - Third-party code that FetchContent pulls into the build directory

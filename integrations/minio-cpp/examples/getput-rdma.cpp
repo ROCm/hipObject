@@ -103,7 +103,7 @@ main(int argc, char *argv[])
     const std::string &host        = args[1];
     const std::string &access_key  = args[2];
     const std::string &secret_key  = args[3];
-    size_t             bufsize     = 10 * 1024 * 1024UL;
+    size_t             bufsize     = size_t{10} * 1024 * 1024;
     bool               gpu_enabled = true;
 
     if (args.size() >= 5) {

@@ -30,6 +30,7 @@
 #include <unistd.h>
 
 #include "hipobj-parse.h"
+#include "hipobj-sockaddr.h"
 #include "hipobj-span.h"
 
 namespace hipobj::test {
@@ -60,8 +61,8 @@ namespace {
     }
 
     /* Receive caps: headers and declared body length. */
-    constexpr size_t kMaxHeaderBytes = 64 * 1024;
-    constexpr size_t kMaxBodyBytes   = 1024 * 1024;
+    constexpr size_t kMaxHeaderBytes = size_t{64} * 1024;
+    constexpr size_t kMaxBodyBytes   = size_t{1024} * 1024;
 
     const char *reasonPhrase(int status)
     {
@@ -154,7 +155,7 @@ HttpServer::HttpServer(int port) : listen_fd_(socket(AF_INET, SOCK_STREAM, 0))
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port        = htons(static_cast<uint16_t>(port));
-    if (bind(listen_fd_.get(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+    if (bind(listen_fd_.get(), hipObj::asSockaddr(addr), sizeof(addr)) != 0) {
         /* Silence here is what made a busy port look like a crash: the object
          * went on being constructed, and the abort arrived later from the
          * accept loop. Say which port and why, once, where it happened. */

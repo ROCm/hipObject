@@ -26,6 +26,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "hipobj-address.h"
+#include "hipobj-sockaddr.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "s3_curl_ops.h"
@@ -80,13 +82,13 @@ public:
         addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port        = 0;
-        if (bind(listenFd_.get(), reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) != 0 ||
+        if (bind(listenFd_.get(), hipObj::asSockaddr(addr), sizeof(addr)) != 0 ||
             listen(listenFd_.get(), 1) != 0) {
             throw std::runtime_error("bind/listen failed");
         }
 
         socklen_t slen = sizeof(addr);
-        if (getsockname(listenFd_.get(), reinterpret_cast<struct sockaddr *>(&addr), &slen) != 0) {
+        if (getsockname(listenFd_.get(), hipObj::asSockaddr(addr), &slen) != 0) {
             throw std::runtime_error("getsockname failed");
         }
         endpoint_ = "http://127.0.0.1:" + std::to_string(static_cast<unsigned>(ntohs(addr.sin_port)));
@@ -297,7 +299,7 @@ fillCtx(hipObjS3CurlCtx *ctx, const std::string &endpoint)
 {
     ctx->endpoint   = endpoint.c_str();
     ctx->objectSize = 4096;
-    ctx->devPtr     = reinterpret_cast<const void *>(0x1000);
+    ctx->devPtr     = hipObj::addressToPointer<const void *>(0x1000);
 }
 
 // Rejects temporaries (including ones converted from a char array),
@@ -432,9 +434,9 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port        = 0;
-    ASSERT_EQ(0, bind(fd.get(), reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)));
+    ASSERT_EQ(0, bind(fd.get(), hipObj::asSockaddr(addr), sizeof(addr)));
     socklen_t slen = sizeof(addr);
-    ASSERT_EQ(0, getsockname(fd.get(), reinterpret_cast<struct sockaddr *>(&addr), &slen));
+    ASSERT_EQ(0, getsockname(fd.get(), hipObj::asSockaddr(addr), &slen));
     const std::string url = "http://127.0.0.1:" + std::to_string(static_cast<unsigned>(ntohs(addr.sin_port)));
 
     hipObjS3CurlCtx ctx{};

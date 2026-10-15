@@ -30,6 +30,7 @@
 
 #include "fake-device.h"
 #include "hip-seam.h"
+#include "hipobj-address.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -604,8 +605,9 @@ protected:
     [[nodiscard]] hipObj::RdmaDevice makeDevice() const
     {
         return {verbs_,
-                hipObj::own<hipObj::IbvContextPtr>(verbs_, reinterpret_cast<struct ibv_context *>(0x1234)),
-                hipObj::own<hipObj::IbvPdPtr>(verbs_, reinterpret_cast<struct ibv_pd *>(0x5678)),
+                hipObj::own<hipObj::IbvContextPtr>(verbs_,
+                                                   hipObj::addressToPointer<struct ibv_context *>(0x1234)),
+                hipObj::own<hipObj::IbvPdPtr>(verbs_, hipObj::addressToPointer<struct ibv_pd *>(0x5678)),
                 1,
                 0,
                 {},
@@ -726,7 +728,7 @@ namespace {
 
         hipObjTest::fake().deviceSyncErr = hipSuccess;
 
-        void *gpuBuf = reinterpret_cast<void *>(0x1000);
+        void *gpuBuf = hipObj::addressToPointer<void *>(0x1000);
         ASSERT_EQ(hipObjBufRegister(gpuBuf, 64).opError, hipObjSuccess);
 
         hipObjOps_t ops{};

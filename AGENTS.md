@@ -245,6 +245,17 @@ with it:
   `std::string::c_str()`, so copy other strings into a `std::string` to print
   them. GCC doesn't have the warning, so build with Clang to check (see
   [C and C++](#c-and-c)).
+- **Don't write `reinterpret_cast`.** clang-tidy reports every one
+  (`cppcoreguidelines-pro-type-reinterpret-cast`). The conversions the code
+  needs are made in one place each: `pointerToAddress()` and
+  `addressToPointer()` from
+  [`shared/hipobj-address.h`](shared/hipobj-address.h) convert between a
+  pointer and its integer address (registration keys, RDMA addresses, and
+  the tests' fake pointers), and `asSockaddr()` from
+  [`shared/hipobj-sockaddr.h`](shared/hipobj-sockaddr.h) gives the sockets
+  API the `struct sockaddr *` it takes. Those headers hold the only
+  suppressions of the check, so don't add others; if the code needs another
+  kind of conversion, add a function for it there.
 - **Don't convert numbers with the C library's functions**: the `ato*`
   family (`atoi()`, `atol()`, `atoll()`, `atof()`), the `strto*` family
   (`strtol()`, `strtoul()`, `strtoll()`, `strtoull()`, `strtod()`, and the

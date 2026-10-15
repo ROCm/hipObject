@@ -25,6 +25,7 @@
 #include <sys/types.h>
 
 #include "fake-device.h"
+#include "hipobj-address.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -654,7 +655,7 @@ TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
         ASSERT_TRUE(token);
         EXPECT_EQ(token->transport, hipObj::TransportType::RC);
         EXPECT_EQ(token->rkey, 0x1234U);
-        EXPECT_EQ(token->remoteAddr, reinterpret_cast<uint64_t>(kDevBuf) + kOffset);
+        EXPECT_EQ(token->remoteAddr, hipObj::pointerToAddress(kDevBuf) + kOffset);
         EXPECT_EQ(token->length, kSize);
     }
 }

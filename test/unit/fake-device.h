@@ -23,6 +23,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
+#include "hipobj-address.h"
 #include "hipobj.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -180,7 +181,7 @@ std::vector<ModifyQpCall> modifyQpCalls();
 inline hipEvent_t
 fakeEvent()
 {
-    return reinterpret_cast<hipEvent_t>(0x99);
+    return hipObj::addressToPointer<hipEvent_t>(0x99);
 }
 
 constexpr int      kFakeDmabufFd     = 1234;
@@ -282,7 +283,7 @@ constexpr uintptr_t kFakeDevBufAddr = 0x10000;
 inline void *
 fakeDevBuf()
 {
-    return reinterpret_cast<void *>(kFakeDevBufAddr);
+    return hipObj::addressToPointer<void *>(kFakeDevBufAddr);
 }
 
 /* A fake address one byte into fakeDevBuf(). It's computed as an integer,
@@ -291,7 +292,7 @@ fakeDevBuf()
 inline void *
 fakeDevBufPlusOne()
 {
-    return reinterpret_cast<void *>(kFakeDevBufAddr + 1);
+    return hipObj::addressToPointer<void *>(kFakeDevBufAddr + 1);
 }
 
 constexpr size_t kFakeBufSize = 64;

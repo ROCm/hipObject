@@ -53,6 +53,9 @@ throwIt()
     if (g_thrown == Thrown::StdException) {
         throw std::runtime_error("thrown by a fake");
     }
+    /* Not a std::exception, to test the C API's catch (...). clang-tidy
+     * before LLVM 23 names the check hicpp-exception-baseclass. */
+    // NOLINTNEXTLINE(bugprone-std-exception-baseclass,hicpp-exception-baseclass)
     throw 42;
 }
 

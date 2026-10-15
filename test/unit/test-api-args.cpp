@@ -26,6 +26,7 @@
 #include <sys/types.h>
 
 #include "fake-device.h"
+#include "hipobj-address.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -254,7 +255,7 @@ TEST_P(RegisterArgsTest, RejectsMoreThanMaxSize)
 TEST_P(RegisterArgsTest, RejectsBufferThatWrapsAddressSpace)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    void *top = reinterpret_cast<void *>(std::numeric_limits<uintptr_t>::max() - 15);
+    void *top = hipObj::addressToPointer<void *>(std::numeric_limits<uintptr_t>::max() - 15);
     EXPECT_EQ(GetParam()(top, 16).opError, hipObjInvalidValue);
     EXPECT_EQ(GetParam()(top, kMaxMr).opError, hipObjInvalidValue);
     EXPECT_EQ(fake().log.registerMr, 0);
@@ -298,7 +299,7 @@ protected:
 
     static void *at(size_t offset)
     {
-        return reinterpret_cast<void *>(kAllocBase + offset);
+        return hipObj::addressToPointer<void *>(kAllocBase + offset);
     }
 };
 
@@ -327,7 +328,8 @@ TEST_F(DeviceRangeTest, RejectsPointerOutsideReportedAllocation)
 {
     ASSERT_NO_FATAL_FAILURE(init());
     /* A runtime that reports an allocation that doesn't hold the pointer */
-    EXPECT_EQ(hipObjBufRegister(reinterpret_cast<void *>(kAllocBase - 1), 1).opError, hipObjInvalidValue);
+    EXPECT_EQ(hipObjBufRegister(hipObj::addressToPointer<void *>(kAllocBase - 1), 1).opError,
+              hipObjInvalidValue);
     EXPECT_EQ(hipObjBufRegister(at(kAllocSize), 1).opError, hipObjInvalidValue);
     EXPECT_EQ(fake().log.registerMr, 0);
 }
@@ -440,7 +442,7 @@ TEST_P(TransferArgsTest, RejectsUnregisteredBuffer)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     hipObjOps_t ops = makeOps();
-    expectRejected(reinterpret_cast<void *>(0x20000), kBufSize, 0, &ops, hipObjBufNotRegistered);
+    expectRejected(hipObj::addressToPointer<void *>(0x20000), kBufSize, 0, &ops, hipObjBufNotRegistered);
     /* A pointer into a registration isn't the registration */
     expectRejected(hipObjTest::fakeDevBufPlusOne(), 1, 0, &ops, hipObjBufNotRegistered);
 }
@@ -478,7 +480,7 @@ TEST_P(TransferArgsTest, AcceptsRangeAtEndOfBuffer)
 TEST_P(TransferArgsTest, ChecksStagedBuffersBeforeCopying)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    void *staged             = reinterpret_cast<void *>(0x30000);
+    void *staged             = hipObj::addressToPointer<void *>(0x30000);
     fake().fail.registerAddr = staged;
     ASSERT_EQ(hipObjBufRegister(staged, kBufSize).opError, hipObjSuccess);
 
@@ -554,7 +556,7 @@ TEST_F(ApiArgsTest, SyncRejectsRangeOutsideDirectBuffer)
 TEST_F(ApiArgsTest, SyncRejectsRangeOutsideStagedBuffer)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    void *staged             = reinterpret_cast<void *>(0x30000);
+    void *staged             = hipObj::addressToPointer<void *>(0x30000);
     fake().fail.registerAddr = staged;
     ASSERT_EQ(hipObjBufRegister(staged, kBufSize).opError, hipObjSuccess);
 

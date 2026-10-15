@@ -7,8 +7,8 @@
  * NIC is needed.
  */
 
+#include <atomic>
 #include <cerrno>
-#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -17,6 +17,7 @@
 
 #include "buffer.h"
 #include "fake-device.h"
+#include "hipobj-address.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
@@ -54,7 +55,7 @@ DmabufLog g_log;
 struct ibv_pd *
 fakePd()
 {
-    return reinterpret_cast<struct ibv_pd *>(1);
+    return hipObj::addressToPointer<struct ibv_pd *>(1);
 }
 
 /* A libibverbs with ibv_reg_dmabuf_mr() */
@@ -112,7 +113,7 @@ TEST_F(DmabufTest, RegistrationClosesFdBeforeReturning)
     EXPECT_EQ(g_log.dmabufRegisterCalls, 1);
     EXPECT_EQ(g_log.registeredFd, kFakeDmabufFd);
     EXPECT_EQ(g_log.registeredOffset, kFakeDmabufOffset);
-    EXPECT_EQ(g_log.registeredIova, reinterpret_cast<uintptr_t>(fakeDevBuf()));
+    EXPECT_EQ(g_log.registeredIova, hipObj::pointerToAddress(fakeDevBuf()));
     EXPECT_EQ(fake().log.registerMr, 0);
 
     /* Open while it was registered, and closed once by the time

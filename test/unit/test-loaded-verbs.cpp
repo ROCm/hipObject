@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include "hipobj-address.h"
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -40,7 +41,7 @@ template <typename T>
 T *
 fakeObject(uintptr_t address)
 {
-    return reinterpret_cast<T *>(address);
+    return hipObj::addressToPointer<T *>(address);
 }
 
 constexpr int kResult = 42;
@@ -72,7 +73,7 @@ makeFuncs()
         return "fake0";
     };
     funcs.query_device = [](struct ibv_context *context, struct ibv_device_attr *attr) {
-        g_call = {.name = "query_device", .object = context, .value = reinterpret_cast<uintptr_t>(attr)};
+        g_call = {.name = "query_device", .object = context, .value = hipObj::pointerToAddress(attr)};
         return kResult;
     };
     funcs.query_port = [](struct ibv_context *context, uint8_t port, struct ibv_port_attr *) {
@@ -171,7 +172,7 @@ TEST_F(LoadedVerbsTest, ForwardsEachCall)
     ibv_device_attr deviceAttr{};
     EXPECT_EQ(verbs.query_device(context, &deviceAttr), kResult);
     expectCall("query_device", context);
-    EXPECT_EQ(g_call.value, reinterpret_cast<uintptr_t>(&deviceAttr));
+    EXPECT_EQ(g_call.value, hipObj::pointerToAddress(&deviceAttr));
     ibv_port_attr portAttr{};
     EXPECT_EQ(verbs.query_port(context, 3, &portAttr), kResult);
     expectCall("query_port", context);

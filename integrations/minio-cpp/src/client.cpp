@@ -260,6 +260,10 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
     if (args.buf == nullptr) {
         return s3_client_.PutObject(args);
     }
+    // Validate() requires a size with buf, but that's out of sight here
+    if (!args.size) {
+        return ::minio::s3::PutObjectResponse(::minio::error::Error("size must be set when buf is set"));
+    }
 
     const size_t size = *args.size;
     // minio-cpp's object_size is a long, which the HTTP paths below set, and
@@ -348,6 +352,10 @@ Client::GetObject(::minio::s3::GetObjectArgs args)
 
     if (args.buf == nullptr) {
         return s3_client_.GetObject(args);
+    }
+    // Validate() requires a size with buf, but that's out of sight here
+    if (!args.size) {
+        return ::minio::s3::GetObjectResponse(::minio::error::Error("size must be set when buf is set"));
     }
 
     const size_t size = *args.size;
