@@ -78,7 +78,6 @@ Checks:
   - -cert-err58-cpp  # TODO: the same check
   - -bugprone-unchecked-optional-access  # TODO(34)
   - -cert-err33-c  # TODO(82): unchecked fprintf(), snprintf(), ...
-  - -concurrency-mt-unsafe  # TODO(27): getenv(), strerror(), dlerror(), ...
   - -cppcoreguidelines-avoid-magic-numbers  # TODO(486)
   - -readability-magic-numbers  # TODO: the same check
   - -cppcoreguidelines-avoid-non-const-global-variables  # TODO(36)
@@ -129,6 +128,12 @@ CheckOptions:
   # std::from_chars takes an end pointer, so it never needs the
   # string_view's data() to be NUL-terminated
   bugprone-suspicious-stringview-data-usage.AllowedCallees: '::std::from_chars'
+  # hipObject only builds with glibc, so report the functions that glibc
+  # documents as thread-unsafe. The default adds POSIX's list, which
+  # includes getenv() and dlerror(): glibc's getenv() only races with
+  # changes to the environment, and its dlerror() keeps per-thread state.
+  # Revisit this if hipObject is built with another C library.
+  concurrency-mt-unsafe.FunctionSet: glibc
 
 # Report problems in every header that isn't a system header, except:
 #   - Third-party code that FetchContent pulls into the build directory
