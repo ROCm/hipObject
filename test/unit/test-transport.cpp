@@ -167,7 +167,7 @@ TEST_F(TransportTest, OpenFailsWithoutDeviceList)
 
 TEST_F(TransportTest, OpenByNameFindsOnlyThatDevice)
 {
-    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs(), topology(), nullptr));
+    EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs(), topology(), ""));
     EXPECT_FALSE(hipObj::openRdmaDeviceByName(verbs(), topology(), "mlx5_1"));
     EXPECT_EQ(fake().log.openDevice, 0);
 

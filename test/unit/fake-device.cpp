@@ -12,6 +12,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "hipobj-span.h"
@@ -477,13 +478,13 @@ makeOps()
 }
 
 std::vector<hipObj::NicInfo>
-EmptyNicTopology::enumerate(const char *) const
+EmptyNicTopology::enumerate(std::string_view) const
 {
     return {};
 }
 
 hipObj::RoceVersion
-EmptyNicTopology::roceVersion(const char *, uint8_t, int) const
+EmptyNicTopology::roceVersion(std::string_view, uint8_t, int) const
 {
     return hipObj::RoceVersion::Unknown;
 }

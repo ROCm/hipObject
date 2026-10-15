@@ -15,8 +15,8 @@
 #include <functional>
 #include <limits>
 #include <optional>
-#include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -24,6 +24,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
+#include "hipobj-span.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -84,7 +85,8 @@ namespace {
             c.gid   = toGid(gid);
             if (!IsConfiguredGid(c.gid))
                 continue;
-            c.roceVersion = topology.roceVersion(ctx->device->name, port_num, i);
+            c.roceVersion =
+                topology.roceVersion(cStringView(ctx->device->name, sizeof(ctx->device->name)), port_num, i);
             candidates.push_back(c);
         }
         return PickBestGid(candidates);
@@ -112,10 +114,28 @@ namespace {
         return static_cast<int>(a.size() - i) + static_cast<int>(b.size() - i);
     }
 
+    /* Whether hcaList, a list of device names separated by commas, each of
+     * which can have spaces and tabs before it, includes devName */
+    bool HcaListIncludes(std::string_view hcaList, std::string_view devName)
+    {
+        for (;;) {
+            const size_t     comma = hcaList.find(',');
+            std::string_view hca   = hcaList.substr(0, comma);
+            const size_t     start = hca.find_first_not_of(" \t");
+            if (start != std::string_view::npos)
+                hca.remove_prefix(start);
+            if (hca == devName)
+                return true;
+            if (comma == std::string_view::npos)
+                return false;
+            hcaList.remove_prefix(comma + 1);
+        }
+    }
+
 } // namespace
 
 std::vector<NicInfo>
-SysfsTopology::enumerate(const char *hca_list) const
+SysfsTopology::enumerate(std::string_view hcaList) const
 {
     std::vector<NicInfo> result;
     int                  num_devs = 0;
@@ -129,22 +149,8 @@ SysfsTopology::enumerate(const char *hca_list) const
         const char *dev_name = verbs_->get_device_name(dev);
         if (!dev_name)
             continue;
-        if (hca_list && *hca_list) {
-            bool               match = false;
-            std::istringstream iss(hca_list);
-            std::string        hca;
-            while (std::getline(iss, hca, ',')) {
-                size_t pos = hca.find_first_not_of(" \t");
-                if (pos != std::string::npos)
-                    hca = hca.substr(pos);
-                if (hca == dev_name) {
-                    match = true;
-                    break;
-                }
-            }
-            if (!match)
-                continue;
-        }
+        if (!hcaList.empty() && !HcaListIncludes(hcaList, dev_name))
+            continue;
 
         IbvContextPtr ctx = own<IbvContextPtr>(*verbs_, verbs_->open_device(dev));
         if (!ctx)
@@ -190,7 +196,7 @@ SysfsTopology::enumerate(const char *hca_list) const
 }
 
 RoceVersion
-SysfsTopology::roceVersion(const char *devName, uint8_t portNum, int gidIndex) const
+SysfsTopology::roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const
 {
     const std::filesystem::path path = std::filesystem::path("/sys/class/infiniband") / devName / "ports" /
                                        std::to_string(static_cast<unsigned int>(portNum)) /
@@ -209,7 +215,8 @@ SysfsTopology::roceVersion(const char *devName, uint8_t portNum, int gidIndex) c
 }
 
 std::optional<RdmaNic>
-GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int gpuIndex, const char *hca_list)
+GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int gpuIndex,
+                   std::string_view hcaList)
 {
     char       gpu_bus_id[32];
     hipError_t err = runtime.deviceGetPCIBusId(gpu_bus_id, sizeof(gpu_bus_id), gpuIndex);
@@ -217,7 +224,7 @@ GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int g
         return std::nullopt;
 
     std::string gpu_bus(gpu_bus_id);
-    auto        devices = topology.enumerate(hca_list);
+    auto        devices = topology.enumerate(hcaList);
     if (devices.empty())
         return std::nullopt;
 

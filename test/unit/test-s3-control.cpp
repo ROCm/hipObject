@@ -74,7 +74,7 @@ protected:
 
     std::optional<hipObj::RdmaReply> receive()
     {
-        return hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_);
+        return hipObj::receiveRdmaReplyRaw(ops_, &ctx_, buf_);
     }
 
     hipObjOps_t           ops_{};
@@ -84,7 +84,7 @@ protected:
 
 TEST_F(S3ControlTest, SendsTokenToCallback)
 {
-    EXPECT_TRUE(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"));
+    EXPECT_TRUE(hipObj::injectRdmaToken(ops_, &ctx_, "abcd"));
     EXPECT_EQ(g_callbacks.tokenLen, 4U);
     EXPECT_EQ(g_callbacks.ctx, &ctx_);
 }
@@ -92,14 +92,13 @@ TEST_F(S3ControlTest, SendsTokenToCallback)
 TEST_F(S3ControlTest, SendReportsCallbackFailure)
 {
     g_callbacks.sendRet = 7;
-    EXPECT_FALSE(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"));
+    EXPECT_FALSE(hipObj::injectRdmaToken(ops_, &ctx_, "abcd"));
 }
 
 TEST_F(S3ControlTest, SendNeedsCallback)
 {
-    EXPECT_FALSE(hipObj::injectRdmaToken(nullptr, &ctx_, "abcd"));
     ops_.sendRequest = nullptr;
-    EXPECT_FALSE(hipObj::injectRdmaToken(&ops_, &ctx_, "abcd"));
+    EXPECT_FALSE(hipObj::injectRdmaToken(ops_, &ctx_, "abcd"));
 }
 
 TEST_F(S3ControlTest, ReceiveDecodesStatus)
@@ -139,11 +138,11 @@ TEST_F(S3ControlTest, ReceiveRejectsLengthPastBuffer)
      * would skip and accept the reply if it read it. */
     const std::span<char> replyBuf = std::span(buf_).first(3);
     g_callbacks.extraLen           = 1;
-    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf));
+    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(ops_, &ctx_, replyBuf));
 
     /* Filling the buffer exactly is fine */
     g_callbacks.extraLen = 0;
-    const auto reply     = hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, replyBuf);
+    const auto reply     = hipObj::receiveRdmaReplyRaw(ops_, &ctx_, replyBuf);
     ASSERT_TRUE(reply);
     EXPECT_EQ(reply->status, hipObj::RdmaReplyStatus::Success);
     EXPECT_EQ(reply->text, "200");
@@ -157,10 +156,9 @@ TEST_F(S3ControlTest, ReceiveReportsCallbackFailure)
 
 TEST_F(S3ControlTest, ReceiveNeedsCallbackAndBuffer)
 {
-    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(nullptr, &ctx_, buf_));
-    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, {}));
+    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(ops_, &ctx_, {}));
     ops_.recvReply = nullptr;
-    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(&ops_, &ctx_, buf_));
+    EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(ops_, &ctx_, buf_));
 }
 
 } // namespace

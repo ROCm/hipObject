@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -67,7 +68,11 @@ std::optional<RdmaReplyStatus> decodeRdmaReply(std::string_view reply);
  * "err"), or std::nullopt when it's malformed */
 std::optional<int> parseRdmaReplyHttpCode(std::string_view reply);
 
-bool parseClientNicFromTokenHex(const char *tokenHex, char *nicIp, size_t nicIpLen);
+/* Writes the IPv4 address in the GID of the token tokenHex encodes to
+ * nicIp, NUL-terminated, or just a NUL when the GID doesn't hold one.
+ * Returns false, leaving nicIp empty if it can, when nicIp is empty or too
+ * small, or the token is malformed (see decodeRdmaTokenHex()). */
+bool parseClientNicFromTokenHex(std::string_view tokenHex, std::span<char> nicIp);
 
 /* The peer token in a "200:" reply, or std::nullopt when the reply is
  * malformed or doesn't carry one. Only a 200 reply carries a token. */

@@ -198,9 +198,10 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     if (current()) {
         return {hipObjAlreadyInitialized, 0};
     }
-    const HipRuntime &runtime     = platform->hip();
-    const bool        haveNicHint = config.nicHint && config.nicHint[0] != '\0';
-    int               gpuDevice   = config.gpuDevice;
+    const HipRuntime      &runtime = platform->hip();
+    const std::string_view nicHint = config.nicHint ? std::string_view(config.nicHint) : std::string_view();
+    const bool             haveNicHint = !nicHint.empty();
+    int                    gpuDevice   = config.gpuDevice;
     if (gpuDevice < 0) {
         hipError_t err = runtime.getDevice(&gpuDevice);
         if (err != hipSuccess) {
@@ -230,14 +231,14 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     }
     std::optional<RdmaNic> nic;
     if (gpuDevice >= 0) {
-        nic = GetClosestNicToGpu(runtime, platform->topology(), gpuDevice, config.nicHint);
+        nic = GetClosestNicToGpu(runtime, platform->topology(), gpuDevice, nicHint);
     }
     if (!nic) {
         // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name
         // hint is provided, try opening it directly without GPU topology so the
         // library works in GPU-less environments (e.g. CI with emulated RDMA).
         if (haveNicHint) {
-            nic = RdmaNic{0, config.nicHint};
+            nic = RdmaNic{0, std::string(nicHint)};
         }
         else {
             return {hipObjNicNotFound, 0};
@@ -248,7 +249,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
      * locals, which release what they hold if anything fails or throws.
      * The instance is only published once nothing else can. */
     std::optional<RdmaDevice> opened =
-        openRdmaDeviceByName(platform->verbs(), platform->topology(), nic->name.c_str());
+        openRdmaDeviceByName(platform->verbs(), platform->topology(), nic->name);
     if (!opened) {
         return {hipObjRdmaError, 0};
     }
@@ -259,7 +260,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     }
     ResolvedConfig resolved{
         .gpuDevice = gpuDevice,
-        .nicHint   = config.nicHint ? config.nicHint : "",
+        .nicHint   = std::string(nicHint),
         .nicIndex  = nic->index,
     };
     auto instance = std::make_unique<Instance>(std::move(platform), options, std::move(resolved),

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include "ibv-core.h"
@@ -139,8 +140,10 @@ private:
  * when a step fails. A device that can't report its vendor still opens,
  * with no vendor ID. */
 std::optional<RdmaDevice> openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex);
+/* openRdmaDevice() on the device named devName. std::nullopt when no
+ * device has that name, which an empty name never is. */
 std::optional<RdmaDevice> openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology,
-                                               const char *devName);
+                                               std::string_view devName);
 
 /* A connection on device, which has to outlive it, with a CQ of cqSize
  * entries and a QP in INIT that holds maxSendWr and maxRecvWr work

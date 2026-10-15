@@ -220,7 +220,7 @@ stageBuffer(const HipRuntime &runtime, void *devPtr, const BufferMap::BufEntry &
 
 static hipObjError_t
 runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size, off_t offset,
-                hipObjOps_t *ops, void *ctx)
+                const hipObjOps_t &ops, void *ctx)
 {
     const auto token = buildRdmaToken(instance.conn, buf, size, offset);
     if (!token) {
@@ -429,7 +429,7 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::runRdmaTransfer(*instance, *buf, size, offset, ops, ctx);
+    err = hipObj::runRdmaTransfer(*instance, *buf, size, offset, *ops, ctx);
     if (err.opError != hipObjSuccess) {
         return err;
     }
@@ -465,7 +465,7 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::runRdmaTransfer(*instance, *buf, size, offset, ops, ctx);
+    return hipObj::runRdmaTransfer(*instance, *buf, size, offset, *ops, ctx);
 }
 catch (...) {
     return hipObj::handleException();
@@ -570,7 +570,9 @@ try {
     if (!token || !nicIp || nicIpLen == 0) {
         return {hipObjInvalidValue, 0};
     }
-    if (!hipObj::parseClientNicFromTokenHex(token, nicIp, nicIpLen)) {
+    /* Bound the scan: anything longer than a token is rejected anyway */
+    if (!hipObj::parseClientNicFromTokenHex(hipObj::cStringView(token, hipObj::kRdmaTokenHexLen + 1),
+                                            hipObj::spanFromPointer(nicIp, nicIpLen))) {
         return {hipObjInvalidValue, 0};
     }
     return {hipObjSuccess, 0};

@@ -299,8 +299,8 @@ constexpr size_t kFakeBufSize = 64;
 /* A NIC topology with no NICs, and no RoCE version for any GID */
 class EmptyNicTopology : public hipObj::NicTopology {
 public:
-    std::vector<hipObj::NicInfo> enumerate(const char *hca_list) const override;
-    hipObj::RoceVersion roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
+    std::vector<hipObj::NicInfo> enumerate(std::string_view hcaList) const override;
+    hipObj::RoceVersion roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const override;
 };
 
 /* Fakes of the outside world over a FakeDevice, and a platform over them
