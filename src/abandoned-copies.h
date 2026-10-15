@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "buffer.h"
@@ -48,11 +49,44 @@ public:
     AbandonedCopies(AbandonedCopies &&)                 = delete;
     AbandonedCopies &operator=(AbandonedCopies &&)      = delete;
 
-    /* Takes over a copy that timed out: done is the event that tracks it,
-     * and entry is the registration whose staging buffer it uses. If it
-     * can't keep track of the copy, it leaks the event and the staging
-     * buffer instead. */
-    void add(HipEventPtr done, std::shared_ptr<const BufferMap::BufEntry> entry) noexcept;
+    /* Room in the list for one copy, set aside by reserve() before the
+     * copy starts. It gives the room back when it's destroyed, unless
+     * add() used it. The list has to outlive it. */
+    class Slot final {
+    public:
+        ~Slot();
+
+        /* Moving hands the room over, and leaves other with none to give
+         * back */
+        Slot(Slot &&other) noexcept : list_(std::exchange(other.list_, nullptr))
+        {
+        }
+
+        Slot(const Slot &)            = delete;
+        Slot &operator=(const Slot &) = delete;
+        Slot &operator=(Slot &&)      = delete;
+
+    private:
+        friend class AbandonedCopies;
+
+        explicit Slot(AbandonedCopies &list) noexcept : list_(&list)
+        {
+        }
+
+        /* Null once add() has used the room, or it's been moved from */
+        AbandonedCopies *list_;
+    };
+
+    /* Sets aside room for a copy that's about to start, so that if it
+     * times out, add() can take it over without allocating, and so
+     * without failing. Can throw std::bad_alloc, before the copy starts. */
+    [[nodiscard]] Slot reserve();
+
+    /* Takes over a copy that timed out, in the room slot set aside: done
+     * is the event that tracks it, and entry is the registration whose
+     * staging buffer it uses. slot has to have come from this list's
+     * reserve(), and not been used or moved from. */
+    void add(Slot &slot, HipEventPtr done, std::shared_ptr<const BufferMap::BufEntry> entry) noexcept;
 
     /* Releases the copies that are over */
     void reclaim();
@@ -63,6 +97,9 @@ public:
 
     /* The number of copies that haven't been released */
     [[nodiscard]] size_t size() const;
+
+    /* The number of copies the list can hold without allocating */
+    [[nodiscard]] size_t capacity() const;
 
 private:
     /* done is declared after entry, so the event is destroyed before the
@@ -81,9 +118,13 @@ private:
     [[nodiscard]] bool isOver(const Copy &copy) const;
 
     const HipRuntime *runtime_;
-    /* Guards copies_ */
+    /* Guards copies_ and reserved_ */
     mutable std::mutex mutex_{};
-    std::vector<Copy>  copies_{};
+    /* Its capacity is always at least its size plus reserved_ */
+    std::vector<Copy> copies_{};
+    /* The number of slots that reserve() has set aside, and that haven't
+     * been used or given back */
+    size_t reserved_ = 0;
 };
 
 } // namespace hipObj

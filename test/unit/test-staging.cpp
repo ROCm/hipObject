@@ -14,10 +14,12 @@
 #include <cstddef>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
+#include "abandoned-copies.h"
 #include "fake-device.h"
 #include "hipobj-address.h"
 #include "hipobj-warnings.h"
@@ -231,6 +233,26 @@ TEST_F(StagingTest, FailsAndReleasesEventWhenCopyFails)
 }
 
 // ---- Staging copies that time out --------------------------------
+
+/* Each copy sets aside room to be taken over in case it times out, and
+ * gives the room back when it doesn't */
+TEST_F(StagingTest, CopiesThatDontTimeOutGiveTheirRoomBack)
+{
+    constexpr int kCopies = 20;
+    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
+    for (int i = 0; i < kCopies; ++i) {
+        EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
+    }
+    fake().memcpyErr = hipErrorInvalidValue;
+    for (int i = 0; i < kCopies; ++i) {
+        EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+    }
+
+    const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
+    ASSERT_NE(instance, nullptr);
+    EXPECT_EQ(instance->abandoned.size(), 0U);
+    EXPECT_LE(instance->abandoned.capacity(), 1U);
+}
 
 /* A copy that timed out may still use the staging buffer, so hipObject
  * keeps the buffer, and refuses to use it, until the copy is over */

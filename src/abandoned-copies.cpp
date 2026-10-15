@@ -5,6 +5,7 @@
 
 #include "abandoned-copies.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
@@ -40,20 +41,38 @@ AbandonedCopies::~AbandonedCopies()
     }
 }
 
-void
-AbandonedCopies::add(HipEventPtr done, std::shared_ptr<const BufferMap::BufEntry> entry) noexcept
+AbandonedCopies::Slot::~Slot()
 {
-    Copy copy{.entry = std::move(entry), .done = std::move(done)};
-    try {
-        const std::scoped_lock<std::mutex> lock(mutex_);
-        copies_.push_back(std::move(copy));
+    if (list_ != nullptr) {
+        const std::scoped_lock<std::mutex> lock(list_->mutex_);
+        --list_->reserved_;
     }
-    catch (...) {
-        /* Copy's members move without throwing, so a push_back() that
-         * throws leaves copy as it was. Untracked, it's never over. */
-        copy.entry->leakHostBuf = true;
-        dropOwnership(copy.done);
+}
+
+AbandonedCopies::Slot
+AbandonedCopies::reserve()
+{
+    const std::scoped_lock<std::mutex> lock(mutex_);
+    /* Grows the capacity by at least half, so a list that's growing
+     * doesn't reallocate for every slot. Once it's held as many copies
+     * and slots as it ever will, it doesn't allocate at all. */
+    const size_t needed = copies_.size() + reserved_ + 1;
+    if (needed > copies_.capacity()) {
+        copies_.reserve(std::max(needed, copies_.capacity() + (copies_.capacity() / 2)));
     }
+    ++reserved_;
+    return Slot(*this);
+}
+
+void
+AbandonedCopies::add(Slot &slot, HipEventPtr done, std::shared_ptr<const BufferMap::BufEntry> entry) noexcept
+{
+    const std::scoped_lock<std::mutex> lock(mutex_);
+    /* The capacity is at least the size plus the slots set aside, which
+     * include this one, so this doesn't reallocate */
+    copies_.push_back(Copy{.entry = std::move(entry), .done = std::move(done)});
+    --reserved_;
+    slot.list_ = nullptr;
 }
 
 void
@@ -73,6 +92,13 @@ AbandonedCopies::size() const
 {
     const std::scoped_lock<std::mutex> lock(mutex_);
     return copies_.size();
+}
+
+size_t
+AbandonedCopies::capacity() const
+{
+    const std::scoped_lock<std::mutex> lock(mutex_);
+    return copies_.capacity();
 }
 
 bool

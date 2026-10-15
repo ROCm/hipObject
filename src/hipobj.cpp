@@ -154,13 +154,16 @@ namespace {
      * gets an error instead of a hang, which is the whole point. The copy
      * may still land, and there's no safe way to stop it, so the event and
      * the registration are handed to the instance's abandoned copies,
-     * which keep the staging buffer until the copy is over. */
+     * which keep the staging buffer until the copy is over. Room for that
+     * is set aside before the copy starts, so handing them over can't
+     * fail and leave a running copy untracked. */
     hipObjError_t stageCopyWithDeadline(Instance                                         &instance,
                                         const std::shared_ptr<const BufferMap::BufEntry> &buf, void *dst,
                                         const void *src, size_t size, hipMemcpyKind kind)
     {
-        const HipRuntime &runtime = instance.platform->hip();
-        hipEvent_t        rawDone = nullptr;
+        AbandonedCopies::Slot slot    = instance.abandoned.reserve();
+        const HipRuntime     &runtime = instance.platform->hip();
+        hipEvent_t            rawDone = nullptr;
         if (runtime.eventCreate(&rawDone) != hipSuccess) {
             return makeError(hipObjInternalError);
         }
@@ -188,7 +191,7 @@ namespace {
                 return makeError(hipObjInternalError);
             }
             if (std::chrono::steady_clock::now() >= deadline) {
-                instance.abandoned.add(std::move(done), buf);
+                instance.abandoned.add(slot, std::move(done), buf);
                 const int64_t     timeoutMs = timeout.count();
                 const std::string direction =
                     kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";

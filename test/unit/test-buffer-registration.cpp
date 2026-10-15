@@ -399,7 +399,12 @@ TEST_F(BufferRegistrationTest, AbandonedCopiesFromManyThreads)
         const auto entry = buffers.find(fakeAddress(static_cast<size_t>(t)));
         ASSERT_NE(entry, nullptr);
         for (int i = 0; i < kIterations; ++i) {
-            abandoned.add(hipObj::own<hipObj::HipEventPtr>(hip_, hipObjTest::fakeEvent()), entry);
+            /* A copy that finished in time gives its room back */
+            {
+                const hipObj::AbandonedCopies::Slot unused = abandoned.reserve();
+            }
+            hipObj::AbandonedCopies::Slot slot = abandoned.reserve();
+            abandoned.add(slot, hipObj::own<hipObj::HipEventPtr>(hip_, hipObjTest::fakeEvent()), entry);
             EXPECT_TRUE(abandoned.running(*entry));
             abandoned.reclaim();
         }
@@ -418,6 +423,45 @@ TEST_F(BufferRegistrationTest, AbandonedCopiesFromManyThreads)
         EXPECT_EQ(buffers.deregisterBuffer(fakeAddress(static_cast<size_t>(t))),
                   DeregisterResult::Deregistered);
     }
+}
+
+/* add() takes a copy over in the room reserve() set aside before the
+ * copy started, so it never allocates, and so can't fail and leave a
+ * running copy untracked */
+TEST_F(BufferRegistrationTest, TakingOverACopyDoesntAllocate)
+{
+    constexpr size_t        kCopies = 5;
+    hipObj::BufferMap       buffers = makeBuffers();
+    hipObj::AbandonedCopies abandoned(hip_);
+    ASSERT_EQ(buffers.registerHostBuffer(fakeAddress(0), 64, fakePd()), RegisterResult::Registered);
+    const auto entry = buffers.find(fakeAddress(0));
+    ASSERT_NE(entry, nullptr);
+    hipDevice_.eventNeverCompletes = true;
+
+    std::vector<hipObj::AbandonedCopies::Slot> slots;
+    slots.reserve(kCopies);
+    for (size_t i = 0; i < kCopies; ++i) {
+        slots.push_back(abandoned.reserve());
+    }
+    const size_t capacity = abandoned.capacity();
+    EXPECT_GE(capacity, kCopies);
+    for (auto &slot : slots) {
+        abandoned.add(slot, hipObj::own<hipObj::HipEventPtr>(hip_, hipObjTest::fakeEvent()), entry);
+        EXPECT_EQ(abandoned.capacity(), capacity);
+    }
+    EXPECT_EQ(abandoned.size(), kCopies);
+
+    /* A used slot doesn't give its room back, and the next copy's room is
+     * set aside before it starts */
+    slots.clear();
+    {
+        const hipObj::AbandonedCopies::Slot next = abandoned.reserve();
+        EXPECT_GT(abandoned.capacity(), kCopies);
+    }
+
+    hipDevice_.eventNeverCompletes = false;
+    abandoned.reclaim();
+    EXPECT_EQ(abandoned.size(), 0U);
 }
 
 } // namespace
