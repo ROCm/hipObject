@@ -41,7 +41,7 @@ std::pair<UniqueFd, UniqueFd>
 makePipe()
 {
     std::array<int, 2> fds{{-1, -1}};
-    if (pipe(fds.data()) != 0) {
+    if (pipe2(fds.data(), O_CLOEXEC) != 0) {
         return {};
     }
     return {UniqueFd(fds[0]), UniqueFd(fds[1])};

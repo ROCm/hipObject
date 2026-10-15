@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -144,7 +145,7 @@ namespace {
 
 } // namespace
 
-HttpServer::HttpServer(int port) : listen_fd_(socket(AF_INET, SOCK_STREAM, 0))
+HttpServer::HttpServer(int port) : listen_fd_(socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0))
 {
     if (!listen_fd_) {
         return;
@@ -232,7 +233,7 @@ HttpServer::runThreaded(const std::stop_token &stop)
         if (ready <= 0) {
             continue;
         }
-        hipObj::UniqueFd client(accept(listen_fd_.get(), nullptr, nullptr));
+        hipObj::UniqueFd client(accept4(listen_fd_.get(), nullptr, nullptr, SOCK_CLOEXEC));
         if (!client) {
             continue;
         }
@@ -295,7 +296,7 @@ HttpServer::stop()
         {
             std::scoped_lock<std::mutex> guard(workersMtx_);
             for (int fd : activeFds_) {
-                hipObj::UniqueFd d(dup(fd));
+                hipObj::UniqueFd d(fcntl(fd, F_DUPFD_CLOEXEC, 0));
                 if (d) {
                     dups.push_back(std::move(d));
                 }
