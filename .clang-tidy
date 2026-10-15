@@ -70,7 +70,6 @@ Checks:
   - -bugprone-implicit-widening-of-multiplication-result  # TODO(6)
   - -bugprone-invalid-enum-default-initialization  # TODO(7): ibv_mtu{} is 0
   - -bugprone-macro-parentheses  # TODO(1): LLVM 20 and 21 only
-  - -bugprone-move-forwarding-reference  # TODO(1)
   - -bugprone-not-null-terminated-result  # TODO(3)
   - -bugprone-signed-bitwise  # TODO(63): bitwise ops on int flags
   - -hicpp-signed-bitwise  # TODO: the same check
@@ -93,7 +92,6 @@ Checks:
   - -cppcoreguidelines-avoid-non-const-global-variables  # TODO(36)
   - -cppcoreguidelines-init-variables  # TODO(3)
   - -cppcoreguidelines-macro-usage  # TODO(4)
-  - -cppcoreguidelines-missing-std-forward  # TODO(4)
   - -cppcoreguidelines-no-malloc  # TODO(21)
   - -cppcoreguidelines-owning-memory  # TODO(48)
   - -cppcoreguidelines-pro-bounds-array-to-pointer-decay  # TODO(87)

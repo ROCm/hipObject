@@ -491,10 +491,8 @@ configuration files.
   `-Wlifetime-safety-invalidation` subgroup, which treats changing a
   container as invalidating references to the container itself, not just
   pointers into it. It flags a `std::string &` parameter that's appended to
-  twice, for example, and the `std::destroy_at()` and `std::construct_at()`
-  pair in `replaceByMove()`
-  ([`src/common/replace-by-move.h`](src/common/replace-by-move.h)), which
-  are correct. Nothing in CI runs it.
+  twice, for example, even though the code is correct. Nothing in CI runs
+  it.
 
 ### Shell
 
