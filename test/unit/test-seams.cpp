@@ -153,13 +153,13 @@ public:
     FakeNicTopology(FakeNicTopology &&)                 = delete;
     FakeNicTopology &operator=(FakeNicTopology &&)      = delete;
 
-    std::vector<hipObj::NicInfo> enumerate(const char *hca_list) const override
+    std::vector<hipObj::NicInfo> enumerate(std::string_view hcaList) const override
     {
-        state_->lastHcaList = hca_list ? hca_list : "";
+        state_->lastHcaList = hcaList;
         return state_->nics;
     }
 
-    hipObj::RoceVersion roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override
+    hipObj::RoceVersion roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const override
     {
         state_->lastDevName = devName;
         state_->lastPortNum = portNum;
@@ -182,7 +182,7 @@ protected:
     }
 
     /* The NIC closest to GPU 0, with the fakes */
-    std::optional<hipObj::RdmaNic> closestNic(const char *hcaList = nullptr) const
+    std::optional<hipObj::RdmaNic> closestNic(std::string_view hcaList = {}) const
     {
         return hipObj::GetClosestNicToGpu(hip_, topology_, 0, hcaList);
     }
@@ -439,17 +439,18 @@ protected:
 
 TEST_F(SysfsTopologyTest, ListsTheFirstActivePort)
 {
-    expectFakeNic(topology_.enumerate(nullptr));
+    expectFakeNic(topology_.enumerate({}));
     EXPECT_EQ(device_.log.openDevice, 1);
     EXPECT_EQ(device_.log.closeDevice, 1);
 }
 
 TEST_F(SysfsTopologyTest, FiltersByHcaList)
 {
-    expectFakeNic(topology_.enumerate(""));
     expectFakeNic(topology_.enumerate("mlx5_0, \thipobj_fake0"));
+    expectFakeNic(topology_.enumerate("hipobj_fake0,"));
     EXPECT_TRUE(topology_.enumerate("mlx5_0,mlx5_1").empty());
     EXPECT_TRUE(topology_.enumerate("hipobj_fake").empty());
+    EXPECT_TRUE(topology_.enumerate("hipobj_fake00").empty());
 
     /* The filtered-out devices weren't opened */
     EXPECT_EQ(device_.log.openDevice, 2);
@@ -459,19 +460,19 @@ TEST_F(SysfsTopologyTest, FiltersByHcaList)
 TEST_F(SysfsTopologyTest, SkipsDevicesItCantQuery)
 {
     device_.fail.getDeviceList = true;
-    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+    EXPECT_TRUE(topology_.enumerate({}).empty());
     device_.fail.getDeviceList = false;
 
     device_.fail.openDevice = true;
-    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+    EXPECT_TRUE(topology_.enumerate({}).empty());
     device_.fail.openDevice = false;
 
     device_.fail.queryDevice = true;
-    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+    EXPECT_TRUE(topology_.enumerate({}).empty());
     device_.fail.queryDevice = false;
 
     device_.fail.queryPort = true;
-    EXPECT_TRUE(topology_.enumerate(nullptr).empty());
+    EXPECT_TRUE(topology_.enumerate({}).empty());
 
     /* Every device that was opened was closed */
     EXPECT_EQ(device_.log.openDevice, 2);
@@ -480,7 +481,7 @@ TEST_F(SysfsTopologyTest, SkipsDevicesItCantQuery)
 
 TEST_F(SysfsTopologyTest, NoRoceVersionWithoutASysfsEntry)
 {
-    EXPECT_EQ(topology_.roceVersion(kFakeDevName.data(), 2, 0), hipObj::RoceVersion::Unknown);
+    EXPECT_EQ(topology_.roceVersion(kFakeDevName, 2, 0), hipObj::RoceVersion::Unknown);
 }
 
 TEST_F(SysfsTopologyTest, NicSelection)
@@ -490,7 +491,7 @@ TEST_F(SysfsTopologyTest, NicSelection)
     hipDevice.gpuBusId = kGpuBusId;
 
     /* The fake device has no bus id, so it's not chosen */
-    EXPECT_FALSE(hipObj::GetClosestNicToGpu(hip, topology_, 0, nullptr));
+    EXPECT_FALSE(hipObj::GetClosestNicToGpu(hip, topology_, 0, {}));
     EXPECT_EQ(device_.log.openDevice, 1);
 }
 

@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hipObj {
@@ -53,13 +54,13 @@ public:
     NicTopology &operator=(NicTopology &&)      = delete;
 
     /* The NICs with an active port, each with its first active port,
-     * among those that hca_list (comma-separated device names, or null or
-     * empty for all) allows */
-    virtual std::vector<NicInfo> enumerate(const char *hca_list) const = 0;
+     * among those that hcaList (comma-separated device names, or empty for
+     * all) allows */
+    virtual std::vector<NicInfo> enumerate(std::string_view hcaList) const = 0;
 
     /* The RoCE version of entry gidIndex in the GID table of port portNum
      * on device devName */
-    virtual RoceVersion roceVersion(const char *devName, uint8_t portNum, int gidIndex) const = 0;
+    virtual RoceVersion roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const = 0;
 };
 
 /* The system's topology: the devices from verbs, and the rest from
@@ -77,8 +78,8 @@ public:
     SysfsTopology(SysfsTopology &&)                 = delete;
     SysfsTopology &operator=(SysfsTopology &&)      = delete;
 
-    std::vector<NicInfo> enumerate(const char *hca_list) const override;
-    RoceVersion          roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
+    std::vector<NicInfo> enumerate(std::string_view hcaList) const override;
+    RoceVersion          roceVersion(std::string_view devName, uint8_t portNum, int gidIndex) const override;
 
 private:
     const Verbs *verbs_;

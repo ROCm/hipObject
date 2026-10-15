@@ -16,22 +16,22 @@
 namespace hipObj {
 
 bool
-injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token)
+injectRdmaToken(const hipObjOps_t &ops, void *ctx, std::string_view token)
 {
-    if (!ops || !ops->sendRequest) {
+    if (!ops.sendRequest) {
         return false;
     }
-    return ops->sendRequest(ctx, token.data(), token.size()) == 0;
+    return ops.sendRequest(ctx, token.data(), token.size()) == 0;
 }
 
 std::optional<RdmaReply>
-receiveRdmaReplyRaw(hipObjOps_t *ops, void *ctx, std::span<char> replyBuf)
+receiveRdmaReplyRaw(const hipObjOps_t &ops, void *ctx, std::span<char> replyBuf)
 {
-    if (!ops || !ops->recvReply || replyBuf.empty()) {
+    if (!ops.recvReply || replyBuf.empty()) {
         return std::nullopt;
     }
     size_t replyLen = replyBuf.size();
-    if (ops->recvReply(ctx, replyBuf.data(), &replyLen) != 0) {
+    if (ops.recvReply(ctx, replyBuf.data(), &replyLen) != 0) {
         return std::nullopt;
     }
     if (replyLen > replyBuf.size()) {

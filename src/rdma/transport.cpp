@@ -73,9 +73,9 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
 }
 
 std::optional<RdmaDevice>
-openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, const char *devName)
+openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, std::string_view devName)
 {
-    if (!devName) {
+    if (devName.empty()) {
         return std::nullopt;
     }
     int              numDevs = 0;

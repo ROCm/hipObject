@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -306,10 +308,15 @@ TEST(RdmaToken, ParseClientNicFromGid)
     token.gid[14]   = 1;
     token.gid[15]   = 42;
 
-    std::string encoded = hipObj::encodeRdmaToken(token);
-    char        nicIp[32];
-    EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded.c_str(), nicIp, sizeof(nicIp)));
-    EXPECT_STREQ(nicIp, "192.168.1.42");
+    std::string          encoded = hipObj::encodeRdmaToken(token);
+    std::array<char, 32> nicIp{};
+    EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded, nicIp));
+    EXPECT_STREQ(nicIp.data(), "192.168.1.42");
+
+    /* Too small for the address and its NUL */
+    EXPECT_FALSE(hipObj::parseClientNicFromTokenHex(encoded, std::span(nicIp).first(12)));
+    EXPECT_EQ(nicIp[0], '\0');
+    EXPECT_FALSE(hipObj::parseClientNicFromTokenHex(encoded, {}));
 }
 
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

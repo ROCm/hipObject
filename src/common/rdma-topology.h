@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include "gid.h"
 
@@ -56,11 +57,11 @@ struct RdmaNic {
 
 /* The NIC in topology with a known PCIe bus id closest to the bus id
  * runtime reports for GPU gpuIndex, picking the first of the closest,
- * among the NICs that hca_list (comma-separated device names, or null for
+ * among the NICs that hcaList (comma-separated device names, or empty for
  * all) allows. std::nullopt when there's no such NIC or the GPU's bus id
  * can't be found. */
 std::optional<RdmaNic> GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology,
-                                          int gpuIndex, const char *hca_list);
+                                          int gpuIndex, std::string_view hcaList);
 
 /* PickBestGid() over the GID table that verbs reports for port_num on
  * ctx's device, with each entry's RoCE version from topology.
