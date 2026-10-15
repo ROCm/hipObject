@@ -144,19 +144,19 @@ main(int argc, char *argv[])
             return resp;
         }
         if (req.method == "PUT") {
-            std::vector<uint8_t> payload;
-            std::string          replyHeader;
-            if (rdma.rdmaReadFromClient(*token, req.contentLength, payload, replyHeader) != 0) {
+            std::optional<hipobj::test::RdmaTestServer::ReadResult> read =
+                rdma.rdmaReadFromClient(*token, req.contentLength);
+            if (!read) {
                 resp.status = 500;
                 resp.body   = "RDMA PUT failed";
                 return resp;
             }
             {
                 std::scoped_lock<std::mutex> lk(objects_mu);
-                objects[key] = std::move(payload);
+                objects[key] = std::move(read->data);
             }
             resp.status                      = 200;
-            resp.headers["x-amz-rdma-reply"] = replyHeader;
+            resp.headers["x-amz-rdma-reply"] = std::move(read->replyHeader);
             resp.headers["etag"]             = "\"test\"";
             return resp;
         }
@@ -173,14 +173,14 @@ main(int argc, char *argv[])
                 }
                 data = it->second;
             }
-            std::string replyHeader;
-            if (rdma.rdmaWriteToClient(*token, data, replyHeader) != 0) {
+            std::optional<std::string> replyHeader = rdma.rdmaWriteToClient(*token, data);
+            if (!replyHeader) {
                 resp.status = 500;
                 resp.body   = "RDMA GET failed";
                 return resp;
             }
             resp.status                                  = 200;
-            resp.headers["x-amz-rdma-reply"]             = replyHeader;
+            resp.headers["x-amz-rdma-reply"]             = std::move(*replyHeader);
             resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(data.size());
             return resp;
         }

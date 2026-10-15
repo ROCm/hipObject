@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,11 +34,21 @@ public:
 
     bool isReady() const;
 
-    int rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vector<uint8_t> &data,
-                          std::string &replyHeader);
+    /* What rdmaReadFromClient() read */
+    struct ReadResult {
+        std::vector<uint8_t> data{};
+        std::string          replyHeader{}; /* The x-amz-rdma-reply value */
+    };
 
-    int rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size, std::vector<uint8_t> &data,
-                           std::string &replyHeader);
+    /* Writes data to the client's buffer. Returns the x-amz-rdma-reply
+     * value, or std::nullopt, after a message, if the transfer failed. */
+    [[nodiscard]] std::optional<std::string> rdmaWriteToClient(const TokenHeader          &tokenHeader,
+                                                               const std::vector<uint8_t> &data);
+
+    /* Reads size bytes from the client's buffer, or as many as the token
+     * header gives if size is 0. Returns std::nullopt, after a message, if
+     * the transfer failed. */
+    [[nodiscard]] std::optional<ReadResult> rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size);
 
 private:
     /* Null when the server couldn't set up RDMA */

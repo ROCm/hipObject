@@ -7,10 +7,10 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cinttypes>
-#include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <locale>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -32,8 +32,6 @@
 #include "hipobj_minio/rdma.h"
 
 namespace hipobj::minio {
-
-using namespace ::minio;
 
 namespace {
 
@@ -102,7 +100,7 @@ namespace {
             return inst;
         }
 
-        hipObjError_t EnsureInit(const minio::s3::BaseUrl &base_url)
+        hipObjError_t EnsureInit(const ::minio::s3::BaseUrl &base_url)
         {
             std::scoped_lock<std::mutex> lock(mutex_);
             std::string                  key = base_url.host + ":" + base_url.region;
@@ -155,24 +153,17 @@ namespace {
         std::string        nic_hint_storage_{};
     };
 
-    struct ScopedBufRegistration {
-        void *ptr   = nullptr;
-        bool  owned = false;
-        ScopedBufRegistration(void *p, bool own) : ptr(p), owned(own)
+    // Deregisters a buffer from hipObjBufRegister(). Owning the buffer's
+    // registration this way releases it on every path, including when a
+    // transfer throws.
+    struct BufDeregisterer {
+        void operator()(void *ptr) const noexcept
         {
+            (void)hipObjBufDeregister(ptr);
         }
-        ~ScopedBufRegistration()
-        {
-            if (owned && ptr) {
-                hipObjBufDeregister(ptr);
-            }
-        }
-
-        ScopedBufRegistration(const ScopedBufRegistration &)            = delete;
-        ScopedBufRegistration &operator=(const ScopedBufRegistration &) = delete;
-        ScopedBufRegistration(ScopedBufRegistration &&)                 = delete;
-        ScopedBufRegistration &operator=(ScopedBufRegistration &&)      = delete;
     };
+
+    using BufRegistrationPtr = std::unique_ptr<void, BufDeregisterer>;
 
     /* The response to a transfer that RDMA completed. Client::PutObject and
      * Client::GetObject return other objects on their other paths, which
@@ -188,19 +179,19 @@ namespace {
     /* An HTTP GET of the whole object into args.buf, which holds size bytes.
      * The object is accumulated in a string and copied to args.buf only if
      * the GET succeeds. */
-    minio::s3::GetObjectResponse HttpGetIntoBuffer(minio::s3::Client              &client,
-                                                   const minio::s3::GetObjectArgs &args, size_t size)
+    ::minio::s3::GetObjectResponse HttpGetIntoBuffer(::minio::s3::Client              &client,
+                                                     const ::minio::s3::GetObjectArgs &args, size_t size)
     {
         std::string received;
         received.reserve(size);
-        minio::s3::GetObjectArgs http_args = args;
-        http_args.datafunc                 = [&](const minio::http::DataFunctionArgs &chunk) -> bool {
+        ::minio::s3::GetObjectArgs http_args = args;
+        http_args.datafunc                   = [&](const ::minio::http::DataFunctionArgs &chunk) -> bool {
             received.append(chunk.datachunk);
             return true;
         };
-        http_args.buf                     = nullptr;
-        http_args.size                    = std::nullopt;
-        minio::s3::GetObjectResponse resp = client.GetObject(http_args);
+        http_args.buf                       = nullptr;
+        http_args.size                      = std::nullopt;
+        ::minio::s3::GetObjectResponse resp = client.GetObject(http_args);
         if (resp) {
             const std::span<char> dst = hipObj::spanFromPointer(args.buf, size);
             std::ranges::copy(std::string_view(received).substr(0, dst.size()), dst.begin());
@@ -238,16 +229,17 @@ TransferStatsReset()
 std::string
 TransferStatsLine(const TransferStats &stats)
 {
-    char buf[256];
-    std::snprintf(buf, sizeof(buf),
-                  "hipobj-stats: rdma_put=%" PRIu64 " rdma_get=%" PRIu64 " http_put=%" PRIu64
-                  " http_get=%" PRIu64 " rdma_bytes=%" PRIu64 " http_bytes=%" PRIu64,
-                  stats.rdmaPuts, stats.rdmaGets, stats.httpPuts, stats.httpGets, stats.rdmaBytes,
-                  stats.httpBytes);
-    return buf;
+    std::ostringstream line;
+    // A stream formats numbers with the global locale, which the application
+    // may have set to one that groups digits ("131,072")
+    line.imbue(std::locale::classic());
+    line << "hipobj-stats: rdma_put=" << stats.rdmaPuts << " rdma_get=" << stats.rdmaGets
+         << " http_put=" << stats.httpPuts << " http_get=" << stats.httpGets
+         << " rdma_bytes=" << stats.rdmaBytes << " http_bytes=" << stats.httpBytes;
+    return line.str();
 }
 
-Client::Client(minio::s3::BaseUrl base_url, minio::creds::Provider *provider)
+Client::Client(::minio::s3::BaseUrl base_url, ::minio::creds::Provider *provider)
     : base_url_(base_url), provider_(provider), s3_client_(base_url, provider)
 {
 }
@@ -258,11 +250,11 @@ Client::RdmaAvailable() const
     return HipObjRuntime::Instance().IsReady();
 }
 
-minio::s3::PutObjectResponse
-Client::PutObject(minio::s3::PutObjectArgs args)
+::minio::s3::PutObjectResponse
+Client::PutObject(::minio::s3::PutObjectArgs args)
 {
-    if (minio::error::Error err = args.Validate()) {
-        return minio::s3::PutObjectResponse(err);
+    if (::minio::error::Error err = args.Validate()) {
+        return ::minio::s3::PutObjectResponse(err);
     }
 
     if (args.buf == nullptr) {
@@ -273,43 +265,40 @@ Client::PutObject(minio::s3::PutObjectArgs args)
     // minio-cpp's object_size is a long, which the HTTP paths below set, and
     // long is only 32 bits on some platforms
     if (!std::in_range<long>(size)) {
-        return minio::s3::PutObjectResponse(minio::error::Error("object size is too large"));
+        return ::minio::s3::PutObjectResponse(::minio::error::Error("object size is too large"));
     }
 
     hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
         // RDMA not available (no NIC or no GPU topology) — fall back to HTTP PUT.
         // Copy the buffer into a std::stringstream so minio-cpp can seek in it.
-        const char              *src = static_cast<const char *>(args.buf);
-        std::string              content(src, size);
-        std::stringstream        ss(content, std::ios_base::in | std::ios_base::binary);
-        minio::s3::PutObjectArgs http_args = args;
-        http_args.stream                   = &ss;
-        http_args.buf                      = nullptr;
-        http_args.size                     = std::nullopt;
-        http_args.object_size              = static_cast<long>(size);
-        http_args.part_size                = 0;
+        const char                *src = static_cast<const char *>(args.buf);
+        std::string                content(src, size);
+        std::stringstream          ss(content, std::ios_base::in | std::ios_base::binary);
+        ::minio::s3::PutObjectArgs http_args = args;
+        http_args.stream                     = &ss;
+        http_args.buf                        = nullptr;
+        http_args.size                       = std::nullopt;
+        http_args.object_size                = static_cast<long>(size);
+        http_args.part_size                  = 0;
         CountHttpPut(size);
         return s3_client_.PutObject(http_args);
     }
 
-    bool          registered_here = false;
-    hipObjError_t reg_err         = hipObjBufRegister(args.buf, size);
-    if (reg_err.opError == hipObjSuccess) {
-        registered_here = true;
-    }
-    else if (reg_err.opError != hipObjBufAlreadyRegistered) {
-        return minio::s3::PutObjectResponse(minio::error::Error(
+    const hipObjError_t reg_err = hipObjBufRegister(args.buf, size);
+    if (reg_err.opError != hipObjSuccess && reg_err.opError != hipObjBufAlreadyRegistered) {
+        return ::minio::s3::PutObjectResponse(::minio::error::Error(
             "hipObjBufRegister failed: " + std::string(hipObjGetErrorString(reg_err.opError))));
     }
-    ScopedBufRegistration reg_guard(args.buf, registered_here);
+    // Only a registration made here is undone here
+    const BufRegistrationPtr registration(reg_err.opError == hipObjSuccess ? args.buf : nullptr);
 
     std::string region;
-    if (minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
+    if (::minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
         region = resp.region;
     }
     else {
-        return minio::s3::PutObjectResponse(resp);
+        return ::minio::s3::PutObjectResponse(resp);
     }
 
     S3RdmaContext put_ctx{
@@ -323,21 +312,21 @@ Client::PutObject(minio::s3::PutObjectArgs args)
     const RdmaResult ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
     if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
         CountRdmaPut(ret.bytes);
-        return RdmaResponse<minio::s3::PutObjectResponse>(std::move(put_ctx.etag));
+        return RdmaResponse<::minio::s3::PutObjectResponse>(std::move(put_ctx.etag));
     }
 
     // The fallback below streams the buffer from the host, so it cannot be
     // taken for device memory, and it turns a GPU-direct transfer into an
     // ordinary one. A caller that handed us a device pointer asked for RDMA.
     if (IsDevicePointer(args.buf)) {
-        return minio::s3::PutObjectResponse(
-            minio::error::Error("RDMA PUT failed (" + std::string(DescribeFailure(ret)) +
-                                ") and the payload is device memory; no HTTP fallback is possible"));
+        return ::minio::s3::PutObjectResponse(
+            ::minio::error::Error("RDMA PUT failed (" + std::string(DescribeFailure(ret)) +
+                                  ") and the payload is device memory; no HTTP fallback is possible"));
     }
     std::cerr << "hipobj: RDMA PUT failed (" << DescribeFailure(ret) << "); falling back to HTTP\n";
 
-    minio::s3::PutObjectArgs http_args = args;
-    std::stringstream        ss(std::ios_base::in | std::ios_base::out | std::ios_base::binary);
+    ::minio::s3::PutObjectArgs http_args = args;
+    std::stringstream          ss(std::ios_base::in | std::ios_base::out | std::ios_base::binary);
     ss.rdbuf()->pubsetbuf(args.buf, static_cast<std::streamsize>(size));
     http_args.stream      = &ss;
     http_args.buf         = nullptr;
@@ -350,11 +339,11 @@ Client::PutObject(minio::s3::PutObjectArgs args)
     return s3_client_.PutObject(http_args);
 }
 
-minio::s3::GetObjectResponse
-Client::GetObject(minio::s3::GetObjectArgs args)
+::minio::s3::GetObjectResponse
+Client::GetObject(::minio::s3::GetObjectArgs args)
 {
-    if (minio::error::Error err = args.Validate()) {
-        return minio::s3::GetObjectResponse(err);
+    if (::minio::error::Error err = args.Validate()) {
+        return ::minio::s3::GetObjectResponse(err);
     }
 
     if (args.buf == nullptr) {
@@ -369,23 +358,20 @@ Client::GetObject(minio::s3::GetObjectArgs args)
         return HttpGetIntoBuffer(s3_client_, args, size);
     }
 
-    bool          registered_here = false;
-    hipObjError_t reg_err         = hipObjBufRegister(args.buf, size);
-    if (reg_err.opError == hipObjSuccess) {
-        registered_here = true;
-    }
-    else if (reg_err.opError != hipObjBufAlreadyRegistered) {
-        return minio::s3::GetObjectResponse(minio::error::Error(
+    const hipObjError_t reg_err = hipObjBufRegister(args.buf, size);
+    if (reg_err.opError != hipObjSuccess && reg_err.opError != hipObjBufAlreadyRegistered) {
+        return ::minio::s3::GetObjectResponse(::minio::error::Error(
             "hipObjBufRegister failed: " + std::string(hipObjGetErrorString(reg_err.opError))));
     }
-    ScopedBufRegistration reg_guard(args.buf, registered_here);
+    // Only a registration made here is undone here
+    const BufRegistrationPtr registration(reg_err.opError == hipObjSuccess ? args.buf : nullptr);
 
     std::string region;
-    if (minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
+    if (::minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
         region = resp.region;
     }
     else {
-        return minio::s3::GetObjectResponse(resp);
+        return ::minio::s3::GetObjectResponse(resp);
     }
 
     S3RdmaContext get_ctx{
@@ -399,21 +385,21 @@ Client::GetObject(minio::s3::GetObjectArgs args)
     const RdmaResult ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
     if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
         CountRdmaGet(ret.bytes);
-        return RdmaResponse<minio::s3::GetObjectResponse>(std::move(get_ctx.etag));
+        return RdmaResponse<::minio::s3::GetObjectResponse>(std::move(get_ctx.etag));
     }
 
     // As in PutObject: the fallback memcpys into args.buf from the host.
     if (IsDevicePointer(args.buf)) {
-        return minio::s3::GetObjectResponse(
-            minio::error::Error("RDMA GET failed (" + std::string(DescribeFailure(ret)) +
-                                ") and the destination is device memory; no HTTP fallback is possible"));
+        return ::minio::s3::GetObjectResponse(
+            ::minio::error::Error("RDMA GET failed (" + std::string(DescribeFailure(ret)) +
+                                  ") and the destination is device memory; no HTTP fallback is possible"));
     }
     std::cerr << "hipobj: RDMA GET failed (" << DescribeFailure(ret) << "); falling back to HTTP\n";
 
-    minio::s3::GetObjectArgs http_args = args;
-    const std::span<char>    dst       = hipObj::spanFromPointer(args.buf, size);
-    size_t                   offset    = 0;
-    http_args.datafunc                 = [&](const minio::http::DataFunctionArgs &chunk) -> bool {
+    ::minio::s3::GetObjectArgs http_args = args;
+    const std::span<char>      dst       = hipObj::spanFromPointer(args.buf, size);
+    size_t                     offset    = 0;
+    http_args.datafunc                   = [&](const ::minio::http::DataFunctionArgs &chunk) -> bool {
         /* Anything past size is dropped */
         const std::span<char>  rest = dst.subspan(offset);
         const std::string_view data = std::string_view(chunk.datachunk).substr(0, rest.size());

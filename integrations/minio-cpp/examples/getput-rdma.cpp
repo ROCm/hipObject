@@ -82,7 +82,7 @@ struct BufferDeleter {
             (void)hipFree(ptr);
         }
         else {
-            free(ptr);
+            std::free(ptr);
         }
     }
 };
@@ -161,11 +161,15 @@ main(int argc, char *argv[])
             std::cerr << "sysconf(_SC_PAGESIZE) failed\n";
             return 1;
         }
-        int res = posix_memalign(reinterpret_cast<void **>(&bufptr), static_cast<size_t>(pagesize), bufsize);
-        if (res != 0 || bufptr == nullptr) {
+        /* posix_memalign() writes a void *, so it needs a void * object to
+         * write it to */
+        void *raw = nullptr;
+        int   res = posix_memalign(&raw, static_cast<size_t>(pagesize), bufsize);
+        if (res != 0 || raw == nullptr) {
             std::cerr << "posix_memalign failed\n";
             return 1;
         }
+        bufptr = static_cast<char *>(raw);
         buffer.reset(bufptr);
         host_buf = hipObj::spanFromPointer(bufptr, bufsize);
         std::ranges::copy(expected, host_buf.begin());
