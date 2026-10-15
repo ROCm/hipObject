@@ -22,6 +22,8 @@
 ---
 Checks:
   - -*
+  # android-cloexec-socket reports nothing with glibc's headers, so
+  # socket() calls need SOCK_CLOEXEC without its help
   - android-cloexec-*
   - bugprone-*
   - cert-*
@@ -64,9 +66,6 @@ Checks:
   # TODO: These checks report problems in the current code. Fix the code
   # and delete the check's line here, or move it to "Not wanted" with a
   # reason. The count is the number of places clang-tidy 23 reports.
-  - -android-cloexec-accept  # TODO(1): accept() without SOCK_CLOEXEC
-  - -android-cloexec-dup  # TODO(1): dup() without F_DUPFD_CLOEXEC
-  - -android-cloexec-pipe  # TODO(1): pipe() without O_CLOEXEC
   - -bugprone-easily-swappable-parameters  # TODO(10)
   - -bugprone-empty-catch  # TODO(2)
   - -bugprone-invalid-enum-default-initialization  # TODO(10): ibv_mtu{} is 0

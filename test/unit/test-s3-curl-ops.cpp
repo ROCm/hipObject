@@ -70,7 +70,7 @@ remainingMs(const std::chrono::steady_clock::time_point &deadline)
 class StubHttpServer {
 public:
     explicit StubHttpServer(std::string_view response)
-        : listenFd_(socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)), response_(response)
+        : listenFd_(socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0)), response_(response)
     {
         if (!listenFd_) {
             throw std::runtime_error("socket() failed");
@@ -168,7 +168,7 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            fd.reset(accept4(listenFd_.get(), nullptr, nullptr, SOCK_NONBLOCK));
+            fd.reset(accept4(listenFd_.get(), nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC));
             if (fd) {
                 break;
             }
@@ -432,7 +432,7 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     // Bind a socket without listening and hold it open for the duration
     // of the request so the port cannot be taken over; connections to it
     // are refused deterministically.
-    const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM, 0));
+    const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
     ASSERT_TRUE(fd);
     struct sockaddr_in addr {};
     addr.sin_family      = AF_INET;

@@ -85,7 +85,7 @@ protected:
      * exchange fails or the server doesn't close it in time */
     [[nodiscard]] std::optional<std::string> exchange(std::string_view request) const
     {
-        const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM, 0));
+        const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
         sockaddr_in            addr{};
         addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
