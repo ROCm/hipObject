@@ -16,6 +16,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "fake-device.h"
+#include "hipobj-address.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "ibv-core.h"
@@ -32,7 +33,7 @@ constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 
 /* reg_mr fails for this address, so it's registered through a staging
  * buffer */
-void *const kStagedBuf = reinterpret_cast<void *>(0x30000);
+void *const kStagedBuf = hipObj::addressToPointer<void *>(0x30000);
 
 /* The HIP runtime reports every pointer as device memory in one allocation,
  * which holds every buffer these tests register */
@@ -106,7 +107,7 @@ TEST_F(RegistrationTest, LimitsNumberOfRegistrations)
     /* hipObject registers at most 256 buffers at a time */
     constexpr size_t kMaxBuffers = 256;
     ASSERT_NO_FATAL_FAILURE(init());
-    auto buffer = [](size_t i) { return reinterpret_cast<void *>(0x100000 + i * kBufSize); };
+    auto buffer = [](size_t i) { return hipObj::addressToPointer<void *>(0x100000 + i * kBufSize); };
     for (size_t i = 0; i < kMaxBuffers; ++i) {
         ASSERT_EQ(hipObjBufRegisterHost(buffer(i), kBufSize).opError, hipObjSuccess) << "buffer " << i;
     }

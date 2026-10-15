@@ -85,7 +85,9 @@ TEST(UniqueFd, MoveConstructTransfersOwnership)
 
     UniqueFd moved(std::move(r));
     EXPECT_EQ(raw, moved.get());
-    /* The moved-from handle owns nothing, so destroying it closes nothing */
+    /* The moved-from handle owns nothing, so destroying it closes nothing.
+     * Using it after the move is the point of the test. */
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     r.reset();
     EXPECT_TRUE(isOpen(raw));
 }
@@ -101,6 +103,8 @@ TEST(UniqueFd, MoveAssignClosesPrevious)
     r = std::move(w);
     EXPECT_TRUE(isClosed(rawR));
     EXPECT_EQ(rawW, r.get());
+    /* Checking the moved-from handle is the point of the test */
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     EXPECT_FALSE(w);
     EXPECT_TRUE(isOpen(rawW));
 }

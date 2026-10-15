@@ -15,6 +15,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
+#include "hipobj-address.h"
 #include "hipobj-private.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -102,9 +103,8 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_p
         }
         else {
             const DmabufFd dmabuf(fd, runtime);
-            auto           mr = own<IbvMrPtr>(verbs,
-                                              verbs.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr),
-                                                                  dmabuf.get(), access));
+            auto           mr = own<IbvMrPtr>(
+                verbs, verbs.reg_dmabuf_mr(pd, offset, length, pointerToAddress(addr), dmabuf.get(), access));
             if (mr) {
                 return mr;
             }
@@ -130,8 +130,8 @@ isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
     if (runtime.memGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
         return false;
     }
-    auto start = reinterpret_cast<uintptr_t>(base);
-    auto addr  = reinterpret_cast<uintptr_t>(ptr);
+    auto start = pointerToAddress(base);
+    auto addr  = pointerToAddress(ptr);
     if (addr < start || addr - start >= allocSize) {
         return false;
     }
@@ -149,7 +149,7 @@ HostBufDeleter::operator()(void *hostBuf) const noexcept
 bool
 BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 {
-    auto key = reinterpret_cast<uintptr_t>(devPtr);
+    auto key = pointerToAddress(devPtr);
     if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
         return false;
     }
@@ -192,7 +192,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
         return false;
     }
     /* Read the address before hostBuf is moved into the entry */
-    const auto remoteAddr = reinterpret_cast<uint64_t>(hostBuf.get());
+    const uint64_t remoteAddr = pointerToAddress(hostBuf.get());
     /* Build the entry before inserting it. mr is declared before
      * hostBuf, so if allocating the map node throws, unwinding would
      * free the staging buffer while it's still registered; the entry
@@ -205,7 +205,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 bool
 BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 {
-    auto key = reinterpret_cast<uintptr_t>(hostPtr);
+    auto key = pointerToAddress(hostPtr);
     if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
         return false;
     }
@@ -216,14 +216,14 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
         return false;
     }
     entries_.try_emplace(key, own<HostBufPtr>(*runtime_, nullptr), std::move(mr), size, false,
-                         reinterpret_cast<uint64_t>(hostPtr));
+                         pointerToAddress(hostPtr));
     return true;
 }
 
 bool
 BufferMap::deregisterBuffer(void *devPtr)
 {
-    auto key = reinterpret_cast<uintptr_t>(devPtr);
+    auto key = pointerToAddress(devPtr);
     auto it  = entries_.find(key);
     if (it == entries_.end()) {
         return false;
@@ -236,7 +236,7 @@ BufferMap::deregisterBuffer(void *devPtr)
 const BufferMap::BufEntry *
 BufferMap::find(const void *devPtr) const
 {
-    auto key = reinterpret_cast<uintptr_t>(devPtr);
+    auto key = pointerToAddress(devPtr);
     auto it  = entries_.find(key);
     return it == entries_.end() ? nullptr : &it->second;
 }

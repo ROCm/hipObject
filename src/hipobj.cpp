@@ -27,6 +27,7 @@
 #include "buffer.h"
 #include "control.h"
 #include "hip-seam.h"
+#include "hipobj-address.h"
 #include "hipobj-private.h"
 #include "hipobj-span.h"
 #include "ibv-core.h"
@@ -68,7 +69,7 @@ namespace {
             return makeError(hipObjSizeTooLarge);
         }
         /* The end of the buffer, ptr + size, must not wrap */
-        if (size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr)) {
+        if (size > std::numeric_limits<uintptr_t>::max() - pointerToAddress(ptr)) {
             return makeError(hipObjInvalidValue);
         }
         return makeError(hipObjSuccess);

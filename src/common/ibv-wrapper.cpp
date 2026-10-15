@@ -18,6 +18,7 @@
 
 #include <dlfcn.h>
 
+#include "hipobj-address.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
 
@@ -27,10 +28,12 @@ namespace {
 
     /* Sets out to the symbol, or to nullptr when the library doesn't have it.
      * Casting dlsym()'s void * to a function pointer is only conditionally
-     * supported in C++, so copy the pointer's bits instead (std::bit_cast
+     * supported in C++ (GCC's -Wconditionally-supported reports
+     * reinterpret_cast), so copy the pointer's bits instead (std::bit_cast
      * doesn't compile if the two pointers differ in size). */
     template <typename FuncPtr> void dlsym_load_optional(FuncPtr &out, void *handle, const char *name)
     {
+        // NOLINTNEXTLINE(bugprone-bitwise-pointer-cast)
         out = std::bit_cast<FuncPtr>(dlsym(handle, name));
     }
 
@@ -186,7 +189,7 @@ LoadedVerbs::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) co
      * isn't a compile-time constant. ibv_reg_mr_iova2() with the address as
      * the IOVA is the same registration as the ibv_reg_mr() function, and
      * also accepts the optional access flags. */
-    return funcs_.reg_mr_iova2(pd, addr, length, reinterpret_cast<uintptr_t>(addr), access);
+    return funcs_.reg_mr_iova2(pd, addr, length, pointerToAddress(addr), access);
 }
 
 bool

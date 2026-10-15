@@ -40,7 +40,7 @@ struct LayoutEntry {
         {"alignment of " #type, static_cast<int64_t>(alignof(type))},
 #define HIPOBJ_IBV_MEMBER(type, member)                                                                      \
     {"offset of " #type "." #member, static_cast<int64_t>(offsetof(type, member))},                          \
-        {"size of " #type "." #member, static_cast<int64_t>(sizeof(std::declval<type &>().member))},
+        {"size of " #type "." #member, static_cast<int64_t>(sizeof(std::declval<type>().member))},
 #define HIPOBJ_IBV_VALUE(name) {"value of " #name, static_cast<int64_t>(name)},
 
 /* The entries in ibv-layout-list.h, from ibv-core.h */

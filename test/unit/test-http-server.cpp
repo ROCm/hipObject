@@ -26,6 +26,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "hipobj-sockaddr.h"
 #include "hipobj-warnings.h"
 #include "http_server.h"
 #include "unique-fd.h"
@@ -75,7 +76,7 @@ protected:
         ASSERT_TRUE(server_.startThreaded());
         sockaddr_in addr{};
         socklen_t   len = sizeof(addr);
-        ASSERT_EQ(getsockname(server_.fd(), reinterpret_cast<sockaddr *>(&addr), &len), 0);
+        ASSERT_EQ(getsockname(server_.fd(), hipObj::asSockaddr(addr), &len), 0);
         port_ = ntohs(addr.sin_port);
     }
 
@@ -89,7 +90,7 @@ protected:
         addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port        = htons(port_);
-        if (!fd || connect(fd.get(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+        if (!fd || connect(fd.get(), hipObj::asSockaddr(addr), sizeof(addr)) != 0) {
             return std::nullopt;
         }
         size_t sent = 0;

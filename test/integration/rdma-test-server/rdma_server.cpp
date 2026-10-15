@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "hipobj-address.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -41,7 +42,7 @@ namespace {
     }
 
     /* The size of the buffer each transfer is staged through */
-    constexpr size_t kStagingSize = 64 * 1024 * 1024;
+    constexpr size_t kStagingSize = size_t{64} * 1024 * 1024;
 
     hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, struct ibv_mr *mr, size_t size)
     {
@@ -49,7 +50,7 @@ namespace {
             .qpNum      = conn.qp()->qp_num,
             .gid        = hipObj::toGid(conn.device().localGid()),
             .rkey       = mr->rkey,
-            .remoteAddr = reinterpret_cast<uint64_t>(mr->addr),
+            .remoteAddr = hipObj::pointerToAddress(mr->addr),
             .length     = size,
             .transport  = hipObj::TransportType::RC,
             .portNum    = conn.device().portNum(),
@@ -61,7 +62,7 @@ namespace {
                                      const hipObj::RdmaToken &clientToken)
     {
         ibv_sge sge{};
-        sge.addr   = reinterpret_cast<uint64_t>(localMr->addr);
+        sge.addr   = hipObj::pointerToAddress(localMr->addr);
         sge.length = static_cast<uint32_t>(size);
         sge.lkey   = localMr->lkey;
 
@@ -85,7 +86,7 @@ namespace {
                                     const hipObj::RdmaToken &clientToken)
     {
         ibv_sge sge{};
-        sge.addr   = reinterpret_cast<uint64_t>(localMr->addr);
+        sge.addr   = hipObj::pointerToAddress(localMr->addr);
         sge.length = static_cast<uint32_t>(size);
         sge.lkey   = localMr->lkey;
 
