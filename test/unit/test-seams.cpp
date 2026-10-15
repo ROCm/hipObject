@@ -267,7 +267,7 @@ class FullBufferBusIdHip : public hipObjTest::FakeHip {
 public:
     using FakeHip::FakeHip;
 
-    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int) const override
+    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int /*device*/) const override
     {
         const std::span<char> out = hipObj::spanFromPointer(pciBusId, static_cast<size_t>(len));
         if (out.size() != kFullBufferBusId.size()) {
@@ -305,7 +305,7 @@ class TopologyVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    const char *get_device_name(struct ibv_device *) const override
+    const char *get_device_name(struct ibv_device * /*device*/) const override
     {
         return kFakeDevName.data();
     }
@@ -370,7 +370,7 @@ public:
 
     struct ibv_context *open_device(struct ibv_device *device) const override
     {
-        return TopologyVerbs::open_device(device) ? context_ : nullptr;
+        return TopologyVerbs::open_device(device) != nullptr ? context_ : nullptr;
     }
 
 private:
@@ -663,17 +663,17 @@ namespace {
 
     ApiTransferLog g_apiTransferLog;
 
-    int fakeSendRequest(void *, const char *, size_t)
+    int fakeSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
     {
         ++g_apiTransferLog.sendRequestCalls;
         return 0;
     }
 
-    int fakeRecvReply(void *, char *reply, size_t *replyLen)
+    int fakeRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
     {
         static constexpr auto kReply = std::to_array("200");
         ++g_apiTransferLog.recvReplyCalls;
-        if (!replyLen || *replyLen < kReply.size()) {
+        if (replyLen == nullptr || *replyLen < kReply.size()) {
             return -1;
         }
         std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).begin());

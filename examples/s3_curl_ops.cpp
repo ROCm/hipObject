@@ -44,7 +44,7 @@ bool
 appendHeader(CurlSlistPtr &list, const char *header)
 {
     struct curl_slist *head = curl_slist_append(list.get(), header);
-    if (!head) {
+    if (head == nullptr) {
         return false;
     }
     if (!list) {
@@ -90,14 +90,14 @@ headerCallback(char *buffer, size_t size, size_t nitems, void *userdata)
 std::string
 buildUrl(const hipObjS3CurlCtx *cfg)
 {
-    std::string url = cfg->endpoint ? cfg->endpoint : "http://127.0.0.1:9000";
+    std::string url = cfg->endpoint != nullptr ? cfg->endpoint : "http://127.0.0.1:9000";
     if (!url.empty() && url.back() == '/') {
         url.pop_back();
     }
     url += '/';
-    url += cfg->bucket ? cfg->bucket : "test";
+    url += cfg->bucket != nullptr ? cfg->bucket : "test";
     url += '/';
-    url += cfg->object ? cfg->object : "object";
+    url += cfg->object != nullptr ? cfg->object : "object";
     return url;
 }
 
@@ -121,7 +121,7 @@ int
 hipObjS3CurlSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
     auto *cfg = static_cast<hipObjS3CurlCtx *>(ctx);
-    if (!cfg || !token) {
+    if (cfg == nullptr || token == nullptr) {
         return -1;
     }
 
@@ -142,7 +142,7 @@ hipObjS3CurlSendRequest(void *ctx, const char *token, size_t tokenLen)
 
     (curl_easy_setopt)(curl.get(), CURLOPT_URL, buildUrl(cfg).c_str());
     (curl_easy_setopt)(curl.get(), CURLOPT_HTTPHEADER, headers.get());
-    (curl_easy_setopt)(curl.get(), CURLOPT_CUSTOMREQUEST, cfg->isPut ? "PUT" : "GET");
+    (curl_easy_setopt)(curl.get(), CURLOPT_CUSTOMREQUEST, cfg->isPut != 0 ? "PUT" : "GET");
     (curl_easy_setopt)(curl.get(), CURLOPT_HEADERFUNCTION, headerCallback);
     (curl_easy_setopt)(curl.get(), CURLOPT_HEADERDATA, &state);
 
@@ -169,7 +169,7 @@ int
 hipObjS3CurlRecvReply(void *ctx, char *reply, size_t *replyLen)
 {
     auto *cfg = static_cast<hipObjS3CurlCtx *>(ctx);
-    if (!cfg || !reply || !replyLen) {
+    if (cfg == nullptr || reply == nullptr || replyLen == nullptr) {
         return -1;
     }
     size_t len = std::strlen(cfg->lastReply);

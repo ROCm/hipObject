@@ -245,7 +245,7 @@ Client::Client(::minio::s3::BaseUrl base_url, ::minio::creds::Provider *provider
 }
 
 bool
-Client::RdmaAvailable() const
+Client::RdmaAvailable()
 {
     return HipObjRuntime::Instance().IsReady();
 }

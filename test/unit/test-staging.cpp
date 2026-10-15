@@ -107,7 +107,7 @@ TEST_F(RegistrationTest, LimitsNumberOfRegistrations)
     /* hipObject registers at most 256 buffers at a time */
     constexpr size_t kMaxBuffers = 256;
     ASSERT_NO_FATAL_FAILURE(init());
-    auto buffer = [](size_t i) { return hipObj::addressToPointer<void *>(0x100000 + i * kBufSize); };
+    auto buffer = [](size_t i) { return hipObj::addressToPointer<void *>(0x100000 + (i * kBufSize)); };
     for (size_t i = 0; i < kMaxBuffers; ++i) {
         ASSERT_EQ(hipObjBufRegisterHost(buffer(i), kBufSize).opError, hipObjSuccess) << "buffer " << i;
     }

@@ -48,8 +48,9 @@ namespace {
 
         template <std::unsigned_integral T> void put(T value)
         {
-            for (size_t i = 0; i < sizeof(T); ++i)
+            for (size_t i = 0; i < sizeof(T); ++i) {
                 rest_[i] = static_cast<uint8_t>(value >> (8 * i));
+            }
             rest_ = rest_.subspan(sizeof(T));
         }
 
@@ -76,8 +77,9 @@ namespace {
             T value = 0;
             /* Not |=, which -Wconversion flags for a uint16_t, since the
              * operands are promoted to int */
-            for (size_t i = 0; i < sizeof(T); ++i)
+            for (size_t i = 0; i < sizeof(T); ++i) {
                 value = static_cast<T>(value | (T{rest_[i]} << (8 * i)));
+            }
             rest_ = rest_.subspan(sizeof(T));
             return value;
         }
@@ -115,28 +117,35 @@ namespace {
             value.remove_suffix(1);
         }
 
-        if (value == "ok")
+        if (value == "ok") {
             return ParsedReply{.httpCode = 200, .peerToken = std::nullopt};
-        if (value == "err")
+        }
+        if (value == "err") {
             return ParsedReply{.httpCode = -1, .peerToken = std::nullopt};
+        }
 
         const std::string_view status = value.substr(0, value.find(':'));
-        if (status.size() != 3)
+        if (status.size() != 3) {
             return std::nullopt;
+        }
         /* Unsigned, so a '-' sign is rejected too */
         const auto parsed = parseNumber<unsigned>(status);
-        if (!parsed || *parsed < 100 || *parsed > 599)
+        if (!parsed || *parsed < 100 || *parsed > 599) {
             return std::nullopt;
+        }
         const int code = static_cast<int>(*parsed);
 
-        if (status.size() == value.size())
+        if (status.size() == value.size()) {
             return ParsedReply{.httpCode = code, .peerToken = std::nullopt};
+        }
         /* Only a successful reply carries a peer token */
-        if (code != 200)
+        if (code != 200) {
             return std::nullopt;
+        }
         auto token = decodeRdmaTokenHex(value.substr(status.size() + 1));
-        if (!token)
+        if (!token) {
             return std::nullopt;
+        }
         return ParsedReply{.httpCode = code, .peerToken = token};
     }
 
@@ -158,8 +167,8 @@ encodeRdmaTokenHex(const RdmaToken &token)
 
     RdmaTokenHex hex{}; /* zeroed, so it ends with a NUL */
     for (size_t i = 0; i < kTokenBinaryLen; ++i) {
-        hex[i * 2]     = kHexDigits[buf[i] >> 4];
-        hex[i * 2 + 1] = kHexDigits[buf[i] & 0xf];
+        hex[i * 2]       = kHexDigits[buf[i] >> 4];
+        hex[(i * 2) + 1] = kHexDigits[buf[i] & 0xf];
     }
     return hex;
 }
@@ -174,14 +183,16 @@ encodeRdmaToken(const RdmaToken &token)
 std::optional<RdmaToken>
 decodeRdmaTokenHex(std::string_view tokenHex)
 {
-    if (tokenHex.size() != kRdmaTokenHexLen)
+    if (tokenHex.size() != kRdmaTokenHexLen) {
         return std::nullopt;
+    }
 
     std::array<uint8_t, kTokenBinaryLen> buf{};
     for (size_t i = 0; i < kTokenBinaryLen; ++i) {
         const auto byte = parseNumber<uint8_t>(tokenHex.substr(i * 2, 2), 16);
-        if (!byte)
+        if (!byte) {
             return std::nullopt;
+        }
         buf[i] = *byte;
     }
 
@@ -189,8 +200,9 @@ decodeRdmaTokenHex(std::string_view tokenHex)
     /* Any uint8_t is a valid TransportType value, so the cast is
      * defined even for a byte that names no enumerator */
     const auto transport = static_cast<TransportType>(in.get<uint8_t>());
-    if (transport != TransportType::DC && transport != TransportType::RC)
+    if (transport != TransportType::DC && transport != TransportType::RC) {
         return std::nullopt;
+    }
 
     RdmaToken token;
     token.transport = transport;
@@ -208,8 +220,9 @@ std::optional<int>
 parseRdmaReplyHttpCode(std::string_view reply)
 {
     const auto parsed = parseReply(reply);
-    if (!parsed)
+    if (!parsed) {
         return std::nullopt;
+    }
     return parsed->httpCode;
 }
 
@@ -217,28 +230,34 @@ std::optional<RdmaReplyStatus>
 decodeRdmaReply(std::string_view reply)
 {
     const auto httpCode = parseRdmaReplyHttpCode(reply);
-    if (!httpCode)
+    if (!httpCode) {
         return std::nullopt;
-    if (*httpCode == 501)
+    }
+    if (*httpCode == 501) {
         return RdmaReplyStatus::NotSupported;
-    if (isSuccessHttpCode(*httpCode))
+    }
+    if (isSuccessHttpCode(*httpCode)) {
         return RdmaReplyStatus::Success;
+    }
     return RdmaReplyStatus::Failed;
 }
 
 bool
 parseClientNicFromTokenHex(std::string_view tokenHex, std::span<char> nicIp)
 {
-    if (nicIp.empty())
+    if (nicIp.empty()) {
         return false;
+    }
     nicIp[0] = '\0';
 
     const auto token = decodeRdmaTokenHex(tokenHex);
-    if (!token)
+    if (!token) {
         return false;
+    }
 
-    if (token->gid[10] != 0xff || token->gid[11] != 0xff)
+    if (token->gid[10] != 0xff || token->gid[11] != 0xff) {
         return true;
+    }
 
     /* Format into a fixed-size buffer first so the snprintf output is
      * bounded; nicIp's size is caller-supplied. */
@@ -246,8 +265,9 @@ parseClientNicFromTokenHex(std::string_view tokenHex, std::span<char> nicIp)
     int n = std::snprintf(buf.data(), buf.size(), "%u.%u.%u.%u", static_cast<unsigned>(token->gid[12]),
                           static_cast<unsigned>(token->gid[13]), static_cast<unsigned>(token->gid[14]),
                           static_cast<unsigned>(token->gid[15]));
-    if (n < 0 || static_cast<size_t>(n) >= nicIp.size())
+    if (n < 0 || static_cast<size_t>(n) >= nicIp.size()) {
         return false;
+    }
     std::ranges::copy(std::span(buf).first(static_cast<size_t>(n) + 1), nicIp.begin());
     return true;
 }
@@ -256,8 +276,9 @@ std::optional<RdmaToken>
 parsePeerTokenFromReply(std::string_view reply)
 {
     const auto parsed = parseReply(reply);
-    if (!parsed)
+    if (!parsed) {
         return std::nullopt;
+    }
     return parsed->peerToken;
 }
 

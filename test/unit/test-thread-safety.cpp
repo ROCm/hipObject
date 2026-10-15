@@ -64,16 +64,16 @@ runThreads(int count, const std::function<void(int)> &body)
 // ---- Transfer callbacks ------------------------------------------------
 
 int
-plainSendRequest(void *, const char *, size_t)
+plainSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
 {
     return 0;
 }
 
 int
-plainRecvReply(void *, char *reply, size_t *replyLen)
+plainRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 {
     static constexpr std::string_view kReply = "200";
-    if (!reply || !replyLen || *replyLen < kReply.size()) {
+    if (reply == nullptr || replyLen == nullptr || *replyLen < kReply.size()) {
         return -1;
     }
     std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).begin());
@@ -93,7 +93,7 @@ struct TransferProbe {
 };
 
 int
-probeSendRequest(void *ctx, const char *, size_t)
+probeSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
 {
     auto *probe = static_cast<TransferProbe *>(ctx);
     if (probe->active.fetch_add(1) != 0) {
@@ -288,7 +288,7 @@ struct ReentryProbe {
  * make each one succeed or change something if it ran, and then one that
  * doesn't take the lock */
 int
-reentrantSendRequest(void *ctx, const char *, size_t)
+reentrantSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
 {
     auto          *probe  = static_cast<ReentryProbe *>(ctx);
     hipObjConfig_t config = makeConfig();
@@ -302,8 +302,10 @@ reentrantSendRequest(void *ctx, const char *, size_t)
         {"hipObjGet", hipObjGet(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
         {"hipObjPut", hipObjPut(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
         {"hipObjBufSync", hipObjBufSync(probe->registered, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError},
-        {"hipObjGetRdmaToken",
-         hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &probe->token).opError},
+        {
+            "hipObjGetRdmaToken",
+            hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &probe->token).opError,
+        },
     };
 
     static constexpr std::string_view kReply = "200";
@@ -328,7 +330,7 @@ TEST_F(ThreadSafetyTest, CallbackReentryFailsInsteadOfDeadlocking)
         EXPECT_EQ(err, hipObjInvalidValue) << name << " from a callback";
     }
     EXPECT_EQ(probe.token, nullptr);
-    if (probe.token) {
+    if (probe.token != nullptr) {
         (void)hipObjPutRdmaToken(probe.token);
     }
 

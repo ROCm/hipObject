@@ -56,10 +56,12 @@ namespace {
     {
         switch (roce_ver) {
             case RoceVersion::V2:
-                if (IsIPv4MappedIPv6(gid))
+                if (IsIPv4MappedIPv6(gid)) {
                     return GidPriority::RoceV2Ipv4;
-                if (LinkLocalGid(gid))
+                }
+                if (LinkLocalGid(gid)) {
                     return GidPriority::RoceV2LinkLocal;
+                }
                 return GidPriority::RoceV2Global;
             case RoceVersion::V1:
                 return LinkLocalGid(gid) ? GidPriority::RoceV1LinkLocal : GidPriority::RoceV1Global;
@@ -73,19 +75,22 @@ namespace {
                                           uint8_t port_num)
     {
         ibv_port_attr port_attr{};
-        if (verbs.query_port(ctx, port_num, &port_attr) != 0)
+        if (verbs.query_port(ctx, port_num, &port_attr) != 0) {
             return std::nullopt;
+        }
 
         std::vector<GidCandidate> candidates;
         for (int i = 0; i < port_attr.gid_tbl_len; ++i) {
             ibv_gid gid{};
-            if (verbs.query_gid(ctx, port_num, i, &gid) != 0)
+            if (verbs.query_gid(ctx, port_num, i, &gid) != 0) {
                 continue;
+            }
             GidCandidate c{};
             c.index = i;
             c.gid   = toGid(gid);
-            if (!IsConfiguredGid(c.gid))
+            if (!IsConfiguredGid(c.gid)) {
                 continue;
+            }
             c.roceVersion =
                 topology.roceVersion(cStringView(ctx->device->name, sizeof(ctx->device->name)), port_num, i);
             candidates.push_back(c);
@@ -96,22 +101,26 @@ namespace {
     std::string ExtractBusNumber(const std::string &pcie_bus_id)
     {
         size_t last_colon = pcie_bus_id.rfind(':');
-        if (last_colon == std::string::npos)
+        if (last_colon == std::string::npos) {
             return pcie_bus_id;
+        }
         return pcie_bus_id.substr(0, last_colon);
     }
 
     int GetBusIdDistance(const std::string &bus_a, const std::string &bus_b)
     {
-        if (bus_a.empty() || bus_b.empty())
+        if (bus_a.empty() || bus_b.empty()) {
             return std::numeric_limits<int>::max();
+        }
         std::string a = ExtractBusNumber(bus_a);
         std::string b = ExtractBusNumber(bus_b);
-        if (a == b)
+        if (a == b) {
             return 0;
+        }
         size_t i = 0;
-        while (i < a.size() && i < b.size() && a[i] == b[i])
+        while (i < a.size() && i < b.size() && a[i] == b[i]) {
             ++i;
+        }
         return static_cast<int>(a.size() - i) + static_cast<int>(b.size() - i);
     }
 
@@ -123,12 +132,15 @@ namespace {
             const size_t     comma = hcaList.find(',');
             std::string_view hca   = hcaList.substr(0, comma);
             const size_t     start = hca.find_first_not_of(" \t");
-            if (start != std::string_view::npos)
+            if (start != std::string_view::npos) {
                 hca.remove_prefix(start);
-            if (hca == devName)
+            }
+            if (hca == devName) {
                 return true;
-            if (comma == std::string_view::npos)
+            }
+            if (comma == std::string_view::npos) {
                 return false;
+            }
             hcaList.remove_prefix(comma + 1);
         }
     }
@@ -141,21 +153,26 @@ SysfsTopology::enumerate(std::string_view hcaList) const
     std::vector<NicInfo> result;
     int                  num_devs = 0;
     auto                 dev_list = own<IbvDeviceListPtr>(*verbs_, verbs_->get_device_list(&num_devs));
-    if (!dev_list || num_devs <= 0)
+    if (!dev_list || num_devs <= 0) {
         return result;
+    }
 
     for (ibv_device *dev : deviceSpan(dev_list, num_devs)) {
-        if (!dev)
+        if (dev == nullptr) {
             break;
+        }
         const char *dev_name = verbs_->get_device_name(dev);
-        if (!dev_name)
+        if (dev_name == nullptr) {
             continue;
-        if (!hcaList.empty() && !HcaListIncludes(hcaList, dev_name))
+        }
+        if (!hcaList.empty() && !HcaListIncludes(hcaList, dev_name)) {
             continue;
+        }
 
         auto ctx = own<IbvContextPtr>(*verbs_, verbs_->open_device(dev));
-        if (!ctx)
+        if (!ctx) {
             continue;
+        }
 
         ibv_device_attr attr{};
         if (verbs_->query_device(ctx.get(), &attr) != 0) {
@@ -164,10 +181,12 @@ SysfsTopology::enumerate(std::string_view hcaList) const
 
         for (uint8_t p = 1; p <= attr.phys_port_cnt; ++p) {
             ibv_port_attr port_attr{};
-            if (verbs_->query_port(ctx.get(), p, &port_attr) != 0)
+            if (verbs_->query_port(ctx.get(), p, &port_attr) != 0) {
                 continue;
-            if (port_attr.state != IBV_PORT_ACTIVE && port_attr.state != IBV_PORT_ACTIVE_DEFER)
+            }
+            if (port_attr.state != IBV_PORT_ACTIVE && port_attr.state != IBV_PORT_ACTIVE_DEFER) {
                 continue;
+            }
 
             NicInfo info;
             info.dev_name = dev_name;
@@ -179,14 +198,14 @@ SysfsTopology::enumerate(std::string_view hcaList) const
              * which is named after its bus id */
             std::error_code             ec;
             const std::filesystem::path resolved = std::filesystem::canonical(device_path, ec);
-            if (!ec)
+            if (!ec) {
                 info.pcie_bus_id = resolved.filename().string();
+            }
 
             std::ifstream numa_file(device_path / "numa_node");
             if (numa_file) {
                 numa_file >> info.numa_node;
-                if (info.numa_node < 0)
-                    info.numa_node = 0;
+                info.numa_node = std::max(info.numa_node, 0);
             }
 
             result.push_back(info);
@@ -203,15 +222,19 @@ SysfsTopology::roceVersion(std::string_view devName, uint8_t portNum, int gidInd
                                        std::to_string(static_cast<unsigned int>(portNum)) /
                                        "gid_attrs/types" / std::to_string(gidIndex);
     std::ifstream f(path);
-    if (!f)
+    if (!f) {
         return RoceVersion::Unknown;
+    }
     std::string line;
-    if (!std::getline(f, line))
+    if (!std::getline(f, line)) {
         return RoceVersion::Unknown;
-    if (line.find("RoCE v2") != std::string::npos)
+    }
+    if (line.find("RoCE v2") != std::string::npos) {
         return RoceVersion::V2;
-    if (line.find("IB/RoCE v1") != std::string::npos || line.find("RoCE v1") != std::string::npos)
+    }
+    if (line.find("IB/RoCE v1") != std::string::npos || line.find("RoCE v1") != std::string::npos) {
         return RoceVersion::V1;
+    }
     return RoceVersion::Unknown;
 }
 
@@ -221,21 +244,24 @@ GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int g
 {
     std::array<char, 32> gpu_bus_id{};
     const int            len = static_cast<int>(gpu_bus_id.size());
-    if (runtime.deviceGetPCIBusId(gpu_bus_id.data(), len, gpuIndex) != hipSuccess)
+    if (runtime.deviceGetPCIBusId(gpu_bus_id.data(), len, gpuIndex) != hipSuccess) {
         return std::nullopt;
+    }
 
     /* Up to the first NUL, or the whole array if HIP didn't write one */
     std::string gpu_bus(gpu_bus_id.begin(), std::ranges::find(gpu_bus_id, '\0'));
     auto        devices = topology.enumerate(hcaList);
-    if (devices.empty())
+    if (devices.empty()) {
         return std::nullopt;
+    }
 
     auto distance = [&gpu_bus](const NicInfo &nic) { return GetBusIdDistance(nic.pcie_bus_id, gpu_bus); };
     /* The first of the closest NICs */
     auto best = std::ranges::min_element(devices, {}, distance);
     /* No NIC has a known bus id */
-    if (distance(*best) == std::numeric_limits<int>::max())
+    if (distance(*best) == std::numeric_limits<int>::max()) {
         return std::nullopt;
+    }
 
     return RdmaNic{.index = static_cast<int>(best - devices.begin()), .name = std::move(best->dev_name)};
 }
@@ -246,8 +272,9 @@ PickBestGid(std::span<const GidCandidate> candidates)
     std::optional<int> best_idx;
     GidPriority        best_prio = GidPriority::Unknown;
     for (const GidCandidate &c : candidates) {
-        if (!IsConfiguredGid(c.gid))
+        if (!IsConfiguredGid(c.gid)) {
             continue;
+        }
         GidPriority prio = ClassifyGid(c.gid, c.roceVersion);
         if (prio != GidPriority::Unknown && (!best_idx || prio > best_prio)) {
             best_idx  = c.index;

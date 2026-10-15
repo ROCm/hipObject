@@ -202,7 +202,7 @@ struct ibv_mr *
 LoadedVerbs::reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
                            int access) const
 {
-    if (!funcs_.reg_dmabuf_mr) {
+    if (funcs_.reg_dmabuf_mr == nullptr) {
         errno = EOPNOTSUPP;
         return nullptr;
     }
@@ -249,7 +249,7 @@ LoadedVerbs::destroy_qp(struct ibv_qp *qp) const
 int
 LoadedVerbs::poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const
 {
-    if (funcs_.poll_cq) {
+    if (funcs_.poll_cq != nullptr) {
         return funcs_.poll_cq(cq, num_entries, wc);
     }
     // Inline-function semantics from verbs.h: delegate to the context ops.
@@ -259,7 +259,7 @@ LoadedVerbs::poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) cons
 int
 LoadedVerbs::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const
 {
-    if (funcs_.post_send) {
+    if (funcs_.post_send != nullptr) {
         return funcs_.post_send(qp, wr, bad_wr);
     }
     return qp->context->ops.post_send(qp, wr, bad_wr);

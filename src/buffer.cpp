@@ -183,7 +183,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 
     void      *rawHostBuf = nullptr;
     hipError_t err        = runtime.hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
-    if (err != hipSuccess || !rawHostBuf) {
+    if (err != hipSuccess || rawHostBuf == nullptr) {
         return false;
     }
     auto hostBuf = own<HostBufPtr>(runtime, rawHostBuf);

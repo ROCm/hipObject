@@ -88,9 +88,24 @@ TEST(TokenHeader, RejectsMalformedSuffix)
 {
     /* Missing or empty fields, extra delimiters, bad characters, signs and
      * prefixes, and values too big for their types */
-    for (const char *suffix : {":", ":1000", ":1000:", "::40", "::", ":1000:40:", ":1000:40:5", ":10g0:40",
-                               ":1000:4z", ":+1000:40", ":1000:-40", ":0x1000:40", ": 1000:40", ":1000:40 ",
-                               ":10000000000000000:40", ":1000:10000000000000000"}) {
+    for (const char *suffix : {
+             ":",
+             ":1000",
+             ":1000:",
+             "::40",
+             "::",
+             ":1000:40:",
+             ":1000:40:5",
+             ":10g0:40",
+             ":1000:4z",
+             ":+1000:40",
+             ":1000:-40",
+             ":0x1000:40",
+             ": 1000:40",
+             ":1000:40 ",
+             ":10000000000000000:40",
+             ":1000:10000000000000000",
+         }) {
         EXPECT_FALSE(parseTokenHeader(tokenHex() + suffix)) << "\"" << suffix << "\"";
     }
 }

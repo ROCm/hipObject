@@ -39,7 +39,7 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
         return std::nullopt;
     }
     struct ibv_device *dev = deviceSpan(devList, numDevs)[static_cast<size_t>(nicIndex)];
-    if (!dev) {
+    if (dev == nullptr) {
         return std::nullopt;
     }
     auto ctx = own<IbvContextPtr>(verbs, verbs.open_device(dev));
@@ -87,7 +87,7 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, std::strin
     int                                  nicIndex = -1;
     for (size_t i = 0; i < devices.size(); ++i) {
         const char *name = verbs.get_device_name(devices[i]);
-        if (name && std::string_view(name) == devName) {
+        if (name != nullptr && std::string_view(name) == devName) {
             nicIndex = static_cast<int>(i);
             break;
         }
