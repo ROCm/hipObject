@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -53,11 +54,9 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
     if (verbs.query_port(ctx.get(), kPortNum, &portAttr) != 0) {
         return std::nullopt;
     }
-    int gidIndex = SelectBestGid(verbs, topology, ctx.get(), kPortNum);
-    if (gidIndex < 0) {
-        gidIndex = 0;
-    }
-    ibv_gid localGid{};
+    /* The first entry, when none is preferred */
+    const int gidIndex = SelectBestGid(verbs, topology, ctx.get(), kPortNum).value_or(0);
+    ibv_gid   localGid{};
     if (verbs.query_gid(ctx.get(), kPortNum, gidIndex, &localGid) != 0) {
         return std::nullopt;
     }
@@ -168,8 +167,8 @@ bool
 transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid)
 {
     // The address handle stores the GID index in a uint8_t, so an index
-    // outside [0, 255] (including the -1 "not selected" default) can't be
-    // used and must not be truncated into a different, valid-looking one.
+    // outside [0, 255] can't be used and must not be truncated into a
+    // different, valid-looking one.
     const RdmaDevice &device = conn.device();
     if (!std::in_range<uint8_t>(device.gidIndex())) {
         return false;
@@ -229,7 +228,8 @@ connectRcPeer(RcConnection &conn, const RdmaToken &peerToken)
 }
 
 bool
-pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout)
+pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
+               std::chrono::milliseconds timeout)
 {
     const Verbs &verbs    = conn.device().verbs();
     const auto   deadline = std::chrono::steady_clock::now() + timeout;
@@ -254,18 +254,20 @@ pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds
                     static_cast<int>(wc.status), static_cast<int>(wc.opcode), wc.vendor_err, wc.wr_id);
             return false;
         }
-        if (expectedOpcode < 0 || wc.opcode == expectedOpcode) {
+        if (!expectedOpcode || wc.opcode == *expectedOpcode) {
             return true;
         }
     }
     // A timeout is a failure: no completion arrived for the awaited work
     // request, so the transfer outcome is unknown and must not be reported
     // as success.
-    const int64_t timeoutMs = timeout.count();
+    const int64_t     timeoutMs = timeout.count();
+    const std::string awaited =
+        expectedOpcode ? "opcode " + std::to_string(static_cast<int>(*expectedOpcode)) : "any opcode";
     fprintf(stderr,
-            "hipObj: no work completion within %" PRId64 " ms (awaiting opcode %d); the "
+            "hipObj: no work completion within %" PRId64 " ms (awaiting %s); the "
             "transfer outcome is unknown\n",
-            timeoutMs, expectedOpcode);
+            timeoutMs, awaited.c_str());
     return false;
 }
 

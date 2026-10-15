@@ -300,7 +300,7 @@ constexpr size_t kFakeBufSize = 64;
 class EmptyNicTopology : public hipObj::NicTopology {
 public:
     std::vector<hipObj::NicInfo> enumerate(const char *hca_list) const override;
-    int roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
+    hipObj::RoceVersion roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
 };
 
 /* Fakes of the outside world over a FakeDevice, and a platform over them
