@@ -22,8 +22,9 @@ struct RdmaReply {
 };
 
 /* Passes token to sendRequest as is. The library passes an RdmaTokenHex,
- * which keeps a NUL after the digits for callbacks that expect one. */
-int injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token);
+ * which keeps a NUL after the digits for callbacks that expect one.
+ * Returns false when there's no callback or it fails. */
+[[nodiscard]] bool injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token);
 
 /* Receives the reply into replyBuf through recvReply and decodes its RDMA
  * status. Returns std::nullopt when the callback fails or reports more than

@@ -150,9 +150,13 @@ std::optional<RcConnection> createRcConnection(const RdmaDevice &device, int cqS
 /* A temporary device would be destroyed before the connection */
 std::optional<RcConnection> createRcConnection(const RdmaDevice &&, int, uint32_t, uint32_t) = delete;
 
-int transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid);
-int transitionQpToRts(RcConnection &conn);
-int connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);
-int pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout);
+/* Each of these returns true on success and false on failure */
+[[nodiscard]] bool transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid,
+                                     union ibv_gid destGid);
+[[nodiscard]] bool transitionQpToRts(RcConnection &conn);
+[[nodiscard]] bool connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);
+/* Fails on an error completion, or when no completion with expectedOpcode
+ * (any opcode, if it's -1) arrives within timeout */
+[[nodiscard]] bool pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout);
 
 } // namespace hipObj

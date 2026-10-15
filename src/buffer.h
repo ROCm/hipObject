@@ -106,9 +106,10 @@ public:
     BufferMap(BufferMap &&)                 = delete;
     BufferMap &operator=(BufferMap &&)      = delete;
 
-    int registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
-    int registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
-    int deregisterBuffer(void *devPtr);
+    /* Each of these returns true on success and false on failure */
+    [[nodiscard]] bool registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
+    [[nodiscard]] bool registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
+    [[nodiscard]] bool deregisterBuffer(void *devPtr);
     /* The registration at devPtr, or null if there isn't one. Looked up
      * once per transfer and passed down. The entry stays valid until
      * devPtr is deregistered, which can't happen during a call that holds

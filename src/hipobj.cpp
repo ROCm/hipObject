@@ -123,27 +123,26 @@ buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf, size_t 
     return token;
 }
 
-static int
+[[nodiscard]] static bool
 finishTransferAfterReply(const HipRuntime &runtime, RcConnection &conn, std::string_view reply,
                          bool requiresDeviceSync, std::chrono::milliseconds pollTimeout)
 {
     if (const auto peerToken = parsePeerTokenFromReply(reply)) {
-        if (connectRcPeer(conn, *peerToken) != 0) {
-            return -1;
+        if (!connectRcPeer(conn, *peerToken)) {
+            return false;
         }
     }
     // A poll timeout or error completion is a failure: the transfer outcome
     // is unknown. With the current one-sided protocol the responder side
     // may not observe a completion at all (see issue #22), so this check
     // reports "no evidence of failure" rather than "transfer verified".
-    if (pollCompletion(conn, -1, pollTimeout) != 0) {
-        return -1;
+    if (!pollCompletion(conn, -1, pollTimeout)) {
+        return false;
     }
     if (!requiresDeviceSync) {
-        return 0;
+        return true;
     }
-    hipError_t err = runtime.deviceSynchronize();
-    return (err == hipSuccess) ? 0 : -1;
+    return runtime.deviceSynchronize() == hipSuccess;
 }
 
 /* hipMemcpy with a deadline (see Options::stageTimeout). Async copy plus a
@@ -228,7 +227,7 @@ runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
         return {hipObjRdmaError, 0};
     }
     const RdmaTokenHex encoded = encodeRdmaTokenHex(*token);
-    if (injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>())) != 0) {
+    if (!injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>()))) {
         return {hipObjS3Error, 0};
     }
     std::array<char, 512> replyBuf;
@@ -236,8 +235,8 @@ runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
     if (!reply || reply->status != RdmaReplyStatus::Success) {
         return {hipObjS3Error, 0};
     }
-    if (finishTransferAfterReply(instance.platform->hip(), instance.conn, reply->text, buf.isDmabuf,
-                                 instance.options.pollTimeout) != 0) {
+    if (!finishTransferAfterReply(instance.platform->hip(), instance.conn, reply->text, buf.isDmabuf,
+                                  instance.options.pollTimeout)) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -348,8 +347,7 @@ try {
     if (instance->buffers.isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = instance->buffers.registerBuffer(devPtr, size, instance->device->pd());
-    if (ret != 0) {
+    if (!instance->buffers.registerBuffer(devPtr, size, instance->device->pd())) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -376,8 +374,7 @@ try {
     if (instance->buffers.isRegistered(hostPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = instance->buffers.registerHostBuffer(hostPtr, size, instance->device->pd());
-    if (ret != 0) {
+    if (!instance->buffers.registerHostBuffer(hostPtr, size, instance->device->pd())) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};
@@ -403,8 +400,7 @@ try {
     if (!instance->buffers.isRegistered(devPtr)) {
         return {hipObjBufNotRegistered, 0};
     }
-    int ret = instance->buffers.deregisterBuffer(devPtr);
-    if (ret != 0) {
+    if (!instance->buffers.deregisterBuffer(devPtr)) {
         return {hipObjRdmaError, 0};
     }
     return {hipObjSuccess, 0};

@@ -15,13 +15,13 @@
 
 namespace hipObj {
 
-int
+bool
 injectRdmaToken(hipObjOps_t *ops, void *ctx, std::string_view token)
 {
     if (!ops || !ops->sendRequest) {
-        return -1;
+        return false;
     }
-    return ops->sendRequest(ctx, token.data(), token.size());
+    return ops->sendRequest(ctx, token.data(), token.size()) == 0;
 }
 
 std::optional<RdmaReply>

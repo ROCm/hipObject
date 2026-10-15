@@ -276,7 +276,7 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
 {
     ASSERT_NO_FATAL_FAILURE(open());
     const hipObj::RdmaToken token = peerToken();
-    ASSERT_EQ(hipObj::connectRcPeer(*conn_, token), 0);
+    ASSERT_TRUE(hipObj::connectRcPeer(*conn_, token));
 
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
     ASSERT_EQ(calls.size(), 2U);
@@ -312,14 +312,14 @@ TEST_F(TransportTest, ConnectDoesNotQueryTheDevice)
     fake().vendorId = hipObj::VENDOR_ID_BROADCOM;
     ASSERT_NO_FATAL_FAILURE(open());
     const int queries = fake().log.queryDevice;
-    ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
+    ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
     EXPECT_EQ(fake().log.queryDevice, queries);
 }
 
 TEST_F(TransportTest, ConnectRejectsPeerThatIsNotRc)
 {
     ASSERT_NO_FATAL_FAILURE(open());
-    EXPECT_EQ(hipObj::connectRcPeer(*conn_, peerToken(hipObj::TransportType::DC)), -1);
+    EXPECT_FALSE(hipObj::connectRcPeer(*conn_, peerToken(hipObj::TransportType::DC)));
     EXPECT_EQ(fake().modifyQpCount, 0U);
 }
 
@@ -327,12 +327,12 @@ TEST_F(TransportTest, ConnectStopsAtFailedTransition)
 {
     ASSERT_NO_FATAL_FAILURE(open());
     fake().fail.modifyQpToState = IBV_QPS_RTR;
-    EXPECT_NE(hipObj::connectRcPeer(*conn_, peerToken()), 0);
+    EXPECT_FALSE(hipObj::connectRcPeer(*conn_, peerToken()));
     EXPECT_EQ(fake().modifyQpCount, 1U);
 
     fake().modifyQpCount        = 0;
     fake().fail.modifyQpToState = IBV_QPS_RTS;
-    EXPECT_NE(hipObj::connectRcPeer(*conn_, peerToken()), 0);
+    EXPECT_FALSE(hipObj::connectRcPeer(*conn_, peerToken()));
     EXPECT_EQ(fake().modifyQpCount, 2U);
 }
 
@@ -347,7 +347,7 @@ TEST_F(TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
         ASSERT_TRUE(conn);
         /* Only the RTR transition's calls count */
         fake().modifyQpCount = 0;
-        EXPECT_EQ(hipObj::transitionQpToRtr(*conn, 1, 0, gid), -1) << "index " << index;
+        EXPECT_FALSE(hipObj::transitionQpToRtr(*conn, 1, 0, gid)) << "index " << index;
         EXPECT_EQ(fake().modifyQpCount, 0U) << "index " << index;
     }
 
@@ -355,7 +355,7 @@ TEST_F(TransportTest, RtrRejectsGidIndexTheAddressHandleCannotHold)
     std::optional<hipObj::RcConnection> conn   = hipObj::createRcConnection(device, 16, 8, 8);
     ASSERT_TRUE(conn);
     fake().modifyQpCount = 0;
-    ASSERT_EQ(hipObj::transitionQpToRtr(*conn, 1, 0, gid), 0);
+    ASSERT_TRUE(hipObj::transitionQpToRtr(*conn, 1, 0, gid));
     EXPECT_EQ(modifyQpCalls().at(0).attr.ah_attr.grh.sgid_index, 255);
 }
 
@@ -377,7 +377,7 @@ TEST_P(VendorQpTest, RtrHasVendorAttributes)
     /* The device reads its vendor ID when it opens */
     fake().vendorId = GetParam().vendorId;
     ASSERT_NO_FATAL_FAILURE(open());
-    ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
+    ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
 
     const struct ibv_qp_attr rtr = modifyQpCalls().at(0).attr;
     if (GetParam().configured) {
@@ -416,7 +416,7 @@ TEST_F(TransportTest, NoVendorAttributesWhenDeviceQueryFails)
     fake().vendorId         = hipObj::VENDOR_ID_BROADCOM;
     fake().fail.queryDevice = true;
     ASSERT_NO_FATAL_FAILURE(open());
-    ASSERT_EQ(hipObj::connectRcPeer(*conn_, peerToken()), 0);
+    ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
     EXPECT_EQ(modifyQpCalls().at(0).attr.timeout, 0);
 }
 
@@ -425,23 +425,23 @@ TEST_F(TransportTest, NoVendorAttributesWhenDeviceQueryFails)
 TEST_F(TransportTest, PollReturnsOnCompletion)
 {
     ASSERT_NO_FATAL_FAILURE(open());
-    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)), 0);
+    EXPECT_TRUE(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)));
     fake().pollOpcode = IBV_WC_RDMA_READ;
-    EXPECT_EQ(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::seconds(1)), 0);
+    EXPECT_TRUE(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::seconds(1)));
 }
 
 TEST_F(TransportTest, PollFailsOnErrorCompletion)
 {
     ASSERT_NO_FATAL_FAILURE(open());
     fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
-    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)), -1);
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)));
 }
 
 TEST_F(TransportTest, PollFailsWhenPollingFails)
 {
     ASSERT_NO_FATAL_FAILURE(open());
     fake().pollResult = -1;
-    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)), -1);
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)));
 }
 
 TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
@@ -449,11 +449,11 @@ TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
     ASSERT_NO_FATAL_FAILURE(open());
     /* Nothing completes */
     fake().pollResult = 0;
-    EXPECT_EQ(hipObj::pollCompletion(*conn_, -1, std::chrono::milliseconds(10)), -1);
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, -1, std::chrono::milliseconds(10)));
     /* Only other work completes */
     fake().pollResult = 1;
     fake().pollOpcode = IBV_WC_SEND;
-    EXPECT_EQ(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::milliseconds(10)), -1);
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::milliseconds(10)));
 }
 
 // ---- Initialization ----------------------------------------------
