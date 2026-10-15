@@ -171,6 +171,16 @@ TEST_F(StagingTest, CopiesInTheRequestedDirection)
     EXPECT_EQ(fake().lastMemcpyKind, hipMemcpyDeviceToHost);
 }
 
+TEST_F(StagingTest, CopiesOnTheCallingThreadsStream)
+{
+    /* Not the null stream, which would make copies from different threads
+     * wait for each other */
+    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
+    ASSERT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
+    EXPECT_EQ(fake().lastMemcpyStream, hipStreamPerThread);
+    EXPECT_EQ(fake().lastEventRecordStream, hipStreamPerThread);
+}
+
 TEST_F(StagingTest, FailsWithoutEvent)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());

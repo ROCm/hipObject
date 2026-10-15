@@ -150,9 +150,12 @@ namespace {
         }
         auto done = own<HipEventPtr>(runtime, rawDone);
 
-        hipError_t err = runtime.memcpyAsync(dst, src, size, kind, nullptr);
+        /* The calling thread's default stream, not the null stream, which
+         * waits for every other blocking stream on the device, so copies from
+         * different threads would wait for each other */
+        hipError_t err = runtime.memcpyAsync(dst, src, size, kind, hipStreamPerThread);
         if (err == hipSuccess) {
-            err = runtime.eventRecord(done.get(), nullptr);
+            err = runtime.eventRecord(done.get(), hipStreamPerThread);
         }
         if (err != hipSuccess) {
             return makeError(hipObjInternalError);

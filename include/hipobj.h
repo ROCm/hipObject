@@ -310,6 +310,10 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * offset; the request the callbacks make selects the
  * part of the object to fetch.
  *
+ * Make sure that no GPU work that reads or writes the
+ * buffer is still running when you call this. When it
+ * returns hipObjSuccess, the data is in the buffer.
+ *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
  * @param size    Number of bytes to transfer
@@ -333,6 +337,11 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * inside the buffer. hipObject doesn't send an object
  * offset; the request the callbacks make selects where
  * the data goes in the object.
+ *
+ * hipObject doesn't wait for GPU work that writes the
+ * buffer, on any stream. Make sure that it has finished,
+ * for example with hipStreamSynchronize(), before you
+ * call this.
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
@@ -363,6 +372,12 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
  * HIPOBJ_SYNC_TO_HOST before a PUT and HIPOBJ_SYNC_TO_DEVICE after a
  * GET. It is a no-op, reporting success, for a directly registered
  * buffer; hipObjGet() and hipObjPut() do it themselves.
+ *
+ * The copy has finished when this returns. hipObject doesn't wait for GPU
+ * work that uses the buffer, on any stream. Before HIPOBJ_SYNC_TO_HOST,
+ * make sure that the GPU work that writes the buffer has finished, for
+ * example with hipStreamSynchronize(). Before HIPOBJ_SYNC_TO_DEVICE, make
+ * sure that no GPU work that reads or writes the buffer is still running.
  *
  * @serialized
  * @ingroup io
