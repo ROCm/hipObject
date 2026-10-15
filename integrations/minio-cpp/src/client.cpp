@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
+#include <locale>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -229,6 +230,9 @@ std::string
 TransferStatsLine(const TransferStats &stats)
 {
     std::ostringstream line;
+    // A stream formats numbers with the global locale, which the application
+    // may have set to one that groups digits ("131,072")
+    line.imbue(std::locale::classic());
     line << "hipobj-stats: rdma_put=" << stats.rdmaPuts << " rdma_get=" << stats.rdmaGets
          << " http_put=" << stats.httpPuts << " http_get=" << stats.httpGets
          << " rdma_bytes=" << stats.rdmaBytes << " http_bytes=" << stats.httpBytes;
