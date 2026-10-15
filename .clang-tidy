@@ -52,6 +52,10 @@ Checks:
   - -portability-avoid-pragma-once
   - -readability-identifier-length
   - -modernize-use-trailing-return-type
+  # Its fix, return {...}, can call a different constructor than the
+  # explicit call it replaces: braces prefer an initializer_list
+  # constructor, as std::string and std::vector have
+  - -modernize-return-braced-init-list
   # GCC's -Weffc++ wants every member initialized in the constructor's
   # initializer list or in its declaration, and this check reports exactly
   # those initializers as redundant, so the two can't both pass
@@ -85,8 +89,6 @@ Checks:
   - -bugprone-use-after-move  # TODO(2)
   - -cert-err33-c  # TODO(82): unchecked fprintf(), snprintf(), ...
   - -concurrency-mt-unsafe  # TODO(27): getenv(), strerror(), dlerror(), ...
-  - -cppcoreguidelines-avoid-c-arrays  # TODO(54)
-  - -modernize-avoid-c-arrays  # TODO: the same check
   - -cppcoreguidelines-avoid-magic-numbers  # TODO(486)
   - -readability-magic-numbers  # TODO: the same check
   - -cppcoreguidelines-avoid-non-const-global-variables  # TODO(36)
@@ -109,16 +111,6 @@ Checks:
   - -misc-misplaced-const  # TODO(1)
   - -misc-non-private-member-variables-in-classes  # TODO(139)
   - -cppcoreguidelines-non-private-member-variables-in-classes  # TODO: the same check
-  - -modernize-concat-nested-namespaces  # TODO(21)
-  - -modernize-loop-convert  # TODO(2)
-  - -modernize-return-braced-init-list  # TODO(10)
-  - -modernize-use-auto  # TODO(11)
-  - -modernize-use-designated-initializers  # TODO(125)
-  - -modernize-use-integer-sign-comparison  # TODO(2)
-  - -modernize-use-ranges  # TODO(2)
-  - -modernize-use-starts-ends-with  # TODO(2)
-  - -modernize-use-string-view  # TODO(2)
-  - -modernize-use-using  # TODO(1): LLVM 20 and 21 only
   - -performance-enum-size  # TODO(8)
   - -performance-faster-string-find  # TODO(1)
   - -performance-prefer-single-char-overloads  # TODO: the same check

@@ -276,7 +276,7 @@ constexpr size_t kLockedFunctions = 9;
 struct ReentryProbe {
     void       *registered   = nullptr;
     void       *unregistered = nullptr;
-    hipObjOps_t plainOps     = {&plainSendRequest, &plainRecvReply};
+    hipObjOps_t plainOps     = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
 
     std::vector<std::pair<std::string_view, hipObjOpError_t>> locked{};
     char                                                     *token       = nullptr;
@@ -320,7 +320,7 @@ TEST_F(ThreadSafetyTest, CallbackReentryFailsInsteadOfDeadlocking)
     probe.unregistered = buffer(1);
     ASSERT_EQ(hipObjBufRegisterHost(probe.registered, kBufSize).opError, hipObjSuccess);
 
-    hipObjOps_t ops = {&reentrantSendRequest, &plainRecvReply};
+    hipObjOps_t ops = {.sendRequest = &reentrantSendRequest, .recvReply = &plainRecvReply};
     EXPECT_EQ(hipObjGet(nullptr, probe.registered, kBufSize, 0, &ops, &probe).opError, hipObjSuccess);
 
     EXPECT_EQ(probe.locked.size(), kLockedFunctions);

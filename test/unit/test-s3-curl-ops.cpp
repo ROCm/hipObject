@@ -10,7 +10,6 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
-#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <span>
@@ -18,7 +17,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <utility>
 
 #include <arpa/inet.h>
 #include <curl/curl.h>
@@ -69,8 +67,8 @@ remainingMs(const std::chrono::steady_clock::time_point &deadline)
 // connects or disappears mid-transfer.
 class StubHttpServer {
 public:
-    explicit StubHttpServer(std::string response)
-        : listenFd_(socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)), response_(std::move(response))
+    explicit StubHttpServer(std::string_view response)
+        : listenFd_(socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)), response_(response)
     {
         if (!listenFd_) {
             throw std::runtime_error("socket() failed");
@@ -91,9 +89,7 @@ public:
         if (getsockname(listenFd_.get(), reinterpret_cast<struct sockaddr *>(&addr), &slen) != 0) {
             throw std::runtime_error("getsockname failed");
         }
-        char url[64];
-        snprintf(url, sizeof(url), "http://127.0.0.1:%u", static_cast<unsigned>(ntohs(addr.sin_port)));
-        endpoint_ = url;
+        endpoint_ = "http://127.0.0.1:" + std::to_string(static_cast<unsigned>(ntohs(addr.sin_port)));
 
         worker_ = std::thread([this] { serve(); });
     }
@@ -188,7 +184,7 @@ private:
         // recv(), so the request can overshoot that threshold by up to one
         // buffer. A clean disconnect just ends the loop; requestComplete
         // below reports whether the terminator was actually seen.
-        char buf[4096];
+        std::array<char, 4096> buf{};
         while (request_.find("\r\n\r\n") == std::string::npos && request_.size() < 8192) {
             if (remainingMs(deadline) == 0) {
                 result_.err = ETIMEDOUT;
@@ -210,7 +206,7 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            ssize_t n = recv(fd.get(), buf, sizeof(buf), 0);
+            ssize_t n = recv(fd.get(), buf.data(), buf.size(), 0);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
@@ -221,7 +217,7 @@ private:
             if (n == 0) {
                 break; // client hung up before sending complete headers
             }
-            request_.append(buf, static_cast<size_t>(n));
+            request_.append(buf.data(), static_cast<size_t>(n));
         }
         result_.requestComplete = request_.find("\r\n\r\n") != std::string::npos;
 
@@ -271,30 +267,29 @@ private:
     std::thread      worker_{};
 };
 
-const char       kToken[]  = "0123456789abcdef";
-constexpr size_t kTokenLen = sizeof(kToken) - 1;
+constexpr std::string_view kToken = "rdma-test-token";
 
-const char kR500[]         = "HTTP/1.0 500 Internal Server Error\r\n"
-                             "X-Amz-Rdma-Reply: ok\r\n"
-                             "\r\n";
-const char kR204[]         = "HTTP/1.0 204 No Content\r\n"
-                             "X-Amz-Rdma-Reply: ok\r\n"
-                             "\r\n";
-const char kR299[]         = "HTTP/1.0 299 Unknown\r\n"
-                             "X-Amz-Rdma-Reply: ok\r\n"
-                             "\r\n";
-const char kR300[]         = "HTTP/1.0 300 Multiple Choices\r\n"
-                             "X-Amz-Rdma-Reply: ok\r\n"
-                             "\r\n";
-const char kR200NoReply[]  = "HTTP/1.0 200 OK\r\n"
-                             "Content-Length: 0\r\n"
-                             "\r\n";
-const char kR200ErrMixed[] = "HTTP/1.0 200 OK\r\n"
-                             "X-Amz-Rdma-Reply: err\r\n"
-                             "\r\n";
-const char kR200OkCaps[]   = "HTTP/1.0 200 OK\r\n"
-                             "X-AMZ-RDMA-REPLY: ok\r\n"
-                             "\r\n";
+constexpr std::string_view kR500         = "HTTP/1.0 500 Internal Server Error\r\n"
+                                           "X-Amz-Rdma-Reply: ok\r\n"
+                                           "\r\n";
+constexpr std::string_view kR204         = "HTTP/1.0 204 No Content\r\n"
+                                           "X-Amz-Rdma-Reply: ok\r\n"
+                                           "\r\n";
+constexpr std::string_view kR299         = "HTTP/1.0 299 Unknown\r\n"
+                                           "X-Amz-Rdma-Reply: ok\r\n"
+                                           "\r\n";
+constexpr std::string_view kR300         = "HTTP/1.0 300 Multiple Choices\r\n"
+                                           "X-Amz-Rdma-Reply: ok\r\n"
+                                           "\r\n";
+constexpr std::string_view kR200NoReply  = "HTTP/1.0 200 OK\r\n"
+                                           "Content-Length: 0\r\n"
+                                           "\r\n";
+constexpr std::string_view kR200ErrMixed = "HTTP/1.0 200 OK\r\n"
+                                           "X-Amz-Rdma-Reply: err\r\n"
+                                           "\r\n";
+constexpr std::string_view kR200OkCaps   = "HTTP/1.0 200 OK\r\n"
+                                           "X-AMZ-RDMA-REPLY: ok\r\n"
+                                           "\r\n";
 
 // ctx keeps endpoint.c_str(), so the string must outlive ctx.
 void
@@ -314,12 +309,12 @@ void fillCtx(hipObjS3CurlCtx *ctx, std::string &&endpoint) = delete;
 // expected value. Checking the stub result keeps a broken stub from
 // masquerading as a passing negative test.
 void
-expectSendResult(const std::string &response, int expectedRc)
+expectSendResult(std::string_view response, int expectedRc)
 {
     StubHttpServer  server(response);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int actualRc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
+    int actualRc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(expectedRc, actualRc);
 }
@@ -385,7 +380,7 @@ TEST(S3CurlOps, ReplyHeaderMixedCase)
     StubHttpServer  server(kR200ErrMixed);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
+    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
@@ -401,7 +396,7 @@ TEST(S3CurlOps, ReplyHeaderAllCaps)
     StubHttpServer  server(kR200OkCaps);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
+    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
@@ -417,13 +412,13 @@ TEST(S3CurlOps, RequestContract)
     StubHttpServer  server(kR200OkCaps);
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, server.endpoint());
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
+    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     ASSERT_TRUE(server.waitDone().ok());
     EXPECT_EQ(0, rc);
 
     const std::string &req = server.lastRequest();
     EXPECT_NE(std::string::npos, req.find("GET /test/object HTTP/1.1"));
-    EXPECT_NE(std::string::npos, req.find(std::string("x-amz-rdma-token: ") + kToken + "\r\n"));
+    EXPECT_NE(std::string::npos, req.find("x-amz-rdma-token: " + std::string(kToken) + "\r\n"));
 }
 
 TEST(S3CurlOps, ConnectionRefusedFails)
@@ -444,13 +439,13 @@ TEST(S3CurlOps, ConnectionRefusedFails)
 
     hipObjS3CurlCtx ctx{};
     fillCtx(&ctx, url);
-    int rc = hipObjS3CurlSendRequest(&ctx, kToken, kTokenLen);
+    int rc = hipObjS3CurlSendRequest(&ctx, kToken.data(), kToken.size());
     EXPECT_EQ(-1, rc);
 }
 
 TEST(S3CurlOps, SendRequestNullCtx)
 {
-    EXPECT_EQ(-1, hipObjS3CurlSendRequest(nullptr, kToken, kTokenLen));
+    EXPECT_EQ(-1, hipObjS3CurlSendRequest(nullptr, kToken.data(), kToken.size()));
 }
 
 TEST(S3CurlOps, SendRequestNullToken)

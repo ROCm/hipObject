@@ -102,9 +102,9 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_p
         }
         else {
             const DmabufFd dmabuf(fd, runtime);
-            IbvMrPtr       mr = own<IbvMrPtr>(verbs, verbs.reg_dmabuf_mr(pd, offset, length,
-                                                                         reinterpret_cast<uintptr_t>(addr),
-                                                                         dmabuf.get(), access));
+            auto           mr = own<IbvMrPtr>(verbs,
+                                              verbs.reg_dmabuf_mr(pd, offset, length, reinterpret_cast<uintptr_t>(addr),
+                                                                  dmabuf.get(), access));
             if (mr) {
                 return mr;
             }
@@ -149,7 +149,7 @@ HostBufDeleter::operator()(void *hostBuf) const noexcept
 bool
 BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 {
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
+    auto key = reinterpret_cast<uintptr_t>(devPtr);
     if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
         return false;
     }
@@ -186,8 +186,8 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     if (err != hipSuccess || !rawHostBuf) {
         return false;
     }
-    HostBufPtr hostBuf = own<HostBufPtr>(runtime, rawHostBuf);
-    mr                 = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
+    auto hostBuf = own<HostBufPtr>(runtime, rawHostBuf);
+    mr           = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
     if (!mr) {
         return false;
     }
@@ -205,13 +205,13 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 bool
 BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 {
-    uintptr_t key = reinterpret_cast<uintptr_t>(hostPtr);
+    auto key = reinterpret_cast<uintptr_t>(hostPtr);
     if (!validateRegistration(entries_.contains(key), entries_.size(), size)) {
         return false;
     }
     const Verbs &verbs  = *verbs_;
     int          access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
-    IbvMrPtr     mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
+    auto         mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
     if (!mr) {
         return false;
     }
@@ -223,8 +223,8 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
 bool
 BufferMap::deregisterBuffer(void *devPtr)
 {
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
+    auto key = reinterpret_cast<uintptr_t>(devPtr);
+    auto it  = entries_.find(key);
     if (it == entries_.end()) {
         return false;
     }
@@ -236,8 +236,8 @@ BufferMap::deregisterBuffer(void *devPtr)
 const BufferMap::BufEntry *
 BufferMap::find(const void *devPtr) const
 {
-    uintptr_t key = reinterpret_cast<uintptr_t>(devPtr);
-    auto      it  = entries_.find(key);
+    auto key = reinterpret_cast<uintptr_t>(devPtr);
+    auto it  = entries_.find(key);
     return it == entries_.end() ? nullptr : &it->second;
 }
 

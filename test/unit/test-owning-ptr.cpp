@@ -47,17 +47,15 @@ TEST(OwningPtrTest, VerbsPointersReleaseThroughTheirVerbs)
     hipObjTest::FakeDevice      device{};
     const hipObjTest::FakeVerbs verbs(device);
     {
-        int                            numDevices = 0;
-        const hipObj::IbvDeviceListPtr list =
-            hipObj::own<hipObj::IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevices));
-        const hipObj::IbvContextPtr ctx =
-            hipObj::own<hipObj::IbvContextPtr>(verbs, verbs.open_device(nullptr));
-        const hipObj::IbvPdPtr pd = hipObj::own<hipObj::IbvPdPtr>(verbs, verbs.alloc_pd(ctx.get()));
-        const hipObj::IbvCqPtr cq =
+        int        numDevices = 0;
+        const auto list = hipObj::own<hipObj::IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevices));
+        const auto ctx  = hipObj::own<hipObj::IbvContextPtr>(verbs, verbs.open_device(nullptr));
+        const auto pd   = hipObj::own<hipObj::IbvPdPtr>(verbs, verbs.alloc_pd(ctx.get()));
+        const auto cq =
             hipObj::own<hipObj::IbvCqPtr>(verbs, verbs.create_cq(ctx.get(), 1, nullptr, nullptr, 0));
-        const hipObj::IbvQpPtr qp = hipObj::own<hipObj::IbvQpPtr>(verbs, verbs.create_qp(pd.get(), nullptr));
-        char                   byte = 0;
-        const hipObj::IbvMrPtr mr = hipObj::own<hipObj::IbvMrPtr>(verbs, verbs.reg_mr(pd.get(), &byte, 1, 0));
+        const auto qp   = hipObj::own<hipObj::IbvQpPtr>(verbs, verbs.create_qp(pd.get(), nullptr));
+        char       byte = 0;
+        const auto mr   = hipObj::own<hipObj::IbvMrPtr>(verbs, verbs.reg_mr(pd.get(), &byte, 1, 0));
         ASSERT_TRUE(list && ctx && pd && cq && qp && mr);
         EXPECT_EQ(device.log.destroyQp, 0);
     }
@@ -77,12 +75,9 @@ TEST(OwningPtrTest, PointersFromTwoVerbsStaySeparate)
     hipObjTest::FakeDevice      second{};
     const hipObjTest::FakeVerbs secondVerbs(second);
     {
-        const hipObj::IbvQpPtr a =
-            hipObj::own<hipObj::IbvQpPtr>(firstVerbs, firstVerbs.create_qp(nullptr, nullptr));
-        const hipObj::IbvQpPtr b =
-            hipObj::own<hipObj::IbvQpPtr>(secondVerbs, secondVerbs.create_qp(nullptr, nullptr));
-        const hipObj::IbvQpPtr c =
-            hipObj::own<hipObj::IbvQpPtr>(secondVerbs, secondVerbs.create_qp(nullptr, nullptr));
+        const auto a = hipObj::own<hipObj::IbvQpPtr>(firstVerbs, firstVerbs.create_qp(nullptr, nullptr));
+        const auto b = hipObj::own<hipObj::IbvQpPtr>(secondVerbs, secondVerbs.create_qp(nullptr, nullptr));
+        const auto c = hipObj::own<hipObj::IbvQpPtr>(secondVerbs, secondVerbs.create_qp(nullptr, nullptr));
         ASSERT_TRUE(a && b && c);
     }
     EXPECT_EQ(first.log.destroyQp, 1);
@@ -98,11 +93,11 @@ TEST(OwningPtrTest, HipPointersReleaseThroughTheirRuntime)
     void                     *rawHostBuf = nullptr;
     {
         ASSERT_EQ(runtime.hostMalloc(&rawHostBuf, 16, hipHostMallocDefault), hipSuccess);
-        const hipObj::HostBufPtr hostBuf = hipObj::own<hipObj::HostBufPtr>(runtime, rawHostBuf);
+        const auto hostBuf = hipObj::own<hipObj::HostBufPtr>(runtime, rawHostBuf);
 
         hipEvent_t rawEvent = nullptr;
         ASSERT_EQ(runtime.eventCreate(&rawEvent), hipSuccess);
-        const hipObj::HipEventPtr event = hipObj::own<hipObj::HipEventPtr>(runtime, rawEvent);
+        const auto event = hipObj::own<hipObj::HipEventPtr>(runtime, rawEvent);
 
         EXPECT_EQ(device.log.hostFree, 0);
     }
@@ -121,11 +116,9 @@ TEST(OwningPtrTest, MovingMovesTheDeleter)
     hipObjTest::FakeDevice      second{};
     const hipObjTest::FakeVerbs secondVerbs(second);
     {
-        hipObj::IbvQpPtr target =
-            hipObj::own<hipObj::IbvQpPtr>(firstVerbs, firstVerbs.create_qp(nullptr, nullptr));
+        auto target = hipObj::own<hipObj::IbvQpPtr>(firstVerbs, firstVerbs.create_qp(nullptr, nullptr));
         {
-            hipObj::IbvQpPtr source =
-                hipObj::own<hipObj::IbvQpPtr>(secondVerbs, secondVerbs.create_qp(nullptr, nullptr));
+            auto source = hipObj::own<hipObj::IbvQpPtr>(secondVerbs, secondVerbs.create_qp(nullptr, nullptr));
             ASSERT_TRUE(target && source);
             target = std::move(source);
         }
@@ -142,7 +135,7 @@ TEST(OwningPtrTest, OwningNullReleasesNothing)
     hipObjTest::FakeDevice      device{};
     const hipObjTest::FakeVerbs verbs(device);
     {
-        const hipObj::IbvQpPtr qp = hipObj::own<hipObj::IbvQpPtr>(verbs, nullptr);
+        const auto qp = hipObj::own<hipObj::IbvQpPtr>(verbs, nullptr);
         EXPECT_FALSE(qp);
         EXPECT_EQ(qp.get_deleter().verbs, &verbs);
     }

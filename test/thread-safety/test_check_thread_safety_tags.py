@@ -38,7 +38,7 @@ GUARD = """\
     }
 """
 
-RETURN = "    return {hipObjSuccess, 0};\n"
+RETURN = "    return hipObj::makeError(hipObjSuccess);\n"
 
 
 def definition(name: str, body: str) -> str:
@@ -155,7 +155,8 @@ class SerializedDefinitionTest(unittest.TestCase):
     def test_wrong_return(self) -> None:
         """Something other than kReentryError returned"""
         self.assert_unguarded(
-            GUARD.replace("hipObj::kReentryError", "{hipObjSuccess, 0}") + RETURN
+            GUARD.replace("hipObj::kReentryError", "hipObj::makeError(hipObjSuccess)")
+            + RETURN
         )
 
     def test_guard_in_string_literal(self) -> None:

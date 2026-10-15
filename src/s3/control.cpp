@@ -42,7 +42,7 @@ receiveRdmaReplyRaw(const hipObjOps_t &ops, void *ctx, std::span<char> replyBuf)
     if (!status) {
         return std::nullopt;
     }
-    return RdmaReply{received, *status};
+    return RdmaReply{.text = received, .status = *status};
 }
 
 } // namespace hipObj

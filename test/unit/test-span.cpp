@@ -103,7 +103,7 @@ TEST(Span, DeviceSpanViewsTheList)
      * verbs */
     hipObjTest::FakeDevice      device{};
     const hipObjTest::FakeVerbs verbs(device);
-    hipObj::IbvDeviceListPtr    list = hipObj::own<hipObj::IbvDeviceListPtr>(verbs, devices.data());
+    auto                        list = hipObj::own<hipObj::IbvDeviceListPtr>(verbs, devices.data());
     const auto                  view = hipObj::deviceSpan(list, 2);
     EXPECT_EQ(view.data(), devices.data());
     EXPECT_EQ(view.size(), 2U);

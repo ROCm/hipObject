@@ -14,6 +14,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -139,7 +140,7 @@ SysfsTopology::enumerate(std::string_view hcaList) const
 {
     std::vector<NicInfo> result;
     int                  num_devs = 0;
-    IbvDeviceListPtr     dev_list = own<IbvDeviceListPtr>(*verbs_, verbs_->get_device_list(&num_devs));
+    auto                 dev_list = own<IbvDeviceListPtr>(*verbs_, verbs_->get_device_list(&num_devs));
     if (!dev_list || num_devs <= 0)
         return result;
 
@@ -152,7 +153,7 @@ SysfsTopology::enumerate(std::string_view hcaList) const
         if (!hcaList.empty() && !HcaListIncludes(hcaList, dev_name))
             continue;
 
-        IbvContextPtr ctx = own<IbvContextPtr>(*verbs_, verbs_->open_device(dev));
+        auto ctx = own<IbvContextPtr>(*verbs_, verbs_->open_device(dev));
         if (!ctx)
             continue;
 
@@ -236,7 +237,7 @@ GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int g
     if (distance(*best) == std::numeric_limits<int>::max())
         return std::nullopt;
 
-    return RdmaNic{static_cast<int>(best - devices.begin()), std::move(best->dev_name)};
+    return RdmaNic{.index = static_cast<int>(best - devices.begin()), .name = std::move(best->dev_name)};
 }
 
 std::optional<int>

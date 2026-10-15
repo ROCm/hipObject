@@ -116,9 +116,9 @@ namespace {
         }
 
         if (value == "ok")
-            return ParsedReply{200, std::nullopt};
+            return ParsedReply{.httpCode = 200, .peerToken = std::nullopt};
         if (value == "err")
-            return ParsedReply{-1, std::nullopt};
+            return ParsedReply{.httpCode = -1, .peerToken = std::nullopt};
 
         const std::string_view status = value.substr(0, value.find(':'));
         if (status.size() != 3)
@@ -130,14 +130,14 @@ namespace {
         const int code = static_cast<int>(*parsed);
 
         if (status.size() == value.size())
-            return ParsedReply{code, std::nullopt};
+            return ParsedReply{.httpCode = code, .peerToken = std::nullopt};
         /* Only a successful reply carries a peer token */
         if (code != 200)
             return std::nullopt;
         auto token = decodeRdmaTokenHex(value.substr(status.size() + 1));
         if (!token)
             return std::nullopt;
-        return ParsedReply{code, token};
+        return ParsedReply{.httpCode = code, .peerToken = token};
     }
 
 } // namespace

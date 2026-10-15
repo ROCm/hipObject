@@ -52,83 +52,83 @@ makeFuncs()
 {
     hipObj::LoadedVerbs::Funcs funcs{};
     funcs.get_device_list = [](int *num) {
-        g_call = {"get_device_list", num, 0};
+        g_call = {.name = "get_device_list", .object = num, .value = 0};
         *num   = 1;
         return fakeObject<struct ibv_device *>(0x10);
     };
     funcs.free_device_list = [](struct ibv_device **list) {
-        g_call = {"free_device_list", static_cast<const void *>(list), 0};
+        g_call = {.name = "free_device_list", .object = static_cast<const void *>(list), .value = 0};
     };
     funcs.open_device = [](struct ibv_device *device) {
-        g_call = {"open_device", device, 0};
+        g_call = {.name = "open_device", .object = device, .value = 0};
         return fakeObject<struct ibv_context>(0x20);
     };
     funcs.close_device = [](struct ibv_context *context) {
-        g_call = {"close_device", context, 0};
+        g_call = {.name = "close_device", .object = context, .value = 0};
         return kResult;
     };
     funcs.get_device_name = [](struct ibv_device *device) {
-        g_call = {"get_device_name", device, 0};
+        g_call = {.name = "get_device_name", .object = device, .value = 0};
         return "fake0";
     };
     funcs.query_device = [](struct ibv_context *context, struct ibv_device_attr *attr) {
-        g_call = {"query_device", context, reinterpret_cast<uintptr_t>(attr)};
+        g_call = {.name = "query_device", .object = context, .value = reinterpret_cast<uintptr_t>(attr)};
         return kResult;
     };
     funcs.query_port = [](struct ibv_context *context, uint8_t port, struct ibv_port_attr *) {
-        g_call = {"query_port", context, port};
+        g_call = {.name = "query_port", .object = context, .value = port};
         return kResult;
     };
     funcs.query_gid = [](struct ibv_context *context, uint8_t, int index, union ibv_gid *) {
-        g_call = {"query_gid", context, static_cast<uint64_t>(index)};
+        g_call = {.name = "query_gid", .object = context, .value = static_cast<uint64_t>(index)};
         return kResult;
     };
     funcs.alloc_pd = [](struct ibv_context *context) {
-        g_call = {"alloc_pd", context, 0};
+        g_call = {.name = "alloc_pd", .object = context, .value = 0};
         return fakeObject<struct ibv_pd>(0x30);
     };
     funcs.dealloc_pd = [](struct ibv_pd *pd) {
-        g_call = {"dealloc_pd", pd, 0};
+        g_call = {.name = "dealloc_pd", .object = pd, .value = 0};
         return kResult;
     };
     funcs.reg_dmabuf_mr = [](struct ibv_pd *pd, uint64_t, size_t, uint64_t iova, int, int) {
-        g_call = {"reg_dmabuf_mr", pd, iova};
+        g_call = {.name = "reg_dmabuf_mr", .object = pd, .value = iova};
         return fakeObject<struct ibv_mr>(0x40);
     };
     funcs.reg_mr_iova2 = [](struct ibv_pd *pd, void *, size_t, uintptr_t iova, int) {
-        g_call = {"reg_mr_iova2", pd, iova};
+        g_call = {.name = "reg_mr_iova2", .object = pd, .value = iova};
         return fakeObject<struct ibv_mr>(0x50);
     };
     funcs.dereg_mr = [](struct ibv_mr *mr) {
-        g_call = {"dereg_mr", mr, 0};
+        g_call = {.name = "dereg_mr", .object = mr, .value = 0};
         return kResult;
     };
     funcs.create_cq = [](struct ibv_context *context, int cqe, void *, struct ibv_comp_channel *, int) {
-        g_call = {"create_cq", context, static_cast<uint64_t>(cqe)};
+        g_call = {.name = "create_cq", .object = context, .value = static_cast<uint64_t>(cqe)};
         return fakeObject<struct ibv_cq>(0x60);
     };
     funcs.destroy_cq = [](struct ibv_cq *cq) {
-        g_call = {"destroy_cq", cq, 0};
+        g_call = {.name = "destroy_cq", .object = cq, .value = 0};
         return kResult;
     };
     funcs.create_qp = [](struct ibv_pd *pd, struct ibv_qp_init_attr *) {
-        g_call = {"create_qp", pd, 0};
+        g_call = {.name = "create_qp", .object = pd, .value = 0};
         return fakeObject<struct ibv_qp>(0x70);
     };
     funcs.modify_qp = [](struct ibv_qp *qp, struct ibv_qp_attr *, int mask) {
-        g_call = {"modify_qp", qp, static_cast<uint64_t>(mask)};
+        g_call = {.name = "modify_qp", .object = qp, .value = static_cast<uint64_t>(mask)};
         return kResult;
     };
     funcs.destroy_qp = [](struct ibv_qp *qp) {
-        g_call = {"destroy_qp", qp, 0};
+        g_call = {.name = "destroy_qp", .object = qp, .value = 0};
         return kResult;
     };
     funcs.poll_cq = [](struct ibv_cq *cq, int count, struct ibv_wc *) {
-        g_call = {"poll_cq", cq, static_cast<uint64_t>(count)};
+        g_call = {.name = "poll_cq", .object = cq, .value = static_cast<uint64_t>(count)};
         return kResult;
     };
     funcs.post_send = [](struct ibv_qp *qp, struct ibv_send_wr *, struct ibv_send_wr **) {
-        g_call = {"post_send", qp, 0};
+        g_call = {.name = "post_send", .object = qp, .value = 0};
         return kResult;
     };
     return funcs;
@@ -271,11 +271,11 @@ TEST_F(LoadedVerbsTest, FallsBackToContextOps)
 
     struct ibv_context context {};
     context.ops.poll_cq = [](struct ibv_cq *cq, int count, struct ibv_wc *) {
-        g_call = {"ops.poll_cq", cq, static_cast<uint64_t>(count)};
+        g_call = {.name = "ops.poll_cq", .object = cq, .value = static_cast<uint64_t>(count)};
         return kResult;
     };
     context.ops.post_send = [](struct ibv_qp *qp, struct ibv_send_wr *, struct ibv_send_wr **) {
-        g_call = {"ops.post_send", qp, 0};
+        g_call = {.name = "ops.post_send", .object = qp, .value = 0};
         return kResult;
     };
     struct ibv_cq cq {};

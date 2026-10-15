@@ -17,6 +17,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "hip-seam.h"
+#include "hipobj-private.h"
 #include "hipobj-parse.h"
 #include "hipobj-warnings.h"
 #include "ibv-wrapper.h"
@@ -199,7 +200,7 @@ hipObjError_t
 initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform, const Options &options)
 {
     if (current()) {
-        return {hipObjAlreadyInitialized, 0};
+        return makeError(hipObjAlreadyInitialized);
     }
     const HipRuntime      &runtime = platform->hip();
     const std::string_view nicHint = config.nicHint ? std::string_view(config.nicHint) : std::string_view();
@@ -212,7 +213,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
             // no NIC hint -- with a hint the topology lookup below is skipped
             // entirely, so an absent GPU is not an error.
             if (err != hipErrorNoDevice || !haveNicHint) {
-                return {hipObjRdmaError, static_cast<int>(err)};
+                return makeError(hipObjRdmaError, static_cast<int>(err));
             }
             gpuDevice = -1;
         }
@@ -226,10 +227,10 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
             deviceCount = 0;
         }
         else if (err != hipSuccess) {
-            return {hipObjRdmaError, static_cast<int>(err)};
+            return makeError(hipObjRdmaError, static_cast<int>(err));
         }
         if (gpuDevice >= deviceCount) {
-            return {hipObjInvalidValue, 0};
+            return makeError(hipObjInvalidValue);
         }
     }
     std::optional<RdmaNic> nic;
@@ -241,10 +242,10 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
         // hint is provided, try opening it directly without GPU topology so the
         // library works in GPU-less environments (e.g. CI with emulated RDMA).
         if (haveNicHint) {
-            nic = RdmaNic{0, std::string(nicHint)};
+            nic = RdmaNic{.index = 0, .name = std::string(nicHint)};
         }
         else {
-            return {hipObjNicNotFound, 0};
+            return makeError(hipObjNicNotFound);
         }
     }
 
@@ -254,12 +255,12 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     std::optional<RdmaDevice> opened =
         openRdmaDeviceByName(platform->verbs(), platform->topology(), nic->name);
     if (!opened) {
-        return {hipObjRdmaError, 0};
+        return makeError(hipObjRdmaError);
     }
     auto                        device = std::make_unique<const RdmaDevice>(std::move(*opened));
     std::optional<RcConnection> conn   = createRcConnection(*device, 256, 128, 128);
     if (!conn) {
-        return {hipObjRdmaError, 0};
+        return makeError(hipObjRdmaError);
     }
     ResolvedConfig resolved{
         .gpuDevice = gpuDevice,
@@ -271,7 +272,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
 
     /* Can't throw */
     current() = std::move(instance);
-    return {hipObjSuccess, 0};
+    return makeError(hipObjSuccess);
 }
 
 } // namespace hipObj

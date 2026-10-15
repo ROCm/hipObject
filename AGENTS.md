@@ -202,6 +202,15 @@ with it:
   - Don't let exceptions cross the C API. The public functions in
     `src/hipobj.cpp` catch everything and return an error code; keep it that
     way.
+  - Make the `hipObjError_t` that a public function returns with
+    `hipObj::makeError()` ([`src/hipobj-private.h`](src/hipobj-private.h)),
+    as in `return makeError(hipObjInvalidValue);`, or
+    `makeError(hipObjRdmaError, static_cast<int>(hipErr))` to pass on a HIP
+    error. Don't write `{hipObjInvalidValue, 0}`: clang-tidy rejects
+    initializing a struct's fields by position. Code outside the library,
+    such as the MinIO bridge, doesn't include the library's private headers,
+    so it uses designated initializers instead
+    (`{.opError = hipObjSuccess, .hipError = 0}`).
 - **Don't add global accessors.** The library's state lives in one global,
   the current `Instance` (`currentInstance()`, [`src/state.h`](src/state.h)),
   which the C API needs to find it. Everything below the `Instance` gets what
@@ -336,6 +345,22 @@ takes priority over speed and convenience.
   ([pr-security-scan.yml](.github/workflows/pr-security-scan.yml): bandit,
   gitleaks, trivy, and zizmor) run on PRs, and their findings get fixed, not
   dismissed.
+- **Make fake secrets in tests look fake.** Gitleaks' `generic-api-key` rule
+  flags a constant that looks like a real key, such as a hex string in a
+  variable named for a token or key, even in a test. Use a value that's
+  obviously a placeholder, such as `"rdma-test-token"`. If the code under test
+  needs a particular length or character set, keep to it, but don't use a
+  plain hex or base64 string. A value that a test computes, such as a token
+  from `encodeRdmaToken()`, isn't a literal, so it's fine. To check, run
+  [gitleaks](https://github.com/gitleaks/gitleaks) on the tracked files with
+  the repository's configuration:
+
+  ```bash
+  d=$(mktemp -d)
+  git ls-files -z | xargs -0 tar -cf - | tar -xf - -C "$d"
+  gitleaks dir "$d" --config .github/scan_tools_configs/gitleaks.toml
+  rm -rf "$d"
+  ```
 
 ## Data path performance
 

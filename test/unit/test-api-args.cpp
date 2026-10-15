@@ -9,6 +9,7 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cstddef>
@@ -89,12 +90,12 @@ TEST(ApiArgsErrorString, UnknownCode)
 
 TEST_F(ApiArgsTest, EverythingButInitNeedsInit)
 {
-    char        buf[kBufSize]{};
-    hipObjOps_t ops   = makeOps();
-    char       *token = nullptr;
+    std::array<char, kBufSize> buf{};
+    hipObjOps_t                ops   = makeOps();
+    char                      *token = nullptr;
 
     EXPECT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjNotInitialized);
-    EXPECT_EQ(hipObjBufRegisterHost(buf, sizeof(buf)).opError, hipObjNotInitialized);
+    EXPECT_EQ(hipObjBufRegisterHost(buf.data(), buf.size()).opError, hipObjNotInitialized);
     EXPECT_EQ(hipObjBufDeregister(kDevBuf).opError, hipObjNotInitialized);
     EXPECT_EQ(hipObjGet(nullptr, kDevBuf, kBufSize, 0, &ops, nullptr).opError, hipObjNotInitialized);
     EXPECT_EQ(hipObjPut(nullptr, kDevBuf, kBufSize, 0, &ops, nullptr).opError, hipObjNotInitialized);
@@ -632,28 +633,29 @@ TEST(ApiArgsParseReply, RejectsNullArguments)
 
 TEST(ApiArgsParseReply, AcceptsDocumentedForms)
 {
-    const struct {
+    struct Case {
         std::string reply;
         int         httpCode;
-    } cases[] = {
-        {"ok", 200},
-        {"err", -1},
-        {"200", 200},
-        {"204", 204},
-        {"206", 206},
-        {"404", 404},
-        {"501", 501},
-        {"100", 100},
-        {"599", 599},
-        {"200:" + validTokenHex(), 200},
-        {"200:" + validTokenHex(hipObj::TransportType::DC), 200},
-        /* Hex is case-insensitive */
-        {"200:" + std::string(88, 'A').replace(0, 2, "01"), 200},
-        /* Trailing line endings and NULs are ignored */
-        {"200\r\n", 200},
-        {std::string("200\0\0", 5), 200},
-        {"ok\n", 200},
     };
+    const auto cases = std::to_array<Case>({
+        {.reply = "ok", .httpCode = 200},
+        {.reply = "err", .httpCode = -1},
+        {.reply = "200", .httpCode = 200},
+        {.reply = "204", .httpCode = 204},
+        {.reply = "206", .httpCode = 206},
+        {.reply = "404", .httpCode = 404},
+        {.reply = "501", .httpCode = 501},
+        {.reply = "100", .httpCode = 100},
+        {.reply = "599", .httpCode = 599},
+        {.reply = "200:" + validTokenHex(), .httpCode = 200},
+        {.reply = "200:" + validTokenHex(hipObj::TransportType::DC), .httpCode = 200},
+        /* Hex is case-insensitive */
+        {.reply = "200:" + std::string(88, 'A').replace(0, 2, "01"), .httpCode = 200},
+        /* Trailing line endings and NULs are ignored */
+        {.reply = "200\r\n", .httpCode = 200},
+        {.reply = std::string("200\0\0", 5), .httpCode = 200},
+        {.reply = "ok\n", .httpCode = 200},
+    });
     for (const auto &c : cases) {
         int httpCode = 0;
         EXPECT_EQ(parseReply(c.reply, httpCode), hipObjSuccess) << "reply \"" << c.reply << "\"";
@@ -670,8 +672,8 @@ TEST(ApiArgsParseReply, ReadsOnlyReplyLen)
 
 TEST(ApiArgsParseReply, RejectsMalformedReplies)
 {
-    const std::string token   = validTokenHex();
-    const std::string cases[] = {
+    const std::string token = validTokenHex();
+    const auto        cases = std::to_array<std::string>({
         "",
         "\r\n",
         "okay",
@@ -708,7 +710,7 @@ TEST(ApiArgsParseReply, RejectsMalformedReplies)
         "404:" + token,
         "501:" + token,
         "ok:" + token,
-    };
+    });
     for (const std::string &reply : cases) {
         int httpCode = 12345;
         EXPECT_EQ(parseReply(reply, httpCode), hipObjInvalidValue) << "reply \"" << reply << "\"";
@@ -734,17 +736,17 @@ tokenWithIpv4()
 
 TEST(ApiArgsTokenClientNic, RejectsNullAndEmptyArguments)
 {
-    const std::string token     = tokenWithIpv4();
-    char              nicIp[32] = "unchanged";
-    EXPECT_EQ(hipObjTokenClientNic(nullptr, nicIp, sizeof(nicIp)).opError, hipObjInvalidValue);
-    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nullptr, sizeof(nicIp)).opError, hipObjInvalidValue);
-    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp, 0).opError, hipObjInvalidValue);
+    const std::string    token = tokenWithIpv4();
+    std::array<char, 32> nicIp = {{"unchanged"}};
+    EXPECT_EQ(hipObjTokenClientNic(nullptr, nicIp.data(), nicIp.size()).opError, hipObjInvalidValue);
+    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nullptr, nicIp.size()).opError, hipObjInvalidValue);
+    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp.data(), 0).opError, hipObjInvalidValue);
 }
 
 TEST(ApiArgsTokenClientNic, RejectsMalformedTokens)
 {
-    const std::string token   = tokenWithIpv4();
-    const std::string cases[] = {
+    const std::string token = tokenWithIpv4();
+    const auto        cases = std::to_array<std::string>({
         "",
         token.substr(1),
         token + "0",
@@ -753,12 +755,12 @@ TEST(ApiArgsTokenClientNic, RejectsMalformedTokens)
         "zz" + token.substr(2),
         /* Unknown transport byte */
         "02" + token.substr(2),
-    };
+    });
     for (const std::string &bad : cases) {
-        char nicIp[32] = "unchanged";
-        EXPECT_EQ(hipObjTokenClientNic(bad.c_str(), nicIp, sizeof(nicIp)).opError, hipObjInvalidValue)
+        std::array<char, 32> nicIp = {{"unchanged"}};
+        EXPECT_EQ(hipObjTokenClientNic(bad.c_str(), nicIp.data(), nicIp.size()).opError, hipObjInvalidValue)
             << "token \"" << bad << "\"";
-        EXPECT_STREQ(nicIp, "");
+        EXPECT_STREQ(nicIp.data(), "");
     }
 }
 
@@ -766,22 +768,22 @@ TEST(ApiArgsTokenClientNic, RespectsBufferLength)
 {
     const std::string token = tokenWithIpv4();
     /* "192.168.100.200" is 15 characters */
-    char nicIp[16] = "unchanged";
-    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp, 15).opError, hipObjInvalidValue);
-    EXPECT_STREQ(nicIp, "");
-    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp, 1).opError, hipObjInvalidValue);
-    EXPECT_STREQ(nicIp, "");
+    std::array<char, 16> nicIp = {{"unchanged"}};
+    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp.data(), 15).opError, hipObjInvalidValue);
+    EXPECT_STREQ(nicIp.data(), "");
+    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp.data(), 1).opError, hipObjInvalidValue);
+    EXPECT_STREQ(nicIp.data(), "");
 
-    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp, sizeof(nicIp)).opError, hipObjSuccess);
-    EXPECT_STREQ(nicIp, "192.168.100.200");
+    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp.data(), nicIp.size()).opError, hipObjSuccess);
+    EXPECT_STREQ(nicIp.data(), "192.168.100.200");
 }
 
 TEST(ApiArgsTokenClientNic, EmptyWhenNoIpv4Address)
 {
-    const std::string token     = validTokenHex();
-    char              nicIp[16] = "unchanged";
-    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp, sizeof(nicIp)).opError, hipObjSuccess);
-    EXPECT_STREQ(nicIp, "");
+    const std::string    token = validTokenHex();
+    std::array<char, 16> nicIp = {{"unchanged"}};
+    EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp.data(), nicIp.size()).opError, hipObjSuccess);
+    EXPECT_STREQ(nicIp.data(), "");
 }
 
 } // namespace

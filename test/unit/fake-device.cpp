@@ -260,7 +260,7 @@ FakeVerbs::modify_qp(struct ibv_qp *, struct ibv_qp_attr *attr, int mask) const
     /* Each call records into its own element */
     const size_t call = device_->modifyQpCount++;
     if (call < device_->modifyQp.size()) {
-        device_->modifyQp[call] = {*attr, mask};
+        device_->modifyQp[call] = {.attr = *attr, .mask = mask};
     }
     return static_cast<int>(attr->qp_state) == device_->fail.modifyQpToState ? -1 : 0;
 }
