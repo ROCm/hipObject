@@ -249,7 +249,7 @@ runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
     if (!injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>()))) {
         return {hipObjS3Error, 0};
     }
-    std::array<char, 512> replyBuf;
+    std::array<char, 512> replyBuf{};
     const auto            reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
     if (!reply || reply->status != RdmaReplyStatus::Success) {
         return {hipObjS3Error, 0};

@@ -252,6 +252,44 @@ TEST_F(NicSeamTest, HcaFilterIsForwarded)
     EXPECT_EQ(state_.lastHcaList, "mlx5_0,mlx5_1");
 }
 
+/* A bus ID as long as the buffer GetClosestNicToGpu() reads it into, so
+ * there's no room for a NUL after it */
+constexpr std::string_view kFullBufferBusId = "000000000000000000000000:42:00.0";
+static_assert(kFullBufferBusId.size() == 32);
+
+/* A HIP runtime that fills the bus ID buffer with kFullBufferBusId, without
+ * a NUL, and succeeds. FakeHip doesn't, since it always writes a NUL. */
+class FullBufferBusIdHip : public hipObjTest::FakeHip {
+public:
+    using FakeHip::FakeHip;
+
+    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int) const override
+    {
+        const std::span<char> out = hipObj::spanFromPointer(pciBusId, static_cast<size_t>(len));
+        if (out.size() != kFullBufferBusId.size()) {
+            return hipErrorInvalidValue;
+        }
+        std::ranges::copy(kFullBufferBusId, out.begin());
+        return hipSuccess;
+    }
+};
+
+/* A bus ID that fills the buffer is used whole, and nothing past the buffer
+ * is read, which AddressSanitizer would report */
+TEST_F(NicSeamTest, BusIdThatFillsTheBufferIsUsedWhole)
+{
+    state_.nics = {
+        {"mlx5_0", std::string(kGpuBusId), 0, 1},
+        {"mlx5_1", std::string(kFullBufferBusId), 1, 1},
+    };
+
+    const FullBufferBusIdHip hip(device_);
+    const auto               nic = hipObj::GetClosestNicToGpu(hip, topology_, 0, {});
+    ASSERT_TRUE(nic) << "the fake fails unless the buffer is 32 bytes";
+    EXPECT_EQ(nic->index, 1);
+    EXPECT_EQ(nic->name, "mlx5_1");
+}
+
 /* A device name that /sys/class/infiniband doesn't have, so SysfsTopology
  * finds no bus id, NUMA node, or GID type for it */
 constexpr std::string_view kFakeDevName = "hipobj_fake0";

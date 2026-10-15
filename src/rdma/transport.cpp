@@ -50,7 +50,7 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
     if (!pd) {
         return std::nullopt;
     }
-    struct ibv_port_attr portAttr;
+    ibv_port_attr portAttr{};
     if (verbs.query_port(ctx.get(), kPortNum, &portAttr) != 0) {
         return std::nullopt;
     }
@@ -64,8 +64,7 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
      * connecting a QP doesn't have to query it. A device that can't report
      * it still opens, and its QPs get no vendor attributes. */
     std::optional<uint32_t> vendorId;
-    struct ibv_device_attr  devAttr;
-    zeroObject(devAttr);
+    ibv_device_attr         devAttr{};
     if (verbs.query_device(ctx.get(), &devAttr) == 0) {
         vendorId = devAttr.vendor_id;
     }
@@ -234,8 +233,8 @@ pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
     const Verbs &verbs    = conn.device().verbs();
     const auto   deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
-        struct ibv_wc wc;
-        int           n = verbs.poll_cq(conn.cq(), 1, &wc);
+        ibv_wc wc{};
+        int    n = verbs.poll_cq(conn.cq(), 1, &wc);
         if (n < 0) {
             return false;
         }
