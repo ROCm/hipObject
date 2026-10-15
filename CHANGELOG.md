@@ -177,7 +177,9 @@
   that writes the buffer has finished, as a buffer that the NIC reads
   directly already requires. The documentation of `hipObjGet()`,
   `hipObjPut()`, and `hipObjBufSync()` now says what GPU work has to
-  finish before each call.
+  finish before each call. It also says that when a staging copy doesn't
+  finish within `HIPOBJ_STAGE_TIMEOUT_MS`, the call returns
+  `hipObjInternalError` while the copy may still be using the buffer.
 
 ### Removed
 
