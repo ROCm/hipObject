@@ -5,6 +5,8 @@
 
 #include "hipobj_minio/rdma.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -26,8 +28,6 @@
 #include "hipobj_minio/context.h"
 
 namespace hipobj::minio {
-
-using namespace ::minio;
 
 namespace {
 
@@ -78,17 +78,18 @@ namespace {
 
     std::string clientNicFromToken(const char *token)
     {
-        char          nicIp[32];
-        hipObjError_t err = hipObjTokenClientNic(token, nicIp, sizeof(nicIp));
-        if (err.opError != hipObjSuccess || nicIp[0] == '\0') {
+        std::array<char, 32> nicIp{};
+        const hipObjError_t  err = hipObjTokenClientNic(token, nicIp.data(), nicIp.size());
+        if (err.opError != hipObjSuccess) {
             return {};
         }
-        return std::string(nicIp);
+        // Up to the first NUL, which gives "" when no address is encoded
+        return std::string(nicIp.begin(), std::ranges::find(nicIp, '\0'));
     }
 
     // A response header's value, or std::nullopt if the response doesn't
     // have the header. GetFront() alone returns "" for both.
-    std::optional<std::string> headerValue(const minio::utils::Multimap &headers, const char *name)
+    std::optional<std::string> headerValue(const ::minio::utils::Multimap &headers, const char *name)
     {
         if (!headers.Contains(name)) {
             return std::nullopt;
@@ -119,11 +120,11 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     // address. See docs/interop.rst.
     const std::string rdma_token(token ? token : "");
 
-    minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-    minio::creds::Credentials creds = sctx->provider->Fetch();
-    minio::utils::Multimap    query_params;
-    minio::http::Url          url;
-    const std::string        &region = sctx->region;
+    ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
+    ::minio::creds::Credentials creds = sctx->provider->Fetch();
+    ::minio::utils::Multimap    query_params;
+    ::minio::http::Url          url;
+    const std::string          &region = sctx->region;
 
     if (!sctx->uploadId.empty()) {
         query_params.Add("uploadId", sctx->uploadId);
@@ -133,14 +134,14 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         query_params.Add("partNumber", std::to_string(sctx->partNumber));
     }
 
-    if (minio::error::Error err = sctx->url.BuildUrl(url, minio::http::Method::kPut, region, query_params,
-                                                     sctx->bucket, sctx->object)) {
+    if (::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kPut, region, query_params,
+                                                       sctx->bucket, sctx->object)) {
         return {RdmaStatus::Failed};
     }
 
     std::string host = url.HostHeaderValue();
 
-    minio::utils::Multimap sign_headers;
+    ::minio::utils::Multimap sign_headers;
     sign_headers.Add("Host", host);
     sign_headers.Add("x-amz-date", date.ToAmzDate());
     sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
@@ -156,12 +157,12 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         sign_headers.Add("X-Amz-Security-Token", creds.session_token);
     }
 
-    minio::signer::SignV4S3(minio::http::Method::kPut, url.path, region, sign_headers, query_params,
-                            creds.access_key, creds.secret_key, kUnsignedPayload, date);
+    ::minio::signer::SignV4S3(::minio::http::Method::kPut, url.path, region, sign_headers, query_params,
+                              creds.access_key, creds.secret_key, kUnsignedPayload, date);
 
     url.query_string = query_params.ToQueryString();
 
-    minio::http::Request req(minio::http::Method::kPut, url);
+    ::minio::http::Request req(::minio::http::Method::kPut, url);
     req.headers              = std::move(sign_headers);
     req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
     req.timeout_secs         = kRdmaTimeoutSecs;
@@ -171,7 +172,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         req.nic_interface = client_nic;
     }
 
-    minio::http::Response res = req.Execute();
+    ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
         rdmaTrace("put: http failed (status=", res.status_code, " error='", res.error, "')");
         return {RdmaStatus::Failed};
@@ -179,7 +180,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
 
     std::string etag = res.headers.GetFront("etag");
     if (res.status_code == 200 && !etag.empty()) {
-        sctx->etag = minio::utils::Trim(etag, '"');
+        sctx->etag = ::minio::utils::Trim(etag, '"');
         return {RdmaStatus::Ok, size};
     }
 
@@ -197,7 +198,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         sctx->checksum = resp_checksum;
     }
 
-    sctx->etag = minio::utils::Trim(etag, '"');
+    sctx->etag = ::minio::utils::Trim(etag, '"');
     return {RdmaStatus::Ok, size};
 }
 
@@ -210,20 +211,20 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     // address. See docs/interop.rst.
     const std::string rdma_token(token ? token : "");
 
-    minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-    minio::creds::Credentials creds = sctx->provider->Fetch();
-    minio::utils::Multimap    query_params;
-    minio::http::Url          url;
-    const std::string        &region = sctx->region;
+    ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
+    ::minio::creds::Credentials creds = sctx->provider->Fetch();
+    ::minio::utils::Multimap    query_params;
+    ::minio::http::Url          url;
+    const std::string          &region = sctx->region;
 
-    if (minio::error::Error err = sctx->url.BuildUrl(url, minio::http::Method::kGet, region, query_params,
-                                                     sctx->bucket, sctx->object)) {
+    if (::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kGet, region, query_params,
+                                                       sctx->bucket, sctx->object)) {
         return {RdmaStatus::Failed};
     }
 
     std::string host = url.HostHeaderValue();
 
-    minio::utils::Multimap sign_headers;
+    ::minio::utils::Multimap sign_headers;
     sign_headers.Add("Host", host);
     sign_headers.Add("x-amz-date", date.ToAmzDate());
     sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
@@ -233,10 +234,10 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
         sign_headers.Add("X-Amz-Security-Token", creds.session_token);
     }
 
-    minio::signer::SignV4S3(minio::http::Method::kGet, url.path, region, sign_headers, query_params,
-                            creds.access_key, creds.secret_key, kUnsignedPayload, date);
+    ::minio::signer::SignV4S3(::minio::http::Method::kGet, url.path, region, sign_headers, query_params,
+                              creds.access_key, creds.secret_key, kUnsignedPayload, date);
 
-    minio::http::Request req(minio::http::Method::kGet, url);
+    ::minio::http::Request req(::minio::http::Method::kGet, url);
     req.headers              = std::move(sign_headers);
     req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
     req.timeout_secs         = kRdmaTimeoutSecs;
@@ -246,7 +247,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
         req.nic_interface = client_nic;
     }
 
-    minio::http::Response res = req.Execute();
+    ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
         rdmaTrace("get: http failed (status=", res.status_code, " error='", res.error, "')");
         return {RdmaStatus::Failed};

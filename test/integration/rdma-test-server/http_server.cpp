@@ -5,6 +5,7 @@
 
 #include "http_server.h"
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <mutex>
 #include <optional>
 #include <ratio>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -28,6 +30,7 @@
 #include <unistd.h>
 
 #include "hipobj-parse.h"
+#include "hipobj-span.h"
 
 namespace hipobj::test {
 
@@ -201,12 +204,12 @@ HttpServer::startThreaded()
     if (!listen_fd_) {
         return false;
     }
-    acceptLoop_ = std::thread([this] { runThreaded(); });
+    acceptLoop_ = std::jthread([this](const std::stop_token &stop) { runThreaded(stop); });
     return true;
 }
 
 void
-HttpServer::runThreaded()
+HttpServer::runThreaded(const std::stop_token &stop)
 {
     /* Accept loop; runs on the tracked thread created by
      * startThreaded() so stop() can join it as the production
@@ -220,7 +223,7 @@ HttpServer::runThreaded()
          * hold the invariant itself: it is also reachable directly. */
         return;
     }
-    while (!stopping_.load()) {
+    while (!stop.stop_requested()) {
         pollfd pfd{};
         pfd.fd     = listen_fd_.get();
         pfd.events = POLLIN;
@@ -244,7 +247,7 @@ HttpServer::runThreaded()
          * which unregisters the fd before closing it. stop() waits on the
          * live count (the join barrier above guarantees no late
          * registration follows). */
-        std::optional<Worker> worker = registerWorker(std::move(client));
+        std::optional<Worker> worker = registerWorker(std::move(client), stop);
         if (!worker) {
             break;
         }
@@ -260,10 +263,10 @@ HttpServer::runThreaded()
 }
 
 std::optional<HttpServer::Worker>
-HttpServer::registerWorker(hipObj::UniqueFd client)
+HttpServer::registerWorker(hipObj::UniqueFd client, const std::stop_token &stop)
 {
     std::scoped_lock<std::mutex> guard(workersMtx_);
-    if (stopping_.load()) {
+    if (stop.stop_requested()) {
         return std::nullopt;
     }
     activeFds_.insert(client.get());
@@ -274,7 +277,10 @@ HttpServer::registerWorker(hipObj::UniqueFd client)
 void
 HttpServer::stop()
 {
-    if (stopping_.exchange(true)) {
+    /* Only the first call does anything, and only once startThreaded()
+     * has started the accept loop. Without the loop, there are no workers
+     * to stop. */
+    if (!acceptLoop_.request_stop()) {
         return;
     }
     if (listen_fd_) {
@@ -304,9 +310,7 @@ HttpServer::stop()
     /* Worker production barrier: joining the accept-loop thread
      * guarantees no registration can follow the live-count wait
      * below. */
-    if (acceptLoop_.joinable()) {
-        acceptLoop_.join();
-    }
+    acceptLoop_.join();
     /* All workers are detached: wait for the live count to reach
      * zero. The FD shutdown above unblocks any worker stuck in a
      * socket call, and each worker decrements the count only after
@@ -324,20 +328,21 @@ HttpServer::handleConnection(int client)
     /* Absolute receive deadline (request bytes only). */
     const auto  deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     std::string raw;
-    char        buf[65536];
-    size_t      headerEnd = std::string::npos;
+    /* Each recv() reads up to this much */
+    std::array<char, 65536> buf{};
+    size_t                  headerEnd = std::string::npos;
     while (headerEnd == std::string::npos) {
         if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
             return;
         }
-        ssize_t n = recv(client, buf, sizeof(buf), 0);
+        ssize_t n = recv(client, buf.data(), buf.size(), 0);
         if (n <= 0) {
             if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
                 continue;
             }
             return;
         }
-        raw.append(buf, static_cast<size_t>(n));
+        raw.append(hipObj::asStringView(std::span(buf).first(static_cast<size_t>(n))));
         if (raw.size() > kMaxHeaderBytes) {
             return;
         }
@@ -365,14 +370,14 @@ HttpServer::handleConnection(int client)
         if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
             break;
         }
-        ssize_t n = recv(client, buf, sizeof(buf), 0);
+        ssize_t n = recv(client, buf.data(), buf.size(), 0);
         if (n <= 0) {
             if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
                 continue;
             }
             break;
         }
-        raw.append(buf, static_cast<size_t>(n));
+        raw.append(hipObj::asStringView(std::span(buf).first(static_cast<size_t>(n))));
     }
     bodyComplete = raw.size() - headerLen >= contentLen;
     if (!bodyComplete) {

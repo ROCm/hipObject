@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
@@ -13,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <stop_token>
 #include <string>
 #include <thread>
 
@@ -91,20 +91,21 @@ private:
         hipObj::UniqueFd client_;
     };
 
-    void runThreaded();
+    /* The accept loop, which runs until stop is requested */
+    void runThreaded(const std::stop_token &stop);
     /* Registers client for a worker, or returns nothing (closing client)
-     * once stop() has begun */
-    std::optional<Worker> registerWorker(hipObj::UniqueFd client);
+     * once stop is requested */
+    std::optional<Worker> registerWorker(hipObj::UniqueFd client, const std::stop_token &stop);
     /* Serves one request on client, which the caller owns and closes */
     void handleConnection(int client);
 
-    hipObj::UniqueFd  listen_fd_;
-    HttpHandler       handler_{};
-    std::atomic<bool> stopping_{false};
+    hipObj::UniqueFd listen_fd_;
+    HttpHandler      handler_{};
     /* The accept loop runs on its own thread when started via
-     * startThreaded(); stop() joins it as the production barrier. */
-    std::thread acceptLoop_{};
-    std::mutex  workersMtx_{};
+     * startThreaded(); stop() requests that it stop, and joins it as the
+     * production barrier. Until then, it has no stop state to request. */
+    std::jthread acceptLoop_{};
+    std::mutex   workersMtx_{};
     /* Detached workers: stop() waits for this count to reach zero
      * after shutting down the registered fds. */
     int                     liveWorkers_ = 0;
