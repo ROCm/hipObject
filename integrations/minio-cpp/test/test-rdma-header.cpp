@@ -45,7 +45,7 @@ TEST(HipObjMinioHeader, TokenClientNicFromGid)
     token.gid[14]   = 0;
     token.gid[15]   = 5;
 
-    std::string          encoded = hipObj::encodeRdmaToken(token);
+    const std::string    encoded = hipObj::encodeRdmaToken(token);
     std::array<char, 32> nicIp{};
     EXPECT_EQ(hipObjTokenClientNic(encoded.c_str(), nicIp.data(), nicIp.size()).opError, hipObjSuccess);
     EXPECT_STREQ(nicIp.data(), "10.0.0.5");

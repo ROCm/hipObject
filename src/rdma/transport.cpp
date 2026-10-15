@@ -78,8 +78,8 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, std::strin
     if (devName.empty()) {
         return std::nullopt;
     }
-    int  numDevs = 0;
-    auto devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
+    int        numDevs = 0;
+    const auto devList = own<IbvDeviceListPtr>(verbs, verbs.get_device_list(&numDevs));
     if (!devList || numDevs <= 0) {
         return std::nullopt;
     }
@@ -108,7 +108,7 @@ namespace {
         attr.pkey_index      = 0;
         attr.port_num        = conn.device().portNum();
         attr.qp_access_flags = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
-        int mask             = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
+        const int mask       = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
         return conn.device().verbs().modify_qp(conn.qp(), &attr, mask) == 0;
     }
 
@@ -192,8 +192,8 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.grh.hop_limit     = 64;
     attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(device.gidIndex());
     attr.ah_attr.grh.traffic_class = 0;
-    int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
-               IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
+    const int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+                     IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
     return device.verbs().modify_qp(conn.qp(), &attr, mask) == 0;
 }
 
@@ -209,8 +209,8 @@ transitionQpToRts(RcConnection &conn)
     attr.rnr_retry     = 7;
     attr.sq_psn        = 0;
     attr.max_rd_atomic = 1;
-    int mask           = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
-               IBV_QP_MAX_QP_RD_ATOMIC;
+    const int mask     = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
+                     IBV_QP_MAX_QP_RD_ATOMIC;
     return conn.device().verbs().modify_qp(conn.qp(), &attr, mask) == 0;
 }
 
@@ -233,8 +233,8 @@ pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
     const Verbs &verbs    = conn.device().verbs();
     const auto   deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
-        ibv_wc wc{};
-        int    n = verbs.poll_cq(conn.cq(), 1, &wc);
+        ibv_wc    wc{};
+        const int n = verbs.poll_cq(conn.cq(), 1, &wc);
         if (n < 0) {
             return false;
         }

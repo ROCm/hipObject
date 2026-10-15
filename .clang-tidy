@@ -46,7 +46,9 @@ Checks:
   - readability-*
 
   # Not wanted: style-only checks that contradict hipObject's
-  # conventions or tooling
+  # conventions or tooling. Turn them on now and then, such as before a
+  # release, and fix whatever they report that's easy to fix, without
+  # committing to fixing all of it
 
   # IWYU checks the includes, and its suggestions are advisory
   - -misc-include-cleaner
@@ -95,7 +97,6 @@ Checks:
   - -cppcoreguidelines-pro-type-vararg  # TODO(53): fprintf(), snprintf(), fcntl()
   - -cppcoreguidelines-special-member-functions  # TODO(6)
   - -google-runtime-int  # TODO(11): long and long long in the examples and MinIO bridge
-  - -misc-const-correctness  # TODO(183)
   - -misc-non-private-member-variables-in-classes  # TODO(56)
   - -cppcoreguidelines-non-private-member-variables-in-classes  # TODO: the same check
   - -readability-function-cognitive-complexity  # TODO(14)
@@ -113,6 +114,9 @@ CheckOptions:
   # changes to the environment, and its dlerror() keeps per-thread state.
   # Revisit this if hipObject is built with another C library.
   concurrency-mt-unsafe.FunctionSet: glibc
+  # A lock guard is only declared for what its constructor and destructor
+  # do, so const would say nothing about it
+  misc-const-correctness.AllowedTypes: '::hipObj::ApiGuard;::std::scoped_lock'
   # The default, Remove, mistakes the comma after an empty {} argument for
   # a trailing comma, as in {a, b, {}, c}, and its fix doesn't compile.
   # Multi-line lists still need a trailing comma, which also keeps

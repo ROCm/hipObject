@@ -7,8 +7,9 @@
 # The examples are written to C++11 (see AGENTS.md), but the build
 # compiles them as C++20, so clang-tidy would suggest newer constructs.
 # This turns off the checks whose fixes need C++14 or later, and one
-# that older versions of clang-tidy get wrong (below), and otherwise uses
-# the top-level configuration.
+# that older versions of clang-tidy get wrong (below). It also keeps
+# misc-const-correctness off parameters, so the examples don't need
+# suppressions, and otherwise uses the top-level configuration.
 ---
 InheritParentConfig: true
 Checks:
@@ -36,3 +37,9 @@ Checks:
   # includes too, so it can't be a using declaration. Later versions skip
   # typedefs inside extern "C".
   - -modernize-use-using
+
+CheckOptions:
+  # Callbacks have to match the prototypes libraries give them, such as
+  # libcurl's CURLOPT_HEADERFUNCTION, which takes a pointer to non-const
+  # it only reads
+  misc-const-correctness.AnalyzeParameters: false

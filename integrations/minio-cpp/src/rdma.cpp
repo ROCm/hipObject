@@ -69,8 +69,8 @@ namespace {
         if (rdma_reply.empty()) {
             return kRdmaReplyNotImplemented;
         }
-        int           httpCode = 0;
-        hipObjError_t err      = hipObjParseRdmaReply(rdma_reply.c_str(), rdma_reply.size(), &httpCode);
+        int                 httpCode = 0;
+        const hipObjError_t err      = hipObjParseRdmaReply(rdma_reply.c_str(), rdma_reply.size(), &httpCode);
         if (err.opError != hipObjSuccess) {
             return std::nullopt;
         }
@@ -121,11 +121,11 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     // address. See docs/interop.rst.
     const std::string rdma_token(token != nullptr ? token : "");
 
-    ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
-    ::minio::creds::Credentials creds = sctx->provider->Fetch();
-    ::minio::utils::Multimap    query_params;
-    ::minio::http::Url          url;
-    const std::string          &region = sctx->region;
+    const ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
+    const ::minio::creds::Credentials creds = sctx->provider->Fetch();
+    ::minio::utils::Multimap          query_params;
+    ::minio::http::Url                url;
+    const std::string                &region = sctx->region;
 
     if (!sctx->uploadId.empty()) {
         query_params.Add("uploadId", sctx->uploadId);
@@ -135,12 +135,12 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         query_params.Add("partNumber", std::to_string(sctx->partNumber));
     }
 
-    if (::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kPut, region, query_params,
-                                                       sctx->bucket, sctx->object)) {
+    if (const ::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kPut, region,
+                                                             query_params, sctx->bucket, sctx->object)) {
         return {.status = RdmaStatus::Failed};
     }
 
-    std::string host = url.HostHeaderValue();
+    const std::string host = url.HostHeaderValue();
 
     ::minio::utils::Multimap sign_headers;
     sign_headers.Add("Host", host);
@@ -168,18 +168,18 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
     req.timeout_secs         = kRdmaTimeoutSecs;
 
-    std::string client_nic = clientNicFromToken(token);
+    const std::string client_nic = clientNicFromToken(token);
     if (!client_nic.empty()) {
         req.nic_interface = client_nic;
     }
 
-    ::minio::http::Response res = req.Execute();
+    const ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
         rdmaTrace("put: http failed (status=", res.status_code, " error='", res.error, "')");
         return {.status = RdmaStatus::Failed};
     }
 
-    std::string etag = res.headers.GetFront("etag");
+    const std::string etag = res.headers.GetFront("etag");
     if (res.status_code == 200 && !etag.empty()) {
         sctx->etag = ::minio::utils::Trim(etag, '"');
         return {.status = RdmaStatus::Ok, .bytes = size};
@@ -194,7 +194,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         return {.status = RdmaStatus::Failed};
     }
 
-    std::string resp_checksum = res.headers.GetFront("x-amz-checksum-crc64nvme");
+    const std::string resp_checksum = res.headers.GetFront("x-amz-checksum-crc64nvme");
     if (!resp_checksum.empty()) {
         sctx->checksum = resp_checksum;
     }
@@ -212,18 +212,18 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     // address. See docs/interop.rst.
     const std::string rdma_token(token != nullptr ? token : "");
 
-    ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
-    ::minio::creds::Credentials creds = sctx->provider->Fetch();
-    ::minio::utils::Multimap    query_params;
-    ::minio::http::Url          url;
-    const std::string          &region = sctx->region;
+    const ::minio::utils::UtcTime     date  = ::minio::utils::UtcTime::Now();
+    const ::minio::creds::Credentials creds = sctx->provider->Fetch();
+    const ::minio::utils::Multimap    query_params;
+    ::minio::http::Url                url;
+    const std::string                &region = sctx->region;
 
-    if (::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kGet, region, query_params,
-                                                       sctx->bucket, sctx->object)) {
+    if (const ::minio::error::Error err = sctx->url.BuildUrl(url, ::minio::http::Method::kGet, region,
+                                                             query_params, sctx->bucket, sctx->object)) {
         return {.status = RdmaStatus::Failed};
     }
 
-    std::string host = url.HostHeaderValue();
+    const std::string host = url.HostHeaderValue();
 
     ::minio::utils::Multimap sign_headers;
     sign_headers.Add("Host", host);
@@ -243,12 +243,12 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
     req.timeout_secs         = kRdmaTimeoutSecs;
 
-    std::string client_nic = clientNicFromToken(token);
+    const std::string client_nic = clientNicFromToken(token);
     if (!client_nic.empty()) {
         req.nic_interface = client_nic;
     }
 
-    ::minio::http::Response res = req.Execute();
+    const ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
         rdmaTrace("get: http failed (status=", res.status_code, " error='", res.error, "')");
         return {.status = RdmaStatus::Failed};
@@ -288,7 +288,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         // A buffer the NIC cannot reach directly is registered as a host
         // staging buffer, so the bytes have to be there before the server
         // reads it.
-        hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
+        const hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
             rdmaTrace("put: stage to host: ", hipObjGetErrorString(serr.opError));
             return {.status = RdmaStatus::Failed};
@@ -315,7 +315,7 @@ rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         }
         ret = rdmaGet(ctx, token.get(), size);
         if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
-            hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
+            const hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
             if (serr.opError != hipObjSuccess) {
                 rdmaTrace("get: stage to device: ", hipObjGetErrorString(serr.opError));
                 return {.status = RdmaStatus::Failed};

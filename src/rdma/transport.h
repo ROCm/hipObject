@@ -119,12 +119,25 @@ public:
         return *device_;
     }
 
-    [[nodiscard]] struct ibv_cq *cq() const noexcept
+    /* Only a non-const connection hands out the CQ and QP that libibverbs
+     * can change, so a function that changes them takes a non-const
+     * connection */
+    [[nodiscard]] struct ibv_cq *cq() noexcept
     {
         return cq_.get();
     }
 
-    [[nodiscard]] struct ibv_qp *qp() const noexcept
+    [[nodiscard]] const struct ibv_cq *cq() const noexcept
+    {
+        return cq_.get();
+    }
+
+    [[nodiscard]] struct ibv_qp *qp() noexcept
+    {
+        return qp_.get();
+    }
+
+    [[nodiscard]] const struct ibv_qp *qp() const noexcept
     {
         return qp_.get();
     }

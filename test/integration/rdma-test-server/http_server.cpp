@@ -131,7 +131,7 @@ namespace {
                 return false;
             }
             const std::string_view rest = std::string_view(data).substr(sent);
-            ssize_t                n    = ::send(fd, rest.data(), rest.size(), MSG_NOSIGNAL);
+            const ssize_t          n    = ::send(fd, rest.data(), rest.size(), MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
@@ -227,9 +227,9 @@ HttpServer::runThreaded(const std::stop_token &stop)
     }
     while (!stop.stop_requested()) {
         pollfd pfd{};
-        pfd.fd     = listen_fd_.get();
-        pfd.events = POLLIN;
-        int ready  = poll(&pfd, 1, 200); /* wake every 200 ms for stop checks */
+        pfd.fd          = listen_fd_.get();
+        pfd.events      = POLLIN;
+        const int ready = poll(&pfd, 1, 200); /* wake every 200 ms for stop checks */
         if (ready <= 0) {
             continue;
         }
@@ -295,7 +295,7 @@ HttpServer::stop()
         std::vector<hipObj::UniqueFd> dups;
         {
             std::scoped_lock<std::mutex> guard(workersMtx_);
-            for (int fd : activeFds_) {
+            for (const int fd : activeFds_) {
                 hipObj::UniqueFd d(fcntl(fd, F_DUPFD_CLOEXEC, 0));
                 if (d) {
                     dups.push_back(std::move(d));
@@ -337,7 +337,7 @@ HttpServer::handleConnection(int client)
         if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
             return;
         }
-        ssize_t n = recv(client, buf.data(), buf.size(), 0);
+        const ssize_t n = recv(client, buf.data(), buf.size(), 0);
         if (n <= 0) {
             if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
                 continue;
@@ -351,11 +351,11 @@ HttpServer::handleConnection(int client)
         headerEnd = raw.find("\r\n\r\n");
     }
     /* Body per Content-Length (control requests carry zero). */
-    size_t headerLen  = headerEnd + 4;
-    size_t contentLen = 0;
+    const size_t headerLen  = headerEnd + 4;
+    size_t       contentLen = 0;
     {
         HttpRequest head = parseRequest(raw.substr(0, headerLen));
-        auto        it   = head.headers.find("content-length");
+        const auto  it   = head.headers.find("content-length");
         if (it != head.headers.end()) {
             const std::optional<size_t> len = hipObj::parseNumber<size_t>(it->second);
             if (!len || *len > kMaxBodyBytes) {
@@ -372,7 +372,7 @@ HttpServer::handleConnection(int client)
         if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
             break;
         }
-        ssize_t n = recv(client, buf.data(), buf.size(), 0);
+        const ssize_t n = recv(client, buf.data(), buf.size(), 0);
         if (n <= 0) {
             if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
                 continue;
@@ -386,10 +386,10 @@ HttpServer::handleConnection(int client)
         return;
     }
 
-    HttpRequest req   = parseRequest(raw.substr(0, headerLen));
-    req.body          = raw.substr(headerLen);
-    req.contentLength = contentLen;
-    HttpResponse resp = handler_(req);
+    HttpRequest req         = parseRequest(raw.substr(0, headerLen));
+    req.body                = raw.substr(headerLen);
+    req.contentLength       = contentLen;
+    const HttpResponse resp = handler_(req);
 
     /* Response transmission deadline: 5s from handler completion. A
      * response that can't be sent is dropped with the connection. */
@@ -420,13 +420,13 @@ parseRequest(const std::string &raw)
         if (line.back() == '\r') {
             line.pop_back();
         }
-        size_t colon = line.find(':');
+        const size_t colon = line.find(':');
         if (colon == std::string::npos) {
             continue;
         }
-        std::string key  = toLower(trim(line.substr(0, colon)));
-        std::string val  = trim(line.substr(colon + 1));
-        req.headers[key] = val;
+        const std::string key = toLower(trim(line.substr(0, colon)));
+        const std::string val = trim(line.substr(colon + 1));
+        req.headers[key]      = val;
     }
     std::ostringstream body;
     body << iss.rdbuf();

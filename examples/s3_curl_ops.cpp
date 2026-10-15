@@ -60,9 +60,9 @@ struct HeaderState {
 size_t
 headerCallback(char *buffer, size_t size, size_t nitems, void *userdata)
 {
-    size_t      total = size * nitems;
-    auto       *state = static_cast<HeaderState *>(userdata);
-    std::string line(buffer, total);
+    const size_t total = size * nitems;
+    const auto  *state = static_cast<HeaderState *>(userdata);
+    std::string  line(buffer, total);
     // HTTP header names are case-insensitive.
     for (char &c : line) {
         if (c >= 'A' && c <= 'Z') {
@@ -78,7 +78,7 @@ headerCallback(char *buffer, size_t size, size_t nitems, void *userdata)
         while (!val.empty() && (val.back() == '\r' || val.back() == '\n' || val.back() == ' ')) {
             val.pop_back();
         }
-        size_t start = val.find_first_not_of(' ');
+        const size_t start = val.find_first_not_of(' ');
         if (start != std::string::npos) {
             val = val.substr(start);
         }
@@ -125,7 +125,7 @@ hipObjS3CurlSendRequest(void *ctx, const char *token, size_t tokenLen)
         return -1;
     }
 
-    CurlEasyPtr curl(curl_easy_init());
+    const CurlEasyPtr curl(curl_easy_init());
     if (!curl) {
         return -1;
     }
@@ -146,8 +146,8 @@ hipObjS3CurlSendRequest(void *ctx, const char *token, size_t tokenLen)
     (curl_easy_setopt)(curl.get(), CURLOPT_HEADERFUNCTION, headerCallback);
     (curl_easy_setopt)(curl.get(), CURLOPT_HEADERDATA, &state);
 
-    CURLcode   rc       = curl_easy_perform(curl.get());
-    const long httpCode = rc == CURLE_OK ? responseCode(curl.get()) : -1;
+    const CURLcode rc       = curl_easy_perform(curl.get());
+    const long     httpCode = rc == CURLE_OK ? responseCode(curl.get()) : -1;
     if (rc != CURLE_OK) {
         return -1;
     }
@@ -172,7 +172,7 @@ hipObjS3CurlRecvReply(void *ctx, char *reply, size_t *replyLen)
     if (cfg == nullptr || reply == nullptr || replyLen == nullptr) {
         return -1;
     }
-    size_t len = std::strlen(cfg->lastReply);
+    const size_t len = std::strlen(cfg->lastReply);
     if (*replyLen < len) {
         return -1;
     }

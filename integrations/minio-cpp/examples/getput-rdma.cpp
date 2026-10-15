@@ -128,7 +128,7 @@ main(int argc, char *argv[])
     std::vector<char> expected(bufsize);
     FillPattern(expected, seed);
 
-    minio::s3::BaseUrl           base_url(host, false, "us-east-1");
+    const minio::s3::BaseUrl     base_url(host, false, "us-east-1");
     minio::creds::StaticProvider provider(access_key, secret_key);
     hipobj::minio::Client        client(base_url, &provider);
 
@@ -163,8 +163,8 @@ main(int argc, char *argv[])
         }
         /* posix_memalign() writes a void *, so it needs a void * object to
          * write it to */
-        void *raw = nullptr;
-        int   res = posix_memalign(&raw, static_cast<size_t>(pagesize), bufsize);
+        void     *raw = nullptr;
+        const int res = posix_memalign(&raw, static_cast<size_t>(pagesize), bufsize);
         if (res != 0 || raw == nullptr) {
             std::cerr << "posix_memalign failed\n";
             return 1;
@@ -182,7 +182,7 @@ main(int argc, char *argv[])
     pargs.bucket = "hipobj-test";
     pargs.object = "my-object";
 
-    minio::s3::PutObjectResponse presp = client.PutObject(pargs);
+    const minio::s3::PutObjectResponse presp = client.PutObject(pargs);
     if (!presp) {
         std::cerr << "PUT failed: " << presp.Error().String() << "\n";
         return 1;
@@ -208,7 +208,7 @@ main(int argc, char *argv[])
     gargs.bucket = "hipobj-test";
     gargs.object = "my-object";
 
-    minio::s3::GetObjectResponse gresp = client.GetObject(gargs);
+    const minio::s3::GetObjectResponse gresp = client.GetObject(gargs);
     if (!gresp) {
         std::cerr << "GET failed: " << gresp.Error().String() << "\n";
         return 1;
@@ -218,7 +218,7 @@ main(int argc, char *argv[])
     std::vector<char> hostbuf(bufsize);
 
     if (gpu_enabled) {
-        hipError_t err = hipMemcpy(hostbuf.data(), dev_ptr, bufsize, hipMemcpyDeviceToHost);
+        const hipError_t err = hipMemcpy(hostbuf.data(), dev_ptr, bufsize, hipMemcpyDeviceToHost);
         if (err != hipSuccess) {
             std::cerr << "hipMemcpy failed: " << hipGetErrorString(err) << "\n";
             return 1;
@@ -237,8 +237,8 @@ main(int argc, char *argv[])
     out.close();
     std::cout << "Wrote output.bin (" << bufsize << " bytes)\n";
 
-    size_t bad = FirstMismatch(hostbuf, seed);
-    bool   ok  = bad == bufsize;
+    const size_t bad = FirstMismatch(hostbuf, seed);
+    const bool   ok  = bad == bufsize;
     if (ok) {
         std::cout << "Data integrity check passed (" << bufsize << " bytes, seed " << seed << ")\n";
     }

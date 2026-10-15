@@ -67,7 +67,7 @@ TEST(ParseNumber, RejectsValuesThatDontFit)
 
 TEST(ParseNumber, RejectsBasesFromCharsDoesntAllow)
 {
-    for (int base : {-16, 0, 1, 37}) {
+    for (const int base : {-16, 0, 1, 37}) {
         EXPECT_FALSE(parseNumber<uint32_t>("1", base)) << "base " << base;
     }
     EXPECT_EQ(parseNumber<uint32_t>("11", 2), 3U);

@@ -142,7 +142,7 @@ namespace {
         if (code != 200) {
             return std::nullopt;
         }
-        auto token = decodeRdmaTokenHex(value.substr(status.size() + 1));
+        const auto token = decodeRdmaTokenHex(value.substr(status.size() + 1));
         if (!token) {
             return std::nullopt;
         }
@@ -262,9 +262,9 @@ parseClientNicFromTokenHex(std::string_view tokenHex, std::span<char> nicIp)
     /* Format into a fixed-size buffer first so the snprintf output is
      * bounded; nicIp's size is caller-supplied. */
     std::array<char, INET_ADDRSTRLEN> buf{};
-    int n = std::snprintf(buf.data(), buf.size(), "%u.%u.%u.%u", static_cast<unsigned>(token->gid[12]),
-                          static_cast<unsigned>(token->gid[13]), static_cast<unsigned>(token->gid[14]),
-                          static_cast<unsigned>(token->gid[15]));
+    const int n = std::snprintf(buf.data(), buf.size(), "%u.%u.%u.%u", static_cast<unsigned>(token->gid[12]),
+                                static_cast<unsigned>(token->gid[13]), static_cast<unsigned>(token->gid[14]),
+                                static_cast<unsigned>(token->gid[15]));
     if (n < 0 || static_cast<size_t>(n) >= nicIp.size()) {
         return false;
     }

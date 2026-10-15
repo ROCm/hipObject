@@ -103,7 +103,7 @@ namespace {
         hipObjError_t EnsureInit(const ::minio::s3::BaseUrl &base_url)
         {
             std::scoped_lock<std::mutex> lock(mutex_);
-            std::string                  key = base_url.host + ":" + base_url.region;
+            const std::string            key = base_url.host + ":" + base_url.region;
             if (initialized_ && key == active_key_) {
                 return {.opError = hipObjSuccess, .hipError = 0};
             }
@@ -253,7 +253,7 @@ Client::RdmaAvailable()
 ::minio::s3::PutObjectResponse
 Client::PutObject(::minio::s3::PutObjectArgs args)
 {
-    if (::minio::error::Error err = args.Validate()) {
+    if (const ::minio::error::Error err = args.Validate()) {
         return ::minio::s3::PutObjectResponse(err);
     }
 
@@ -272,12 +272,12 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
         return ::minio::s3::PutObjectResponse(::minio::error::Error("object size is too large"));
     }
 
-    hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
+    const hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
         // RDMA not available (no NIC or no GPU topology) — fall back to HTTP PUT.
         // Copy the buffer into a std::stringstream so minio-cpp can seek in it.
         const char                *src = static_cast<const char *>(args.buf);
-        std::string                content(src, size);
+        const std::string          content(src, size);
         std::stringstream          ss(content, std::ios_base::in | std::ios_base::binary);
         ::minio::s3::PutObjectArgs http_args = args;
         http_args.stream                     = &ss;
@@ -298,7 +298,7 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
     const BufRegistrationPtr registration(reg_err.opError == hipObjSuccess ? args.buf : nullptr);
 
     std::string region;
-    if (::minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
+    if (const ::minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
         region = resp.region;
     }
     else {
@@ -346,7 +346,7 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
 ::minio::s3::GetObjectResponse
 Client::GetObject(::minio::s3::GetObjectArgs args)
 {
-    if (::minio::error::Error err = args.Validate()) {
+    if (const ::minio::error::Error err = args.Validate()) {
         return ::minio::s3::GetObjectResponse(err);
     }
 
@@ -360,7 +360,7 @@ Client::GetObject(::minio::s3::GetObjectArgs args)
 
     const size_t size = *args.size;
 
-    hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
+    const hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
         // RDMA not available — fall back to HTTP GET.
         return HttpGetIntoBuffer(s3_client_, args, size);
@@ -375,7 +375,7 @@ Client::GetObject(::minio::s3::GetObjectArgs args)
     const BufRegistrationPtr registration(reg_err.opError == hipObjSuccess ? args.buf : nullptr);
 
     std::string region;
-    if (::minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
+    if (const ::minio::s3::GetRegionResponse resp = s3_client_.GetRegion(args.bucket, args.region)) {
         region = resp.region;
     }
     else {

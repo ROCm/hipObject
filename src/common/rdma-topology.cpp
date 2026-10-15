@@ -100,7 +100,7 @@ namespace {
 
     std::string ExtractBusNumber(const std::string &pcie_bus_id)
     {
-        size_t last_colon = pcie_bus_id.rfind(':');
+        const size_t last_colon = pcie_bus_id.rfind(':');
         if (last_colon == std::string::npos) {
             return pcie_bus_id;
         }
@@ -152,7 +152,7 @@ SysfsTopology::enumerate(std::string_view hcaList) const
 {
     std::vector<NicInfo> result;
     int                  num_devs = 0;
-    auto                 dev_list = own<IbvDeviceListPtr>(*verbs_, verbs_->get_device_list(&num_devs));
+    const auto           dev_list = own<IbvDeviceListPtr>(*verbs_, verbs_->get_device_list(&num_devs));
     if (!dev_list || num_devs <= 0) {
         return result;
     }
@@ -169,7 +169,7 @@ SysfsTopology::enumerate(std::string_view hcaList) const
             continue;
         }
 
-        auto ctx = own<IbvContextPtr>(*verbs_, verbs_->open_device(dev));
+        const auto ctx = own<IbvContextPtr>(*verbs_, verbs_->open_device(dev));
         if (!ctx) {
             continue;
         }
@@ -255,9 +255,11 @@ GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int g
         return std::nullopt;
     }
 
-    auto distance = [&gpu_bus](const NicInfo &nic) { return GetBusIdDistance(nic.pcie_bus_id, gpu_bus); };
+    const auto distance = [&gpu_bus](const NicInfo &nic) {
+        return GetBusIdDistance(nic.pcie_bus_id, gpu_bus);
+    };
     /* The first of the closest NICs */
-    auto best = std::ranges::min_element(devices, {}, distance);
+    const auto best = std::ranges::min_element(devices, {}, distance);
     /* No NIC has a known bus id */
     if (distance(*best) == std::numeric_limits<int>::max()) {
         return std::nullopt;
@@ -275,7 +277,7 @@ PickBestGid(std::span<const GidCandidate> candidates)
         if (!IsConfiguredGid(c.gid)) {
             continue;
         }
-        GidPriority prio = ClassifyGid(c.gid, c.roceVersion);
+        const GidPriority prio = ClassifyGid(c.gid, c.roceVersion);
         if (prio != GidPriority::Unknown && (!best_idx || prio > best_prio)) {
             best_idx  = c.index;
             best_prio = prio;

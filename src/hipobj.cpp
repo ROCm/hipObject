@@ -160,7 +160,7 @@ namespace {
 
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         for (;;) {
-            hipError_t q = runtime.eventQuery(done.get());
+            const hipError_t q = runtime.eventQuery(done.get());
             if (q == hipSuccess) {
                 return makeError(hipObjSuccess);
             }
@@ -292,8 +292,12 @@ hipObjGetErrorString(hipObjOpError_t err)
     }
 }
 
+/* config is only read, but it's a pointer to non-const in the public
+ * header, which matches cuObject's API */
+// NOLINTBEGIN(misc-const-correctness)
 hipObjError_t
 hipObjInit(hipObjConfig_t *config)
+// NOLINTEND(misc-const-correctness)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
@@ -417,9 +421,13 @@ catch (...) {
     return hipObj::kExceptionError;
 }
 
+/* ops is only read, but it's a pointer to non-const in the public header,
+ * which matches cuObject's API */
+// NOLINTBEGIN(misc-const-correctness)
 hipObjError_t
 hipObjGet([[maybe_unused]] hipObjHandle_t handle, void *devPtr, size_t size, off_t offset, hipObjOps_t *ops,
           void *ctx)
+// NOLINTEND(misc-const-correctness)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
@@ -448,9 +456,13 @@ catch (...) {
     return hipObj::kExceptionError;
 }
 
+/* ops is only read, but it's a pointer to non-const in the public header,
+ * which matches cuObject's API */
+// NOLINTBEGIN(misc-const-correctness)
 hipObjError_t
 hipObjPut([[maybe_unused]] hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset,
           hipObjOps_t *ops, void *ctx)
+// NOLINTEND(misc-const-correctness)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
@@ -486,7 +498,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::Instance *const instance = hipObj::currentInstance();
+    const hipObj::Instance *const instance = hipObj::currentInstance();
     if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }
@@ -516,7 +528,7 @@ try {
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
-    hipObj::Instance *const instance = hipObj::currentInstance();
+    const hipObj::Instance *const instance = hipObj::currentInstance();
     if (instance == nullptr) {
         return hipObj::makeError(hipObjNotInitialized);
     }

@@ -114,8 +114,8 @@ stubRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
     // No real server is contacted in stub mode; reply "501" (not
     // implemented) so the transfer is reported as unsupported rather
     // than silently succeeding.
-    const char *reply501 = "501";
-    size_t      len      = strlen(reply501);
+    const char  *reply501 = "501";
+    const size_t len      = strlen(reply501);
     if (*replyLen < len) {
         return -1;
     }
@@ -153,7 +153,7 @@ main(int argc, char *argv[])
         return 1;
     }
 
-    size_t objSize = parseSize(argv[1]);
+    const size_t objSize = parseSize(argv[1]);
     if (objSize == 0) {
         fprintf(stderr, "Invalid object size: %s\n", argv[1]);
         return 1;
@@ -189,27 +189,27 @@ main(int argc, char *argv[])
         fprintf(stderr, "hipObjInit failed: %s\n", hipObjGetErrorString(err.opError));
         return 1;
     }
-    HipObjShutdownGuard shutdownGuard;
+    const HipObjShutdownGuard shutdownGuard;
 
-    void      *rawDevPtr = nullptr;
-    hipError_t hip_err   = hipMalloc(&rawDevPtr, objSize);
+    void            *rawDevPtr = nullptr;
+    const hipError_t hip_err   = hipMalloc(&rawDevPtr, objSize);
     if (hip_err != hipSuccess) {
         fprintf(stderr, "hipMalloc failed: %d\n", hip_err);
         return 1;
     }
-    std::unique_ptr<void, HipFreeDeleter> devPtr(rawDevPtr);
+    const std::unique_ptr<void, HipFreeDeleter> devPtr(rawDevPtr);
 
     err = hipObjBufRegister(devPtr.get(), objSize);
     if (err.opError != hipObjSuccess) {
         fprintf(stderr, "hipObjBufRegister failed: %s\n", hipObjGetErrorString(err.opError));
         return 1;
     }
-    HipObjBufRegistration registration(devPtr.get());
+    const HipObjBufRegistration registration(devPtr.get());
 
     hipObjOps_t ops;
     void       *opsCtx = nullptr;
 #ifdef HIPOBJ_HAVE_CURL
-    CurlGlobal curl(live);
+    const CurlGlobal curl(live);
     if (live && !curl.ok()) {
         fprintf(stderr, "curl_global_init failed\n");
         return 1;

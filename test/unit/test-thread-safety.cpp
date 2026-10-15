@@ -171,9 +171,9 @@ TEST_F(ThreadSafetyTest, TransfersRunOneAtATime)
 
     runThreads(kThreads, [this](int t) {
         for (int i = 0; i < kIterations; ++i) {
-            hipObjError_t err = (i % 2 == 0)
-                                    ? hipObjGet(nullptr, buffer(t), kBufSize, 0, &probeOps_, &probe_)
-                                    : hipObjPut(nullptr, buffer(t), kBufSize, 0, &probeOps_, &probe_);
+            const hipObjError_t err = (i % 2 == 0)
+                                          ? hipObjGet(nullptr, buffer(t), kBufSize, 0, &probeOps_, &probe_)
+                                          : hipObjPut(nullptr, buffer(t), kBufSize, 0, &probeOps_, &probe_);
             EXPECT_EQ(err.opError, hipObjSuccess);
         }
     });
@@ -220,7 +220,7 @@ TEST_F(ThreadSafetyTest, ConcurrentInitHasOneWinner)
     std::atomic<int> alreadyInitialized{0};
 
     runThreads(kThreads, [&](int) {
-        hipObjOpError_t err = init();
+        const hipObjOpError_t err = init();
         if (err == hipObjSuccess) {
             succeeded.fetch_add(1);
         }
@@ -351,7 +351,7 @@ TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
     char *token = nullptr;
     ASSERT_EQ(hipObjGetRdmaToken(buffer(0), kBufSize, HIPOBJ_RDMA_OP_GET, &token).opError, hipObjSuccess);
     /* Releases the token however the test ends */
-    std::unique_ptr<char, decltype(&hipObjPutRdmaToken)> tokenOwner(token, &hipObjPutRdmaToken);
+    const std::unique_ptr<char, decltype(&hipObjPutRdmaToken)> tokenOwner(token, &hipObjPutRdmaToken);
 
     const std::string expectedVersion = std::to_string(HIPOBJ_VERSION_MAJOR) + "." +
                                         std::to_string(HIPOBJ_VERSION_MINOR) + "." +

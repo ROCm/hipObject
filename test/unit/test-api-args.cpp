@@ -56,7 +56,7 @@ class ApiArgsTest : public hipObjTest::FakeDeviceTest {};
 
 TEST(ApiArgsErrorString, EveryCodeHasItsOwnString)
 {
-    std::vector<hipObjOpError_t> codes = {
+    const std::vector<hipObjOpError_t> codes = {
         hipObjSuccess,          hipObjInvalidValue,
         hipObjNotInitialized,   hipObjAlreadyInitialized,
         hipObjRdmaError,        hipObjS3Error,
@@ -65,7 +65,7 @@ TEST(ApiArgsErrorString, EveryCodeHasItsOwnString)
         hipObjSizeTooLarge,     hipObjInternalError,
     };
     std::vector<std::string> seen;
-    for (hipObjOpError_t code : codes) {
+    for (const hipObjOpError_t code : codes) {
         const char *str = hipObjGetErrorString(code);
         ASSERT_NE(str, nullptr);
         EXPECT_STRNE(str, "Unknown error") << "code " << code;
@@ -125,7 +125,7 @@ TEST_F(ApiArgsTest, InitRejectsNullConfig)
 
 TEST_F(ApiArgsTest, InitRejectsReservedFlags)
 {
-    for (uint32_t flags : {1U, 0x80000000U, 0xffffffffU}) {
+    for (const uint32_t flags : {1U, 0x80000000U, 0xffffffffU}) {
         hipObjConfig_t config = makeConfig();
         config.flags          = flags;
         EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue) << "flags " << flags;
@@ -135,7 +135,7 @@ TEST_F(ApiArgsTest, InitRejectsReservedFlags)
 
 TEST_F(ApiArgsTest, InitRejectsNegativeDeviceOtherThanMinusOne)
 {
-    for (int device : {-2, std::numeric_limits<int>::min()}) {
+    for (const int device : {-2, std::numeric_limits<int>::min()}) {
         hipObjConfig_t config = makeConfig();
         config.gpuDevice      = device;
         EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue) << "device " << device;
@@ -146,7 +146,7 @@ TEST_F(ApiArgsTest, InitRejectsNegativeDeviceOtherThanMinusOne)
 TEST_F(ApiArgsTest, InitRejectsDeviceThatDoesNotExist)
 {
     fake().deviceCount = 2;
-    for (int device : {2, 3, std::numeric_limits<int>::max()}) {
+    for (const int device : {2, 3, std::numeric_limits<int>::max()}) {
         hipObjConfig_t config = makeConfig();
         config.gpuDevice      = device;
         EXPECT_EQ(initFakes(config).opError, hipObjInvalidValue) << "device " << device;
@@ -176,7 +176,7 @@ TEST_F(ApiArgsTest, InitReportsDeviceCountFailure)
     hipObjConfig_t config = makeConfig();
     config.gpuDevice      = 0;
 
-    hipObjError_t err = initFakes(config);
+    const hipObjError_t err = initFakes(config);
 
     EXPECT_EQ(err.opError, hipObjRdmaError);
     EXPECT_EQ(err.hipError, static_cast<int>(hipErrorInvalidValue));
@@ -244,7 +244,7 @@ TEST_P(RegisterArgsTest, RejectsZeroSize)
 TEST_P(RegisterArgsTest, RejectsMoreThanMaxSize)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    for (size_t size : {kMaxMr + 1, std::numeric_limits<size_t>::max()}) {
+    for (const size_t size : {kMaxMr + 1, std::numeric_limits<size_t>::max()}) {
         EXPECT_EQ(GetParam()(kDevBuf, size).opError, hipObjSizeTooLarge) << "size " << size;
     }
     EXPECT_EQ(fake().log.registerMr, 0);
@@ -255,6 +255,9 @@ TEST_P(RegisterArgsTest, RejectsMoreThanMaxSize)
 TEST_P(RegisterArgsTest, RejectsBufferThatWrapsAddressSpace)
 {
     ASSERT_NO_FATAL_FAILURE(init());
+    /* clang-tidy doesn't see that the function GetParam() returns takes
+     * a pointer to non-const */
+    // NOLINTNEXTLINE(misc-const-correctness)
     void *top = hipObj::addressToPointer<void *>(std::numeric_limits<uintptr_t>::max() - 15);
     EXPECT_EQ(GetParam()(top, 16).opError, hipObjInvalidValue);
     EXPECT_EQ(GetParam()(top, kMaxMr).opError, hipObjInvalidValue);
@@ -384,8 +387,11 @@ callGet(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops)
     return hipObjGet(nullptr, devPtr, size, offset, ops, nullptr);
 }
 
+/* callPut() only reads devPtr, but it's a TransferFn, as callGet() is */
+// NOLINTBEGIN(misc-const-correctness)
 hipObjError_t
 callPut(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops)
+// NOLINTEND(misc-const-correctness)
 {
     return hipObjPut(nullptr, devPtr, size, offset, ops, nullptr);
 }
@@ -521,7 +527,7 @@ INSTANTIATE_TEST_SUITE_P(ApiArgs, TransferArgsTest, ::testing::Values(&callGet, 
 TEST_F(ApiArgsTest, SyncRejectsBadDirection)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
-    for (int direction : {-1, 2, std::numeric_limits<int>::max()}) {
+    for (const int direction : {-1, 2, std::numeric_limits<int>::max()}) {
         EXPECT_EQ(hipObjBufSync(kDevBuf, kBufSize, 0, direction).opError, hipObjInvalidValue)
             << "direction " << direction;
     }
@@ -530,7 +536,7 @@ TEST_F(ApiArgsTest, SyncRejectsBadDirection)
 TEST_F(ApiArgsTest, SyncRejectsBadBufferArguments)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
-    for (int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
+    for (const int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
         EXPECT_EQ(hipObjBufSync(nullptr, kBufSize, 0, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, 0, 0, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, 1, -1, direction).opError, hipObjInvalidValue);
@@ -544,7 +550,7 @@ TEST_F(ApiArgsTest, SyncRejectsRangeOutsideDirectBuffer)
     /* A directly registered buffer needs no staging, but a bad range is
      * still an error */
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
-    for (int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
+    for (const int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
         EXPECT_EQ(hipObjBufSync(kDevBuf, kBufSize + 1, 0, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, 1, kBufSize, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, std::numeric_limits<size_t>::max(), 1, direction).opError,
@@ -561,7 +567,7 @@ TEST_F(ApiArgsTest, SyncRejectsRangeOutsideStagedBuffer)
     fake().fail.registerAddr = staged;
     ASSERT_EQ(hipObjBufRegister(staged, kBufSize).opError, hipObjSuccess);
 
-    for (int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
+    for (const int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
         EXPECT_EQ(hipObjBufSync(staged, kBufSize + 1, 0, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(staged, std::numeric_limits<size_t>::max(), 1, direction).opError,
                   hipObjInvalidValue);
@@ -582,7 +588,7 @@ TEST_F(ApiArgsTest, GetTokenRejectsBadArguments)
     EXPECT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, HIPOBJ_RDMA_OP_PUT, nullptr).opError, hipObjInvalidValue);
     EXPECT_EQ(hipObjGetRdmaToken(nullptr, kBufSize, HIPOBJ_RDMA_OP_PUT, &token).opError, hipObjInvalidValue);
     EXPECT_EQ(hipObjGetRdmaToken(kDevBuf, 0, HIPOBJ_RDMA_OP_PUT, &token).opError, hipObjInvalidValue);
-    for (int op : {-1, 2, std::numeric_limits<int>::max()}) {
+    for (const int op : {-1, 2, std::numeric_limits<int>::max()}) {
         EXPECT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, op, &token).opError, hipObjInvalidValue)
             << "op " << op;
     }
@@ -596,7 +602,7 @@ TEST_F(ApiArgsTest, GetTokenRejectsBadArguments)
 TEST_F(ApiArgsTest, GetTokenAcceptsWholeBuffer)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
-    for (int op : {HIPOBJ_RDMA_OP_PUT, HIPOBJ_RDMA_OP_GET}) {
+    for (const int op : {HIPOBJ_RDMA_OP_PUT, HIPOBJ_RDMA_OP_GET}) {
         char *token = nullptr;
         ASSERT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, op, &token).opError, hipObjSuccess);
         ASSERT_NE(token, nullptr);
