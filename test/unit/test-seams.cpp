@@ -127,13 +127,18 @@ TEST(HipSeamTest, SystemHipForwardsEachCall)
 
 // ---- NIC topology seam -------------------------------------------
 
+/* Short names for the RoCE versions in the GID tables */
+constexpr hipObj::RoceVersion kUnknown = hipObj::RoceVersion::Unknown;
+constexpr hipObj::RoceVersion kV1      = hipObj::RoceVersion::V1;
+constexpr hipObj::RoceVersion kV2      = hipObj::RoceVersion::V2;
+
 /* What a FakeNicTopology answers with, and what it was asked */
 struct TopologyState {
-    std::vector<hipObj::NicInfo> nics{};
-    std::vector<int>             roceVersions{}; /* by GID index; -1 past the end */
-    std::string                  lastHcaList{};
-    std::string                  lastDevName{};
-    int                          lastPortNum = -1;
+    std::vector<hipObj::NicInfo>     nics{};
+    std::vector<hipObj::RoceVersion> roceVersions{}; /* by GID index; Unknown past the end */
+    std::string                      lastHcaList{};
+    std::string                      lastDevName{};
+    int                              lastPortNum = -1;
 };
 
 class FakeNicTopology : public hipObj::NicTopology {
@@ -154,12 +159,12 @@ public:
         return state_->nics;
     }
 
-    int roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override
+    hipObj::RoceVersion roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override
     {
         state_->lastDevName = devName;
         state_->lastPortNum = portNum;
         if (gidIndex < 0 || std::cmp_greater_equal(gidIndex, state_->roceVersions.size())) {
-            return -1;
+            return hipObj::RoceVersion::Unknown;
         }
         return state_->roceVersions[static_cast<size_t>(gidIndex)];
     }
@@ -340,7 +345,7 @@ protected:
         context_.device = &device_;
     }
 
-    int selectBestGid(uint8_t portNum)
+    std::optional<int> selectBestGid(uint8_t portNum)
     {
         return hipObj::SelectBestGid(verbs_, topology_, &context_, portNum);
     }
@@ -356,42 +361,42 @@ protected:
 TEST_F(GidSeamTest, RoceVersionsComeFromTheTopology)
 {
     /* As RoCE v2 GIDs, the IPv4-mapped one is preferred */
-    state_.roceVersions = {2, 2, 2};
+    state_.roceVersions = {kV2, kV2, kV2};
     EXPECT_EQ(selectBestGid(2), 1);
     EXPECT_EQ(state_.lastDevName, kFakeDevName);
     EXPECT_EQ(state_.lastPortNum, 2);
 
     /* A RoCE v2 GID is preferred to a RoCE v1 one */
-    state_.roceVersions = {2, 1, 2};
+    state_.roceVersions = {kV2, kV1, kV2};
     EXPECT_EQ(selectBestGid(2), 0);
 }
 
 TEST_F(GidSeamTest, NoGidWithAKnownRoceVersion)
 {
-    EXPECT_EQ(selectBestGid(2), -1);
+    EXPECT_EQ(selectBestGid(2), std::nullopt);
 
-    state_.roceVersions = {0, 0, 0};
-    EXPECT_EQ(selectBestGid(2), -1);
+    state_.roceVersions = {kUnknown, kUnknown, kUnknown};
+    EXPECT_EQ(selectBestGid(2), std::nullopt);
 }
 
 TEST_F(GidSeamTest, PortQueryFails)
 {
     fakeDevice_.fail.queryPort = true;
-    state_.roceVersions        = {2, 2, 2};
-    EXPECT_EQ(selectBestGid(2), -1);
+    state_.roceVersions        = {kV2, kV2, kV2};
+    EXPECT_EQ(selectBestGid(2), std::nullopt);
 }
 
 TEST_F(GidSeamTest, UnreadableGidsAreSkipped)
 {
     fakeDevice_.fail.queryGid = true;
-    state_.roceVersions       = {2, 2, 2};
-    EXPECT_EQ(selectBestGid(2), -1);
+    state_.roceVersions       = {kV2, kV2, kV2};
+    EXPECT_EQ(selectBestGid(2), std::nullopt);
 }
 
 /* Opening a device chooses its GID with the topology it's given */
 TEST_F(GidSeamTest, OpenedDeviceHasTheGidTheTopologyPrefers)
 {
-    state_.roceVersions                          = {2, 2, 2};
+    state_.roceVersions                          = {kV2, kV2, kV2};
     const std::optional<hipObj::RdmaDevice> rdma = hipObj::openRdmaDevice(verbs_, topology_, 0);
     ASSERT_TRUE(rdma);
     EXPECT_EQ(rdma->context(), &context_);
@@ -475,7 +480,7 @@ TEST_F(SysfsTopologyTest, SkipsDevicesItCantQuery)
 
 TEST_F(SysfsTopologyTest, NoRoceVersionWithoutASysfsEntry)
 {
-    EXPECT_EQ(topology_.roceVersion(kFakeDevName.data(), 2, 0), -1);
+    EXPECT_EQ(topology_.roceVersion(kFakeDevName.data(), 2, 0), hipObj::RoceVersion::Unknown);
 }
 
 TEST_F(SysfsTopologyTest, NicSelection)

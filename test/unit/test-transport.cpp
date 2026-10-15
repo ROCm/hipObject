@@ -425,7 +425,7 @@ TEST_F(TransportTest, NoVendorAttributesWhenDeviceQueryFails)
 TEST_F(TransportTest, PollReturnsOnCompletion)
 {
     ASSERT_NO_FATAL_FAILURE(open());
-    EXPECT_TRUE(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)));
+    EXPECT_TRUE(hipObj::pollCompletion(*conn_, std::nullopt, std::chrono::seconds(1)));
     fake().pollOpcode = IBV_WC_RDMA_READ;
     EXPECT_TRUE(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::seconds(1)));
 }
@@ -434,14 +434,14 @@ TEST_F(TransportTest, PollFailsOnErrorCompletion)
 {
     ASSERT_NO_FATAL_FAILURE(open());
     fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
-    EXPECT_FALSE(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)));
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, std::nullopt, std::chrono::seconds(1)));
 }
 
 TEST_F(TransportTest, PollFailsWhenPollingFails)
 {
     ASSERT_NO_FATAL_FAILURE(open());
     fake().pollResult = -1;
-    EXPECT_FALSE(hipObj::pollCompletion(*conn_, -1, std::chrono::seconds(1)));
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, std::nullopt, std::chrono::seconds(1)));
 }
 
 TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
@@ -449,7 +449,7 @@ TEST_F(TransportTest, PollTimesOutWithoutTheAwaitedCompletion)
     ASSERT_NO_FATAL_FAILURE(open());
     /* Nothing completes */
     fake().pollResult = 0;
-    EXPECT_FALSE(hipObj::pollCompletion(*conn_, -1, std::chrono::milliseconds(10)));
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, std::nullopt, std::chrono::milliseconds(10)));
     /* Only other work completes */
     fake().pollResult = 1;
     fake().pollOpcode = IBV_WC_SEND;

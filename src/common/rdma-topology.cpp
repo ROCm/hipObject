@@ -50,26 +50,29 @@ namespace {
                gid[6] == 0 && gid[7] == 0 && gid[8] == 0 && gid[9] == 0 && gid[10] == 0xff && gid[11] == 0xff;
     }
 
-    GidPriority ClassifyGid(const Gid &gid, int roce_ver)
+    GidPriority ClassifyGid(const Gid &gid, RoceVersion roce_ver)
     {
-        if (roce_ver == 2) {
-            if (IsIPv4MappedIPv6(gid))
-                return GidPriority::RoceV2Ipv4;
-            if (LinkLocalGid(gid))
-                return GidPriority::RoceV2LinkLocal;
-            return GidPriority::RoceV2Global;
+        switch (roce_ver) {
+            case RoceVersion::V2:
+                if (IsIPv4MappedIPv6(gid))
+                    return GidPriority::RoceV2Ipv4;
+                if (LinkLocalGid(gid))
+                    return GidPriority::RoceV2LinkLocal;
+                return GidPriority::RoceV2Global;
+            case RoceVersion::V1:
+                return LinkLocalGid(gid) ? GidPriority::RoceV1LinkLocal : GidPriority::RoceV1Global;
+            case RoceVersion::Unknown:
+            default:
+                return GidPriority::Unknown;
         }
-        if (roce_ver == 1)
-            return LinkLocalGid(gid) ? GidPriority::RoceV1LinkLocal : GidPriority::RoceV1Global;
-        return GidPriority::Unknown;
     }
 
-    int AutoSelectGidIndex(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx,
-                           uint8_t port_num)
+    std::optional<int> AutoSelectGidIndex(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx,
+                                          uint8_t port_num)
     {
         ibv_port_attr port_attr;
         if (verbs.query_port(ctx, port_num, &port_attr) != 0)
-            return -1;
+            return std::nullopt;
 
         std::vector<GidCandidate> candidates;
         for (int i = 0; i < port_attr.gid_tbl_len; ++i) {
@@ -186,7 +189,7 @@ SysfsTopology::enumerate(const char *hca_list) const
     return result;
 }
 
-int
+RoceVersion
 SysfsTopology::roceVersion(const char *devName, uint8_t portNum, int gidIndex) const
 {
     const std::filesystem::path path = std::filesystem::path("/sys/class/infiniband") / devName / "ports" /
@@ -194,15 +197,15 @@ SysfsTopology::roceVersion(const char *devName, uint8_t portNum, int gidIndex) c
                                        "gid_attrs/types" / std::to_string(gidIndex);
     std::ifstream f(path);
     if (!f)
-        return -1;
+        return RoceVersion::Unknown;
     std::string line;
     if (!std::getline(f, line))
-        return -1;
+        return RoceVersion::Unknown;
     if (line.find("RoCE v2") != std::string::npos)
-        return 2;
+        return RoceVersion::V2;
     if (line.find("IB/RoCE v1") != std::string::npos || line.find("RoCE v1") != std::string::npos)
-        return 1;
-    return 0;
+        return RoceVersion::V1;
+    return RoceVersion::Unknown;
 }
 
 std::optional<RdmaNic>
@@ -228,16 +231,16 @@ GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int g
     return RdmaNic{static_cast<int>(best - devices.begin()), std::move(best->dev_name)};
 }
 
-int
+std::optional<int>
 PickBestGid(std::span<const GidCandidate> candidates)
 {
-    int         best_idx  = -1;
-    GidPriority best_prio = GidPriority::Unknown;
+    std::optional<int> best_idx;
+    GidPriority        best_prio = GidPriority::Unknown;
     for (const GidCandidate &c : candidates) {
         if (!IsConfiguredGid(c.gid))
             continue;
         GidPriority prio = ClassifyGid(c.gid, c.roceVersion);
-        if (prio != GidPriority::Unknown && (best_idx < 0 || prio > best_prio)) {
+        if (prio != GidPriority::Unknown && (!best_idx || prio > best_prio)) {
             best_idx  = c.index;
             best_prio = prio;
         }
@@ -245,7 +248,7 @@ PickBestGid(std::span<const GidCandidate> candidates)
     return best_idx;
 }
 
-int
+std::optional<int>
 SelectBestGid(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx, uint8_t port_num)
 {
     return AutoSelectGidIndex(verbs, topology, ctx, port_num);

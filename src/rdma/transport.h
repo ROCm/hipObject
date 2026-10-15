@@ -156,7 +156,8 @@ std::optional<RcConnection> createRcConnection(const RdmaDevice &&, int, uint32_
 [[nodiscard]] bool transitionQpToRts(RcConnection &conn);
 [[nodiscard]] bool connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);
 /* Fails on an error completion, or when no completion with expectedOpcode
- * (any opcode, if it's -1) arrives within timeout */
-[[nodiscard]] bool pollCompletion(RcConnection &conn, int expectedOpcode, std::chrono::milliseconds timeout);
+ * (any opcode, if it's std::nullopt) arrives within timeout */
+[[nodiscard]] bool pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
+                                  std::chrono::milliseconds timeout);
 
 } // namespace hipObj

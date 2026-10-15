@@ -21,6 +21,7 @@ namespace hipObj {
 class HipRuntime;
 class NicTopology;
 class Verbs;
+enum class RoceVersion;
 
 /* Higher value = more preferred. */
 enum class GidPriority {
@@ -33,19 +34,18 @@ enum class GidPriority {
 };
 
 /* One GID table entry as read from the device: its index, GID, and
- * RoCE version from NicTopology::roceVersion() (1, 2, or anything else
- * for unknown). */
+ * RoCE version from NicTopology::roceVersion(). */
 struct GidCandidate {
-    int index;
-    Gid gid;
-    int roceVersion;
+    int         index;
+    Gid         gid;
+    RoceVersion roceVersion;
 };
 
 /* Pick the preferred GID: unconfigured (all-zero) and unknown-type
  * entries are skipped, the highest GidPriority wins, and ties keep the
- * earliest candidate. Returns that candidate's index, or -1 if none
- * qualifies. */
-int PickBestGid(std::span<const GidCandidate> candidates);
+ * earliest candidate. Returns that candidate's index, or std::nullopt if
+ * none qualifies. */
+std::optional<int> PickBestGid(std::span<const GidCandidate> candidates);
 
 /* An RDMA NIC: its index in the list NicTopology::enumerate() returned,
  * and its device name */
@@ -63,8 +63,9 @@ std::optional<RdmaNic> GetClosestNicToGpu(const HipRuntime &runtime, const NicTo
                                           int gpuIndex, const char *hca_list);
 
 /* PickBestGid() over the GID table that verbs reports for port_num on
- * ctx's device, with each entry's RoCE version from topology. -1 when the
- * port can't be queried or no entry qualifies. */
-int SelectBestGid(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx, uint8_t port_num);
+ * ctx's device, with each entry's RoCE version from topology.
+ * std::nullopt when the port can't be queried or no entry qualifies. */
+std::optional<int> SelectBestGid(const Verbs &verbs, const NicTopology &topology, ibv_context *ctx,
+                                 uint8_t port_num);
 
 } // namespace hipObj

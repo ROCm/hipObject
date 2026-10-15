@@ -136,7 +136,7 @@ finishTransferAfterReply(const HipRuntime &runtime, RcConnection &conn, std::str
     // is unknown. With the current one-sided protocol the responder side
     // may not observe a completion at all (see issue #22), so this check
     // reports "no evidence of failure" rather than "transfer verified".
-    if (!pollCompletion(conn, -1, pollTimeout)) {
+    if (!pollCompletion(conn, std::nullopt, pollTimeout)) {
         return false;
     }
     if (!requiresDeviceSync) {

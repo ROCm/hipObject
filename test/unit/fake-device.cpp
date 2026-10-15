@@ -482,10 +482,10 @@ EmptyNicTopology::enumerate(const char *) const
     return {};
 }
 
-int
+hipObj::RoceVersion
 EmptyNicTopology::roceVersion(const char *, uint8_t, int) const
 {
-    return -1;
+    return hipObj::RoceVersion::Unknown;
 }
 
 // ---- Platform --------------------------------------------------------

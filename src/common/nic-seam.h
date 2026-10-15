@@ -31,6 +31,13 @@ struct NicInfo {
     int         port_num  = 1;
 };
 
+/* The RoCE version of a GID table entry */
+enum class RoceVersion {
+    Unknown, /* another type, or one that can't be read */
+    V1,
+    V2,
+};
+
 /* The methods are const, so one topology can be shared by everything
  * that uses it. A fake that records its calls keeps what it records
  * outside the object, behind a pointer. */
@@ -51,9 +58,8 @@ public:
     virtual std::vector<NicInfo> enumerate(const char *hca_list) const = 0;
 
     /* The RoCE version of entry gidIndex in the GID table of port portNum
-     * on device devName: 1 or 2, 0 for another type, or -1 when it can't
-     * be read */
-    virtual int roceVersion(const char *devName, uint8_t portNum, int gidIndex) const = 0;
+     * on device devName */
+    virtual RoceVersion roceVersion(const char *devName, uint8_t portNum, int gidIndex) const = 0;
 };
 
 /* The system's topology: the devices from verbs, and the rest from
@@ -72,7 +78,7 @@ public:
     SysfsTopology &operator=(SysfsTopology &&)      = delete;
 
     std::vector<NicInfo> enumerate(const char *hca_list) const override;
-    int                  roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
+    RoceVersion          roceVersion(const char *devName, uint8_t portNum, int gidIndex) const override;
 
 private:
     const Verbs *verbs_;

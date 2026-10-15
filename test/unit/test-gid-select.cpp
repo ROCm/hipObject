@@ -6,12 +6,14 @@
  * GID table entries are built in memory.
  */
 
+#include <optional>
 #include <span>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "hipobj-warnings.h"
+#include "nic-seam.h"
 #include "rdma-topology.h"
 
 /* Google Test registers each test with a global constructor */
@@ -21,9 +23,14 @@ namespace {
 
 using hipObj::GidCandidate;
 using hipObj::PickBestGid;
+using hipObj::RoceVersion;
+
+constexpr RoceVersion kUnknown = RoceVersion::Unknown;
+constexpr RoceVersion kV1      = RoceVersion::V1;
+constexpr RoceVersion kV2      = RoceVersion::V2;
 
 GidCandidate
-linkLocal(int index, int roceVersion)
+linkLocal(int index, RoceVersion roceVersion)
 {
     GidCandidate c{};
     c.index       = index;
@@ -36,7 +43,7 @@ linkLocal(int index, int roceVersion)
 }
 
 GidCandidate
-ipv4Mapped(int index, int roceVersion)
+ipv4Mapped(int index, RoceVersion roceVersion)
 {
     GidCandidate c{};
     c.index       = index;
@@ -51,7 +58,7 @@ ipv4Mapped(int index, int roceVersion)
 }
 
 GidCandidate
-globalV6(int index, int roceVersion)
+globalV6(int index, RoceVersion roceVersion)
 {
     GidCandidate c{};
     c.index       = index;
@@ -64,7 +71,7 @@ globalV6(int index, int roceVersion)
     return c;
 }
 
-int
+std::optional<int>
 pick(const std::vector<GidCandidate> &v)
 {
     return PickBestGid(v);
@@ -77,50 +84,50 @@ pick(const std::vector<GidCandidate> &v)
 // must win; the first entry (RoCE v1 link-local) is the least preferred.
 TEST(GidSelect, PrefersRoceV2Ipv4OnTypicalRoceTable)
 {
-    EXPECT_EQ(pick({linkLocal(0, 1), linkLocal(1, 2), ipv4Mapped(2, 1), ipv4Mapped(3, 2)}), 3);
+    EXPECT_EQ(pick({linkLocal(0, kV1), linkLocal(1, kV2), ipv4Mapped(2, kV1), ipv4Mapped(3, kV2)}), 3);
 }
 
 TEST(GidSelect, ResultDoesNotDependOnTableOrder)
 {
-    EXPECT_EQ(pick({ipv4Mapped(3, 2), linkLocal(1, 2), ipv4Mapped(2, 1), linkLocal(0, 1)}), 3);
+    EXPECT_EQ(pick({ipv4Mapped(3, kV2), linkLocal(1, kV2), ipv4Mapped(2, kV1), linkLocal(0, kV1)}), 3);
 }
 
 TEST(GidSelect, RoceV2GlobalBeatsRoceV2LinkLocal)
 {
-    EXPECT_EQ(pick({linkLocal(0, 1), linkLocal(1, 2), globalV6(2, 2)}), 2);
+    EXPECT_EQ(pick({linkLocal(0, kV1), linkLocal(1, kV2), globalV6(2, kV2)}), 2);
 }
 
 TEST(GidSelect, RoceV2LinkLocalBeatsAnyRoceV1)
 {
-    EXPECT_EQ(pick({linkLocal(0, 1), ipv4Mapped(1, 1), linkLocal(2, 2)}), 2);
+    EXPECT_EQ(pick({linkLocal(0, kV1), ipv4Mapped(1, kV1), linkLocal(2, kV2)}), 2);
 }
 
 TEST(GidSelect, RoceV1OnlyPrefersGlobalOverLinkLocal)
 {
-    EXPECT_EQ(pick({linkLocal(0, 1), ipv4Mapped(1, 1)}), 1);
+    EXPECT_EQ(pick({linkLocal(0, kV1), ipv4Mapped(1, kV1)}), 1);
 }
 
 TEST(GidSelect, TieKeepsEarliestCandidate)
 {
-    EXPECT_EQ(pick({ipv4Mapped(4, 2), ipv4Mapped(5, 2)}), 4);
+    EXPECT_EQ(pick({ipv4Mapped(4, kV2), ipv4Mapped(5, kV2)}), 4);
 }
 
 TEST(GidSelect, SkipsUnconfiguredAndUnknownTypeEntries)
 {
     GidCandidate zero{};
     zero.index               = 0;
-    zero.roceVersion         = 2;
-    GidCandidate unknownType = ipv4Mapped(1, -1);
-    EXPECT_EQ(pick({zero, unknownType, linkLocal(2, 1)}), 2);
+    zero.roceVersion         = kV2;
+    GidCandidate unknownType = ipv4Mapped(1, kUnknown);
+    EXPECT_EQ(pick({zero, unknownType, linkLocal(2, kV1)}), 2);
 }
 
-TEST(GidSelect, NoUsableEntryReturnsMinusOne)
+TEST(GidSelect, NoUsableEntryReturnsNothing)
 {
     GidCandidate zero{};
     zero.index       = 0;
-    zero.roceVersion = 2;
-    EXPECT_EQ(pick({}), -1);
-    EXPECT_EQ(pick({zero, ipv4Mapped(1, 0)}), -1);
+    zero.roceVersion = kV2;
+    EXPECT_EQ(pick({}), std::nullopt);
+    EXPECT_EQ(pick({zero, ipv4Mapped(1, kUnknown)}), std::nullopt);
 }
 
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
