@@ -173,7 +173,10 @@ version with each ``.`` replaced by ``0``, such as
 ``0.1.0.100100`` for ROCm 10.1.0, and a release. The release
 comes from the ``CPACK_DEBIAN_PACKAGE_RELEASE`` or
 ``CPACK_RPM_PACKAGE_RELEASE`` environment variable when
-hipObject is configured, and is ``local`` if it isn't set.
+hipObject is configured, and is ``local`` if it isn't set. An
+RPM package's release also ends with the distribution's tag,
+such as ``.el9``, when the build machine's ``rpm`` defines one
+(``%{?dist}``).
 
 CPack builds DEB packages with ``dpkg-deb``, and RPM packages
 with ``rpmbuild``. rocm-cmake only sets up the generators whose

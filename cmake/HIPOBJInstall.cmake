@@ -184,8 +184,8 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
 # rocm_create_package() takes the release from the
 # CPACK_DEBIAN_PACKAGE_RELEASE and CPACK_RPM_PACKAGE_RELEASE environment
 # variables, which ROCm's release builds set, and uses it as it is. Set
-# whichever isn't set to "local", so the release is always known here (see
-# the devel package's dependency below). It appends the
+# whichever isn't set to "local", so the DEB release is always known here
+# (see the devel package's dependency below). It appends the
 # ROCM_LIBPATCH_VERSION environment variable (ROCM_VERSION with each '.'
 # replaced by '0') to the package version, so set that too, which
 # includes the ROCm version in the package version even outside of a
@@ -197,7 +197,6 @@ foreach(format IN ITEMS DEBIAN RPM)
   endif()
 endforeach()
 set(HIPOBJ_DEB_RELEASE "$ENV{CPACK_DEBIAN_PACKAGE_RELEASE}")
-set(HIPOBJ_RPM_RELEASE "$ENV{CPACK_RPM_PACKAGE_RELEASE}")
 if(NOT DEFINED ENV{ROCM_LIBPATCH_VERSION})
   string(REPLACE "." "0" HIPOBJ_ROCM_LIBPATCH_VERSION "${ROCM_VERSION}")
   set(ENV{ROCM_LIBPATCH_VERSION} "${HIPOBJ_ROCM_LIBPATCH_VERSION}")
@@ -248,11 +247,17 @@ set(CPACK_RPM_DEVEL_PACKAGE_NAME
 # accept any other nightly's runtime package, whose library might not
 # match its header. Add a dependency on this exact version and release,
 # which it adds its own to.
+#
+# The RPM one names them with the spec file's %{version} and %{release},
+# which rpmbuild expands to the devel package's own, the same as the
+# runtime package's. rocm_create_package() appends %{?dist} to the RPM
+# release when the build machine's rpm defines a distribution tag (such
+# as .el9), so the release isn't known until rpmbuild expands it.
 if(BUILD_SHARED_LIBS)
   set(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS
     "${HIPOBJ_PACKAGE_NAME} (= ${HIPOBJ_PACKAGE_VERSION}-${HIPOBJ_DEB_RELEASE})")
   set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES
-    "${HIPOBJ_PACKAGE_NAME} = ${HIPOBJ_PACKAGE_VERSION}-${HIPOBJ_RPM_RELEASE}")
+    "${HIPOBJ_PACKAGE_NAME} = %{version}-%{release}")
 endif()
 
 # The nightly packages were named hipobject, hipobject-dev or
