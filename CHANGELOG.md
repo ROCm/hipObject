@@ -10,8 +10,8 @@
   `hipobject-static-dev` DEB or `hipobject-static-devel` RPM package
   for a static build. rocm-cmake is downloaded if ROCm doesn't provide
   it.
-- Nightly DEB packages of the `develop` branch, for Ubuntu 24.04 with
-  ROCm 10.1.0 and 7.14.1, are published as the `nightly`
+- Nightly DEB packages of the `develop` branch, for Ubuntu 24.04 and
+  26.04 with ROCm 10.1.0 and 7.14.1, are published as the `nightly`
   prerelease on GitHub, which each new build replaces. They're for
   testing, and aren't a supported release.
 - The `ROCM_VERSION` CMake and environment variable sets the ROCm

@@ -100,7 +100,7 @@ jobs:
       # finish so a failure in one doesn't hide the state of the others
       fail-fast: false
       matrix:
-        ubuntu: ['24.04']
+        ubuntu: ['24.04', '26.04']
         rocm: [10.1.0, 7.14.1]
     container:
       image: rocm/dev-ubuntu-${{ matrix.ubuntu }}:${{ matrix.rocm }}-full
@@ -140,7 +140,11 @@ jobs:
           } >> "${GITHUB_ENV}"
 
       # rocm-cmake reads the package release from the environment when
-      # hipObject is configured
+      # hipObject is configured.
+      #
+      # Warnings aren't errors here. The build workflow checks them, but
+      # only on Ubuntu 24.04, so a newer release's compiler can warn about
+      # code that workflow passes. That shouldn't stop the packages.
       - name: Configure
         env:
           CPACK_DEBIAN_PACKAGE_RELEASE: ${{ needs.version.outputs.release }}~${{ matrix.ubuntu }}
@@ -148,7 +152,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=ON \
-            -DHIPOBJ_WERROR=ON \
+            -DHIPOBJ_WERROR=OFF \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON
 
