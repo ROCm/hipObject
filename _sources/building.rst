@@ -159,7 +159,7 @@ DEB packages of the ``develop`` branch are built every night
 that it changes, and published as the `nightly prerelease
 <https://github.com/ROCm/hipObject/releases/tag/nightly>`_,
 which each new build replaces. There are packages for Ubuntu
-24.04, built for ROCm 10.1.0 and 7.14.1. They
+24.04 and 26.04, built for ROCm 10.1.0 and 7.14.1. They
 install into ``/opt/rocm/core-<major>.<minor>``, and their
 release is ``0.<commit time>.g<commit>~<Ubuntu release>``, so
 a newer nightly upgrades an older one. The nightly packages
