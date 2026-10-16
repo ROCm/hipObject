@@ -91,8 +91,7 @@ namespace {
             if (!IsConfiguredGid(c.gid)) {
                 continue;
             }
-            c.roceVersion =
-                topology.roceVersion(cStringView(ctx->device->name, sizeof(ctx->device->name)), port_num, i);
+            c.roceVersion = topology.roceVersion(cStringView(ctx->device->name), port_num, i);
             candidates.push_back(c);
         }
         return PickBestGid(candidates);

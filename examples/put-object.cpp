@@ -49,6 +49,8 @@ public:
 
     HipObjShutdownGuard(const HipObjShutdownGuard &)            = delete;
     HipObjShutdownGuard &operator=(const HipObjShutdownGuard &) = delete;
+    HipObjShutdownGuard(HipObjShutdownGuard &&)                 = delete;
+    HipObjShutdownGuard &operator=(HipObjShutdownGuard &&)      = delete;
 };
 
 // Deregisters a buffer from hipObject when it goes out of scope. Create
@@ -66,6 +68,8 @@ public:
 
     HipObjBufRegistration(const HipObjBufRegistration &)            = delete;
     HipObjBufRegistration &operator=(const HipObjBufRegistration &) = delete;
+    HipObjBufRegistration(HipObjBufRegistration &&)                 = delete;
+    HipObjBufRegistration &operator=(HipObjBufRegistration &&)      = delete;
 
 private:
     void *devPtr_;
@@ -87,6 +91,8 @@ public:
 
     CurlGlobal(const CurlGlobal &)            = delete;
     CurlGlobal &operator=(const CurlGlobal &) = delete;
+    CurlGlobal(CurlGlobal &&)                 = delete;
+    CurlGlobal &operator=(CurlGlobal &&)      = delete;
 
     bool ok() const
     {

@@ -20,8 +20,10 @@ namespace hipObj {
 namespace {
 
     /* The number of leases the calling thread holds, from any pool. Each
-     * thread has its own, so it needs no lock. */
-    thread_local size_t t_leasesHeld = 0;
+     * thread has its own, so it needs no lock. constinit makes sure it's
+     * initialized at compile time, so no access has to check whether it's
+     * been initialized. */
+    constinit thread_local size_t t_leasesHeld = 0;
 
 } // namespace
 

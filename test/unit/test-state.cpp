@@ -25,7 +25,6 @@
 #include "buffer.h"
 #include "connection-pool.h"
 #include "fake-device.h"
-#include "hipobj-address.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "state.h"
@@ -147,7 +146,7 @@ TEST(ParseOptionsTest, AllSet)
 
 /* reg_mr fails for this address, so it's registered through a staging
  * buffer */
-void *const kStagedBuf = hipObj::addressToPointer<void *>(0x30000);
+void *const kStagedBuf = hipObjTest::fakeStagedBuf();
 
 constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 

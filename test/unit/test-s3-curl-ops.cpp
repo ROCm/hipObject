@@ -152,10 +152,9 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            struct pollfd pfd;
+            pollfd pfd{};
             pfd.fd       = listenFd_.get();
             pfd.events   = POLLIN;
-            pfd.revents  = 0;
             const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
@@ -192,10 +191,9 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            struct pollfd pfd;
+            pollfd pfd{};
             pfd.fd       = fd.get();
             pfd.events   = POLLIN;
-            pfd.revents  = 0;
             const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
@@ -231,10 +229,9 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            struct pollfd pfd;
+            pollfd pfd{};
             pfd.fd       = fd.get();
             pfd.events   = POLLOUT;
-            pfd.revents  = 0;
             const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {

@@ -304,6 +304,17 @@ fakeDevBufPlusOne()
     return hipObj::addressToPointer<void *>(kFakeDevBufAddr + 1);
 }
 
+/* Another fake device address, for a buffer that's registered through a
+ * staging buffer. Tests make reg_mr fail for it, by setting
+ * fake().fail.registerAddr to it. */
+constexpr uintptr_t kFakeStagedBufAddr = 0x30000;
+
+inline void *
+fakeStagedBuf()
+{
+    return hipObj::addressToPointer<void *>(kFakeStagedBufAddr);
+}
+
 constexpr size_t kFakeBufSize = 64;
 
 /* A NIC topology with no NICs, and no RoCE version for any GID */

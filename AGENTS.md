@@ -365,11 +365,13 @@ takes priority over speed and convenience.
 - **Fully initialize anything that touches the wire.** That covers tokens, HTTP
   headers and bodies, and every verbs structure handed to libibverbs (work
   requests, scatter/gather entries, QP attributes). Initialize each one
-  completely before filling it in (`T x{}`, or `hipObj::zeroObject()` from
-  [`shared/hipobj-span.h`](shared/hipobj-span.h) for C structs, as the
-  existing code does). Serialize field by field; never copy a struct's raw
-  bytes onto the wire, since its padding can carry stale memory, and `{}`
-  doesn't guarantee that padding is zeroed.
+  completely before filling it in: `T x{}`, or for C structs, declare it
+  with `auto x = hipObj::zeroedObject<T>()` from
+  [`shared/hipobj-span.h`](shared/hipobj-span.h), which zeroes the padding
+  too, and zero one that already exists with `hipObj::zeroObject()`.
+  Serialize field by field; never copy a struct's raw bytes onto the wire,
+  since its padding can carry stale memory, and `{}` doesn't guarantee that
+  padding is zeroed.
 - **Treat everything from the network as untrusted.** That includes S3
   responses, `x-amz-rdma-reply` values, peer tokens, and completions. Check
   lengths, character sets (hex, base64), and ranges before using a value, and

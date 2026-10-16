@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -55,6 +56,15 @@ TEST(Span, CStringViewCutsALongString)
     EXPECT_EQ(hipObj::cStringView("token", 0), "");
 }
 
+TEST(Span, CStringViewOfAnArrayStopsAtTheNulOrTheEnd)
+{
+    const std::array<char, 8> terminated{{'m', 'l', 'x', '5', '\0', 'x', 'x', 'x'}};
+    EXPECT_EQ(hipObj::cStringView(terminated), "mlx5");
+
+    const std::array<char, 4> unterminated{{'a', 'b', 'c', 'd'}};
+    EXPECT_EQ(hipObj::cStringView(unterminated), "abcd");
+}
+
 TEST(Span, AsStringViewViewsTheSameCharacters)
 {
     const std::array<char, 5> chars{{'h', 'e', 'l', 'l', 'o'}};
@@ -91,6 +101,25 @@ TEST(Span, ZeroObjectZeroesThePadding)
     hipObj::zeroObject(padded);
     const std::span<const std::byte, sizeof(Padded)> bytes = std::as_bytes(std::span<Padded, 1>{&padded, 1});
     EXPECT_TRUE(std::ranges::all_of(bytes, [](std::byte b) noexcept { return b == std::byte{0}; }));
+}
+
+TEST(Span, ZeroedObjectZeroesThePadding)
+{
+    /* Built in memory that isn't zero to begin with. The result
+     * initializes the new Padded directly, without a copy, as it does a
+     * variable declared with it. */
+    alignas(Padded) std::array<std::byte, sizeof(Padded)> storage{};
+    std::ranges::fill(storage, std::byte{0xa5});
+    ::new (static_cast<void *>(storage.data())) Padded(hipObj::zeroedObject<Padded>());
+    EXPECT_TRUE(std::ranges::all_of(storage, [](std::byte b) noexcept { return b == std::byte{0}; }));
+}
+
+TEST(Span, ZeroedObjectZeroesEnumsWithoutAZeroEnumerator)
+{
+    /* ibv_mtu has no zero enumerator, and the member is zero anyway */
+    const auto attr = hipObj::zeroedObject<ibv_qp_attr>();
+    EXPECT_EQ(static_cast<int>(attr.path_mtu), 0);
+    EXPECT_EQ(attr.qp_state, IBV_QPS_RESET);
 }
 
 TEST(Span, DeviceSpanViewsTheList)

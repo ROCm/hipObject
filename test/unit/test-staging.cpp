@@ -39,7 +39,7 @@ constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 
 /* reg_mr fails for this address, so it's registered through a staging
  * buffer */
-void *const kStagedBuf = hipObj::addressToPointer<void *>(0x30000);
+void *const kStagedBuf = hipObjTest::fakeStagedBuf();
 
 /* The HIP runtime reports every pointer as device memory in one allocation,
  * which holds every buffer these tests register */

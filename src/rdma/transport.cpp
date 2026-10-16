@@ -102,8 +102,7 @@ namespace {
 
     [[nodiscard]] bool transitionQpToInit(RcConnection &conn)
     {
-        struct ibv_qp_attr attr;
-        zeroObject(attr);
+        auto attr            = zeroedObject<ibv_qp_attr>();
         attr.qp_state        = IBV_QPS_INIT;
         attr.pkey_index      = 0;
         attr.port_num        = conn.device().portNum();
@@ -140,8 +139,7 @@ createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uin
     if (!cq) {
         return std::nullopt;
     }
-    struct ibv_qp_init_attr initAttr;
-    zeroObject(initAttr);
+    auto initAttr             = zeroedObject<ibv_qp_init_attr>();
     initAttr.send_cq          = cq.get();
     initAttr.recv_cq          = cq.get();
     initAttr.cap.max_send_wr  = maxSendWr;
@@ -173,8 +171,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
         return false;
     }
 
-    struct ibv_qp_attr attr;
-    zeroObject(attr);
+    auto attr     = zeroedObject<ibv_qp_attr>();
     attr.qp_state = IBV_QPS_RTR;
     attr.path_mtu = IBV_MTU_4096;
     applyVendorQpAttrs(device, attr);
@@ -200,8 +197,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
 bool
 transitionQpToRts(RcConnection &conn)
 {
-    struct ibv_qp_attr attr;
-    zeroObject(attr);
+    auto attr     = zeroedObject<ibv_qp_attr>();
     attr.qp_state = IBV_QPS_RTS;
     applyVendorQpAttrs(conn.device(), attr);
     attr.timeout       = 14;
@@ -230,8 +226,7 @@ namespace {
 
     [[nodiscard]] bool transitionQpToReset(RcConnection &conn)
     {
-        struct ibv_qp_attr attr;
-        zeroObject(attr);
+        auto attr     = zeroedObject<ibv_qp_attr>();
         attr.qp_state = IBV_QPS_RESET;
         return conn.device().verbs().modify_qp(conn.qp(), &attr, IBV_QP_STATE) == 0;
     }

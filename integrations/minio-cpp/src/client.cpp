@@ -37,13 +37,14 @@ namespace {
 
     /* Monotonic, process-wide, and deliberately not per-Client: a caller that
      * wants to know whether the RDMA path was taken does not want to thread a
-     * Client reference through its assertions. */
-    std::atomic<uint64_t> g_rdmaPuts{0};
-    std::atomic<uint64_t> g_rdmaGets{0};
-    std::atomic<uint64_t> g_httpPuts{0};
-    std::atomic<uint64_t> g_httpGets{0};
-    std::atomic<uint64_t> g_rdmaBytes{0};
-    std::atomic<uint64_t> g_httpBytes{0};
+     * Client reference through its assertions. constinit makes sure they're
+     * initialized at compile time, before anything can count. */
+    constinit std::atomic<uint64_t> g_rdmaPuts{0};
+    constinit std::atomic<uint64_t> g_rdmaGets{0};
+    constinit std::atomic<uint64_t> g_httpPuts{0};
+    constinit std::atomic<uint64_t> g_httpGets{0};
+    constinit std::atomic<uint64_t> g_rdmaBytes{0};
+    constinit std::atomic<uint64_t> g_httpBytes{0};
 
     void CountRdmaPut(size_t n)
     {

@@ -69,6 +69,15 @@ asStringView(std::span<const char> chars) noexcept
 
 HIPOBJ_WARN_UNSAFE_BUFFER_ON
 
+/* Views the NUL-terminated string in chars, without its NUL, or all of
+ * chars if it has no NUL. Pass it a char array, such as ibv_device's
+ * name, without decaying the array to a pointer. */
+inline std::string_view
+cStringView(std::span<const char> chars) noexcept
+{
+    return cStringView(chars.data(), chars.size());
+}
+
 /* Views main()'s arguments */
 inline std::span<char *>
 argSpan(int argc, char **argv) noexcept
@@ -85,6 +94,31 @@ void
 zeroObject(T &obj) noexcept
 {
     std::ranges::fill(std::as_writable_bytes(std::span<T, 1>{std::addressof(obj), 1}), std::byte{0});
+}
+
+/* Returns a T with every byte zero, padding included, as zeroObject()
+ * leaves one. Declare a C struct with it, as in
+ * auto attr = zeroedObject<ibv_qp_attr>(), rather than declaring it
+ * uninitialized and zeroing it with zeroObject().
+ *
+ * T() and T{} are different. For a C struct, T() is value-initialization,
+ * which zero-initializes it, and the standard defines zero-initialization
+ * to set the padding bits to zero too. T{} is aggregate initialization,
+ * which initializes each member and leaves the padding unspecified.
+ * clang-tidy's bugprone-invalid-enum-default-initialization also reports
+ * T{} for setting a member whose enum has no zero enumerator (such as
+ * ibv_mtu) to zero, but not T().
+ *
+ * T() is a prvalue, so C++17's guaranteed copy elision initializes the
+ * object being declared with it directly, without a copy. Assigning the
+ * result to an existing object is a copy, though, and a copy needn't keep
+ * the padding, so use zeroObject() for that. */
+template <typename T>
+    requires std::is_trivially_copyable_v<T> && std::is_trivially_default_constructible_v<T>
+[[nodiscard]] T
+zeroedObject() noexcept
+{
+    return T();
 }
 
 } // namespace hipObj
