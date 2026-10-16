@@ -19,6 +19,9 @@
 #      and build them against that prefix with the CMakeLists.txt
 #      installed with them, which builds them as C++11. They need a GPU
 #      and an RDMA NIC, so they aren't run.
+#   4. If the tools were installed (TOOLS), run hipobj-test-install
+#      --version from that prefix, which checks that its run path finds
+#      the installed libhipobj, and that it reports EXPECTED_VERSION
 
 if(NOT SETTINGS)
   message(FATAL_ERROR "run-install-test: SETTINGS is not set")
@@ -113,4 +116,24 @@ if(EXAMPLES_DIR)
 
   run_step("build the installed examples"
     ${CMAKE_COMMAND} --build ${examples_build_dir} ${config_args})
+endif()
+
+if(TOOLS)
+  execute_process(
+    COMMAND ${prefix}/bin/hipobj-test-install --version
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE output)
+  if(NOT result EQUAL 0)
+    message(FATAL_ERROR
+      "run-install-test: run the installed hipobj-test-install failed:\n"
+      "${output}")
+  endif()
+  string(FIND "${output}" "hipObject ${EXPECTED_VERSION})" version_position)
+  if(version_position EQUAL -1)
+    message(FATAL_ERROR
+      "run-install-test: hipobj-test-install --version didn't report "
+      "hipObject ${EXPECTED_VERSION}:\n${output}")
+  endif()
+  message(STATUS "run-install-test: run the installed hipobj-test-install: OK")
 endif()

@@ -502,8 +502,9 @@ configuration files.
   `StatementMacros` in [`.clang-format`](.clang-format), wrap the smallest
   region you can, and comment why the warning can't be fixed. `shared/` is
   already on the include path of the library, the MinIO bridge, the unit
-  tests, `hipobj-rdma-test-server`, and `minio-getput-rdma`; add it only to a
-  target that lacks it (the examples). The examples are built with
+  tests, `hipobj-rdma-test-server`, `minio-getput-rdma`, and
+  `hipobj-test-install`; add it only to a target that lacks it (the
+  examples). The examples are built with
   `-Wno-unsafe-buffer-usage`, the one exception to these rules, since they're
   C++11 (see
   [Public API](#public-api)).

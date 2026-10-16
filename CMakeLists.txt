@@ -130,9 +130,12 @@ option(HIPOBJ_IONIC
 
 add_subdirectory(src)
 
-# Before the tests, which build the installed examples
+# Before the tests, which build the installed examples and run the
+# installed tools
 option(HIPOBJ_INSTALL_EXAMPLES
   "Build the examples and install their sources" ON)
+option(HIPOBJ_INSTALL_TOOLS
+  "Build and install the tool programs" ON)
 
 if(BUILD_TESTING)
   include(HIPOBJUseGTest)
@@ -141,6 +144,10 @@ endif()
 
 if(HIPOBJ_INSTALL_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if(HIPOBJ_INSTALL_TOOLS)
+  add_subdirectory(tools)
 endif()
 
 option(HIPOBJ_MINIO_CLIENT

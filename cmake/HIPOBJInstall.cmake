@@ -13,9 +13,10 @@ include(ROCMCreatePackage)
 # Components, which rocm_create_package() turns into packages:
 #   runtime  What programs need at run time: the versioned shared
 #            library (libhipobj.so.<major> and libhipobj.so.<version>),
-#            the license, and with HIPOBJ_MINIO_CLIENT, the MinIO
-#            example program. A static build puts the license in
-#            devel instead.
+#            the license, the tools (HIPOBJ_INSTALL_TOOLS), and with
+#            HIPOBJ_MINIO_CLIENT, the MinIO example program. A static
+#            build puts the license in devel instead, and doesn't
+#            package the programs.
 #   devel    What's needed to build against hipObject: the
 #            libhipobj.so symlink used at link time, the static
 #            library, the header, the CMake package files, and the

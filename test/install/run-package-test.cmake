@@ -24,8 +24,9 @@
 #   - That the devel package depends on the runtime package from the same
 #     build, with its exact version and release
 #   - The files each package contains, including the examples' sources
-#     in the devel package, that no file is in two packages, and that
-#     the test programs and the example programs aren't packaged
+#     in the devel package and the tools in the runtime package, that no
+#     file is in two packages, and that the test programs and the
+#     example programs aren't packaged, nor the tools in a static build
 #   - The package dependencies, which depend on the ROCm version and on
 #     the system libraries the installed programs link
 #   - That the package holding the library, and only that one,
@@ -153,6 +154,13 @@ set(not_packaged_files
   bin/hipobj-examples/get-object
   bin/hipobj-examples/put-object)
 
+# The tools, which the runtime package has when they're installed. A
+# static build installs them, but has no runtime package to put them in.
+set(tool_files)
+if(TOOLS)
+  set(tool_files bin/hipobj-test-install)
+endif()
+
 # The ROCm packages the library's package depends on
 set(rocm_depends "amdrocm-runtime${devel_suffix}${rocm_mm}")
 set(rocm_not_depends rocm-core)
@@ -189,7 +197,8 @@ if(SHARED)
   set(${runtime_package}_files
     lib/libhipobj.so.${LIBRARY_SOVERSION}
     lib/libhipobj.so.${LIBRARY_VERSION}
-    ${license_file})
+    ${license_file}
+    ${tool_files})
   set(${runtime_package}_depends ${rocm_depends} ${program_depends})
   set(${runtime_package}_not_depends ${rocm_not_depends})
   set(${runtime_package}_recommends ${library_recommends})
@@ -223,6 +232,7 @@ else()
   set(${devel_package}_recommends ${library_recommends})
   set(${devel_package}_not_recommends)
   set(${devel_package}_replaces hipobject-static${devel_suffix})
+  list(APPEND not_packaged_files ${tool_files})
 endif()
 
 # rocm_create_package() appends ROCM_LIBPATCH_VERSION to the version.

@@ -4,6 +4,12 @@
 
 ### Added
 
+- `hipobj-test-install`, a program in the runtime package, installed in
+  `bin`. It will check that hipObject is installed and works, as far as
+  the system's hardware allows, without an S3 server. For now it only
+  reports the hipObject version, with `--version`. The new
+  `HIPOBJ_INSTALL_TOOLS` CMake option (default `ON`) builds and installs
+  it. A static build installs it but doesn't package it.
 - hipObject is installed and packaged with rocm-cmake. `cpack` builds
   `hipobject<mm>` (runtime) and `hipobject-dev<mm>` (development) DEB
   packages or `hipobject<mm>` and `hipobject-devel<mm>` RPM packages,
