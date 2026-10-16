@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -24,6 +25,7 @@
 #include <hip/hip_runtime_api.h>
 #include <sys/types.h>
 
+#include "connection-pool.h"
 #include "fake-device.h"
 #include "hipobj-address.h"
 #include "hipobj-span.h"
@@ -60,6 +62,35 @@ constexpr int kRtrMask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DES
                          IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
 constexpr int kRtsMask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                          IBV_QP_MAX_QP_RD_ATOMIC;
+constexpr int kInitMask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
+
+/* The QPs an instance creates with the default options: one for each
+ * transfer, and the one hipObjGetRdmaToken() advertises */
+const int kDefaultQps = 1 + static_cast<int>(hipObj::Options{}.maxTransfers);
+
+/* The default options, with maxTransfers connections for transfers. A
+ * test passes this rather than declaring options of its own: CodeQL reads
+ * a local in one of the fixtures' member functions as a global, and
+ * reports locals with the same name as hiding it
+ * (cpp/local-variable-hides-global-variable). */
+hipObj::Options
+withMaxTransfers(size_t maxTransfers)
+{
+    hipObj::Options result;
+    result.maxTransfers = maxTransfers;
+    return result;
+}
+
+/* The states that the modify_qp() calls so far moved QPs to */
+std::vector<ibv_qp_state>
+modifiedStates()
+{
+    std::vector<ibv_qp_state> states;
+    for (const hipObjTest::ModifyQpCall &call : modifyQpCalls()) {
+        states.push_back(call.attr.qp_state);
+    }
+    return states;
+}
 
 class TransportTest : public hipObjTest::FakeDeviceTest {
 protected:
@@ -68,7 +99,7 @@ protected:
     {
         std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs(), topology(), 0);
         ASSERT_TRUE(device);
-        device_.emplace(std::move(*device));
+        device_ = std::make_unique<hipObj::RdmaDevice>(std::move(*device));
     }
 
     /* Opens the fake device, and creates a connection on it in conn_.
@@ -79,7 +110,7 @@ protected:
         ASSERT_NO_FATAL_FAILURE(openDevice());
         std::optional<hipObj::RcConnection> conn = hipObj::createRcConnection(*device_, 16, 8, 8);
         ASSERT_TRUE(conn);
-        conn_.emplace(std::move(*conn));
+        conn_                = std::make_unique<hipObj::RcConnection>(std::move(*conn));
         fake().modifyQpCount = 0;
     }
 
@@ -112,9 +143,12 @@ protected:
         EXPECT_EQ(hipObj::toGid(attr.ah_attr.grh.dgid), token.gid);
     }
 
-    /* conn_ is declared after device_, so it's destroyed first */
-    std::optional<hipObj::RdmaDevice>   device_{};
-    std::optional<hipObj::RcConnection> conn_{};
+    /* conn_ is declared after device_, so it's destroyed first. They're
+     * on the heap, which keeps the fixture small: CodeQL, which can't
+     * expand TEST_F(), reads each test as a function that takes the
+     * fixture by value, and reports a large one (cpp/large-parameter). */
+    std::unique_ptr<hipObj::RdmaDevice>   device_{};
+    std::unique_ptr<hipObj::RcConnection> conn_{};
 };
 
 // ---- Opening the device ------------------------------------------
@@ -197,7 +231,7 @@ TEST_F(TransportTest, CreateSetsUpTheConnection)
     ASSERT_NO_FATAL_FAILURE(openDevice());
     const std::optional<hipObj::RcConnection> conn = hipObj::createRcConnection(*device_, 16, 8, 8);
     ASSERT_TRUE(conn);
-    EXPECT_EQ(&conn->device(), &*device_);
+    EXPECT_EQ(&conn->device(), device_.get());
     EXPECT_NE(conn->cq(), nullptr);
     EXPECT_NE(conn->qp(), nullptr);
     EXPECT_EQ(fake().log.createCq, 1);
@@ -238,13 +272,13 @@ TEST_F(TransportTest, MovingKeepsTheQpAndDevice)
     conn_.reset();
     EXPECT_EQ(fake().log.destroyQp, 0);
     EXPECT_EQ(moved->qp(), qp);
-    EXPECT_EQ(&moved->device(), &*device_);
+    EXPECT_EQ(&moved->device(), device_.get());
 }
 
 TEST_F(TransportTest, DestroyingReleasesEverything)
 {
     ASSERT_NO_FATAL_FAILURE(open());
-    EXPECT_EQ(&conn_->device(), &*device_);
+    EXPECT_EQ(&conn_->device(), device_.get());
     EXPECT_EQ(fake().log.destroyQp, 0);
 
     /* The connection doesn't own its device */
@@ -268,7 +302,7 @@ TEST_F(TransportTest, CreateMovesQpToInitWithRemoteReadAndWrite)
     EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_INIT);
     EXPECT_EQ(calls[0].attr.port_num, device_->portNum());
     EXPECT_EQ(calls[0].attr.pkey_index, 0);
-    EXPECT_EQ(calls[0].mask, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
+    EXPECT_EQ(calls[0].mask, kInitMask);
     /* The peer reads the buffer for a PUT and writes it for a GET, and
      * nothing else */
     EXPECT_EQ(calls[0].attr.qp_access_flags,
@@ -309,6 +343,74 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
     EXPECT_EQ(rts.rnr_retry, 7);
     EXPECT_EQ(rts.sq_psn, 0U);
     EXPECT_EQ(rts.max_rd_atomic, 1);
+}
+
+/* An RC QP connects once: from RTS, it has to go back through RESET
+ * before it can connect again, as the fake device enforces */
+TEST_F(TransportTest, ConnectedQpConnectsAgainOnlyAfterReset)
+{
+    ASSERT_NO_FATAL_FAILURE(open());
+    ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
+    EXPECT_EQ(conn_->qp()->state, IBV_QPS_RTS);
+    EXPECT_FALSE(hipObj::connectRcPeer(*conn_, peerToken()));
+
+    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
+    EXPECT_EQ(conn_->qp()->state, IBV_QPS_INIT);
+    EXPECT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
+}
+
+TEST_F(TransportTest, ResetMovesQpToInitThroughReset)
+{
+    ASSERT_NO_FATAL_FAILURE(open());
+    ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
+    fake().modifyQpCount = 0;
+    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
+
+    std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
+    ASSERT_EQ(calls.size(), 2U);
+    EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_RESET);
+    EXPECT_EQ(calls[0].mask, IBV_QP_STATE);
+    /* The same INIT transition as creating the connection, which doesn't
+     * widen the access flags */
+    EXPECT_EQ(calls[1].attr.qp_state, IBV_QPS_INIT);
+    EXPECT_EQ(calls[1].mask, kInitMask);
+    EXPECT_EQ(calls[1].attr.qp_access_flags,
+              static_cast<unsigned int>(IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+}
+
+TEST_F(TransportTest, ResetDrainsTheCq)
+{
+    ASSERT_NO_FATAL_FAILURE(open());
+
+    /* Polls until the CQ is empty */
+    fake().pollResult = 0;
+    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
+    EXPECT_EQ(fake().log.pollCq, 1);
+
+    /* A CQ that always has a completion is polled no more times than it
+     * can hold completions */
+    fake().log.pollCq = 0;
+    fake().pollResult = 1;
+    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
+    EXPECT_EQ(fake().log.pollCq, conn_->cq()->cqe);
+}
+
+TEST_F(TransportTest, ResetFailsWhenAStepFails)
+{
+    ASSERT_NO_FATAL_FAILURE(open());
+    fake().fail.modifyQpToState = IBV_QPS_RESET;
+    EXPECT_FALSE(hipObj::resetRcConnection(*conn_));
+    EXPECT_EQ(fake().log.pollCq, 0);
+
+    fake().fail.modifyQpToState = -1;
+    fake().pollResult           = -1;
+    fake().modifyQpCount        = 0;
+    EXPECT_FALSE(hipObj::resetRcConnection(*conn_));
+    EXPECT_EQ(modifiedStates(), std::vector<ibv_qp_state>({IBV_QPS_RESET}));
+
+    fake().pollResult           = 0;
+    fake().fail.modifyQpToState = IBV_QPS_INIT;
+    EXPECT_FALSE(hipObj::resetRcConnection(*conn_));
 }
 
 TEST_F(TransportTest, ConnectDoesNotQueryTheDevice)
@@ -492,6 +594,16 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenInitTransitionFails)
     expectNothingLeaked();
 }
 
+TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenThePoolCantBeCreated)
+{
+    /* The token connection, and one of the pool's three */
+    fake().fail.qpLimit = 2;
+    EXPECT_EQ(initFakes(makeConfig(), withMaxTransfers(3)).opError, hipObjRdmaError);
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+    EXPECT_EQ(fake().log.createQp, 2);
+    expectNothingLeaked();
+}
+
 TEST_F(TransportTest, InitFailsForUnknownNic)
 {
     hipObjConfig_t config = makeConfig();
@@ -505,7 +617,7 @@ TEST_F(TransportTest, ShutdownReleasesEverything)
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
-    EXPECT_EQ(fake().log.createQp, 1);
+    EXPECT_EQ(fake().log.createQp, kDefaultQps);
     expectNothingLeaked();
 }
 
@@ -562,53 +674,125 @@ protected:
         hipObjOps_t ops = makeOps();
         return GetParam()(&ops);
     }
+
+    /* Initializes with options, and registers kBufSize bytes at kDevBuf.
+     * Forgets the modify_qp() calls that moved the QPs to INIT, so a test
+     * sees only the transfers' calls. */
+    void initForTransfers(const hipObj::Options &options = {}) const
+    {
+        ASSERT_EQ(initFakes(makeConfig(), options).opError, hipObjSuccess);
+        ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);
+        fake().modifyQpCount = 0;
+    }
+
+    /* initForTransfers() with one connection for transfers, so each one
+     * uses it */
+    void initForTransfersOnOneConnection() const
+    {
+        ASSERT_NO_FATAL_FAILURE(initForTransfers(withMaxTransfers(1)));
+    }
 };
 
 TEST_P(TransportTransferTest, ConnectsToPeerInReply)
 {
-    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    ASSERT_NO_FATAL_FAILURE(initForTransfers());
     setReplyWithPeerToken(peerToken());
     const int queries = fake().log.queryDevice;
     ASSERT_EQ(transfer().opError, hipObjSuccess);
     /* Connecting reads the vendor ID initialization stored, not the device */
     EXPECT_EQ(fake().log.queryDevice, queries);
 
-    /* Initialization moved the QP to INIT; the reply's token connects it */
+    /* The reply's token connects the QP, and it's reset to INIT once the
+     * transfer is over */
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
-    ASSERT_EQ(calls.size(), 3U);
-    EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_INIT);
-    EXPECT_EQ(calls[1].attr.qp_state, IBV_QPS_RTR);
-    EXPECT_EQ(calls[1].attr.dest_qp_num, peerToken().qpNum);
-    expectPeerGid(calls[1].attr);
-    EXPECT_EQ(calls[2].attr.qp_state, IBV_QPS_RTS);
+    ASSERT_EQ(calls.size(), 4U);
+    EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_RTR);
+    EXPECT_EQ(calls[0].attr.dest_qp_num, peerToken().qpNum);
+    expectPeerGid(calls[0].attr);
+    EXPECT_EQ(calls[1].attr.qp_state, IBV_QPS_RTS);
+    EXPECT_EQ(calls[2].attr.qp_state, IBV_QPS_RESET);
+    EXPECT_EQ(calls[3].attr.qp_state, IBV_QPS_INIT);
+}
+
+/* A QP that's connected can't connect again until it's reset, so this
+ * fails if the transfer doesn't reset it */
+TEST_P(TransportTransferTest, PeerTokenTransfersBackToBack)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
+    setReplyWithPeerToken(peerToken());
+    ASSERT_EQ(transfer().opError, hipObjSuccess);
+    ASSERT_EQ(transfer().opError, hipObjSuccess);
+    EXPECT_EQ(modifiedStates(),
+              std::vector<ibv_qp_state>({IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT, IBV_QPS_RTR,
+                                         IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT}));
 }
 
 TEST_P(TransportTransferTest, DoesNotConnectWithoutPeerToken)
 {
-    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    ASSERT_NO_FATAL_FAILURE(initForTransfers());
     ASSERT_EQ(transfer().opError, hipObjSuccess);
-    EXPECT_EQ(fake().modifyQpCount, 1U);
+    EXPECT_EQ(fake().modifyQpCount, 0U);
 }
 
 TEST_P(TransportTransferTest, RejectsPeerTokenThatIsNotRc)
 {
-    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    ASSERT_NO_FATAL_FAILURE(initForTransfers());
     setReplyWithPeerToken(peerToken(hipObj::TransportType::DC));
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
-    EXPECT_EQ(fake().modifyQpCount, 1U);
+    /* The QP isn't connected, though it's still reset */
+    EXPECT_EQ(modifiedStates(), std::vector<ibv_qp_state>({IBV_QPS_RESET, IBV_QPS_INIT}));
 }
 
 TEST_P(TransportTransferTest, FailsWhenConnectionFails)
 {
-    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
     setReplyWithPeerToken(peerToken());
-    fake().fail.modifyQpToState = IBV_QPS_RTR;
+    fake().fail.modifyQpToState = IBV_QPS_RTS;
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
+
+    /* The QP got as far as RTR, and it's reset, so the next transfer can
+     * connect it */
+    fake().fail.modifyQpToState = -1;
+    EXPECT_EQ(transfer().opError, hipObjSuccess);
+    EXPECT_EQ(modifiedStates(),
+              std::vector<ibv_qp_state>({IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT, IBV_QPS_RTR,
+                                         IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT}));
+}
+
+/* A connection that can't be reset is replaced */
+TEST_P(TransportTransferTest, ReplacesAConnectionItCantReset)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
+    const int qps = fake().log.createQp;
+    setReplyWithPeerToken(peerToken());
+    fake().fail.modifyQpToState = IBV_QPS_RESET;
+    ASSERT_EQ(transfer().opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.createQp, qps + 1);
+    EXPECT_EQ(fake().log.destroyQp, 1);
+
+    fake().fail.modifyQpToState = -1;
+    EXPECT_EQ(transfer().opError, hipObjSuccess);
+}
+
+/* A connection that can't be reset or replaced is dropped, and with none
+ * left, transfers fail */
+TEST_P(TransportTransferTest, FailsWithoutConnections)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
+    setReplyWithPeerToken(peerToken());
+    fake().fail.modifyQpToState = IBV_QPS_RESET;
+    fake().fail.createQp        = true;
+    ASSERT_EQ(transfer().opError, hipObjSuccess);
+    EXPECT_EQ(hipObj::currentInstance()->pool.size(), 0U);
+
+    const int requests = fake().log.sendRequest;
+    EXPECT_EQ(transfer().opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.sendRequest, requests);
 }
 
 TEST_P(TransportTransferTest, FailsOnErrorCompletion)
 {
-    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    ASSERT_NO_FATAL_FAILURE(initForTransfers());
     fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
 }
@@ -616,14 +800,14 @@ TEST_P(TransportTransferTest, FailsOnErrorCompletion)
 TEST_P(TransportTransferTest, FailsWhenDeviceSyncFails)
 {
     /* A GPU-direct buffer is synchronized after the transfer */
-    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    ASSERT_NO_FATAL_FAILURE(initForTransfers());
     fake().deviceSyncErr = hipErrorLaunchFailure;
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
 }
 
 TEST_P(TransportTransferTest, ReportsS3Failures)
 {
-    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    ASSERT_NO_FATAL_FAILURE(initForTransfers());
 
     hipObjOps_t ops = makeOps();
     ops.sendRequest = &failSendRequest;
@@ -638,7 +822,38 @@ TEST_P(TransportTransferTest, ReportsS3Failures)
         setReply(reply);
         EXPECT_EQ(transfer().opError, hipObjS3Error) << "reply \"" << reply << "\"";
     }
-    EXPECT_EQ(fake().modifyQpCount, 1U);
+    EXPECT_EQ(fake().modifyQpCount, 0U);
+}
+
+TEST_F(TransportTest, InitCreatesAConnectionForEachTransferAndOneForTokens)
+{
+    ASSERT_EQ(initFakes(makeConfig(), withMaxTransfers(3)).opError, hipObjSuccess);
+    ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.createQp, 4);
+    EXPECT_EQ(fake().log.createCq, 4);
+    const std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
+    ASSERT_EQ(calls.size(), 4U);
+    for (const hipObjTest::ModifyQpCall &call : calls) {
+        EXPECT_EQ(call.attr.qp_state, IBV_QPS_INIT);
+    }
+
+    /* A transfer's token names a connection from the pool, not the one
+     * hipObjGetRdmaToken() advertises */
+    hipObjOps_t ops = makeOps();
+    ops.sendRequest = &recordSendRequest;
+    SentToken sent;
+    ASSERT_EQ(hipObjGet(nullptr, kDevBuf, kBufSize, 0, &ops, &sent).opError, hipObjSuccess);
+    const auto transferToken =
+        hipObj::decodeRdmaTokenHex(hipObj::asStringView(std::span(sent.bytes).first(sent.len)));
+    ASSERT_TRUE(transferToken);
+
+    char *token = nullptr;
+    ASSERT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, HIPOBJ_RDMA_OP_GET, &token).opError, hipObjSuccess);
+    const auto appToken =
+        hipObj::decodeRdmaTokenHex(hipObj::cStringView(token, hipObj::kRdmaTokenHexLen + 1));
+    EXPECT_EQ(hipObjPutRdmaToken(token).opError, hipObjSuccess);
+    ASSERT_TRUE(appToken);
+    EXPECT_NE(transferToken->qpNum, appToken->qpNum);
 }
 
 TEST_F(TransportTest, SendsTokenForTheRegisteredRange)

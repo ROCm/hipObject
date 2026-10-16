@@ -82,6 +82,29 @@ modifyQpCalls()
 
 // ---- ibverbs -------------------------------------------------------
 
+namespace {
+
+    /* Whether a QP can move from one state to another, for the states
+     * hipObject uses. Any state can move to RESET or ERR. */
+    bool isValidTransition(enum ibv_qp_state from, enum ibv_qp_state to)
+    {
+        if (to == IBV_QPS_RESET || to == IBV_QPS_ERR) {
+            return true;
+        }
+        if (from == IBV_QPS_RESET) {
+            return to == IBV_QPS_INIT;
+        }
+        if (from == IBV_QPS_INIT) {
+            return to == IBV_QPS_INIT || to == IBV_QPS_RTR;
+        }
+        if (from == IBV_QPS_RTR || from == IBV_QPS_RTS) {
+            return to == IBV_QPS_RTS;
+        }
+        return false;
+    }
+
+} // namespace
+
 struct ibv_device **
 FakeVerbs::get_device_list(int *num_devices) const
 {
@@ -223,7 +246,7 @@ FakeVerbs::dereg_mr(struct ibv_mr *mr) const
 }
 
 struct ibv_cq *
-FakeVerbs::create_cq(struct ibv_context * /*context*/, int /*cqe*/, void * /*cq_context*/,
+FakeVerbs::create_cq(struct ibv_context * /*context*/, int cqe, void * /*cq_context*/,
                      struct ibv_comp_channel * /*channel*/, int /*comp_vector*/) const
 {
     if (device_->fail.createCq) {
@@ -232,6 +255,7 @@ FakeVerbs::create_cq(struct ibv_context * /*context*/, int /*cqe*/, void * /*cq_
     auto *cq = static_cast<struct ibv_cq *>(std::calloc(1, sizeof(struct ibv_cq)));
     if (cq != nullptr) {
         ++device_->log.createCq;
+        cq->cqe = cqe;
     }
     return cq;
 }
@@ -247,9 +271,11 @@ FakeVerbs::destroy_cq(struct ibv_cq *cq) const
 struct ibv_qp *
 FakeVerbs::create_qp(struct ibv_pd * /*pd*/, struct ibv_qp_init_attr * /*qp_init_attr*/) const
 {
-    if (device_->fail.createQp) {
+    if (device_->fail.createQp ||
+        (device_->fail.qpLimit >= 0 && device_->log.createQp >= device_->fail.qpLimit)) {
         return nullptr;
     }
+    /* Zeroed, so its state is IBV_QPS_RESET */
     auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
     if (qp != nullptr) {
         ++device_->log.createQp;
@@ -259,14 +285,25 @@ FakeVerbs::create_qp(struct ibv_pd * /*pd*/, struct ibv_qp_init_attr * /*qp_init
 }
 
 int
-FakeVerbs::modify_qp(struct ibv_qp * /*qp*/, struct ibv_qp_attr *attr, int mask) const
+FakeVerbs::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int mask) const
 {
     /* Each call records into its own element */
     const size_t call = device_->modifyQpCount++;
     if (call < device_->modifyQp.size()) {
         device_->modifyQp[call] = {.attr = *attr, .mask = mask};
     }
-    return static_cast<int>(attr->qp_state) == device_->fail.modifyQpToState ? -1 : 0;
+    if (static_cast<int>(attr->qp_state) == device_->fail.modifyQpToState) {
+        return -1;
+    }
+    /* Only the transfer that holds a QP changes it, so its state needs no
+     * synchronization */
+    if ((mask & IBV_QP_STATE) != 0) {
+        if (!isValidTransition(qp->state, attr->qp_state)) {
+            return -1;
+        }
+        qp->state = attr->qp_state;
+    }
+    return 0;
 }
 
 int
@@ -280,6 +317,7 @@ FakeVerbs::destroy_qp(struct ibv_qp *qp) const
 int
 FakeVerbs::poll_cq(struct ibv_cq * /*cq*/, int /*num_entries*/, struct ibv_wc *wc) const
 {
+    ++device_->log.pollCq;
     if (device_->pollResult <= 0) {
         return device_->pollResult;
     }

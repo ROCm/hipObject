@@ -6,6 +6,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -13,6 +14,7 @@
 
 #include "abandoned-copies.h"
 #include "buffer.h"
+#include "connection-pool.h"
 #include "hipobj.h"
 #include "transport.h"
 
@@ -79,6 +81,11 @@ struct Options {
      * from the environment. */
     std::chrono::milliseconds pollTimeout = std::chrono::seconds(5);
 
+    /* How many connections hipObjInit() creates for transfers
+     * (HIPOBJ_MAX_TRANSFERS, from 1 to 1024), and so how many transfers
+     * can run at once. Each one is a QP and a CQ on the NIC. */
+    size_t maxTransfers = 16;
+
     /* Strict GPU-direct mode (HIPOBJ_REQUIRE_GPU_DIRECT). Registering a
      * device buffer is supposed to hand the NIC the device memory itself;
      * when that fails we silently fall back to a host staging buffer and
@@ -111,26 +118,27 @@ struct ResolvedConfig {
 };
 
 /* The library's state from hipObjInit() to hipObjShutdown(). It's
- * complete when it's built, and only the connection's QP state, the
- * buffers, and the abandoned staging copies change after that. The buffer
- * map and the abandoned copies have locks of their own; the connection is
- * only used by transfers, which hold the API lock (see ApiGuard).
+ * complete when it's built, and only the transfers' connections, the
+ * buffers, and the abandoned staging copies change after that, and each
+ * of those has a lock of its own. The token connection never changes.
  *
  * It lives in a shared_ptr, and each call that uses it holds a copy (see
  * currentInstance()), so it's destroyed when hipObjShutdown() has removed
  * it and the last of those calls has returned. Members are destroyed in
- * reverse order: the abandoned copies that are over are released, and the
- * buffers deregistered, and the connection's QP and CQ destroyed, before
+ * reverse order: the abandoned copies that are over are released, the
+ * buffers deregistered, and the connections' QPs and CQs destroyed, before
  * the device's protection domain is deallocated, and the platform
  * outlives them all. */
 struct Instance final {
     /* instanceDevice has to have come from instancePlatform's verbs, and
-     * instanceConn has to have been created on *instanceDevice. The device
-     * is on the heap so the connection can be created on it, at the
-     * address it keeps, before the instance is built. */
+     * instanceTokenConn has to have been created on *instanceDevice. The
+     * device is on the heap so the connection can be created on it, at
+     * the address it keeps, before the instance is built. Creates
+     * instanceOptions.maxTransfers connections in the pool, or fewer if
+     * they can't all be created (see ConnectionPool). */
     Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions,
              ResolvedConfig instanceConfig, std::shared_ptr<const RdmaDevice> instanceDevice,
-             RcConnection instanceConn) noexcept;
+             RcConnection instanceTokenConn);
     ~Instance() = default;
 
     /* Lives in a shared_ptr, and isn't copied or moved */
@@ -143,9 +151,14 @@ struct Instance final {
     Options                           options;
     ResolvedConfig                    config;
     std::shared_ptr<const RdmaDevice> device;
-    RcConnection                      conn;
-    BufferMap                         buffers;
-    AbandonedCopies                   abandoned;
+    /* The connection whose QP number hipObjGetRdmaToken() advertises. It
+     * stays in INIT, since nothing tells hipObject when a transfer that
+     * the application drives itself ends, so it's never leased or
+     * connected. */
+    RcConnection    tokenConn;
+    ConnectionPool  pool;
+    BufferMap       buffers;
+    AbandonedCopies abandoned;
 };
 
 /* The library's instance, or null when it isn't initialized. The copy
@@ -167,9 +180,10 @@ hipObjError_t initWith(const hipObjConfig_t &config, std::shared_ptr<const Platf
                        const Options &options);
 
 /* Removes the current instance, if there is one, so later calls find the
- * library uninitialized. The instance, and what it holds, is released
- * here if nothing else holds it, or else when the last call that holds it
- * (see currentInstance()) lets it go. */
+ * library uninitialized, and closes its connection pool, so calls that
+ * hold it can't start a transfer. The instance, and what it holds, is
+ * released here if nothing else holds it, or else when the last call that
+ * holds it (see currentInstance()) lets it go. */
 void shutdownInstance();
 
 /* Holds the library-wide API lock for as long as it lives. Every public
@@ -177,9 +191,9 @@ void shutdownInstance();
  * hipobj.h) takes it on its first line and holds it for the whole call,
  * so the library runs one such call at a time. That includes every
  * function that reads or changes library state, which is the current
- * Instance and everything it holds. The current instance and the buffer
- * map have locks of their own, but the instance's connection relies on
- * this one.
+ * Instance and everything it holds. The current instance, and everything
+ * in it that changes, have locks of their own, so this one only keeps
+ * the calls serialized, as hipobj.h documents.
  *
  * hipObjGet() and hipObjPut() call the application's callbacks with the
  * lock held, and the lock isn't recursive, so a callback that called a

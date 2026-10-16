@@ -159,6 +159,11 @@ hipobj_add_fake_device_test(test-api-exceptions
 hipobj_add_fake_device_test(test-transport
   test-transport.cpp)
 
+hipobj_add_fake_device_test(test-connection-pool
+  test-connection-pool.cpp)
+# A deadlock fails the test instead of hanging the run
+set_tests_properties(test-connection-pool PROPERTIES TIMEOUT 120)
+
 hipobj_add_fake_device_test(test-state
   test-state.cpp)
 

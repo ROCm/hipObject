@@ -7,6 +7,7 @@
  * hipObjShutdown(), against the fake device in fake-device.h.
  */
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <functional>
@@ -16,11 +17,13 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
 #include "buffer.h"
+#include "connection-pool.h"
 #include "fake-device.h"
 #include "hipobj-address.h"
 #include "hipobj-warnings.h"
@@ -55,6 +58,7 @@ TEST(ParseOptionsTest, DefaultsWhenNothingIsSet)
     const hipObj::Options options = parse({});
     EXPECT_EQ(options.stageTimeout, std::chrono::seconds(30));
     EXPECT_EQ(options.pollTimeout, std::chrono::seconds(5));
+    EXPECT_EQ(options.maxTransfers, 16U);
     EXPECT_FALSE(options.requireGpuDirect);
     EXPECT_TRUE(options.dmabuf.enabled);
     EXPECT_FALSE(options.dmabuf.debug);
@@ -73,6 +77,21 @@ TEST(ParseOptionsTest, InvalidStageTimeoutIsIgnored)
          {"", "0", "-20", "+20", " 20", "20 ", "20ms", "0x14", "86400001", "99999999999999999999"}) {
         EXPECT_EQ(parse({{"HIPOBJ_STAGE_TIMEOUT_MS", value}}).stageTimeout, std::chrono::seconds(30))
             << "\"" << value << "\"";
+    }
+}
+
+TEST(ParseOptionsTest, MaxTransfers)
+{
+    EXPECT_EQ(parse({{"HIPOBJ_MAX_TRANSFERS", "1"}}).maxTransfers, 1U);
+    EXPECT_EQ(parse({{"HIPOBJ_MAX_TRANSFERS", "64"}}).maxTransfers, 64U);
+    EXPECT_EQ(parse({{"HIPOBJ_MAX_TRANSFERS", "1024"}}).maxTransfers, 1024U);
+}
+
+TEST(ParseOptionsTest, InvalidMaxTransfersIsIgnored)
+{
+    for (const char *value :
+         {"", "0", "-4", "+4", " 4", "4 ", "4x", "0x10", "1025", "99999999999999999999999"}) {
+        EXPECT_EQ(parse({{"HIPOBJ_MAX_TRANSFERS", value}}).maxTransfers, 16U) << "\"" << value << "\"";
     }
 }
 
@@ -111,12 +130,14 @@ TEST(ParseOptionsTest, AllSet)
 {
     const hipObj::Options options = parse({
         {"HIPOBJ_STAGE_TIMEOUT_MS", "250"},
+        {"HIPOBJ_MAX_TRANSFERS", "3"},
         {"HIPOBJ_REQUIRE_GPU_DIRECT", "1"},
         {"HIPOBJ_DMABUF", "0"},
         {"HIPOBJ_RDMA_DEBUG", "1"},
     });
     EXPECT_EQ(options.stageTimeout, milliseconds(250));
     EXPECT_EQ(options.pollTimeout, std::chrono::seconds(5));
+    EXPECT_EQ(options.maxTransfers, 3U);
     EXPECT_TRUE(options.requireGpuDirect);
     EXPECT_FALSE(options.dmabuf.enabled);
     EXPECT_TRUE(options.dmabuf.debug);
@@ -144,6 +165,7 @@ TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
     hipObj::Options options;
     options.stageTimeout     = milliseconds(7);
     options.pollTimeout      = milliseconds(9);
+    options.maxTransfers     = 3;
     options.requireGpuDirect = true;
     ASSERT_EQ(initWith(options).opError, hipObjSuccess);
 
@@ -153,6 +175,8 @@ TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
         EXPECT_EQ(instance->platform, fakes_->platform());
         EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
         EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
+        EXPECT_EQ(instance->options.maxTransfers, 3U);
+        EXPECT_EQ(instance->pool.size(), 3U);
         EXPECT_TRUE(instance->options.requireGpuDirect);
         EXPECT_EQ(instance->config.gpuDevice, -1);
         EXPECT_EQ(instance->config.nicHint, "mlx5_0");
@@ -179,12 +203,20 @@ TEST_F(InitWithTest, ShutdownLeavesTheInstanceToItsLastHolder)
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
     EXPECT_EQ(hipObjBufDeregister(hipObjTest::fakeDevBuf()).opError, hipObjNotInitialized);
 
-    /* Nothing has been released, and the held instance still works */
+    /* Nothing has been released, and the held instance still works,
+     * but it can't start a transfer */
+    const int qps = fake().log.createQp;
     EXPECT_EQ(fake().log.deregMr, 0);
     EXPECT_EQ(fake().log.destroyQp, 0);
     EXPECT_EQ(fake().log.closeDevice, 0);
     EXPECT_NE(held->buffers.find(hipObjTest::fakeDevBuf()), nullptr);
     EXPECT_EQ(fakes_.use_count(), 2);
+    {
+        const auto  acquired = held->pool.acquire();
+        const auto *err      = std::get_if<hipObj::ConnectionPool::AcquireError>(&acquired);
+        ASSERT_NE(err, nullptr);
+        EXPECT_EQ(*err, hipObj::ConnectionPool::AcquireError::Closed);
+    }
 
     /* The library can be initialized again while the old instance lives */
     ASSERT_NO_FATAL_FAILURE(init());
@@ -195,7 +227,7 @@ TEST_F(InitWithTest, ShutdownLeavesTheInstanceToItsLastHolder)
     /* Letting go of the old instance releases it */
     held.reset();
     EXPECT_EQ(fake().log.deregMr, 1);
-    EXPECT_EQ(fake().log.destroyQp, 1);
+    EXPECT_EQ(fake().log.destroyQp, qps);
     EXPECT_EQ(fake().log.closeDevice, 1);
 }
 
