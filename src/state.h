@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
 
 #include "abandoned-copies.h"
@@ -185,35 +184,5 @@ hipObjError_t initWith(const hipObjConfig_t &config, std::shared_ptr<const Platf
  * released here if nothing else holds it, or else when the last call that
  * holds it (see currentInstance()) lets it go. */
 void shutdownInstance();
-
-/* Holds the library-wide API lock for as long as it lives. Every public
- * function documented as serialized (see the "threads" group in
- * hipobj.h) takes it on its first line and holds it for the whole call,
- * so the library runs one such call at a time. That includes every
- * function that reads or changes library state, which is the current
- * Instance and everything it holds. The current instance, and everything
- * in it that changes, have locks of their own, so this one only keeps
- * the calls serialized, as hipobj.h documents.
- *
- * hipObjGet() and hipObjPut() call the application's callbacks with the
- * lock held, and the lock isn't recursive, so a callback that called a
- * locked function would deadlock. The guard detects that instead: when
- * the calling thread already holds the lock, it doesn't lock, and owns()
- * returns false. */
-class ApiGuard final {
-public:
-    ApiGuard();
-    ~ApiGuard();
-    ApiGuard(const ApiGuard &)            = delete;
-    ApiGuard &operator=(const ApiGuard &) = delete;
-    ApiGuard(ApiGuard &&)                 = delete;
-    ApiGuard &operator=(ApiGuard &&)      = delete;
-
-    /* False when the calling thread already held the lock */
-    [[nodiscard]] bool owns() const noexcept;
-
-private:
-    std::unique_lock<std::mutex> lock_;
-};
 
 } // namespace hipObj

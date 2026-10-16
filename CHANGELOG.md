@@ -39,16 +39,19 @@
   it, such as clangd, find the same system headers as the compiler.
 - The `hipObjBusy` error code, after `hipObjInternalError`, so no other
   code's value changes. A call returns it when the buffer it's given is
-  in use: a staging copy of the buffer that timed out is still running.
-  It isn't the `hipObjBusy` that was removed with the V2 interface, and
-  cuObject has no equivalent.
+  in use: a staging copy of the buffer that timed out is still running,
+  or, for `hipObjBufDeregister()`, another call is using the buffer. A
+  transfer started from a `hipObjOps_t` callback also returns it when
+  every RDMA connection is in use. It isn't the `hipObjBusy` that was
+  removed with the V2 interface, and cuObject has no equivalent.
 - The `HIPOBJ_MAX_TRANSFERS` environment variable sets how many RDMA
   connections (a queue pair and its completion queue each)
   `hipObjInit()` creates for transfers. Each `hipObjGet()` and
   `hipObjPut()` uses one of them, rather than every transfer sharing one
-  queue pair, so it's the most transfers that can be in progress at
-  once. The value is a whole number from 1 to 1024, and a value that
-  isn't one is ignored, leaving the default of 16. Like the other
+  queue pair, so it's how many transfers can run at once; a transfer
+  that starts while they're all in use waits for one. The value is a
+  whole number from 1 to 1024, and a value that isn't one is ignored,
+  leaving the default of 16. Like the other
   environment variables, it's read each time `hipObjInit()` runs, which
   fails with `hipObjRdmaError` if it can't create them all.
   `hipObjGetRdmaToken()` still advertises a queue pair of its own, which
@@ -133,20 +136,26 @@
   one way to make sure an application releases hipObject's resources on
   every path. In `--live` mode, the examples now exit with an error if
   `curl_global_init()` fails.
-- The public API can be called from multiple threads. Functions that use
-  the library's state (`hipObjInit()`, `hipObjShutdown()`, buffer
-  registration, transfers, `hipObjBufSync()`, and `hipObjGetRdmaToken()`)
-  are serialized: they run one at a time across the process, and a call
-  waits for the one in progress to finish, so only one transfer runs at a
-  time. They used to have no synchronization, and calling them from more
-  than one thread at a time could corrupt the library's state or crash.
-  The other functions can be called from any thread at any time. Each
-  function's documentation now says which kind it is, and the new Thread
-  Safety section of the API reference explains both, along with what
-  applications have to do themselves.
-- A `hipObjOps_t` callback that calls a serialized function now gets
-  `hipObjInvalidValue`, since the callbacks run while the library holds
-  its lock. Such calls used to run.
+- The public API can be called from multiple threads, and transfers run
+  concurrently. Every function can be called from any thread at any
+  time, including from a `hipObjOps_t` callback. The functions used to
+  have no synchronization, and calling them from more than one thread at
+  a time could corrupt the library's state or crash. The new Thread
+  Safety section of the API reference describes what applications can
+  rely on, and what they have to do themselves, such as for a transfer
+  they drive with `hipObjGetRdmaToken()`. In particular:
+  - `hipObjGet()` and `hipObjPut()` each use an RDMA connection of their
+    own (see `HIPOBJ_MAX_TRANSFERS`, above), and wait for one when they're
+    all in use. A transfer that a callback starts returns `hipObjBusy`
+    instead of waiting, since the connection it would wait for could be
+    its caller's.
+  - `hipObjBufDeregister()` returns `hipObjBusy`, and leaves the buffer
+    registered, while another call is using it, including the transfer
+    whose callback calls it. It used to deregister the buffer.
+  - `hipObjShutdown()` returns without waiting for the calls in progress,
+    which finish normally. hipObject releases the RDMA resources and
+    buffer registrations when the last of them returns, and
+    `hipObjInit()` can initialize it again before then.
 - `hipObjGetVersionString()` no longer writes to a shared buffer on every
   call, which was a data race when two threads called it at once.
 - The library links CMake's `Threads::Threads`, which adds `-pthread`

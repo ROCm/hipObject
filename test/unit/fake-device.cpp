@@ -541,7 +541,6 @@ hipObjError_t
 initWithPlatform(const hipObjConfig_t &config, std::shared_ptr<const hipObj::Platform> platform,
                  const hipObj::Options &options)
 {
-    const hipObj::ApiGuard guard;
     return hipObj::initWith(config, std::move(platform), options);
 }
 

@@ -56,7 +56,9 @@ public:
 
     /* One connection, for one transfer, from acquire(). It returns the
      * connection to the pool when it's destroyed, after resetting it if
-     * connect() was called. The pool has to outlive it. */
+     * connect() was called. The pool has to outlive it, and it has to be
+     * destroyed on the thread that acquired it, which it counts as holding
+     * a lease until then (see acquire()). */
     class Lease final {
     public:
         ~Lease();
@@ -83,9 +85,7 @@ public:
     private:
         friend class ConnectionPool;
 
-        Lease(ConnectionPool &pool, size_t index) noexcept : pool_(&pool), index_(index)
-        {
-        }
+        Lease(ConnectionPool &pool, size_t index) noexcept;
 
         /* Null once it's been moved from */
         ConnectionPool *pool_;
@@ -94,12 +94,16 @@ public:
         bool   connected_ = false;
     };
 
-    /* Why acquire() returned no lease: the pool was closed, or it has no
-     * connections left */
-    enum class AcquireError { Closed, NoConnections };
+    /* Why acquire() returned no lease: the pool was closed, it has no
+     * connections left, or they're all leased and the calling thread
+     * can't wait for one */
+    enum class AcquireError { Closed, NoConnections, Busy };
 
     /* A lease on a connection that no other lease holds, waiting for one
-     * to be returned if they're all leased */
+     * to be returned if they're all leased. A thread that already holds a
+     * lease, from any pool, gets Busy instead of waiting: the lease it
+     * would wait for could be its own, as when a transfer's callback
+     * starts another transfer. */
     [[nodiscard]] std::variant<Lease, AcquireError> acquire();
 
     /* Makes acquire() fail with Closed from now on, including the calls

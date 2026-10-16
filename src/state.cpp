@@ -31,43 +31,6 @@ namespace hipObj {
 
 namespace {
 
-    // True while the calling thread holds the API lock. Each thread has its
-    // own copy, so it needs no synchronization.
-    thread_local bool t_holdsApiLock = false;
-
-    std::mutex &apiMutex()
-    {
-        static std::mutex lock;
-        return lock;
-    }
-
-} // namespace
-
-ApiGuard::ApiGuard() : lock_(apiMutex(), std::defer_lock)
-{
-    if (t_holdsApiLock) {
-        return;
-    }
-    lock_.lock();
-    t_holdsApiLock = true;
-}
-
-// lock_ is destroyed, and the mutex unlocked, after this body runs
-ApiGuard::~ApiGuard()
-{
-    if (lock_.owns_lock()) {
-        t_holdsApiLock = false;
-    }
-}
-
-bool
-ApiGuard::owns() const noexcept
-{
-    return lock_.owns_lock();
-}
-
-namespace {
-
     /* The current instance, and the locks that guard it. They're taken in
      * the order they're declared. */
     struct Current {

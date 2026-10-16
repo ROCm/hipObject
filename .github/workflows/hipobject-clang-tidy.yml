@@ -28,7 +28,6 @@ on:
       - '!cmake/HIPOBJDocumentation.cmake'
       - '!docs/**'
       - '!requirements.txt'
-      - '!test/thread-safety/*.py'
       - '!.github/**'
       - '.github/workflows/hipobject-clang-tidy.yml'
   push:

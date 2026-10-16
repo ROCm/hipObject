@@ -116,7 +116,7 @@ CheckOptions:
   concurrency-mt-unsafe.FunctionSet: glibc
   # A lock guard is only declared for what its constructor and destructor
   # do, so const would say nothing about it
-  misc-const-correctness.AllowedTypes: '::hipObj::ApiGuard;::std::scoped_lock'
+  misc-const-correctness.AllowedTypes: '::std::scoped_lock'
   # The default, Remove, mistakes the comma after an empty {} argument for
   # a trailing comma, as in {a, b, {}, c}, and its fix doesn't compile.
   # Multi-line lists still need a trailing comma, which also keeps
