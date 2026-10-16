@@ -68,6 +68,19 @@ constexpr int kInitMask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_Q
  * transfer, and the one hipObjGetRdmaToken() advertises */
 const int kDefaultQps = 1 + static_cast<int>(hipObj::Options{}.maxTransfers);
 
+/* The default options, with maxTransfers connections for transfers. A
+ * test passes this rather than declaring options of its own: CodeQL reads
+ * a local in one of the fixtures' member functions as a global, and
+ * reports locals with the same name as hiding it
+ * (cpp/local-variable-hides-global-variable). */
+hipObj::Options
+withMaxTransfers(size_t maxTransfers)
+{
+    hipObj::Options result;
+    result.maxTransfers = maxTransfers;
+    return result;
+}
+
 /* The states that the modify_qp() calls so far moved QPs to */
 std::vector<ibv_qp_state>
 modifiedStates()
@@ -86,7 +99,7 @@ protected:
     {
         std::optional<hipObj::RdmaDevice> device = hipObj::openRdmaDevice(verbs(), topology(), 0);
         ASSERT_TRUE(device);
-        device_.emplace(std::move(*device));
+        device_ = std::make_unique<hipObj::RdmaDevice>(std::move(*device));
     }
 
     /* Opens the fake device, and creates a connection on it in conn_.
@@ -97,7 +110,7 @@ protected:
         ASSERT_NO_FATAL_FAILURE(openDevice());
         std::optional<hipObj::RcConnection> conn = hipObj::createRcConnection(*device_, 16, 8, 8);
         ASSERT_TRUE(conn);
-        conn_.emplace(std::move(*conn));
+        conn_                = std::make_unique<hipObj::RcConnection>(std::move(*conn));
         fake().modifyQpCount = 0;
     }
 
@@ -130,9 +143,12 @@ protected:
         EXPECT_EQ(hipObj::toGid(attr.ah_attr.grh.dgid), token.gid);
     }
 
-    /* conn_ is declared after device_, so it's destroyed first */
-    std::optional<hipObj::RdmaDevice>   device_{};
-    std::optional<hipObj::RcConnection> conn_{};
+    /* conn_ is declared after device_, so it's destroyed first. They're
+     * on the heap, which keeps the fixture small: CodeQL, which can't
+     * expand TEST_F(), reads each test as a function that takes the
+     * fixture by value, and reports a large one (cpp/large-parameter). */
+    std::unique_ptr<hipObj::RdmaDevice>   device_{};
+    std::unique_ptr<hipObj::RcConnection> conn_{};
 };
 
 // ---- Opening the device ------------------------------------------
@@ -215,7 +231,7 @@ TEST_F(TransportTest, CreateSetsUpTheConnection)
     ASSERT_NO_FATAL_FAILURE(openDevice());
     const std::optional<hipObj::RcConnection> conn = hipObj::createRcConnection(*device_, 16, 8, 8);
     ASSERT_TRUE(conn);
-    EXPECT_EQ(&conn->device(), &*device_);
+    EXPECT_EQ(&conn->device(), device_.get());
     EXPECT_NE(conn->cq(), nullptr);
     EXPECT_NE(conn->qp(), nullptr);
     EXPECT_EQ(fake().log.createCq, 1);
@@ -256,13 +272,13 @@ TEST_F(TransportTest, MovingKeepsTheQpAndDevice)
     conn_.reset();
     EXPECT_EQ(fake().log.destroyQp, 0);
     EXPECT_EQ(moved->qp(), qp);
-    EXPECT_EQ(&moved->device(), &*device_);
+    EXPECT_EQ(&moved->device(), device_.get());
 }
 
 TEST_F(TransportTest, DestroyingReleasesEverything)
 {
     ASSERT_NO_FATAL_FAILURE(open());
-    EXPECT_EQ(&conn_->device(), &*device_);
+    EXPECT_EQ(&conn_->device(), device_.get());
     EXPECT_EQ(fake().log.destroyQp, 0);
 
     /* The connection doesn't own its device */
@@ -582,9 +598,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenThePoolCantBeCreated)
 {
     /* The token connection, and one of the pool's three */
     fake().fail.qpLimit = 2;
-    hipObj::Options options;
-    options.maxTransfers = 3;
-    EXPECT_EQ(initFakes(makeConfig(), options).opError, hipObjRdmaError);
+    EXPECT_EQ(initFakes(makeConfig(), withMaxTransfers(3)).opError, hipObjRdmaError);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
     EXPECT_EQ(fake().log.createQp, 2);
     expectNothingLeaked();
@@ -675,9 +689,7 @@ protected:
      * uses it */
     void initForTransfersOnOneConnection() const
     {
-        hipObj::Options options;
-        options.maxTransfers = 1;
-        ASSERT_NO_FATAL_FAILURE(initForTransfers(options));
+        ASSERT_NO_FATAL_FAILURE(initForTransfers(withMaxTransfers(1)));
     }
 };
 
@@ -815,9 +827,7 @@ TEST_P(TransportTransferTest, ReportsS3Failures)
 
 TEST_F(TransportTest, InitCreatesAConnectionForEachTransferAndOneForTokens)
 {
-    hipObj::Options options;
-    options.maxTransfers = 3;
-    ASSERT_EQ(initFakes(makeConfig(), options).opError, hipObjSuccess);
+    ASSERT_EQ(initFakes(makeConfig(), withMaxTransfers(3)).opError, hipObjSuccess);
     ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);
     EXPECT_EQ(fake().log.createQp, 4);
     EXPECT_EQ(fake().log.createCq, 4);
