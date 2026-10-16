@@ -119,7 +119,7 @@ namespace {
             cfg.gpuDevice     = -1;
             // Without a GPU there is no topology to walk, so hipObjInit can only find
             // a NIC if it is named explicitly. Same variable the examples read.
-            if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && hint[0] != '\0') {
+            if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && *hint != '\0') {
                 nic_hint_storage_ = hint;
                 cfg.nicHint       = nic_hint_storage_.c_str();
             }

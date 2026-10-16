@@ -46,9 +46,10 @@ Checks:
   - readability-*
 
   # Not wanted: style-only checks that contradict hipObject's
-  # conventions or tooling. Turn them on now and then, such as before a
-  # release, and fix whatever they report that's easy to fix, without
-  # committing to fixing all of it
+  # conventions or tooling, and checks whose fixes would make the code
+  # worse than what the build already does. Turn them on now and then,
+  # such as before a release, and fix whatever they report that's easy to
+  # fix, without committing to fixing all of it
 
   # IWYU checks the includes, and its suggestions are advisory
   - -misc-include-cleaner
@@ -69,6 +70,18 @@ Checks:
   # the wire or kept in large arrays, and padding takes up most of what a
   # smaller type would save in a struct
   - -performance-enum-size
+  # They report operator[] on std::array, std::vector, std::span, and the
+  # like, and want at(). Every build defines _GLIBCXX_ASSERTIONS, so
+  # libstdc++ bounds-checks operator[] and aborts on a bad index, and C
+  # arrays are already reported by modernize-avoid-c-arrays and
+  # -Wunsafe-buffer-usage. An index that comes from the network has to be
+  # checked where it arrives, and rejected with an error, so a bad one
+  # that gets this far is a bug in hipObject. Stopping is safer than
+  # what at() would do: throw, have the C API turn the exception into
+  # hipObjInternalError, and carry on past the broken invariant. at() also
+  # adds an exception path to the hot path's loops
+  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+  - -cppcoreguidelines-pro-bounds-constant-array-index
 
   # TODO: These checks report problems in the current code. Fix the code
   # and delete the check's line here, or move it to "Not wanted" with a
@@ -84,9 +97,6 @@ Checks:
   - -cert-err58-cpp  # TODO: the same check
   - -bugprone-unchecked-optional-access  # TODO(34)
   - -cert-err33-c  # TODO(43): unchecked fprintf() and snprintf()
-  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access  # TODO(144)
-  - -cppcoreguidelines-pro-bounds-constant-array-index  # TODO(16)
-  - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(21)
   - -cppcoreguidelines-pro-type-vararg  # TODO(53): fprintf(), snprintf(), fcntl()
   - -google-runtime-int  # TODO(11): long and long long in the examples and MinIO bridge
   - -readability-function-cognitive-complexity  # TODO(14)

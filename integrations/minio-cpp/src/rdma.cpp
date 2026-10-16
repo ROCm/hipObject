@@ -40,7 +40,7 @@ namespace {
     {
         static const bool on = [] {
             const char *v = std::getenv("HIPOBJ_RDMA_DEBUG");
-            return v != nullptr && v[0] != '\0' && v[0] != '0';
+            return v != nullptr && *v != '\0' && *v != '0';
         }();
         return on;
     }
