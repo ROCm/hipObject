@@ -8,16 +8,15 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -31,6 +30,7 @@
 #include "control.h"
 #include "hip-seam.h"
 #include "hipobj-address.h"
+#include "hipobj-print.h"
 #include "hipobj-private.h"
 #include "hipobj-span.h"
 #include "ibv-core.h"
@@ -221,14 +221,13 @@ namespace {
             }
             if (std::chrono::steady_clock::now() >= deadline) {
                 instance.abandoned.add(slot, std::move(done), buf);
-                const int64_t     timeoutMs = timeout.count();
-                const std::string direction =
+                const std::string_view direction =
                     kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";
-                fprintf(stderr,
-                        "hipObj: staging %s copy of %zu bytes did not complete within "
-                        "%" PRId64 " ms; abandoning it. The GPU never signalled completion -- "
+                printTo(stderr,
+                        "hipObj: staging {} copy of {} bytes did not complete within "
+                        "{} ms; abandoning it. The GPU never signalled completion -- "
                         "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
-                        direction.c_str(), size, timeoutMs);
+                        direction, size, timeout.count());
                 return makeError(hipObjInternalError);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -654,11 +653,15 @@ const char *
 hipObjGetVersionString(void)
 try {
     /* Formatted once: C++ runs a function-local static's initializer
-     * exactly once, even when several threads call this at the same time */
+     * exactly once, even when several threads call this at the same time.
+     * It's an array rather than a std::string so that it has nothing to
+     * destroy when the program exits. format_to_n() doesn't write a NUL, so
+     * it gets one less than the array's size, which leaves the last
+     * element's zero to end the string. */
     static const std::array<char, 32> version = [] {
         std::array<char, 32> buf{};
-        std::snprintf(buf.data(), buf.size(), "%d.%d.%d", HIPOBJ_VERSION_MAJOR, HIPOBJ_VERSION_MINOR,
-                      HIPOBJ_VERSION_PATCH);
+        std::format_to_n(buf.begin(), buf.size() - 1, "{}.{}.{}", HIPOBJ_VERSION_MAJOR, HIPOBJ_VERSION_MINOR,
+                         HIPOBJ_VERSION_PATCH);
         return buf;
     }();
     return version.data();

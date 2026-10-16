@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "hipobj-parse.h"
+#include "hipobj-print.h"
 #include "hipobj-span.h"
 #include "http_server.h"
 #include "ibv-wrapper.h"
@@ -44,7 +45,7 @@ objectKey(const std::string &path)
 void
 usage(const std::string &prog)
 {
-    fprintf(stderr, "usage: %s [port]\n", prog.c_str());
+    hipObj::printTo(stderr, "usage: {} [port]\n", prog);
 }
 
 } // namespace
@@ -59,13 +60,13 @@ main(int argc, char *argv[])
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string &arg = args[i];
         if (arg[0] == '-') {
-            fprintf(stderr, "hipobj-rdma-test-server: unknown option %s\n", arg.c_str());
+            hipObj::printTo(stderr, "hipobj-rdma-test-server: unknown option {}\n", arg);
             usage(prog);
             return 2;
         }
         const std::optional<uint16_t> value = hipObj::parseNumber<uint16_t>(arg);
         if (!value || *value == 0) {
-            fprintf(stderr, "hipobj-rdma-test-server: invalid port %s\n", arg.c_str());
+            hipObj::printTo(stderr, "hipobj-rdma-test-server: invalid port {}\n", arg);
             usage(prog);
             return 2;
         }
@@ -77,8 +78,8 @@ main(int argc, char *argv[])
     const std::unique_ptr<hipObj::LoadedVerbs> verbs = hipObj::loadLibibverbs();
     hipobj::test::RdmaTestServer               rdma(verbs.get());
     if (!rdma.isReady()) {
-        fprintf(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
-                        "HTTP-only mode\n");
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
+                                "HTTP-only mode\n");
     }
 
     std::map<std::string, std::vector<uint8_t>> objects;
@@ -195,10 +196,10 @@ main(int argc, char *argv[])
     /* "listening on port N" is what every caller waits for before it starts
      * sending. Printing it without checking made a dead server look ready. */
     if (!server.startThreaded()) {
-        fprintf(stderr, "hipobj-rdma-test-server: not listening on port %d\n", port);
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: not listening on port {}\n", port);
         return 1;
     }
-    fprintf(stdout, "hipobj-rdma-test-server listening on port %d\n", port);
+    hipObj::printTo(stdout, "hipobj-rdma-test-server listening on port {}\n", port);
     for (;;) {
         std::this_thread::sleep_for(std::chrono::seconds(3600));
     }

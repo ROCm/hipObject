@@ -295,11 +295,8 @@ with it:
   `main()`'s `argv`) is turned into a view once, where it comes in, with
   `spanFromPointer()`, `cStringView()`, or `argSpan()` from
   [`shared/hipobj-span.h`](shared/hipobj-span.h). That header holds the only
-  suppressions of the warning, so don't add others. The warning also flags a
-  `printf()` `"%s"` argument that isn't a string literal or
-  `std::string::c_str()`, so copy other strings into a `std::string` to print
-  them. GCC doesn't have the warning, so build with Clang to check (see
-  [C and C++](#c-and-c)).
+  suppressions of the warning, so don't add others. GCC doesn't have the
+  warning, so build with Clang to check (see [C and C++](#c-and-c)).
 - **Don't write `reinterpret_cast`.** clang-tidy reports every one
   (`cppcoreguidelines-pro-type-reinterpret-cast`). The conversions the code
   needs are made in one place each: `pointerToAddress()` and
@@ -327,6 +324,20 @@ with it:
   that it consumed all the text. The C++11 examples are the one exception,
   since they can't use either: they use `std::strtoull()`, and check `errno`,
   the end pointer, and the first character.
+- **Don't print with `printf()` or its relatives** (`fprintf()`,
+  `snprintf()`, and the rest). clang-tidy reports every call to a C-style
+  variadic function (`cppcoreguidelines-pro-type-vararg`): the arguments
+  arrive without their types, and the function trusts the format string to
+  say what they are. Print with `hipObj::printTo()` from
+  [`shared/hipobj-print.h`](shared/hipobj-print.h), as in
+  `printTo(stderr, "hipObj: {} bytes\n", size)`. It takes a `std::format`
+  format string, which is checked against the arguments' types when it's
+  compiled, and never throws. Format text with `std::format()`, or
+  `std::format_to_n()` to fill a fixed-size buffer without allocating. For
+  other variadic functions, such as `fcntl()`, use one that isn't variadic
+  where there is one (`fstat()` to check that a file descriptor is open). The
+  C++11 examples are the exception, since they can't use `std::format`: they
+  print with `printf()` and `fprintf()`.
 
 ## Portability
 
@@ -338,10 +349,11 @@ so don't add assumptions that only hold on Linux's data model.
   `size_t` for sizes, `ptrdiff_t` for pointer differences, and the fixed-width
   types from `<cstdint>` (`int64_t`, `uint64_t`, `uint32_t`) for everything
   with a defined width, especially values that go on the wire.
-- **Watch the APIs that are tied to `long`**: `%ld`/`%lu` format specifiers
-  (use the `<cinttypes>` macros such as `PRIu64`, or `%zu` for `size_t`), and
-  integer literal suffixes (`L`, `UL`). `strtol()` and `strtoul()` are too,
-  but they're banned anyway (see [C++ code](#c-code)).
+- **Watch the APIs that are tied to `long`**: `printf()`'s `%ld`/`%lu` format
+  specifiers, in the examples, which are the only code that still uses
+  `printf()` (use the `<cinttypes>` macros such as `PRIu64`, or `%zu` for
+  `size_t`), and integer literal suffixes (`L`, `UL`). `strtol()` and
+  `strtoul()` are too, but they're banned anyway (see [C++ code](#c-code)).
 - **`off_t` is a known exception.** The public header uses it for offsets, and
   that will be fixed when hipObject moves to rocm-systems. Until then, don't
   change it, and don't spread it into new internal code; use a fixed-width

@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 #include "hipobj-parse.h"
+#include "hipobj-print.h"
 #include "hipobj-sockaddr.h"
 #include "hipobj-span.h"
 
@@ -161,7 +162,7 @@ HttpServer::HttpServer(int port) : listen_fd_(socket(AF_INET, SOCK_STREAM | SOCK
          * went on being constructed, and the abort arrived later from the
          * accept loop. Say which port and why, once, where it happened. */
         const std::string reason = std::generic_category().message(errno);
-        fprintf(stderr, "hipobj-rdma-test-server: cannot bind port %d: %s\n", port, reason.c_str());
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: cannot bind port {}: {}\n", port, reason);
         listen_fd_.reset();
         return;
     }

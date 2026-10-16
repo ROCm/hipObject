@@ -26,6 +26,7 @@
 #include <miniocpp/utils.h>
 
 #include "bytes-transferred.h"
+#include "hipobj-print.h"
 #include "hipobj_minio/context.h"
 
 namespace hipobj::minio {
@@ -47,9 +48,8 @@ namespace {
 
     // Prints args, streamed one after another, as a line on stderr when
     // HIPOBJ_RDMA_DEBUG is set. The line is built first and written with one
-    // fprintf(), which POSIX makes atomic with respect to other stdio calls
-    // on the stream, so lines from concurrent transfers don't interleave. One
-    // std::cerr insertion has no such guarantee.
+    // call to hipObj::printTo(), so lines from concurrent transfers don't
+    // interleave. One std::cerr insertion has no such guarantee.
     //
     // Pass text as std::string_view literals ("..."sv), not plain string
     // literals: a plain one arrives as a reference to a char array, which
@@ -60,11 +60,8 @@ namespace {
             return;
         }
         std::ostringstream line;
-        line << "hipobj: rdma: ";
         (line << ... << args);
-        line << '\n';
-        const std::string text = line.str();
-        (void)std::fprintf(stderr, "%s", text.c_str());
+        hipObj::printTo(stderr, "hipobj: rdma: {}\n", line.view());
     }
 
     // The HTTP status in an x-amz-rdma-reply value, or std::nullopt if it's

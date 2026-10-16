@@ -12,7 +12,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
+#include <format>
 #include <optional>
 #include <span>
 #include <string>
@@ -259,16 +259,20 @@ parseClientNicFromTokenHex(std::string_view tokenHex, std::span<char> nicIp)
         return true;
     }
 
-    /* Format into a fixed-size buffer first so the snprintf output is
-     * bounded; nicIp's size is caller-supplied. */
+    /* Formats into a buffer that holds any IPv4 address and its NUL, then
+     * copies that only if nicIp, whose size is caller-supplied, has room.
+     * format_to_n() doesn't write a NUL, so it gets one less than the
+     * buffer's size, and returns the length of the whole address. The
+     * bytes are uint8_t, which std::format prints as numbers, not
+     * characters. */
     std::array<char, INET_ADDRSTRLEN> buf{};
-    const int n = std::snprintf(buf.data(), buf.size(), "%u.%u.%u.%u", static_cast<unsigned>(token->gid[12]),
-                                static_cast<unsigned>(token->gid[13]), static_cast<unsigned>(token->gid[14]),
-                                static_cast<unsigned>(token->gid[15]));
-    if (n < 0 || static_cast<size_t>(n) >= nicIp.size()) {
+    const auto formatted = std::format_to_n(buf.begin(), buf.size() - 1, "{}.{}.{}.{}", token->gid[12],
+                                            token->gid[13], token->gid[14], token->gid[15]);
+    const auto length    = static_cast<size_t>(formatted.size);
+    if (length >= nicIp.size()) {
         return false;
     }
-    std::ranges::copy(std::span(buf).first(static_cast<size_t>(n) + 1), nicIp.begin());
+    std::ranges::copy(std::span(buf).first(length + 1), nicIp.begin());
     return true;
 }
 

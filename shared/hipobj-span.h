@@ -17,18 +17,17 @@
  * functions here turn it into a view, and are the only places that
  * suppress the warning. The caller vouches that the pointer and length
  * describe valid memory, so convert once, where the pointer enters, and
- * use the view from then on.
+ * use the view from then on. writeChars() goes the other way, handing a
+ * view to fwrite() as a pointer and a length.
  *
- * The warning also flags a printf() "%s" argument unless it's a string
- * literal or std::string::c_str(), since it can't tell whether other
- * pointers point to a NUL-terminated string. Copy such a string into a
- * std::string to print it (this is only worth it on error paths, where
- * most printing is). */
+ * Print with hipObj::printTo() (hipobj-print.h), not printf() and its
+ * relatives: clang-tidy reports C-style variadic calls. */
 
 #pragma once
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <span>
@@ -65,6 +64,14 @@ constexpr std::string_view
 asStringView(std::span<const char> chars) noexcept
 {
     return {chars.data(), chars.size()};
+}
+
+/* Writes chars to stream with one fwrite(). True if they were all
+ * written. */
+inline bool
+writeChars(std::FILE *stream, std::span<const char> chars) noexcept
+{
+    return std::fwrite(chars.data(), 1, chars.size(), stream) == chars.size();
 }
 
 HIPOBJ_WARN_UNSAFE_BUFFER_ON

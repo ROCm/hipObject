@@ -13,12 +13,12 @@
 #include <cerrno>
 #include <cstdio>
 #include <memory>
-#include <string>
 #include <utility>
 
 #include <dlfcn.h>
 
 #include "hipobj-address.h"
+#include "hipobj-print.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
 
@@ -44,10 +44,9 @@ namespace {
         dlsym_load_optional(out, handle, name);
         if (!out) {
             /* dlerror() returns NULL when the symbol's value is NULL */
-            const char       *err      = dlerror();
-            const std::string symbol   = name;
-            const std::string errorStr = err ? err : "symbol is NULL";
-            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", symbol.c_str(), errorStr.c_str());
+            const char *err = dlerror();
+            printTo(stderr, "hipObj: dlsym failed for {}: {}\n", name,
+                    err != nullptr ? err : "symbol is NULL");
             return false;
         }
         return true;
@@ -108,15 +107,14 @@ loadLibibverbs()
     DlHandle library = open_libibverbs();
     if (!library) {
         /* dlerror()'s message names the library and says why it didn't load */
-        const char       *err      = dlerror();
-        const std::string errorStr = err != nullptr ? err : "unknown error";
-        fprintf(stderr, "hipObj: Could not load libibverbs: %s\n", errorStr.c_str());
+        const char *err = dlerror();
+        printTo(stderr, "hipObj: Could not load libibverbs: {}\n", err != nullptr ? err : "unknown error");
         return nullptr;
     }
 
     LoadedVerbs::Funcs funcs{};
     if (!load_functions(funcs, library.get())) {
-        fprintf(stderr, "hipObj: Could not init IBV function table.\n");
+        printTo(stderr, "hipObj: Could not init IBV function table.\n");
         return nullptr;
     }
 

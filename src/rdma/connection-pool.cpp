@@ -12,6 +12,7 @@
 #include <utility>
 #include <variant>
 
+#include "hipobj-print.h"
 #include "thread-safety.h"
 #include "transport.h"
 
@@ -167,9 +168,9 @@ ConnectionPool::release(size_t index, bool connected) noexcept
     if (left == 0) {
         returned_.notify_all();
     }
-    fprintf(stderr,
+    printTo(stderr,
             "hipObj: could neither reset nor replace an RDMA connection after a transfer, so it's "
-            "dropped; %zu of %zu are left.\n",
+            "dropped; {} of {} are left.\n",
             left, slots_.size());
 }
 

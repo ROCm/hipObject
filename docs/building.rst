@@ -9,7 +9,10 @@ Required
 
 - CMake 3.25.2 or later
 - ROCm 7.14 or later (provides HIP, HSA runtime)
-- C++20 capable compiler (e.g., g++ or amdclang++ from ROCm)
+- C++20 capable compiler and standard library: GCC 13 or later, or
+  Clang (e.g., amdclang++ from ROCm) with GCC 13's libstdc++ or later.
+  On RHEL 9, whose system GCC is 11, install ``gcc-toolset-13`` or
+  later.
 
 Optional
 ^^^^^^^^

@@ -6,7 +6,6 @@
 #include "transport.h"
 
 #include <chrono>
-#include <cinttypes>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -16,6 +15,7 @@
 #include <thread>
 #include <utility>
 
+#include "hipobj-print.h"
 #include "hipobj-span.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
@@ -279,9 +279,9 @@ pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
              * only place that number exists. Dropping it here is what turns a
              * specific fault -- a bad rkey, a protection violation, an unreachable
              * remote -- into an indistinguishable failure several layers up. */
-            fprintf(stderr,
-                    "hipObj: work completion failed: status=%d opcode=%d "
-                    "vendor_err=0x%" PRIx32 " wr_id=%" PRIu64 "\n",
+            printTo(stderr,
+                    "hipObj: work completion failed: status={} opcode={} "
+                    "vendor_err={:#x} wr_id={}\n",
                     static_cast<int>(wc.status), static_cast<int>(wc.opcode), wc.vendor_err, wc.wr_id);
             return false;
         }
@@ -292,13 +292,12 @@ pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
     // A timeout is a failure: no completion arrived for the awaited work
     // request, so the transfer outcome is unknown and must not be reported
     // as success.
-    const int64_t     timeoutMs = timeout.count();
     const std::string awaited =
         expectedOpcode ? "opcode " + std::to_string(static_cast<int>(*expectedOpcode)) : "any opcode";
-    fprintf(stderr,
-            "hipObj: no work completion within %" PRId64 " ms (awaiting %s); the "
+    printTo(stderr,
+            "hipObj: no work completion within {} ms (awaiting {}); the "
             "transfer outcome is unknown\n",
-            timeoutMs, awaited.c_str());
+            timeout.count(), awaited);
     return false;
 }
 

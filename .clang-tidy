@@ -97,7 +97,6 @@ Checks:
   - -cert-err58-cpp  # TODO: the same check
   - -bugprone-unchecked-optional-access  # TODO(34)
   - -cert-err33-c  # TODO(43): unchecked fprintf() and snprintf()
-  - -cppcoreguidelines-pro-type-vararg  # TODO(53): fprintf(), snprintf(), fcntl()
   - -google-runtime-int  # TODO(11): long and long long in the examples and MinIO bridge
   - -readability-function-cognitive-complexity  # TODO(14)
   - -readability-magic-numbers  # TODO(289)

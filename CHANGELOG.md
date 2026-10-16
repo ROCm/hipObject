@@ -93,6 +93,10 @@
 - hipObject now requires CMake 3.25.2 or later, instead of 3.21. Earlier
   versions couldn't configure hipObject with amdclang, or with
   `HIPOBJ_FETCH_CUOBJECT_CLIENT` on.
+- hipObject now needs a C++ standard library with `<format>`: GCC 13 or
+  later, or Clang (including amdclang) with GCC 13's libstdc++ or later.
+  RHEL 9's system GCC is 11, so building there needs `gcc-toolset-13` or
+  later.
 - The oldest supported Ubuntu release is now 24.04, instead of 22.04,
   whose CMake is 3.22. The DEB packages depend on the libraries' Ubuntu
   24.04 package names, such as `libcurl4t64`, so they no longer install

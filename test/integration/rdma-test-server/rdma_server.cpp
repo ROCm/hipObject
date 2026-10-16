@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "hipobj-address.h"
+#include "hipobj-print.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -37,7 +38,7 @@ namespace {
      * all. Six different faults reported as one. Name which one it was. */
     std::nullopt_t rdmaFail(const std::string &op, const std::string &why)
     {
-        fprintf(stderr, "hipobj-rdma-test-server: %s failed: %s\n", op.c_str(), why.c_str());
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: {} failed: {}\n", op, why);
         return std::nullopt;
     }
 
@@ -154,8 +155,8 @@ struct RdmaTestServer::Impl {
         conn.reset();
         std::optional<hipObj::RcConnection> fresh = createConnection(device);
         if (!fresh) {
-            fprintf(stderr, "hipobj-rdma-test-server: could not rebuild the RC QP; "
-                            "the server can no longer serve RDMA\n");
+            hipObj::printTo(stderr, "hipobj-rdma-test-server: could not rebuild the RC QP; "
+                                    "the server can no longer serve RDMA\n");
             return;
         }
         conn.emplace(std::move(*fresh));
@@ -212,10 +213,10 @@ RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vec
         xferSize = data.size();
     }
     if (data.size() < xferSize || xferSize > kStagingSize) {
-        fprintf(stderr,
-                "hipobj-rdma-test-server: GET failed: %zu bytes requested of a %zu "
-                "byte object, %zu byte staging buffer\n",
-                xferSize, data.size(), kStagingSize);
+        hipObj::printTo(stderr,
+                        "hipobj-rdma-test-server: GET failed: {} bytes requested of a {} "
+                        "byte object, {} byte staging buffer\n",
+                        xferSize, data.size(), kStagingSize);
         return std::nullopt;
     }
 
@@ -247,10 +248,10 @@ RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size)
         xferSize = clientToken.length;
     }
     if (xferSize > kStagingSize) {
-        fprintf(stderr,
-                "hipobj-rdma-test-server: PUT failed: %zu bytes exceeds the %zu "
-                "byte staging buffer\n",
-                xferSize, kStagingSize);
+        hipObj::printTo(stderr,
+                        "hipobj-rdma-test-server: PUT failed: {} bytes exceeds the {} "
+                        "byte staging buffer\n",
+                        xferSize, kStagingSize);
         return std::nullopt;
     }
 
