@@ -9,7 +9,10 @@
   or `hipobject` and `hipobject-devel` RPM packages, or a single
   `hipobject-static-dev` DEB or `hipobject-static-devel` RPM package
   for a static build. rocm-cmake is downloaded if ROCm doesn't provide
-  it.
+  it. The package that holds the library recommends libibverbs, which
+  RDMA needs: `libibverbs1` (DEB) or `libibverbs.so.1()(64bit)` (RPM).
+  An RPM package built with a CMake before 4.1, which can't add a
+  Recommends, doesn't.
 - Nightly DEB packages of the `develop` branch, for Ubuntu 24.04 and
   26.04 with ROCm 10.1.0 and 7.14.1, are published as the `nightly`
   prerelease on GitHub, which each new build replaces. They're for
@@ -296,6 +299,16 @@
   as `12abc` as its leading number, and a negative one such as `-1` as
   a huge size. They now reject anything but a plain decimal number of
   bytes that fits in a `size_t`.
+- `hipObjInit()` failed with `hipObjRdmaError` unless libibverbs'
+  development package (`libibverbs-dev` or `rdma-core-devel`) was
+  installed, since hipObject loaded the unversioned `libibverbs.so` link
+  that only that package installs. It now loads `libibverbs.so.1`, which
+  the runtime package (`libibverbs1` or `libibverbs`) installs, from the
+  loader's search path, and no longer also looks in
+  `/usr/lib/x86_64-linux-gnu`, which the loader already searches on the
+  systems that have it. When libibverbs doesn't load, the message
+  `hipObjInit()` prints now says why, and no longer claims that RDMA is
+  disabled.
 
 ### Known issues
 
