@@ -485,43 +485,47 @@ sudo<span class="w"> </span>make<span class="w"> </span>install
 <td><p>ON</p></td>
 <td><p>Build examples (see below)</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BUILD_DOCS</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INSTALL_TOOLS</span></code></p></td>
+<td><p>ON</p></td>
+<td><p>Build tools (see below)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BUILD_DOCS</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Build documentation</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_DOCS_ONLY</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_DOCS_ONLY</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Docs targets only (no HIP)</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Build minio-cpp RDMA bridge</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INTEGRATION_TESTS</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INTEGRATION_TESTS</span></code></p></td>
 <td><p>ON</p></td>
 <td><p>Build RC test server</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FETCH_CUOBJECT_CLIENT</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FETCH_CUOBJECT_CLIENT</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Fetch libcuobjclient 1.2.0.59</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FIND_CUOBJECT_SERVER</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FIND_CUOBJECT_SERVER</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Find libcuobjserver + probe</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_WERROR</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_WERROR</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Treat warnings as errors</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CODE_COVERAGE</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CODE_COVERAGE</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Build with code coverage</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
 <td><p>see below</p></td>
 <td><p>Path to ROCm install</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code></p></td>
 <td><p>detected</p></td>
 <td><p>ROCm version</p></td>
 </tr>
@@ -546,6 +550,11 @@ build tree (<code class="docutils literal notranslate"><span class="pre">example
 in <code class="docutils literal notranslate"><span class="pre">share/doc/hipobject&lt;mm&gt;/examples</span></code> (see <a class="reference internal" href="#packaging">Packaging</a>). The
 example programs aren’t installed. The <code class="docutils literal notranslate"><span class="pre">README.md</span></code> installed with
 them explains how to build and run them.</p>
+<p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INSTALL_TOOLS</span></code> builds and installs the tool programs, in
+<code class="docutils literal notranslate"><span class="pre">bin</span></code>, in the runtime package (see <a class="reference internal" href="#packaging">Packaging</a>). So far there’s
+one, <code class="docutils literal notranslate"><span class="pre">hipobj-test-install</span></code>, which will check that hipObject is
+installed and works, as far as the system’s hardware allows. For
+now it only reports the hipObject version, with <code class="docutils literal notranslate"><span class="pre">--version</span></code>.</p>
 <p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_WERROR</span></code> adds <code class="docutils literal notranslate"><span class="pre">-Werror</span></code> to hipObject’s own targets
 (the library, tests, examples, and tools), but not to third-party
 code that CMake fetches. It’s off by default so that a compiler
@@ -603,7 +612,8 @@ build DEB or RPM packages, run CPack in the build directory:</p>
 <tbody>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject&lt;mm&gt;</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">hipobject&lt;mm&gt;</span></code></p></td>
-<td><p>Shared library, license</p></td>
+<td><p>Shared library, license,
+tools</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-dev&lt;mm&gt;</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">hipobject-devel&lt;mm&gt;</span></code></p></td>
@@ -616,9 +626,9 @@ examples’ sources</p></td>
 </div>
 <p>A static build (<code class="docutils literal notranslate"><span class="pre">BUILD_SHARED_LIBS=OFF</span></code>) creates a single
 <code class="docutils literal notranslate"><span class="pre">hipobject-static-dev&lt;mm&gt;</span></code> DEB or
-<code class="docutils literal notranslate"><span class="pre">hipobject-static-devel&lt;mm&gt;</span></code> RPM package. Test programs aren’t
-packaged. With <code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code>, the runtime package also
-has the <code class="docutils literal notranslate"><span class="pre">minio-getput-rdma</span></code> program (see
+<code class="docutils literal notranslate"><span class="pre">hipobject-static-devel&lt;mm&gt;</span></code> RPM package, without the tools.
+Test programs aren’t packaged. With <code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code>, the
+runtime package also has the <code class="docutils literal notranslate"><span class="pre">minio-getput-rdma</span></code> program (see
 <a class="reference internal" href="#minio-c-rdma-bridge">MinIO C++ RDMA Bridge</a>).</p>
 <p><code class="docutils literal notranslate"><span class="pre">&lt;mm&gt;</span></code> is the major and minor version of the ROCm that
 hipObject is built for, as in ROCm’s own package names, so the

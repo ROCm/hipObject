@@ -65,6 +65,7 @@ Option                           Default        Description
 ``BUILD_SHARED_LIBS``            ON             Build shared library
 ``BUILD_TESTING``                ON             Build and register tests
 ``HIPOBJ_INSTALL_EXAMPLES``      ON             Build examples (see below)
+``HIPOBJ_INSTALL_TOOLS``         ON             Build tools (see below)
 ``HIPOBJ_BUILD_DOCS``            OFF            Build documentation
 ``HIPOBJ_DOCS_ONLY``             OFF            Docs targets only (no HIP)
 ``HIPOBJ_MINIO_CLIENT``          OFF            Build minio-cpp RDMA bridge
@@ -97,6 +98,12 @@ build tree (``examples/``) and installs their sources, with a
 in ``share/doc/hipobject<mm>/examples`` (see `Packaging`_). The
 example programs aren't installed. The ``README.md`` installed with
 them explains how to build and run them.
+
+``HIPOBJ_INSTALL_TOOLS`` builds and installs the tool programs, in
+``bin``, in the runtime package (see `Packaging`_). So far there's
+one, ``hipobj-test-install``, which will check that hipObject is
+installed and works, as far as the system's hardware allows. For
+now it only reports the hipObject version, with ``--version``.
 
 ``HIPOBJ_WERROR`` adds ``-Werror`` to hipObject's own targets
 (the library, tests, examples, and tools), but not to third-party
@@ -156,7 +163,8 @@ build DEB or RPM packages, run CPack in the build directory:
 ========================= ========================= ==========================
 DEB package               RPM package               Contents
 ========================= ========================= ==========================
-``hipobject<mm>``         ``hipobject<mm>``         Shared library, license
+``hipobject<mm>``         ``hipobject<mm>``         Shared library, license,
+                                                    tools
 ``hipobject-dev<mm>``     ``hipobject-devel<mm>``   Header, CMake package,
                                                     ``libhipobj.so`` link,
                                                     examples' sources
@@ -164,9 +172,9 @@ DEB package               RPM package               Contents
 
 A static build (``BUILD_SHARED_LIBS=OFF``) creates a single
 ``hipobject-static-dev<mm>`` DEB or
-``hipobject-static-devel<mm>`` RPM package. Test programs aren't
-packaged. With ``HIPOBJ_MINIO_CLIENT``, the runtime package also
-has the ``minio-getput-rdma`` program (see
+``hipobject-static-devel<mm>`` RPM package, without the tools.
+Test programs aren't packaged. With ``HIPOBJ_MINIO_CLIENT``, the
+runtime package also has the ``minio-getput-rdma`` program (see
 `MinIO C++ RDMA Bridge`_).
 
 ``<mm>`` is the major and minor version of the ROCm that
