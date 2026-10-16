@@ -12,7 +12,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <cstdlib>
 #include <limits>
 #include <memory>
 
@@ -314,9 +313,9 @@ TEST_F(StagingTest, ShutdownLeaksTheStagingBufferOfACopyThatsRunning)
     EXPECT_EQ(fake().log.destroyQp, fake().log.createQp);
     EXPECT_EQ(fake().log.closeDevice, 1);
 
-    /* Frees what the library leaked, which the fake allocated with
-     * malloc(), so the leak checker doesn't report it */
-    std::free(stagingBuf);
+    /* Frees what the library leaked, so the leak checker doesn't report
+     * it */
+    hipObjTest::freeFakeHostMemory(stagingBuf);
 }
 
 } // namespace

@@ -7,11 +7,11 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -72,9 +72,12 @@ FirstMismatch(std::span<const char> buf, uint32_t seed)
     return buf.size();
 }
 
-/* Frees the transfer buffer with the allocator that made it */
+/* Frees the transfer buffer with the allocator that made it: hipFree() on
+ * the GPU path, and on the host path, the aligned operator delete that
+ * matches the aligned operator new */
 struct BufferDeleter {
-    bool onGpu = false;
+    bool             onGpu     = false;
+    std::align_val_t alignment = {};
 
     void operator()(char *ptr) const noexcept
     {
@@ -82,7 +85,7 @@ struct BufferDeleter {
             (void)hipFree(ptr);
         }
         else {
-            std::free(ptr);
+            ::operator delete(ptr, alignment);
         }
     }
 };
@@ -137,7 +140,7 @@ main(int argc, char *argv[])
     /* bufptr's bytes, on the host path */
     std::span<char> host_buf;
     /* Owns bufptr (which is dev_ptr on the GPU path) */
-    std::unique_ptr<char, BufferDeleter> buffer(nullptr, BufferDeleter{gpu_enabled});
+    std::unique_ptr<char, BufferDeleter> buffer(nullptr, BufferDeleter{.onGpu = gpu_enabled});
 
     if (gpu_enabled) {
         hipError_t err = hipMalloc(&dev_ptr, bufsize);
@@ -161,15 +164,13 @@ main(int argc, char *argv[])
             std::cerr << "sysconf(_SC_PAGESIZE) failed\n";
             return 1;
         }
-        /* posix_memalign() writes a void *, so it needs a void * object to
-         * write it to */
-        void     *raw = nullptr;
-        const int res = posix_memalign(&raw, static_cast<size_t>(pagesize), bufsize);
-        if (res != 0 || raw == nullptr) {
-            std::cerr << "posix_memalign failed\n";
+        const auto alignment = std::align_val_t{static_cast<size_t>(pagesize)};
+        bufptr               = static_cast<char *>(::operator new(bufsize, alignment, std::nothrow));
+        if (bufptr == nullptr) {
+            std::cerr << "allocating the host buffer failed\n";
             return 1;
         }
-        bufptr = static_cast<char *>(raw);
+        buffer.get_deleter().alignment = alignment;
         buffer.reset(bufptr);
         host_buf = hipObj::spanFromPointer(bufptr, bufsize);
         std::ranges::copy(expected, host_buf.begin());

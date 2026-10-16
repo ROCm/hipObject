@@ -349,6 +349,8 @@ private:
     bool initialized_ = false;
 };
 
+/* Google Test takes ownership of the environment, as a raw pointer */
+// NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
 const ::testing::Environment *const kCurlEnv = ::testing::AddGlobalTestEnvironment(new CurlGlobalEnv);
 
 } // namespace

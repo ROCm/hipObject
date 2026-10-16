@@ -48,6 +48,21 @@ namespace {
      * its type */
     constexpr hipObjError_t kExceptionError = makeError(hipObjInternalError);
 
+    /* A token that hipObjGetRdmaToken() hands to its caller, and
+     * hipObjPutRdmaToken() takes back. The [] is std::unique_ptr's form for
+     * an array allocated at run time, which std::array can't replace, not a
+     * C array. */
+    // NOLINTBEGIN(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+    using TokenPtr = std::unique_ptr<char[]>;
+
+    /* Space for a token of size bytes. hipObjGetRdmaToken() fills all of
+     * it, so it isn't zeroed. */
+    TokenPtr allocateToken(size_t size)
+    {
+        return std::make_unique_for_overwrite<char[]>(size);
+    }
+    // NOLINTEND(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+
     /* True when [offset, offset + size) lies inside a registration of regSize
      * bytes. Compares without computing offset + size, which could wrap. */
     bool rangeInRegistration(off_t offset, size_t size, size_t regSize)
@@ -577,12 +592,9 @@ try {
         return hipObj::makeError(hipObjRdmaError);
     }
     const hipObj::RdmaTokenHex encoded = hipObj::encodeRdmaTokenHex(*token);
-    char                      *copy    = static_cast<char *>(std::malloc(encoded.size()));
-    if (copy == nullptr) {
-        return hipObj::makeError(hipObjInternalError);
-    }
-    std::ranges::copy(encoded, hipObj::spanFromPointer(copy, encoded.size()).begin());
-    *outToken = copy;
+    hipObj::TokenPtr           copy    = hipObj::allocateToken(encoded.size());
+    std::ranges::copy(encoded, hipObj::spanFromPointer(copy.get(), encoded.size()).begin());
+    *outToken = copy.release();
     return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {
@@ -595,7 +607,8 @@ try {
     if (token == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
-    std::free(token);
+    /* From hipObjGetRdmaToken() */
+    const hipObj::TokenPtr owned(token);
     return hipObj::makeError(hipObjSuccess);
 }
 catch (...) {

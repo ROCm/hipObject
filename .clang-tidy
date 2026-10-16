@@ -84,8 +84,6 @@ Checks:
   - -cert-err58-cpp  # TODO: the same check
   - -bugprone-unchecked-optional-access  # TODO(34)
   - -cert-err33-c  # TODO(43): unchecked fprintf() and snprintf()
-  - -cppcoreguidelines-no-malloc  # TODO(12)
-  - -cppcoreguidelines-owning-memory  # TODO(13)
   - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access  # TODO(144)
   - -cppcoreguidelines-pro-bounds-constant-array-index  # TODO(16)
   - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(21)

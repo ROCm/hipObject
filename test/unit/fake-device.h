@@ -193,6 +193,10 @@ fakeEvent()
 constexpr int      kFakeDmabufFd     = 1234;
 constexpr uint64_t kFakeDmabufOffset = 0x200;
 
+/* Frees memory from FakeHip::hostMalloc(), as hostFree() does, without
+ * recording a call. A test can free what the library leaks with it. */
+void freeFakeHostMemory(void *ptr);
+
 /* A HIP runtime that answers from a FakeDevice and records its calls there.
  * hostMalloc() and hostFree() allocate and free real memory. A test can
  * derive from it to change one method. */
