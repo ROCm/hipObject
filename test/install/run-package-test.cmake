@@ -15,9 +15,14 @@
 # installed.
 #
 # Checks:
-#   - The package names: hipobject and hipobject-dev (DEB) or
-#     hipobject-devel (RPM), or a single hipobject-static-dev (DEB) or
-#     hipobject-static-devel (RPM) for a static build
+#   - The package names, which end with the ROCm major and minor version
+#     (<mm>): hipobject<mm> and hipobject-dev<mm> (DEB) or
+#     hipobject-devel<mm> (RPM), or a single hipobject-static-dev<mm>
+#     (DEB) or hipobject-static-devel<mm> (RPM) for a static build
+#   - That each package replaces the one it was named before, without
+#     the ROCm version: Conflicts and Replaces (DEB) or Obsoletes (RPM)
+#   - That the devel package depends on the runtime package from the same
+#     build, with its exact version and release
 #   - The files each package contains, that no file is in two packages,
 #     and that the test programs aren't packaged
 #   - The package dependencies, which depend on the ROCm version and on
@@ -131,10 +136,10 @@ set(cmake_package_files
   lib/cmake/hipobj/hipobj-config.cmake
   lib/cmake/hipobj/hipobj-config-version.cmake
   lib/cmake/hipobj/hipobj-targets.cmake)
-set(license_file share/doc/hipobject/LICENSE.md)
+set(rocm_mm "${ROCM_VERSION_MAJOR}.${ROCM_VERSION_MINOR}")
+set(license_file share/doc/hipobject${rocm_mm}/LICENSE.md)
 
 # The ROCm packages the library's package depends on
-set(rocm_mm "${ROCM_VERSION_MAJOR}.${ROCM_VERSION_MINOR}")
 set(rocm_depends "amdrocm-runtime${devel_suffix}${rocm_mm}")
 set(rocm_not_depends rocm-core)
 
@@ -161,9 +166,10 @@ else()
   set(library_recommends ${LIBRARY_RPM_RECOMMENDS})
 endif()
 
+# <name>_replaces is the package's name before it had the ROCm version
 if(SHARED)
-  set(runtime_package hipobject)
-  set(devel_package hipobject${devel_suffix})
+  set(runtime_package hipobject${rocm_mm})
+  set(devel_package hipobject${devel_suffix}${rocm_mm})
   set(expected_packages ${runtime_package} ${devel_package})
 
   set(${runtime_package}_files
@@ -174,6 +180,7 @@ if(SHARED)
   set(${runtime_package}_not_depends ${rocm_not_depends})
   set(${runtime_package}_recommends ${library_recommends})
   set(${runtime_package}_not_recommends)
+  set(${runtime_package}_replaces hipobject)
 
   set(${devel_package}_files
     include/hipobj/hipobj.h
@@ -183,9 +190,10 @@ if(SHARED)
   set(${devel_package}_not_depends)
   set(${devel_package}_recommends)
   set(${devel_package}_not_recommends ${library_recommends})
+  set(${devel_package}_replaces hipobject${devel_suffix})
 else()
   set(runtime_package)
-  set(devel_package hipobject-static${devel_suffix})
+  set(devel_package hipobject-static${devel_suffix}${rocm_mm})
   set(expected_packages ${devel_package})
 
   set(${devel_package}_files
@@ -198,6 +206,7 @@ else()
   set(${devel_package}_not_depends ${rocm_not_depends} ${program_depends})
   set(${devel_package}_recommends ${library_recommends})
   set(${devel_package}_not_recommends)
+  set(${devel_package}_replaces hipobject-static${devel_suffix})
 endif()
 
 # rocm_create_package() appends ROCM_LIBPATCH_VERSION to the version.
@@ -239,18 +248,46 @@ function(parse_rpm_relations out_var text)
   set(${out_var} "${text}" PARENT_SCOPE)
 endfunction()
 
+# Turn a relationship field into a list of its entries, with their
+# version constraints and single spaces: "a (= 1),\n b" -> "a (= 1);b".
+# DEB fields separate them with commas, and rpm lists one per line.
+function(split_relations out_var text)
+  if(GENERATOR STREQUAL "DEB")
+    string(REPLACE "," ";" text "${text}")
+  else()
+    string(REPLACE "\n" ";" text "${text}")
+  endif()
+  set(entries)
+  foreach(entry IN LISTS text)
+    string(REGEX REPLACE "[ \t\n]+" " " entry "${entry}")
+    string(STRIP "${entry}" entry)
+    if(NOT entry STREQUAL "")
+      list(APPEND entries "${entry}")
+    endif()
+  endforeach()
+  set(${out_var} "${entries}" PARENT_SCOPE)
+endfunction()
+
 # Read a package
 #
 # Sets, in the caller's scope:
-#   package_name       The package name
-#   package_version    The package version
-#   package_depends    The names of the packages and capabilities it
-#                      depends on, without version constraints
-#   package_recommends The same for what it recommends
-#   package_provides   The capabilities it provides (RPM only)
-#   package_files      The absolute paths of the files it contains
-#   package_dirs       The absolute paths of the directories it contains
-#                      (DEB) or owns (RPM)
+#   package_name         The package name
+#   package_version      The package version
+#   package_full_version The package version and release, as another
+#                        package's dependency on this one names it
+#   package_depends      The names of the packages and capabilities it
+#                        depends on, without version constraints
+#   package_depend_entries The same with their version constraints, as
+#                        split_relations() writes them
+#   package_recommends   The names of what it recommends
+#   package_conflicts    The names of the packages it conflicts with
+#                        (DEB) or obsoletes (RPM)
+#   package_replaces     The names of the packages it replaces (DEB) or
+#                        obsoletes (RPM)
+#   package_provides     The capabilities it provides (RPM only)
+#   package_files        The absolute paths of the files it contains
+#   package_dirs         The absolute paths of the directories it
+#                        contains (DEB) or owns (RPM)
 function(read_package package)
   set(files)
   set(dirs)
@@ -262,10 +299,18 @@ function(read_package package)
     run_command(depends "read ${package}" ${DPKG_DEB} -f ${package} Depends)
     run_command(recommends "read ${package}"
       ${DPKG_DEB} -f ${package} Recommends)
+    run_command(conflicts "read ${package}"
+      ${DPKG_DEB} -f ${package} Conflicts)
+    run_command(replaces "read ${package}" ${DPKG_DEB} -f ${package} Replaces)
     run_command(listing "list ${package}" ${DPKG_DEB} -c ${package})
 
+    # A DEB version includes the release
+    string(STRIP "${version}" full_version)
+    split_relations(depend_entries "${depends}")
     parse_deb_relations(depends "${depends}")
     parse_deb_relations(recommends "${recommends}")
+    parse_deb_relations(conflicts "${conflicts}")
+    parse_deb_relations(replaces "${replaces}")
 
     # <mode> <owner> <size> <date> <time> ./<path>[ -> <target>]
     string(REPLACE "\n" ";" listing "${listing}")
@@ -286,16 +331,25 @@ function(read_package package)
       ${RPM} -qp --queryformat "%{NAME}" ${package})
     run_command(version "read ${package}"
       ${RPM} -qp --queryformat "%{VERSION}" ${package})
+    run_command(full_version "read ${package}"
+      ${RPM} -qp --queryformat "%{VERSION}-%{RELEASE}" ${package})
     run_command(depends "read ${package}" ${RPM} -qp --requires ${package})
     run_command(recommends "read ${package}"
       ${RPM} -qp --recommends ${package})
+    run_command(obsoletes "read ${package}"
+      ${RPM} -qp --obsoletes ${package})
     run_command(provides "read ${package}" ${RPM} -qp --provides ${package})
     run_command(listing "list ${package}"
       ${RPM} -qp --queryformat "[%{FILEMODES:perms} %{FILENAMES}\n]"
         ${package})
 
+    string(STRIP "${full_version}" full_version)
+    split_relations(depend_entries "${depends}")
     parse_rpm_relations(depends "${depends}")
     parse_rpm_relations(recommends "${recommends}")
+    # Obsoletes does the work of DEB's Conflicts and Replaces
+    parse_rpm_relations(conflicts "${obsoletes}")
+    set(replaces "${conflicts}")
     string(STRIP "${provides}" provides)
     string(REPLACE "\n" ";" provides "${provides}")
 
@@ -317,8 +371,12 @@ function(read_package package)
   string(STRIP "${version}" version)
   set(package_name "${name}" PARENT_SCOPE)
   set(package_version "${version}" PARENT_SCOPE)
+  set(package_full_version "${full_version}" PARENT_SCOPE)
   set(package_depends "${depends}" PARENT_SCOPE)
+  set(package_depend_entries "${depend_entries}" PARENT_SCOPE)
   set(package_recommends "${recommends}" PARENT_SCOPE)
+  set(package_conflicts "${conflicts}" PARENT_SCOPE)
+  set(package_replaces "${replaces}" PARENT_SCOPE)
   set(package_provides "${provides}" PARENT_SCOPE)
   set(package_files "${files}" PARENT_SCOPE)
   set(package_dirs "${dirs}" PARENT_SCOPE)
@@ -372,6 +430,20 @@ foreach(package IN LISTS packages)
       fail("${what}: recommends ${recommend}")
     endif()
   endforeach()
+
+  # Replaces its old name, so installing it removes the old package
+  set(old_name "${${package_name}_replaces}")
+  if(NOT old_name IN_LIST package_conflicts
+      OR NOT old_name IN_LIST package_replaces)
+    list(JOIN package_conflicts ", " conflicts_text)
+    list(JOIN package_replaces ", " replaces_text)
+    fail("${what}: doesn't replace ${old_name} (conflicts with "
+      "${conflicts_text}; replaces ${replaces_text})")
+  endif()
+
+  # Kept for the checks between packages, after this loop
+  set(${package_name}_full_version "${package_full_version}")
+  set(${package_name}_depend_entries "${package_depend_entries}")
 
   # Every file is under the install prefix and is in one package
   set(relative_files)
@@ -437,4 +509,21 @@ list(LENGTH packages package_count)
 if(NOT found_count EQUAL package_count)
   fail("cpack -G ${GENERATOR} created more than one package with the "
     "same name")
+endif()
+
+# The devel package depends on the runtime package from the same build,
+# by its exact version and release, so it can't be installed with
+# another build's library
+if(SHARED)
+  set(full_version "${${runtime_package}_full_version}")
+  if(GENERATOR STREQUAL "DEB")
+    set(exact_depend "${runtime_package} (= ${full_version})")
+  else()
+    set(exact_depend "${runtime_package} = ${full_version}")
+  endif()
+  if(NOT exact_depend IN_LIST ${devel_package}_depend_entries)
+    list(JOIN ${devel_package}_depend_entries ", " depends_text)
+    fail("${devel_package} doesn't depend on ${exact_depend} (depends on "
+      "${depends_text})")
+  endif()
 endif()

@@ -224,13 +224,13 @@ jobs:
 
           This build is for testing. It isn't a supported release, and its API can change at any time.
 
-          Pick the packages for your Ubuntu release and ROCm version. The file names include the Ubuntu release, and the last part of the version before the "-" is the ROCm version with each "." replaced by "0" (100100 is ROCm 10.1.0). Install the runtime package, and the development package if you build against hipObject:
+          Pick the packages for your Ubuntu release and ROCm version. The package names end with the ROCm major and minor version (hipobject10.1 is for ROCm 10.1), and the file names include the Ubuntu release. Install the runtime package, and the development package if you build against hipObject:
 
           \`\`\`bash
-          sudo apt install ./hipobject_<version>_amd64.deb ./hipobject-dev_<version>_amd64.deb
+          sudo apt install ./hipobject<rocm>_<version>_amd64.deb ./hipobject-dev<rocm>_<version>_amd64.deb
           \`\`\`
 
-          The packages install into \`/opt/rocm/core-<major>.<minor>\`. SHA256SUMS has the checksums of the packages; check the packages you downloaded with \`sha256sum --check --ignore-missing SHA256SUMS\` in the directory you downloaded them to.
+          The packages install into \`/opt/rocm/core-<major>.<minor>\`, so the packages for each ROCm version can be installed together. They replace the packages named hipobject and hipobject-dev, without the ROCm version, that earlier nightlies had. SHA256SUMS has the checksums of the packages; check the packages you downloaded with \`sha256sum --check --ignore-missing SHA256SUMS\` in the directory you downloaded them to.
           EOF
 
           if gh release view nightly > /dev/null 2>&1; then

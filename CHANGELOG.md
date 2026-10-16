@@ -5,14 +5,22 @@
 ### Added
 
 - hipObject is installed and packaged with rocm-cmake. `cpack` builds
-  `hipobject` (runtime) and `hipobject-dev` (development) DEB packages
-  or `hipobject` and `hipobject-devel` RPM packages, or a single
-  `hipobject-static-dev` DEB or `hipobject-static-devel` RPM package
-  for a static build. rocm-cmake is downloaded if ROCm doesn't provide
-  it. The package that holds the library recommends libibverbs, which
-  RDMA needs: `libibverbs1` (DEB) or `libibverbs.so.1()(64bit)` (RPM).
-  An RPM package built with a CMake before 4.1, which can't add a
-  Recommends, doesn't.
+  `hipobject<mm>` (runtime) and `hipobject-dev<mm>` (development) DEB
+  packages or `hipobject<mm>` and `hipobject-devel<mm>` RPM packages,
+  or a single `hipobject-static-dev<mm>` DEB or
+  `hipobject-static-devel<mm>` RPM package for a static build, where
+  `<mm>` is the ROCm major and minor version, as in ROCm's own package
+  names (`hipobject10.1`). Packages for different ROCm versions can be
+  installed together when each installs into its ROCm version's
+  directory, `/opt/rocm/core-<mm>`. The development package requires
+  the runtime package from the same build, with the same version and
+  release. Each package replaces the package of the same kind that
+  earlier nightly packages had, without the ROCm version in its name.
+  rocm-cmake is downloaded if ROCm doesn't provide it. The package that
+  holds the library recommends libibverbs, which RDMA needs:
+  `libibverbs1` (DEB) or `libibverbs.so.1()(64bit)` (RPM). An RPM
+  package built with a CMake before 4.1, which can't add a Recommends,
+  doesn't.
 - Nightly DEB packages of the `develop` branch, for Ubuntu 24.04 and
   26.04 with ROCm 10.1.0 and 7.14.1, are published as the `nightly`
   prerelease on GitHub, which each new build replaces. They're for
