@@ -75,9 +75,10 @@ cmake --build build -j"$(nproc)"
 
 Notes:
 
-- The build steps in [docs/building.rst](docs/building.rst) set `HIPOBJ_IONIC`
-  to **OFF** for local lab workflows; CI uses **ON** to compile both RDMA
-  backends—keep that difference in mind when debugging.
+- `HIPOBJ_BNXT` and `HIPOBJ_IONIC` are on by default, and the build steps in
+  [docs/building.rst](docs/building.rst) leave them that way, so they compile
+  both RDMA backends, as CI's build workflow does. The emulated-hardware
+  workflows turn `HIPOBJ_BNXT` off, since their NIC is an ionic one.
 - CI ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) builds this
   configuration in the `rocm/dev-ubuntu-24.04:10.0.0-full` image, along with
   variants that add `-DBUILD_SHARED_LIBS=OFF`, `-DHIPOBJ_USE_SANITIZERS=ON`

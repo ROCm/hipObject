@@ -241,6 +241,19 @@
   finish before each call. It also says that when a staging copy doesn't
   finish within `HIPOBJ_STAGE_TIMEOUT_MS`, the call returns
   `hipObjInternalError` while the copy may still be using the buffer.
+- The `hipobj.h` documentation of `hipObjConfig_t` and `hipObjInit()` now
+  says what hipObject does with the configuration. It doesn't use
+  `endpoint`, `region`, `accessKey`, or `secretKey`, since the
+  application's S3 client makes the requests. A `gpuDevice` of -1 means
+  the calling thread's current HIP device, and on a host without a GPU,
+  `gpuDevice` has to be -1 and `nicHint` set. `nicHint` is a
+  comma-separated list of the RDMA devices hipObject can choose from, or,
+  when it can't choose by where the GPU is, the one device to open. The
+  documentation of `hipObjInit()` lists the errors it returns, and the
+  functions that work without it: `hipObjGetErrorString()`,
+  `hipObjGetVersionString()`, `hipObjParseRdmaReply()`,
+  `hipObjTokenClientNic()`, and `hipObjPutRdmaToken()`. It used to say
+  that it had to be called before any other function.
 
 ### Removed
 
@@ -338,6 +351,29 @@
   systems that have it. When libibverbs doesn't load, the message
   `hipObjInit()` prints now says why, and no longer claims that RDMA is
   disabled.
+- The Quick Start program in `README.md` didn't compile. It called
+  `hipObjGet()` with four arguments rather than six, leaving out the
+  `hipObjOps_t` callbacks that make the S3 request, passed a placeholder
+  that isn't valid C as the handle, and wasn't in a function. It's now a
+  complete C program, with the callbacks for an application's S3 client
+  to fill in, and the `CMakeLists.txt` that builds it against the
+  installed hipObject. It frees its GPU buffer only once
+  `hipObjBufDeregister()` succeeds, since a staging copy that timed out
+  can still be using the buffer. The building documentation has a new section on
+  using hipObject from a CMake project.
+- The documentation listed `UPLOAD_PART` and `RANGE_GET` (or `UPLOAD`
+  and `RANGE`) as operations alongside GET and PUT, but hipObject only
+  has `hipObjGet()` and `hipObjPut()`. A byte range, or a part of a
+  multipart upload, is whatever the application's S3 request asks for.
+  The README also described NIC selection as NUMA-aware, but hipObject
+  chooses the NIC closest to the GPU by PCI bus ID, without using NUMA
+  nodes.
+- The building documentation said that the tests need a GPU and an
+  RDMA NIC, which they don't, and that `LD_LIBRARY_PATH` must include
+  the ROCm and rdma-core libraries, which is only needed when the loader
+  can't find them otherwise. It now also lists the CMake options for
+  sanitizers, clang-tidy, and include-what-you-use, and the environment
+  variables that hipObject reads when it runs.
 
 ### Known issues
 
