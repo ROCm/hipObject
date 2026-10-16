@@ -14,11 +14,24 @@ Required
 Optional
 ^^^^^^^^
 
-- rdma-core development headers (for system libibverbs;
-  hipObject loads libibverbs via ``dlopen`` so this is
-  not strictly required at build time)
+- rdma-core 49 or later development headers
+  (``libibverbs-dev`` or ``rdma-core-devel``), for the test
+  that checks hipObject's copies of the libibverbs structures
+  against them. The library doesn't need them, since it loads
+  libibverbs with ``dlopen``.
 - GTest (fetched automatically if not found)
 - Doxygen, Python 3, Sphinx, Breathe (for documentation)
+
+Run Time
+^^^^^^^^
+
+RDMA needs libibverbs and the libibverbs provider for the
+NIC, from rdma-core: ``libibverbs1`` and ``ibverbs-providers``
+on Ubuntu, or ``libibverbs`` on RHEL. hipObject loads
+``libibverbs.so.1`` with ``dlopen`` the first time
+``hipObjInit()`` runs, so it doesn't need the development
+package. Without libibverbs, ``hipObjInit()`` prints why
+libibverbs didn't load and fails with ``hipObjRdmaError``.
 
 Build Steps
 -----------
@@ -146,11 +159,84 @@ A static build (``BUILD_SHARED_LIBS=OFF``) creates a single
 package, without the examples. The package version includes
 the ROCm version. Test programs aren't packaged.
 
-The ``hipobject`` package depends on ROCm and on the system
-libraries the examples link, such as libcurl (and OpenSSL,
-zlib, and pugixml with ``HIPOBJ_MINIO_CLIENT``). The RPM
-package requires these libraries by soname (e.g.,
-``libcurl.so.4()(64bit)``).
+CPack builds DEB packages with ``dpkg-deb``, and RPM packages
+with ``rpmbuild``. rocm-cmake only sets up the generators whose
+tools it finds when hipObject is configured.
+
+Package Dependencies
+^^^^^^^^^^^^^^^^^^^^
+
+The packages declare these dependencies, where ``<mm>`` is the
+ROCm major and minor version, such as ``10.1``. RPM calls
+Depends "Requires".
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 14 32 32
+
+   * - Package
+     - Relationship
+     - DEB
+     - RPM
+   * - ``hipobject``
+     - Depends
+     - ``amdrocm-runtime-dev<mm>``, the examples' libraries
+     - ``amdrocm-runtime-devel<mm>``, the examples' libraries
+   * -
+     - Recommends
+     - ``libibverbs1``, ``hipobject-dev``
+     - ``libibverbs.so.1()(64bit)`` (CMake 4.1 or later)
+   * -
+     - Suggests
+     -
+     - ``hipobject-devel`` (CMake 4.0 or later)
+   * - ``hipobject-dev`` or ``hipobject-devel``
+     - Depends
+     - ``hipobject``
+     - ``hipobject``
+   * - ``hipobject-static-dev`` or ``hipobject-static-devel``
+     - Depends
+     - ``amdrocm-runtime-dev<mm>``
+     - ``amdrocm-runtime-devel<mm>``
+   * -
+     - Recommends
+     - ``libibverbs1``
+     - ``libibverbs.so.1()(64bit)`` (CMake 4.1 or later)
+
+The examples' libraries are libcurl (``libcurl4t64``, or
+``libcurl.so.4()(64bit)``), when CMake finds it, and with
+``HIPOBJ_MINIO_CLIENT``, OpenSSL, zlib, and the system's
+pugixml and curlpp, if it uses them. The RPM packages name
+libraries by soname, which every distribution's library
+packages provide. The static package doesn't have the
+examples, so it doesn't depend on their libraries.
+
+The package that holds the library recommends libibverbs,
+which RDMA needs (see `Run Time`_). It's a recommendation
+rather than a dependency so that hipObject can be installed
+without it, such as on a build machine. ``apt`` and ``dnf``
+install recommended packages by default, but not suggested
+ones. hipObject doesn't include libibverbs in its packages.
+rocm-cmake adds the runtime package's recommendation or
+suggestion of the development package.
+
+DEB packages get every dependency in the table with any
+supported CMake. RPM packages only get the weak dependencies
+(Recommends and Suggests) that the CMake that builds them
+supports:
+
+============== ========================= ========================
+CMake          RPM Recommends            RPM Suggests
+============== ========================= ========================
+Before 4.0     No                        No
+4.0            No                        Yes
+4.1 or later   Yes                       Yes
+============== ========================= ========================
+
+CPack's RPM generator before CMake 4.0 drops every weak
+dependency, since its check for ``rpmbuild``'s support of them
+doesn't work, and Recommends needs 4.1. Build RPM packages
+with CMake 4.1 or later to get them all.
 
 Nightly Packages
 ^^^^^^^^^^^^^^^^

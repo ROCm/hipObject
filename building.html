@@ -369,11 +369,13 @@
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#required">Required</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#optional">Optional</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-time">Run Time</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-steps">Build Steps</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cmake-options">CMake Options</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#package-dependencies">Package Dependencies</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nightly-packages">Nightly Packages</a></li>
 </ul>
 </li>
@@ -407,12 +409,24 @@
 <section id="optional">
 <h3>Optional<a class="headerlink" href="#optional" title="Link to this heading">#</a></h3>
 <ul class="simple">
-<li><p>rdma-core development headers (for system libibverbs;
-hipObject loads libibverbs via <code class="docutils literal notranslate"><span class="pre">dlopen</span></code> so this is
-not strictly required at build time)</p></li>
+<li><p>rdma-core 49 or later development headers
+(<code class="docutils literal notranslate"><span class="pre">libibverbs-dev</span></code> or <code class="docutils literal notranslate"><span class="pre">rdma-core-devel</span></code>), for the test
+that checks hipObject’s copies of the libibverbs structures
+against them. The library doesn’t need them, since it loads
+libibverbs with <code class="docutils literal notranslate"><span class="pre">dlopen</span></code>.</p></li>
 <li><p>GTest (fetched automatically if not found)</p></li>
 <li><p>Doxygen, Python 3, Sphinx, Breathe (for documentation)</p></li>
 </ul>
+</section>
+<section id="run-time">
+<h3>Run Time<a class="headerlink" href="#run-time" title="Link to this heading">#</a></h3>
+<p>RDMA needs libibverbs and the libibverbs provider for the
+NIC, from rdma-core: <code class="docutils literal notranslate"><span class="pre">libibverbs1</span></code> and <code class="docutils literal notranslate"><span class="pre">ibverbs-providers</span></code>
+on Ubuntu, or <code class="docutils literal notranslate"><span class="pre">libibverbs</span></code> on RHEL. hipObject loads
+<code class="docutils literal notranslate"><span class="pre">libibverbs.so.1</span></code> with <code class="docutils literal notranslate"><span class="pre">dlopen</span></code> the first time
+<code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code> runs, so it doesn’t need the development
+package. Without libibverbs, <code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code> prints why
+libibverbs didn’t load and fails with <code class="docutils literal notranslate"><span class="pre">hipObjRdmaError</span></code>.</p>
 </section>
 </section>
 <section id="build-steps">
@@ -594,11 +608,109 @@ license</p></td>
 <code class="docutils literal notranslate"><span class="pre">hipobject-static-dev</span></code> DEB or <code class="docutils literal notranslate"><span class="pre">hipobject-static-devel</span></code> RPM
 package, without the examples. The package version includes
 the ROCm version. Test programs aren’t packaged.</p>
-<p>The <code class="docutils literal notranslate"><span class="pre">hipobject</span></code> package depends on ROCm and on the system
-libraries the examples link, such as libcurl (and OpenSSL,
-zlib, and pugixml with <code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code>). The RPM
-package requires these libraries by soname (e.g.,
-<code class="docutils literal notranslate"><span class="pre">libcurl.so.4()(64bit)</span></code>).</p>
+<p>CPack builds DEB packages with <code class="docutils literal notranslate"><span class="pre">dpkg-deb</span></code>, and RPM packages
+with <code class="docutils literal notranslate"><span class="pre">rpmbuild</span></code>. rocm-cmake only sets up the generators whose
+tools it finds when hipObject is configured.</p>
+<section id="package-dependencies">
+<h3>Package Dependencies<a class="headerlink" href="#package-dependencies" title="Link to this heading">#</a></h3>
+<p>The packages declare these dependencies, where <code class="docutils literal notranslate"><span class="pre">&lt;mm&gt;</span></code> is the
+ROCm major and minor version, such as <code class="docutils literal notranslate"><span class="pre">10.1</span></code>. RPM calls
+Depends “Requires”.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 22.0%" />
+<col style="width: 14.0%" />
+<col style="width: 32.0%" />
+<col style="width: 32.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Package</p></th>
+<th class="head"><p>Relationship</p></th>
+<th class="head"><p>DEB</p></th>
+<th class="head"><p>RPM</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+<td><p>Depends</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-dev&lt;mm&gt;</span></code>, the examples’ libraries</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-devel&lt;mm&gt;</span></code>, the examples’ libraries</p></td>
+</tr>
+<tr class="row-odd"><td></td>
+<td><p>Recommends</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">libibverbs1</span></code>, <code class="docutils literal notranslate"><span class="pre">hipobject-dev</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">libibverbs.so.1()(64bit)</span></code> (CMake 4.1 or later)</p></td>
+</tr>
+<tr class="row-even"><td></td>
+<td><p>Suggests</p></td>
+<td></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-devel</span></code> (CMake 4.0 or later)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-dev</span></code> or <code class="docutils literal notranslate"><span class="pre">hipobject-devel</span></code></p></td>
+<td><p>Depends</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-static-dev</span></code> or <code class="docutils literal notranslate"><span class="pre">hipobject-static-devel</span></code></p></td>
+<td><p>Depends</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-dev&lt;mm&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-devel&lt;mm&gt;</span></code></p></td>
+</tr>
+<tr class="row-odd"><td></td>
+<td><p>Recommends</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">libibverbs1</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">libibverbs.so.1()(64bit)</span></code> (CMake 4.1 or later)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The examples’ libraries are libcurl (<code class="docutils literal notranslate"><span class="pre">libcurl4t64</span></code>, or
+<code class="docutils literal notranslate"><span class="pre">libcurl.so.4()(64bit)</span></code>), when CMake finds it, and with
+<code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code>, OpenSSL, zlib, and the system’s
+pugixml and curlpp, if it uses them. The RPM packages name
+libraries by soname, which every distribution’s library
+packages provide. The static package doesn’t have the
+examples, so it doesn’t depend on their libraries.</p>
+<p>The package that holds the library recommends libibverbs,
+which RDMA needs (see <a class="reference internal" href="#run-time">Run Time</a>). It’s a recommendation
+rather than a dependency so that hipObject can be installed
+without it, such as on a build machine. <code class="docutils literal notranslate"><span class="pre">apt</span></code> and <code class="docutils literal notranslate"><span class="pre">dnf</span></code>
+install recommended packages by default, but not suggested
+ones. hipObject doesn’t include libibverbs in its packages.
+rocm-cmake adds the runtime package’s recommendation or
+suggestion of the development package.</p>
+<p>DEB packages get every dependency in the table with any
+supported CMake. RPM packages only get the weak dependencies
+(Recommends and Suggests) that the CMake that builds them
+supports:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>CMake</p></th>
+<th class="head"><p>RPM Recommends</p></th>
+<th class="head"><p>RPM Suggests</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Before 4.0</p></td>
+<td><p>No</p></td>
+<td><p>No</p></td>
+</tr>
+<tr class="row-odd"><td><p>4.0</p></td>
+<td><p>No</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p>4.1 or later</p></td>
+<td><p>Yes</p></td>
+<td><p>Yes</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>CPack’s RPM generator before CMake 4.0 drops every weak
+dependency, since its check for <code class="docutils literal notranslate"><span class="pre">rpmbuild</span></code>’s support of them
+doesn’t work, and Recommends needs 4.1. Build RPM packages
+with CMake 4.1 or later to get them all.</p>
+</section>
 <section id="nightly-packages">
 <h3>Nightly Packages<a class="headerlink" href="#nightly-packages" title="Link to this heading">#</a></h3>
 <p>DEB packages of the <code class="docutils literal notranslate"><span class="pre">develop</span></code> branch are built every night
@@ -727,11 +839,13 @@ library paths at runtime.</p></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#required">Required</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#optional">Optional</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-time">Run Time</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-steps">Build Steps</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cmake-options">CMake Options</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#package-dependencies">Package Dependencies</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nightly-packages">Nightly Packages</a></li>
 </ul>
 </li>
