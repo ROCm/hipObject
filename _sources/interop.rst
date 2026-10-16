@@ -130,7 +130,7 @@ On a GPU client node with libcurl installed:
 
    cmake -B build -DBUILD_TESTING=ON
    cmake --build build --target get-object
-   ./build/hipobj-examples/get-object 4096 --live http://127.0.0.1:9000
+   ./build/examples/get-object 4096 --live http://127.0.0.1:9000
 
 Layer 3 — MinIO AIStor bridge
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
