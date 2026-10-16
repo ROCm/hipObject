@@ -23,8 +23,9 @@
 #     the ROCm version: Conflicts and Replaces (DEB) or Obsoletes (RPM)
 #   - That the devel package depends on the runtime package from the same
 #     build, with its exact version and release
-#   - The files each package contains, that no file is in two packages,
-#     and that the test programs aren't packaged
+#   - The files each package contains, including the examples' sources
+#     in the devel package, that no file is in two packages, and that
+#     the test programs and the example programs aren't packaged
 #   - The package dependencies, which depend on the ROCm version and on
 #     the system libraries the installed programs link
 #   - That the package holding the library, and only that one,
@@ -139,6 +140,19 @@ set(cmake_package_files
 set(rocm_mm "${ROCM_VERSION_MAJOR}.${ROCM_VERSION_MINOR}")
 set(license_file share/doc/hipobject${rocm_mm}/LICENSE.md)
 
+# The examples' sources, which the devel package has when they're
+# installed. The example programs themselves aren't installed.
+set(example_files)
+if(EXAMPLES_DIR)
+  foreach(file IN ITEMS CMakeLists.txt README.md get-object.cpp
+      put-object.cpp s3_curl_ops.cpp s3_curl_ops.h)
+    list(APPEND example_files ${EXAMPLES_DIR}/${file})
+  endforeach()
+endif()
+set(not_packaged_files
+  bin/hipobj-examples/get-object
+  bin/hipobj-examples/put-object)
+
 # The ROCm packages the library's package depends on
 set(rocm_depends "amdrocm-runtime${devel_suffix}${rocm_mm}")
 set(rocm_not_depends rocm-core)
@@ -185,7 +199,8 @@ if(SHARED)
   set(${devel_package}_files
     include/hipobj/hipobj.h
     lib/libhipobj.so
-    ${cmake_package_files})
+    ${cmake_package_files}
+    ${example_files})
   set(${devel_package}_depends ${runtime_package})
   set(${devel_package}_not_depends)
   set(${devel_package}_recommends)
@@ -200,7 +215,8 @@ else()
     include/hipobj/hipobj.h
     lib/libhipobj.a
     ${cmake_package_files}
-    ${license_file})
+    ${license_file}
+    ${example_files})
   set(${devel_package}_depends ${rocm_depends})
   # The installed programs aren't packaged
   set(${devel_package}_not_depends ${rocm_not_depends} ${program_depends})
@@ -468,6 +484,11 @@ foreach(package IN LISTS packages)
   foreach(file IN LISTS test_files)
     if(file IN_LIST relative_files)
       fail("${what}: contains the test program ${INSTALL_PREFIX}/${file}")
+    endif()
+  endforeach()
+  foreach(file IN LISTS not_packaged_files)
+    if(file IN_LIST relative_files)
+      fail("${what}: contains ${INSTALL_PREFIX}/${file}")
     endif()
   endforeach()
 

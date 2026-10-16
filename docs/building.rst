@@ -64,6 +64,7 @@ Option                           Default        Description
 ``HIPOBJ_IONIC``                 ON             Build ionic RDMA backend
 ``BUILD_SHARED_LIBS``            ON             Build shared library
 ``BUILD_TESTING``                ON             Build and register tests
+``HIPOBJ_INSTALL_EXAMPLES``      ON             Build examples (see below)
 ``HIPOBJ_BUILD_DOCS``            OFF            Build documentation
 ``HIPOBJ_DOCS_ONLY``             OFF            Docs targets only (no HIP)
 ``HIPOBJ_MINIO_CLIENT``          OFF            Build minio-cpp RDMA bridge
@@ -89,6 +90,13 @@ and pick the configuration at build time.
 built with, without compiler extensions. ``26`` needs CMake 3.30 or
 later, which is the first version that knows how to ask GCC
 (14 and later) and Clang for C++26.
+
+``HIPOBJ_INSTALL_EXAMPLES`` builds the example programs in the
+build tree (``examples/``) and installs their sources, with a
+``CMakeLists.txt`` that builds them against the installed hipObject,
+in ``share/doc/hipobject<mm>/examples`` (see `Packaging`_). The
+example programs aren't installed. The ``README.md`` installed with
+them explains how to build and run them.
 
 ``HIPOBJ_WERROR`` adds ``-Werror`` to hipObject's own targets
 (the library, tests, examples, and tools), but not to third-party
@@ -148,16 +156,18 @@ build DEB or RPM packages, run CPack in the build directory:
 ========================= ========================= ==========================
 DEB package               RPM package               Contents
 ========================= ========================= ==========================
-``hipobject<mm>``         ``hipobject<mm>``         Shared library, examples,
-                                                    license
+``hipobject<mm>``         ``hipobject<mm>``         Shared library, license
 ``hipobject-dev<mm>``     ``hipobject-devel<mm>``   Header, CMake package,
-                                                    ``libhipobj.so`` link
+                                                    ``libhipobj.so`` link,
+                                                    examples' sources
 ========================= ========================= ==========================
 
 A static build (``BUILD_SHARED_LIBS=OFF``) creates a single
 ``hipobject-static-dev<mm>`` DEB or
-``hipobject-static-devel<mm>`` RPM package, without the
-examples. Test programs aren't packaged.
+``hipobject-static-devel<mm>`` RPM package. Test programs aren't
+packaged. With ``HIPOBJ_MINIO_CLIENT``, the runtime package also
+has the ``minio-getput-rdma`` program (see
+`MinIO C++ RDMA Bridge`_).
 
 ``<mm>`` is the major and minor version of the ROCm that
 hipObject is built for, as in ROCm's own package names, so the
@@ -199,8 +209,8 @@ package, and Obsoletes in an RPM package.
      - RPM
    * - ``hipobject<mm>``
      - Depends
-     - ``amdrocm-runtime-dev<mm>``, the examples' libraries
-     - ``amdrocm-runtime-devel<mm>``, the examples' libraries
+     - ``amdrocm-runtime-dev<mm>``, the MinIO program's libraries
+     - ``amdrocm-runtime-devel<mm>``, the MinIO program's libraries
    * -
      - Recommends
      - ``libibverbs1``, ``hipobject-dev<mm>``
@@ -241,13 +251,13 @@ come from the same build. Each package replaces the package it
 was named before it had the ROCm version, which only nightly
 packages had, so installing it removes that package.
 
-The examples' libraries are libcurl (``libcurl4t64``, or
-``libcurl.so.4()(64bit)``), when CMake finds it, and with
-``HIPOBJ_MINIO_CLIENT``, OpenSSL, zlib, and the system's
-pugixml and curlpp, if it uses them. The RPM packages name
-libraries by soname, which every distribution's library
-packages provide. The static package doesn't have the
-examples, so it doesn't depend on their libraries.
+The MinIO program's libraries, with ``HIPOBJ_MINIO_CLIENT``, are
+libcurl, OpenSSL, zlib, and the system's pugixml and curlpp, if
+it uses them. The RPM packages name libraries by soname, which
+every distribution's library packages provide. The static package
+doesn't have the program, so it doesn't depend on its libraries.
+The examples' sources need libcurl's development package to build
+their ``--live`` mode, but the packages don't depend on it.
 
 The package that holds the library recommends libibverbs,
 which RDMA needs (see `Run Time`_). It's a recommendation

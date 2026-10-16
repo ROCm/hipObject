@@ -151,9 +151,17 @@ Notes:
   ([`test/header`](test/header)), so a violation breaks the build.
 - **The examples in [`examples/`](examples/) show how consumers use the header,
   and are written to C++11.** The build compiles them as C++20 like everything
-  else, so nothing catches newer constructs in them; keep them to C++11 by
-  hand. They're also built without Clang's `-Wunsafe-buffer-usage` (see
-  [C++ code](#c-code)), which C++11 code can't satisfy.
+  else, with the full warning set, clang-tidy, and IWYU. hipObject installs
+  their sources, not the programs, with
+  [`examples/CMakeLists.install.cmake`](examples/CMakeLists.install.cmake) as
+  their `CMakeLists.txt`, which builds them as C++11 against the installed
+  hipObject. The `hipobj-install` test builds them that way, which catches
+  newer constructs. Add a new example's files to the list in
+  [`cmake/HIPOBJInstall.cmake`](cmake/HIPOBJInstall.cmake) and the package
+  test's ([`test/install/run-package-test.cmake`](test/install/run-package-test.cmake)),
+  and to `CMakeLists.install.cmake`. They're also built without Clang's
+  `-Wunsafe-buffer-usage` (see [C++ code](#c-code)), which C++11 code can't
+  satisfy.
 
 ## Thread safety
 

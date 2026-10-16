@@ -147,6 +147,17 @@
   one way to make sure an application releases hipObject's resources on
   every path. In `--live` mode, the examples now exit with an error if
   `curl_global_init()` fails.
+- The `get-object` and `put-object` examples are installed as source,
+  not as programs. Their sources, a `CMakeLists.txt` that builds them
+  against the installed hipObject as C++11, and a `README.md` on building
+  and running them are installed in `share/doc/hipobject<mm>/examples`,
+  in the development package (`hipobject-dev<mm>`, `hipobject-devel<mm>`,
+  or a static build's one package). The runtime package no longer has
+  `bin/hipobj-examples/get-object` and `put-object`, and no longer
+  depends on libcurl unless it has the MinIO bridge's
+  `minio-getput-rdma`. To run the examples, build them from the
+  installed sources. `HIPOBJ_INSTALL_EXAMPLES` still turns the examples
+  on and off, and still builds them in the build tree.
 - The public API can be called from multiple threads, and transfers run
   concurrently. Every function can be called from any thread at any
   time, including from a `hipObjOps_t` callback. The functions used to

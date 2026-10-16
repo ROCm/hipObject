@@ -130,13 +130,15 @@ option(HIPOBJ_IONIC
 
 add_subdirectory(src)
 
+# Before the tests, which build the installed examples
+option(HIPOBJ_INSTALL_EXAMPLES
+  "Build the examples and install their sources" ON)
+
 if(BUILD_TESTING)
   include(HIPOBJUseGTest)
   add_subdirectory(test)
 endif()
 
-option(HIPOBJ_INSTALL_EXAMPLES
-  "Install example programs" ON)
 if(HIPOBJ_INSTALL_EXAMPLES)
   add_subdirectory(examples)
 endif()
