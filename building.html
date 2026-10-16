@@ -591,13 +591,13 @@ build DEB or RPM packages, run CPack in the build directory:</p>
 </tr>
 </thead>
 <tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject&lt;mm&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject&lt;mm&gt;</span></code></p></td>
 <td><p>Shared library, examples,
 license</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-dev</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-devel</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-dev&lt;mm&gt;</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-devel&lt;mm&gt;</span></code></p></td>
 <td><p>Header, CMake package,
 <code class="docutils literal notranslate"><span class="pre">libhipobj.so</span></code> link</p></td>
 </tr>
@@ -605,17 +605,34 @@ license</p></td>
 </table>
 </div>
 <p>A static build (<code class="docutils literal notranslate"><span class="pre">BUILD_SHARED_LIBS=OFF</span></code>) creates a single
-<code class="docutils literal notranslate"><span class="pre">hipobject-static-dev</span></code> DEB or <code class="docutils literal notranslate"><span class="pre">hipobject-static-devel</span></code> RPM
-package, without the examples. The package version includes
-the ROCm version. Test programs aren’t packaged.</p>
+<code class="docutils literal notranslate"><span class="pre">hipobject-static-dev&lt;mm&gt;</span></code> DEB or
+<code class="docutils literal notranslate"><span class="pre">hipobject-static-devel&lt;mm&gt;</span></code> RPM package, without the
+examples. Test programs aren’t packaged.</p>
+<p><code class="docutils literal notranslate"><span class="pre">&lt;mm&gt;</span></code> is the major and minor version of the ROCm that
+hipObject is built for, as in ROCm’s own package names, so the
+runtime package for ROCm 10.1 is <code class="docutils literal notranslate"><span class="pre">hipobject10.1</span></code>. Builds for
+different ROCm versions are different packages, which install
+side by side when each installs into its ROCm version’s own
+directory, <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;mm&gt;</span></code>, as they do when
+<code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is set (see <a class="reference internal" href="#cmake-options">CMake Options</a>) and as the
+nightly packages do.</p>
+<p>The package version is hipObject’s version followed by the ROCm
+version with each <code class="docutils literal notranslate"><span class="pre">.</span></code> replaced by <code class="docutils literal notranslate"><span class="pre">0</span></code>, such as
+<code class="docutils literal notranslate"><span class="pre">0.1.0.100100</span></code> for ROCm 10.1.0, and a release. The release
+comes from the <code class="docutils literal notranslate"><span class="pre">CPACK_DEBIAN_PACKAGE_RELEASE</span></code> or
+<code class="docutils literal notranslate"><span class="pre">CPACK_RPM_PACKAGE_RELEASE</span></code> environment variable when
+hipObject is configured, and is <code class="docutils literal notranslate"><span class="pre">local</span></code> if it isn’t set. An
+RPM package’s release also ends with the distribution’s tag,
+such as <code class="docutils literal notranslate"><span class="pre">.el9</span></code>, when the build machine’s <code class="docutils literal notranslate"><span class="pre">rpm</span></code> defines one
+(<code class="docutils literal notranslate"><span class="pre">%{?dist}</span></code>).</p>
 <p>CPack builds DEB packages with <code class="docutils literal notranslate"><span class="pre">dpkg-deb</span></code>, and RPM packages
 with <code class="docutils literal notranslate"><span class="pre">rpmbuild</span></code>. rocm-cmake only sets up the generators whose
 tools it finds when hipObject is configured.</p>
 <section id="package-dependencies">
 <h3>Package Dependencies<a class="headerlink" href="#package-dependencies" title="Link to this heading">#</a></h3>
-<p>The packages declare these dependencies, where <code class="docutils literal notranslate"><span class="pre">&lt;mm&gt;</span></code> is the
-ROCm major and minor version, such as <code class="docutils literal notranslate"><span class="pre">10.1</span></code>. RPM calls
-Depends “Requires”.</p>
+<p>The packages declare these dependencies. RPM calls Depends
+“Requires”. Replaces is Conflicts and Replaces in a DEB
+package, and Obsoletes in an RPM package.</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <colgroup>
 <col style="width: 22.0%" />
@@ -631,27 +648,38 @@ Depends “Requires”.</p>
 </tr>
 </thead>
 <tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject&lt;mm&gt;</span></code></p></td>
 <td><p>Depends</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-dev&lt;mm&gt;</span></code>, the examples’ libraries</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-devel&lt;mm&gt;</span></code>, the examples’ libraries</p></td>
 </tr>
 <tr class="row-odd"><td></td>
 <td><p>Recommends</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">libibverbs1</span></code>, <code class="docutils literal notranslate"><span class="pre">hipobject-dev</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">libibverbs1</span></code>, <code class="docutils literal notranslate"><span class="pre">hipobject-dev&lt;mm&gt;</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">libibverbs.so.1()(64bit)</span></code> (CMake 4.1 or later)</p></td>
 </tr>
 <tr class="row-even"><td></td>
 <td><p>Suggests</p></td>
 <td></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-devel</span></code> (CMake 4.0 or later)</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-devel&lt;mm&gt;</span></code> (CMake 4.0 or later)</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-dev</span></code> or <code class="docutils literal notranslate"><span class="pre">hipobject-devel</span></code></p></td>
+<tr class="row-odd"><td></td>
+<td><p>Replaces</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-dev&lt;mm&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">hipobject-devel&lt;mm&gt;</span></code></p></td>
 <td><p>Depends</p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">hipobject</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject&lt;mm&gt;</span> <span class="pre">(=</span> <span class="pre">&lt;version&gt;-&lt;release&gt;)</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject&lt;mm&gt;</span> <span class="pre">=</span> <span class="pre">&lt;version&gt;-&lt;release&gt;</span></code></p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-static-dev</span></code> or <code class="docutils literal notranslate"><span class="pre">hipobject-static-devel</span></code></p></td>
+<tr class="row-odd"><td></td>
+<td><p>Replaces</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-dev</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-devel</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">hipobject-static-dev&lt;mm&gt;</span></code> or
+<code class="docutils literal notranslate"><span class="pre">hipobject-static-devel&lt;mm&gt;</span></code></p></td>
 <td><p>Depends</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-dev&lt;mm&gt;</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">amdrocm-runtime-devel&lt;mm&gt;</span></code></p></td>
@@ -661,9 +689,19 @@ Depends “Requires”.</p>
 <td><p><code class="docutils literal notranslate"><span class="pre">libibverbs1</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">libibverbs.so.1()(64bit)</span></code> (CMake 4.1 or later)</p></td>
 </tr>
+<tr class="row-even"><td></td>
+<td><p>Replaces</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-static-dev</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">hipobject-static-devel</span></code></p></td>
+</tr>
 </tbody>
 </table>
 </div>
+<p>The development package depends on the runtime package with its
+own version and release, so the header and the library always
+come from the same build. Each package replaces the package it
+was named before it had the ROCm version, which only nightly
+packages had, so installing it removes that package.</p>
 <p>The examples’ libraries are libcurl (<code class="docutils literal notranslate"><span class="pre">libcurl4t64</span></code>, or
 <code class="docutils literal notranslate"><span class="pre">libcurl.so.4()(64bit)</span></code>), when CMake finds it, and with
 <code class="docutils literal notranslate"><span class="pre">HIPOBJ_MINIO_CLIENT</span></code>, OpenSSL, zlib, and the system’s
@@ -717,10 +755,12 @@ with CMake 4.1 or later to get them all.</p>
 that it changes, and published as the <a class="reference external" href="https://github.com/ROCm/hipObject/releases/tag/nightly">nightly prerelease</a>,
 which each new build replaces. There are packages for Ubuntu
 24.04 and 26.04, built for ROCm 10.1.0 and 7.14.1. They
-install into <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>, and their
-release is <code class="docutils literal notranslate"><span class="pre">0.&lt;commit</span> <span class="pre">time&gt;.g&lt;commit&gt;~&lt;Ubuntu</span> <span class="pre">release&gt;</span></code>, so
-a newer nightly upgrades an older one. The nightly packages
-are for testing, and aren’t a supported release.</p>
+install into <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>, so the
+packages for both ROCm versions can be installed together, and
+their release is
+<code class="docutils literal notranslate"><span class="pre">0.&lt;commit</span> <span class="pre">time&gt;.g&lt;commit&gt;~&lt;Ubuntu</span> <span class="pre">release&gt;</span></code>, so a newer
+nightly upgrades an older one. The nightly packages are for
+testing, and aren’t a supported release.</p>
 </section>
 </section>
 <section id="minio-c-rdma-bridge">

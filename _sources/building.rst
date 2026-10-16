@@ -145,19 +145,38 @@ build DEB or RPM packages, run CPack in the build directory:
 
    cpack -G DEB    # or RPM
 
-=================== ===================== ==============================
-DEB package         RPM package           Contents
-=================== ===================== ==============================
-``hipobject``       ``hipobject``         Shared library, examples,
-                                          license
-``hipobject-dev``   ``hipobject-devel``   Header, CMake package,
-                                          ``libhipobj.so`` link
-=================== ===================== ==============================
+========================= ========================= ==========================
+DEB package               RPM package               Contents
+========================= ========================= ==========================
+``hipobject<mm>``         ``hipobject<mm>``         Shared library, examples,
+                                                    license
+``hipobject-dev<mm>``     ``hipobject-devel<mm>``   Header, CMake package,
+                                                    ``libhipobj.so`` link
+========================= ========================= ==========================
 
 A static build (``BUILD_SHARED_LIBS=OFF``) creates a single
-``hipobject-static-dev`` DEB or ``hipobject-static-devel`` RPM
-package, without the examples. The package version includes
-the ROCm version. Test programs aren't packaged.
+``hipobject-static-dev<mm>`` DEB or
+``hipobject-static-devel<mm>`` RPM package, without the
+examples. Test programs aren't packaged.
+
+``<mm>`` is the major and minor version of the ROCm that
+hipObject is built for, as in ROCm's own package names, so the
+runtime package for ROCm 10.1 is ``hipobject10.1``. Builds for
+different ROCm versions are different packages, which install
+side by side when each installs into its ROCm version's own
+directory, ``/opt/rocm/core-<mm>``, as they do when
+``ROCM_VERSION`` is set (see `CMake Options`_) and as the
+nightly packages do.
+
+The package version is hipObject's version followed by the ROCm
+version with each ``.`` replaced by ``0``, such as
+``0.1.0.100100`` for ROCm 10.1.0, and a release. The release
+comes from the ``CPACK_DEBIAN_PACKAGE_RELEASE`` or
+``CPACK_RPM_PACKAGE_RELEASE`` environment variable when
+hipObject is configured, and is ``local`` if it isn't set. An
+RPM package's release also ends with the distribution's tag,
+such as ``.el9``, when the build machine's ``rpm`` defines one
+(``%{?dist}``).
 
 CPack builds DEB packages with ``dpkg-deb``, and RPM packages
 with ``rpmbuild``. rocm-cmake only sets up the generators whose
@@ -166,9 +185,9 @@ tools it finds when hipObject is configured.
 Package Dependencies
 ^^^^^^^^^^^^^^^^^^^^
 
-The packages declare these dependencies, where ``<mm>`` is the
-ROCm major and minor version, such as ``10.1``. RPM calls
-Depends "Requires".
+The packages declare these dependencies. RPM calls Depends
+"Requires". Replaces is Conflicts and Replaces in a DEB
+package, and Obsoletes in an RPM package.
 
 .. list-table::
    :header-rows: 1
@@ -178,23 +197,32 @@ Depends "Requires".
      - Relationship
      - DEB
      - RPM
-   * - ``hipobject``
+   * - ``hipobject<mm>``
      - Depends
      - ``amdrocm-runtime-dev<mm>``, the examples' libraries
      - ``amdrocm-runtime-devel<mm>``, the examples' libraries
    * -
      - Recommends
-     - ``libibverbs1``, ``hipobject-dev``
+     - ``libibverbs1``, ``hipobject-dev<mm>``
      - ``libibverbs.so.1()(64bit)`` (CMake 4.1 or later)
    * -
      - Suggests
      -
-     - ``hipobject-devel`` (CMake 4.0 or later)
-   * - ``hipobject-dev`` or ``hipobject-devel``
+     - ``hipobject-devel<mm>`` (CMake 4.0 or later)
+   * -
+     - Replaces
+     - ``hipobject``
+     - ``hipobject``
+   * - ``hipobject-dev<mm>`` or ``hipobject-devel<mm>``
      - Depends
-     - ``hipobject``
-     - ``hipobject``
-   * - ``hipobject-static-dev`` or ``hipobject-static-devel``
+     - ``hipobject<mm> (= <version>-<release>)``
+     - ``hipobject<mm> = <version>-<release>``
+   * -
+     - Replaces
+     - ``hipobject-dev``
+     - ``hipobject-devel``
+   * - ``hipobject-static-dev<mm>`` or
+       ``hipobject-static-devel<mm>``
      - Depends
      - ``amdrocm-runtime-dev<mm>``
      - ``amdrocm-runtime-devel<mm>``
@@ -202,6 +230,16 @@ Depends "Requires".
      - Recommends
      - ``libibverbs1``
      - ``libibverbs.so.1()(64bit)`` (CMake 4.1 or later)
+   * -
+     - Replaces
+     - ``hipobject-static-dev``
+     - ``hipobject-static-devel``
+
+The development package depends on the runtime package with its
+own version and release, so the header and the library always
+come from the same build. Each package replaces the package it
+was named before it had the ROCm version, which only nightly
+packages had, so installing it removes that package.
 
 The examples' libraries are libcurl (``libcurl4t64``, or
 ``libcurl.so.4()(64bit)``), when CMake finds it, and with
@@ -246,10 +284,12 @@ that it changes, and published as the `nightly prerelease
 <https://github.com/ROCm/hipObject/releases/tag/nightly>`_,
 which each new build replaces. There are packages for Ubuntu
 24.04 and 26.04, built for ROCm 10.1.0 and 7.14.1. They
-install into ``/opt/rocm/core-<major>.<minor>``, and their
-release is ``0.<commit time>.g<commit>~<Ubuntu release>``, so
-a newer nightly upgrades an older one. The nightly packages
-are for testing, and aren't a supported release.
+install into ``/opt/rocm/core-<major>.<minor>``, so the
+packages for both ROCm versions can be installed together, and
+their release is
+``0.<commit time>.g<commit>~<Ubuntu release>``, so a newer
+nightly upgrades an older one. The nightly packages are for
+testing, and aren't a supported release.
 
 MinIO C++ RDMA Bridge
 ---------------------
