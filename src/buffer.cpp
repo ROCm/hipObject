@@ -141,7 +141,7 @@ isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
 void
 HostBufDeleter::operator()(void *hostBuf) const noexcept
 {
-    (void)runtime->hostFree(hostBuf);
+    (void)runtime_->hostFree(hostBuf);
 }
 
 std::optional<BufferMap::RegisterResult>

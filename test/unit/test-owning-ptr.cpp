@@ -123,13 +123,14 @@ TEST(OwningPtrTest, MovingMovesTheDeleter)
             target = std::move(source);
         }
         EXPECT_EQ(first.log.destroyQp, 1);
-        EXPECT_EQ(target.get_deleter().verbs, &secondVerbs);
         EXPECT_EQ(second.log.destroyQp, 0);
     }
+    EXPECT_EQ(first.log.destroyQp, 1);
     EXPECT_EQ(second.log.destroyQp, 1);
 }
 
-/* own() of a null pointer is empty, and releases nothing */
+/* own() of a null pointer is empty, and releases nothing, but its deleter
+ * still releases through the Verbs it was given */
 TEST(OwningPtrTest, OwningNullReleasesNothing)
 {
     hipObjTest::FakeDevice      device{};
@@ -137,9 +138,10 @@ TEST(OwningPtrTest, OwningNullReleasesNothing)
     {
         const auto qp = hipObj::own<hipObj::IbvQpPtr>(verbs, nullptr);
         EXPECT_FALSE(qp);
-        EXPECT_EQ(qp.get_deleter().verbs, &verbs);
+        qp.get_deleter()(verbs.create_qp(nullptr, nullptr));
+        EXPECT_EQ(device.log.destroyQp, 1);
     }
-    EXPECT_EQ(device.log.destroyQp, 0);
+    EXPECT_EQ(device.log.destroyQp, 1);
 }
 
 } // namespace

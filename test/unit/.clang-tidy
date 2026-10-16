@@ -1,0 +1,15 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+# clang-tidy configuration for the unit tests
+#
+# Google Test makes each TEST_F() body a subclass of its fixture, so a
+# fixture shares its state with its tests through protected members, as
+# Google Test's documentation does. Making them private would only add an
+# accessor for each. Otherwise this uses the top-level configuration.
+---
+InheritParentConfig: true
+Checks:
+  - -misc-non-private-member-variables-in-classes
+  - -cppcoreguidelines-non-private-member-variables-in-classes

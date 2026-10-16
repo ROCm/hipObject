@@ -44,12 +44,15 @@ IbvMrPtr registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, str
 /* Frees a host staging buffer through the runtime whose hostMalloc()
  * allocated it, which has to outlive the pointer. Create the pointer with
  * own() (ibv-ptr.h). */
-struct HostBufDeleter {
-    explicit HostBufDeleter(const HipRuntime &deleterRuntime) noexcept : runtime(&deleterRuntime)
+class HostBufDeleter {
+public:
+    explicit HostBufDeleter(const HipRuntime &deleterRuntime) noexcept : runtime_(&deleterRuntime)
     {
     }
-    const HipRuntime *runtime;
-    void              operator()(void *hostBuf) const noexcept;
+    void operator()(void *hostBuf) const noexcept;
+
+private:
+    const HipRuntime *runtime_;
 };
 
 using HostBufPtr = std::unique_ptr<void, HostBufDeleter>;

@@ -518,8 +518,10 @@ configuration files.
   and build; it must report nothing. The checks are in
   [`.clang-tidy`](.clang-tidy), which needs clang-tidy 19 or later, and
   [`examples/.clang-tidy`](examples/.clang-tidy) turns off the ones that
-  would suggest constructs newer than C++11 there. ROCm's clang-tidy lacks
-  the `clang-analyzer-*` checks, so prefer an upstream one. CI:
+  would suggest constructs newer than C++11 there, or make the examples
+  harder to follow. [`test/unit/.clang-tidy`](test/unit/.clang-tidy) turns
+  off the one that Google Test's fixtures can't satisfy. ROCm's clang-tidy
+  lacks the `clang-analyzer-*` checks, so prefer an upstream one. CI:
   [hipobject-clang-tidy.yml](.github/workflows/hipobject-clang-tidy.yml),
   with upstream clang-tidy 23.
 - **include-what-you-use (IWYU)**: configure with `-DHIPOBJ_USE_IWYU=ON` and

@@ -89,8 +89,6 @@ Checks:
   - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(21)
   - -cppcoreguidelines-pro-type-vararg  # TODO(53): fprintf(), snprintf(), fcntl()
   - -google-runtime-int  # TODO(11): long and long long in the examples and MinIO bridge
-  - -misc-non-private-member-variables-in-classes  # TODO(56)
-  - -cppcoreguidelines-non-private-member-variables-in-classes  # TODO: the same check
   - -readability-function-cognitive-complexity  # TODO(14)
   - -readability-magic-numbers  # TODO(289)
   - -cppcoreguidelines-avoid-magic-numbers  # TODO: the same check
@@ -116,6 +114,11 @@ CheckOptions:
   # A lock guard is only declared for what its constructor and destructor
   # do, so const would say nothing about it
   misc-const-correctness.AllowedTypes: '::std::scoped_lock'
+  # A class whose data members are all public is a struct, a set of values
+  # with no invariant to protect, even with a constructor, so only mixed
+  # and protected data are reported, as the cppcoreguidelines alias of
+  # this check does by default
+  misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: true
   # The default, Remove, mistakes the comma after an empty {} argument for
   # a trailing comma, as in {a, b, {}, c}, and its fix doesn't compile.
   # Multi-line lists still need a trailing comma, which also keeps
