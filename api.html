@@ -462,11 +462,6 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv422hipObjGetVersionStringv">
 <span id="_CPPv322hipObjGetVersionStringv"></span><span id="_CPPv222hipObjGetVersionStringv"></span><span id="hipObjGetVersionString__void"></span><span class="target" id="group__core_1ga9e1534d88db59149240b934840c70391"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetVersionString</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv422hipObjGetVersionStringv" title="Link to this definition">#</a><br /></dt>
 <dd><p>Return the library version as a string. </p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Concurrent: can be called from any thread at any time, including from a callback, as long as calls that run at the same time don’t share a buffer that one of them writes to or a token that one of them releases. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 </dd></dl>
 
 <dl class="cpp function">
@@ -474,11 +469,6 @@ rendered via Breathe.</p>
 <span id="_CPPv310hipObjInitP14hipObjConfig_t"></span><span id="_CPPv210hipObjInitP14hipObjConfig_t"></span><span id="hipObjInit__hipObjConfig_tP"></span><span class="target" id="group__core_1ga2b4e5bd6f1170f792720293c41864619"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjInit</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjConfig_t" title="hipObjConfig_t"><span class="n"><span class="pre">hipObjConfig_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">config</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv410hipObjInitP14hipObjConfig_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Initialize the hipObject library. </p>
 <p>Opens the RDMA device, selects the closest NIC to the GPU, and prepares internal state. Must be called before any other hipObj* function.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>config</strong> – Pointer to configuration struct </p>
@@ -494,12 +484,8 @@ rendered via Breathe.</p>
 <span id="_CPPv314hipObjShutdownv"></span><span id="_CPPv214hipObjShutdownv"></span><span id="hipObjShutdown__void"></span><span class="target" id="group__core_1ga395aabc844f28115e01f5b5e41e644f7"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjShutdown</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv414hipObjShutdownv" title="Link to this definition">#</a><br /></dt>
 <dd><p>Shut down the hipObject library. </p>
 <p>Releases all RDMA resources. All registered buffers are implicitly deregistered.</p>
+<p>It doesn’t wait for calls in progress on other threads, or for the transfer whose callback calls it. They finish normally, and the resources they use are released when the last of them returns (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
 <p>A staging buffer that a copy that timed out may still use (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>) isn’t freed.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
@@ -599,7 +585,7 @@ rendered via Breathe.</p>
 <em>#include &lt;hipobj.h&gt;</em></div>
 <p>Callback struct for S3 SDK integration. </p>
 <p>The application provides these callbacks so that hipObject can inject RDMA tokens into S3 requests and receive RDMA reply tags from the server. This mirrors cuObject’s CUObjOps_t pattern.</p>
-<p>The callbacks run while hipObject holds its API lock, so they can’t call serialized functions; see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
+<p>The callbacks can call any hipObject function; see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
 <div class="breathe-sectiondef docutils container">
 <p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
 <dl class="cpp var">
@@ -651,17 +637,12 @@ rendered via Breathe.</p>
 <dl>
 <dt class="sig sig-object cpp">
 <span class="target" id="group__threads"></span></dt>
-<dd><p>hipObject can be called from any number of threads. Each function’s documentation says which of these it is:</p>
-<p><ul class="simple">
-<li><p><strong>Serialized</strong> functions use the library’s state: whether it’s initialized, the registered buffers, and the RDMA connection. They run one at a time across the whole process. Each one takes a library-wide lock and holds it until it returns, so a serialized call waits for the one in progress, on any thread, to finish.</p></li>
-<li><p><strong>Concurrent</strong> functions don’t use the library’s state. They can be called from any thread at any time, including while a serialized function runs and from a callback. As with any C function, calls that run at the same time mustn’t share a buffer that one of them writes to, or a token that one of them releases.</p></li>
-</ul>
-</p>
-<p>Since serialized calls run one at a time, only one transfer is in progress at a time, and calling hipObject from more threads doesn’t move data any faster. A call can also wait a long time for another thread’s transfer, which holds the lock for as long as the transfer takes: while the application’s callbacks send the S3 request and wait for the response, while hipObject copies the buffer through host memory (for a buffer that the NIC can’t reach directly), and while it waits for the RDMA transfer to complete.</p>
-<p><a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> waits for the serialized call in progress to finish. Calls made after it, on any thread, that need an initialized library fail with hipObjNotInitialized until <a class="reference internal" href="#group__core_1ga2b4e5bd6f1170f792720293c41864619"><span class="std std-ref">hipObjInit()</span></a> is called again.</p>
-<p><strong>Callbacks.</strong> <a class="reference internal" href="#group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"><span class="std std-ref">hipObjGet()</span></a> and <a class="reference internal" href="#group__io_1gaf3a2695bab90023d0d40967e48489ff5"><span class="std std-ref">hipObjPut()</span></a> run the <a class="reference internal" href="#structhipObjOps__t"><span class="std std-ref">hipObjOps_t</span></a> callbacks with the lock held. A callback can call concurrent functions. If it calls a serialized function, that function returns hipObjInvalidValue instead of waiting for a lock its own thread holds. A callback also mustn’t wait for another thread that’s calling a serialized function, since that thread is waiting for the lock: neither can continue, and hipObject can’t detect it.</p>
-<p><strong>Transfers made of several calls.</strong> The lock covers one call, not a sequence of calls. A transfer that the application drives itself, with <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a>, its own S3 request, and <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>, is several calls, and other threads’ calls can run between them. hipObject uses one RDMA connection for every transfer, so the application must make sure that such a transfer doesn’t overlap any other transfer, on any thread.</p>
-<p>Serializing the library is how hipObject works now, not a promise: a later release may run transfers concurrently. </p>
+<dd><p>Every hipObject function can be called from any thread at any time, including from the <a class="reference internal" href="#structhipObjOps__t"><span class="std std-ref">hipObjOps_t</span></a> callbacks, and calls on different threads run at the same time. A call waits for another only briefly, while the other changes something that both use, such as the list of registered buffers, with two exceptions: a transfer can wait for an RDMA connection (see below), and calls to <a class="reference internal" href="#group__core_1ga2b4e5bd6f1170f792720293c41864619"><span class="std std-ref">hipObjInit()</span></a> and <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> run one at a time.</p>
+<p><strong>Transfers.</strong> <a class="reference internal" href="#group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"><span class="std std-ref">hipObjGet()</span></a> and <a class="reference internal" href="#group__io_1gaf3a2695bab90023d0d40967e48489ff5"><span class="std std-ref">hipObjPut()</span></a> calls run at the same time as each other, and as every other call. Each transfer uses an RDMA connection of its own, from a set that <a class="reference internal" href="#group__core_1ga2b4e5bd6f1170f792720293c41864619"><span class="std std-ref">hipObjInit()</span></a> creates. The HIPOBJ_MAX_TRANSFERS environment variable sets how many it creates, and so how many transfers can be in progress at once: a whole number from 1 to 1024. A value that isn’t one is ignored, leaving the default of 16. A transfer that starts while every connection is in use waits for one to be free.</p>
+<p><strong>Callbacks.</strong> A callback can call any function, including <a class="reference internal" href="#group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"><span class="std std-ref">hipObjGet()</span></a> and <a class="reference internal" href="#group__io_1gaf3a2695bab90023d0d40967e48489ff5"><span class="std std-ref">hipObjPut()</span></a>. A transfer that a callback starts doesn’t wait for a connection, since the one it would wait for could be the one the callback’s own transfer holds: if none is free, it returns hipObjBusy. A callback that waits for another thread’s transfer can wait forever for the same reason, and hipObject can’t detect it.</p>
+<p><strong>Buffers.</strong> <a class="reference internal" href="#group__buffer_1ga2dc6e401b67d9f0dcef8725556dcea83"><span class="std std-ref">hipObjBufDeregister()</span></a> returns hipObjBusy, and leaves the buffer registered, while another call is using the buffer: a transfer, including the one whose callback deregisters it, <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>, or <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a>. Calls on other buffers don’t wait for each other. As with any C function, calls that run at the same time mustn’t share memory that one of them writes to: overlapping parts of a registered buffer, or a token that one of them releases. For a buffer that’s staged through host memory (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>), <a class="reference internal" href="#group__io_1gaf3a2695bab90023d0d40967e48489ff5"><span class="std std-ref">hipObjPut()</span></a> and HIPOBJ_SYNC_TO_HOST write the staging buffer, so they count as writing the part of the buffer they use.</p>
+<p><strong>Shutdown.</strong> <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> doesn’t wait for the calls in progress. They finish normally, and hipObject releases its RDMA resources and buffer registrations when the last of them returns. A transfer that’s waiting for a connection returns hipObjNotInitialized. Calls that start after <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a>, on any thread, and need an initialized library fail with hipObjNotInitialized until <a class="reference internal" href="#group__core_1ga2b4e5bd6f1170f792720293c41864619"><span class="std std-ref">hipObjInit()</span></a> is called again, which can be before the earlier calls have finished.</p>
+<p><strong>Transfers made of several calls.</strong> A transfer that the application drives itself, with <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a>, its own S3 request, and <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>, is several calls, and hipObject doesn’t know that the transfer is in progress between them. Other threads’ calls can run between them, and nothing keeps those from deregistering the buffer or shutting hipObject down: the application must keep the buffer registered, and hipObject initialized, until the transfer ends. Every token from <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a> names the same RDMA connection, so the application must also make sure that such transfers don’t overlap each other. They can overlap <a class="reference internal" href="#group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"><span class="std std-ref">hipObjGet()</span></a> and <a class="reference internal" href="#group__io_1gaf3a2695bab90023d0d40967e48489ff5"><span class="std std-ref">hipObjPut()</span></a> transfers, which use connections of their own. </p>
 </dd></dl>
 
 </section>
@@ -735,7 +716,7 @@ rendered via Breathe.</p>
 <dl class="cpp enumerator">
 <dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t10hipObjBusyE">
 <span id="_CPPv3N15hipObjOpError_t10hipObjBusyE"></span><span id="_CPPv2N15hipObjOpError_t10hipObjBusyE"></span><span class="target" id="group__error_1gga1ee9764dda2b20100b8e5463e7246e61a7d9af3b412560965465404414bdc7f8e"></span><span class="k"><span class="pre">enumerator</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBusy</span></span></span><a class="headerlink" href="#_CPPv4N15hipObjOpError_t10hipObjBusyE" title="Link to this definition">#</a><br /></dt>
-<dd><p>The buffer is in use: a staging copy of it that timed out is still running (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>). Try again later. hipObject added this code; cuObject doesn’t have it. </p>
+<dd><p>The buffer or connection is in use. A staging copy of the buffer that timed out is still running (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>); another call is using a buffer that <a class="reference internal" href="#group__buffer_1ga2dc6e401b67d9f0dcef8725556dcea83"><span class="std std-ref">hipObjBufDeregister()</span></a> was given; or a transfer started from a callback found every RDMA connection in use (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>). Try again later. hipObject added this code; cuObject doesn’t have it. </p>
 </dd></dl>
 
 </dd></dl>
@@ -744,11 +725,6 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv420hipObjGetErrorString15hipObjOpError_t">
 <span id="_CPPv320hipObjGetErrorString15hipObjOpError_t"></span><span id="_CPPv220hipObjGetErrorString15hipObjOpError_t"></span><span id="hipObjGetErrorString__hipObjOpError_t"></span><span class="target" id="group__error_1ga3d847cc075755e1e3cc4ca1a21e24f52"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetErrorString</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv415hipObjOpError_t" title="hipObjOpError_t"><span class="n"><span class="pre">hipObjOpError_t</span></span></a><span class="w"> </span><span class="n sig-param"><span class="pre">err</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv420hipObjGetErrorString15hipObjOpError_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Return a human-readable string for an operation error code. </p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Concurrent: can be called from any thread at any time, including from a callback, as long as calls that run at the same time don’t share a buffer that one of them writes to or a token that one of them releases. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 </dd></dl>
 
 <dl class="cpp macro">
@@ -772,12 +748,7 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv419hipObjBufDeregisterPv">
 <span id="_CPPv319hipObjBufDeregisterPv"></span><span id="_CPPv219hipObjBufDeregisterPv"></span><span id="hipObjBufDeregister__voidP"></span><span class="target" id="group__buffer_1ga2dc6e401b67d9f0dcef8725556dcea83"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufDeregister</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv419hipObjBufDeregisterPv" title="Link to this definition">#</a><br /></dt>
 <dd><p>Deregister a previously registered buffer. </p>
-<p>While a staging copy of the buffer that timed out is still running (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>), this returns hipObjBusy and leaves the buffer registered. Call it again once the copy has finished, and don’t free the buffer until then.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
+<p>While another call is using the buffer (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>), or a staging copy of the buffer that timed out is still running (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>), this returns hipObjBusy and leaves the buffer registered. Call it again once the call or the copy has finished, and don’t free the buffer until then.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>devPtr</strong> – Pointer previously passed to hipObjBufRegister or hipObjBufRegisterHost </p>
@@ -793,11 +764,6 @@ rendered via Breathe.</p>
 <span id="_CPPv317hipObjBufRegisterPv6size_t"></span><span id="_CPPv217hipObjBufRegisterPv6size_t"></span><span id="hipObjBufRegister__voidP.s"></span><span class="target" id="group__buffer_1ga6e5f4ed7bb337f3095fb232cfa9ff4cb"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufRegister</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv417hipObjBufRegisterPv6size_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Register a GPU buffer for RDMA transfers. </p>
 <p>Exports the GPU buffer via dmabuf and registers it with the RDMA NIC. Maximum 4 GiB per registration. The buffer must lie within a single HIP allocation: returns hipObjInvalidValue if it runs past the end of the allocation that holds devPtr.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -816,11 +782,6 @@ rendered via Breathe.</p>
 <span id="_CPPv321hipObjBufRegisterHostPv6size_t"></span><span id="_CPPv221hipObjBufRegisterHostPv6size_t"></span><span id="hipObjBufRegisterHost__voidP.s"></span><span class="target" id="group__buffer_1ga883521992a80d57ff932c466becfe172"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjBufRegisterHost</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">hostPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv421hipObjBufRegisterHostPv6size_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Register a host buffer for RDMA transfers. </p>
 <p>Registers user-owned CPU RAM, such as a buffer allocated with malloc() or hipHostMalloc(), with the RDMA NIC. hipObject does not allocate or free the host buffer. Maximum 4 GiB per registration.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -843,12 +804,7 @@ rendered via Breathe.</p>
 <dd><p>Stage a registered buffer between device and host memory. </p>
 <p>When a device pointer cannot be registered with the NIC directly (no dmabuf support, or a fabric with no peer-to-peer path to the GPU), <a class="reference internal" href="#group__buffer_1ga6e5f4ed7bb337f3095fb232cfa9ff4cb"><span class="std std-ref">hipObjBufRegister()</span></a> registers a host staging buffer instead and the peer’s RDMA reads and writes land there. Callers driving a transfer through <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a> must therefore call this with HIPOBJ_SYNC_TO_HOST before a PUT and HIPOBJ_SYNC_TO_DEVICE after a GET. It is a no-op, reporting success, for a directly registered buffer; <a class="reference internal" href="#group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"><span class="std std-ref">hipObjGet()</span></a> and <a class="reference internal" href="#group__io_1gaf3a2695bab90023d0d40967e48489ff5"><span class="std std-ref">hipObjPut()</span></a> do it themselves.</p>
 <p>When this returns hipObjSuccess, the copy has finished. If the copy doesn’t finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS environment variable), this returns hipObjInternalError and leaves the copy running. It can still read or write the buffer after this returns. Until it finishes, hipObject keeps the staging buffer it uses, and the buffer can’t be used: <a class="reference internal" href="#group__io_1gad3be882f3535e1ae81ee7b1695f5cdec"><span class="std std-ref">hipObjGet()</span></a>, <a class="reference internal" href="#group__io_1gaf3a2695bab90023d0d40967e48489ff5"><span class="std std-ref">hipObjPut()</span></a>, <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>, and <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a> return hipObjBusy for it, and <a class="reference internal" href="#group__buffer_1ga2dc6e401b67d9f0dcef8725556dcea83"><span class="std std-ref">hipObjBufDeregister()</span></a> returns hipObjBusy and leaves it registered. Once the copy has finished, the buffer can be used and deregistered again. If it never finishes, the staging buffer is never freed.</p>
-<p>hipObject doesn’t wait for GPU work that uses the buffer, on any stream. Before HIPOBJ_SYNC_TO_HOST, make sure that the GPU work that writes the buffer has finished, for example with hipStreamSynchronize(). Before HIPOBJ_SYNC_TO_DEVICE, make sure that no GPU work that reads or writes the buffer is still running.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
+<p>hipObject doesn’t wait for GPU work that uses the buffer, on any stream. Before HIPOBJ_SYNC_TO_HOST, make sure that the GPU work that writes the buffer has finished, for example with hipStreamSynchronize(). Before HIPOBJ_SYNC_TO_DEVICE, make sure that no GPU work that reads or writes the buffer is still running. </p>
 </dd></dl>
 
 <dl class="cpp function">
@@ -857,12 +813,8 @@ rendered via Breathe.</p>
 <dd><p>GET: fetch an S3 object into a registered buffer via RDMA. </p>
 <p>The server performs an RDMA WRITE to push data into the registered buffer, starting <code class="docutils literal notranslate"><span class="pre">offset</span></code> bytes into it. The bytes from offset to offset + size must lie inside the buffer. hipObject doesn’t send an object offset; the request the callbacks make selects the part of the object to fetch.</p>
 <p>Make sure that no GPU work that reads or writes the buffer is still running when you call this. When it returns hipObjSuccess, the data is in the buffer.</p>
+<p>If every RDMA connection is in use by other transfers, this waits for one to be free, or, if it’s called from a callback, returns hipObjBusy (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
 <p>For a buffer that’s staged through host memory (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>), if the copy into the buffer doesn’t finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS environment variable), this returns hipObjInternalError and leaves the copy running. It can still write the buffer after this returns, and until it finishes, the buffer can’t be used or deregistered (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>).</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -885,24 +837,14 @@ rendered via Breathe.</p>
 <span id="_CPPv318hipObjGetRdmaTokenPKv6size_tiPPc"></span><span id="_CPPv218hipObjGetRdmaTokenPKv6size_tiPPc"></span><span id="hipObjGetRdmaToken__voidCP.s.i.cPP"></span><span class="target" id="group__io_1ga4b1095efab54d620753fc18d475531f4"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetRdmaToken</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">devPtr</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">size</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">op</span></span>, <span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">outToken</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv418hipObjGetRdmaTokenPKv6size_tiPPc" title="Link to this definition">#</a><br /></dt>
 <dd><p>Mint a hex-encoded RC RDMA token for a registered buffer. </p>
 <p>The caller must release <code class="docutils literal notranslate"><span class="pre">*outToken</span></code> with <a class="reference internal" href="#group__io_1gaae230e1f71aa7243d882deff8ff4efcf"><span class="std std-ref">hipObjPutRdmaToken()</span></a>. <code class="docutils literal notranslate"><span class="pre">op</span></code> is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved).</p>
-<p>Returns hipObjBusy while a staging copy of the buffer that timed out is still running (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>).</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
+<p>Returns hipObjBusy while a staging copy of the buffer that timed out is still running (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>). </p>
 </dd></dl>
 
 <dl class="cpp function">
 <dt class="sig sig-object cpp" id="_CPPv420hipObjParseRdmaReplyPKc6size_tPi">
 <span id="_CPPv320hipObjParseRdmaReplyPKc6size_tPi"></span><span id="_CPPv220hipObjParseRdmaReplyPKc6size_tPi"></span><span id="hipObjParseRdmaReply__cCP.s.iP"></span><span class="target" id="group__io_1ga3878729f7564208a6160f667aea8a500"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjParseRdmaReply</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">reply</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">replyLen</span></span>, <span class="kt"><span class="pre">int</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">httpCode</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv420hipObjParseRdmaReplyPKc6size_tPi" title="Link to this definition">#</a><br /></dt>
 <dd><p>Parse an x-amz-rdma-reply header value. </p>
-<p>On success writes the HTTP-style reply code (200, 204, 206, 501) to <code class="docutils literal notranslate"><span class="pre">httpCode</span></code>.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Concurrent: can be called from any thread at any time, including from a callback, as long as calls that run at the same time don’t share a buffer that one of them writes to or a token that one of them releases. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
+<p>On success writes the HTTP-style reply code (200, 204, 206, 501) to <code class="docutils literal notranslate"><span class="pre">httpCode</span></code>. </p>
 </dd></dl>
 
 <dl class="cpp function">
@@ -911,12 +853,8 @@ rendered via Breathe.</p>
 <dd><p>PUT: store a registered buffer to an S3 object via RDMA. </p>
 <p>The server performs an RDMA READ to pull data from the registered buffer, starting <code class="docutils literal notranslate"><span class="pre">offset</span></code> bytes into it. The bytes from offset to offset + size must lie inside the buffer. hipObject doesn’t send an object offset; the request the callbacks make selects where the data goes in the object.</p>
 <p>hipObject doesn’t wait for GPU work that writes the buffer, on any stream. Make sure that it has finished, for example with hipStreamSynchronize(), before you call this.</p>
+<p>If every RDMA connection is in use by other transfers, this waits for one to be free, or, if it’s called from a callback, returns hipObjBusy (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
 <p>For a buffer that’s staged through host memory (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>), if the copy out of the buffer doesn’t finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS environment variable), this returns hipObjInternalError and leaves the copy running. It can still read the buffer after this returns, and until it finishes, the buffer can’t be used or deregistered (see <a class="reference internal" href="#group__io_1ga9881be94f12504fb3e0ff980ac73653c"><span class="std std-ref">hipObjBufSync()</span></a>).</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Serialized: runs one at a time with the other serialized functions, and returns hipObjInvalidValue if called from a callback. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
@@ -938,23 +876,13 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv418hipObjPutRdmaTokenPc">
 <span id="_CPPv318hipObjPutRdmaTokenPc"></span><span id="_CPPv218hipObjPutRdmaTokenPc"></span><span id="hipObjPutRdmaToken__cP"></span><span class="target" id="group__io_1gaae230e1f71aa7243d882deff8ff4efcf"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjPutRdmaToken</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">token</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv418hipObjPutRdmaTokenPc" title="Link to this definition">#</a><br /></dt>
 <dd><p>Release a token allocated by <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a></p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Concurrent: can be called from any thread at any time, including from a callback, as long as calls that run at the same time don’t share a buffer that one of them writes to or a token that one of them releases. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
 </dd></dl>
 
 <dl class="cpp function">
 <dt class="sig sig-object cpp" id="_CPPv420hipObjTokenClientNicPKcPc6size_t">
 <span id="_CPPv320hipObjTokenClientNicPKcPc6size_t"></span><span id="_CPPv220hipObjTokenClientNicPKcPc6size_t"></span><span id="hipObjTokenClientNic__cCP.cP.s"></span><span class="target" id="group__io_1ga85ce7d367ff2f1fe671d1e41c37fb8f0"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjTokenClientNic</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">token</span></span>, <span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">nicIp</span></span>, <span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">nicIpLen</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv420hipObjTokenClientNicPKcPc6size_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Extract client NIC IPv4 from a minted RDMA token. </p>
-<p>Writes a dotted-quad address into <code class="docutils literal notranslate"><span class="pre">nicIp</span></code> when the token GID carries an IPv4-mapped RoCEv2 suffix. Returns hipObjSuccess with an empty string when no address is encoded.</p>
-<p><dl class="simple">
-<dt><strong>Thread safety</strong></dt><dd><p>Concurrent: can be called from any thread at any time, including from a callback, as long as calls that run at the same time don’t share a buffer that one of them writes to or a token that one of them releases. See <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
-</dd>
-</dl>
-</p>
+<p>Writes a dotted-quad address into <code class="docutils literal notranslate"><span class="pre">nicIp</span></code> when the token GID carries an IPv4-mapped RoCEv2 suffix. Returns hipObjSuccess with an empty string when no address is encoded. </p>
 </dd></dl>
 
 <dl class="cpp macro">
