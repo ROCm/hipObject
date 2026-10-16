@@ -188,6 +188,19 @@ with it:
 - **Take locks in this order**, and only those a step needs:
   `Current::initMutex`, then `Current::mutex`, `BufferMap`'s, and
   `ConnectionPool`'s.
+- **Declare what each lock guards, for Clang's thread safety analysis.**
+  The library's locks are the wrappers in
+  [`src/common/thread-safety.h`](src/common/thread-safety.h) (`Mutex`,
+  `SharedMutex`, `ScopedLock`, `SharedLock`, and `ConditionVariable`), not
+  the standard library's, which Clang can't check. Mark everything a lock
+  guards with `HIPOBJ_GUARDED_BY()`, a function that needs a lock held with
+  `HIPOBJ_REQUIRES()` or `HIPOBJ_REQUIRES_SHARED()`, and one that takes its
+  class's lock with `HIPOBJ_REQUIRES(!mutex_)`. Clang's `-Wthread-safety`
+  warnings then report a guarded variable used without its lock, a lock
+  taken twice, and `Current`'s two locks taken out of order. GCC doesn't
+  check any of it, so build with Clang (see [C and C++](#c-and-c)). The
+  header lists what the analysis misses, such as constructors and
+  destructors, so it doesn't replace ThreadSanitizer.
 - **Don't wait for something the calling thread may hold.** A callback runs
   on the thread of the transfer that called it, so a transfer started from a
   callback can't wait for a connection: `ConnectionPool::acquire()` returns
@@ -221,7 +234,9 @@ with it:
     `std::array`, `std::vector`, and `std::span` rather than C arrays and
     pointer-and-length pairs; `std::optional` rather than sentinel values;
     `enum class`; `constexpr` rather than macros; `std::mutex` and
-    `std::scoped_lock` rather than pthreads; and C++ casts rather than C casts.
+    `std::scoped_lock` rather than pthreads (in the library, their annotated
+    wrappers; see [Thread safety](#thread-safety)); and C++ casts rather than
+    C casts.
   - Include the C++ versions of C standard library headers (`<cstdlib>`,
     `<cstring>`, `<cstdint>`, not `<stdlib.h>`, `<string.h>`, `<stdint.h>`),
     and use the `std::`-qualified names they declare. Only headers that C code

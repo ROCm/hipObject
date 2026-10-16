@@ -9,9 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <shared_mutex>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -23,6 +21,7 @@
 #include "hipobj-private.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
+#include "thread-safety.h"
 
 namespace hipObj {
 
@@ -160,7 +159,7 @@ BufferMap::refusal(uintptr_t key) const
 std::optional<BufferMap::RegisterResult>
 BufferMap::precheck(uintptr_t key) const
 {
-    const std::shared_lock<std::shared_mutex> lock(mutex_);
+    const SharedLock lock(mutex_);
     return refusal(key);
 }
 
@@ -169,7 +168,7 @@ BufferMap::precheck(uintptr_t key) const
 BufferMap::RegisterResult
 BufferMap::insert(uintptr_t key, std::shared_ptr<const BufEntry> entry)
 {
-    const std::scoped_lock<std::shared_mutex> lock(mutex_);
+    const ScopedLock<SharedMutex> lock(mutex_);
     if (const auto refused = refusal(key)) {
         return *refused;
     }
@@ -261,8 +260,8 @@ BufferMap::deregisterBuffer(void *devPtr)
     const auto                      key = pointerToAddress(devPtr);
     std::shared_ptr<const BufEntry> entry;
     {
-        const std::scoped_lock<std::shared_mutex> lock(mutex_);
-        const auto                                it = entries_.find(key);
+        const ScopedLock<SharedMutex> lock(mutex_);
+        const auto                    it = entries_.find(key);
         if (it == entries_.end()) {
             return DeregisterResult::NotRegistered;
         }
@@ -286,16 +285,16 @@ BufferMap::deregisterBuffer(void *devPtr)
 std::shared_ptr<const BufferMap::BufEntry>
 BufferMap::find(const void *devPtr) const
 {
-    const auto                                key = pointerToAddress(devPtr);
-    const std::shared_lock<std::shared_mutex> lock(mutex_);
-    const auto                                it = entries_.find(key);
+    const auto       key = pointerToAddress(devPtr);
+    const SharedLock lock(mutex_);
+    const auto       it = entries_.find(key);
     return it == entries_.end() ? nullptr : it->second;
 }
 
 size_t
 BufferMap::size() const
 {
-    const std::shared_lock<std::shared_mutex> lock(mutex_);
+    const SharedLock lock(mutex_);
     return entries_.size();
 }
 } // namespace hipObj

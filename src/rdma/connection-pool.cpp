@@ -8,11 +8,11 @@
 #include <cstddef>
 #include <cstdio>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <utility>
 #include <variant>
 
+#include "thread-safety.h"
 #include "transport.h"
 
 namespace hipObj {
@@ -72,9 +72,13 @@ ConnectionPool::Lease::connect(const RdmaToken &peerToken)
 std::variant<ConnectionPool::Lease, ConnectionPool::AcquireError>
 ConnectionPool::acquire()
 {
-    std::unique_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     if (t_leasesHeld == 0) {
-        returned_.wait(lock, [this] { return closed_ || !free_.empty() || live_ == 0; });
+        /* wait() can return before there's a reason to stop waiting, so
+         * it's called until there is one */
+        while (!closed_ && free_.empty() && live_ != 0) {
+            returned_.wait(mutex_);
+        }
     }
     if (closed_) {
         return AcquireError::Closed;
@@ -91,7 +95,7 @@ void
 ConnectionPool::close()
 {
     {
-        const std::scoped_lock<std::mutex> lock(mutex_);
+        const ScopedLock<Mutex> lock(mutex_);
         closed_ = true;
     }
     returned_.notify_all();
@@ -100,14 +104,14 @@ ConnectionPool::close()
 size_t
 ConnectionPool::size() const
 {
-    const std::scoped_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     return live_;
 }
 
 size_t
 ConnectionPool::available() const
 {
-    const std::scoped_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     return free_.size();
 }
 
@@ -141,7 +145,7 @@ ConnectionPool::release(size_t index, bool connected) noexcept
 
     size_t left = 0;
     {
-        const std::scoped_lock<std::mutex> lock(mutex_);
+        const ScopedLock<Mutex> lock(mutex_);
         if (usable) {
             /* The capacity is the number of slots, so this doesn't
              * reallocate */

@@ -16,6 +16,13 @@ AllowShortIfStatementsOnASingleLine: Never
 
 AlwaysBreakAfterReturnType: TopLevelDefinitions
 
+# The thread safety macros that follow a variable's name (see
+# src/common/thread-safety.h). Without this, clang-format takes the
+# macro for the name, and aligns the declarations around it.
+AttributeMacros:
+  - HIPOBJ_ACQUIRED_AFTER
+  - HIPOBJ_GUARDED_BY
+
 BraceWrapping:
   BeforeCatch: true
   BeforeElse:  true

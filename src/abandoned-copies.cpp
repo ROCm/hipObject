@@ -10,7 +10,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -19,6 +18,7 @@
 #include "buffer.h"
 #include "hip-seam.h"
 #include "ibv-ptr.h"
+#include "thread-safety.h"
 
 namespace hipObj {
 
@@ -44,7 +44,7 @@ AbandonedCopies::~AbandonedCopies()
 AbandonedCopies::Slot::~Slot()
 {
     if (list_ != nullptr) {
-        const std::scoped_lock<std::mutex> lock(list_->mutex_);
+        const ScopedLock<Mutex> lock(list_->mutex_);
         --list_->reserved_;
     }
 }
@@ -52,7 +52,7 @@ AbandonedCopies::Slot::~Slot()
 AbandonedCopies::Slot
 AbandonedCopies::reserve()
 {
-    const std::scoped_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     /* Grows the capacity by at least half, so a list that's growing
      * doesn't reallocate for every slot. Once it's held as many copies
      * and slots as it ever will, it doesn't allocate at all. */
@@ -67,7 +67,7 @@ AbandonedCopies::reserve()
 void
 AbandonedCopies::add(Slot &slot, HipEventPtr done, std::shared_ptr<const BufferMap::BufEntry> entry) noexcept
 {
-    const std::scoped_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     /* The capacity is at least the size plus the slots set aside, which
      * include this one, so this doesn't reallocate */
     copies_.push_back(Copy{.entry = std::move(entry), .done = std::move(done)});
@@ -90,14 +90,14 @@ AbandonedCopies::running(const BufferMap::BufEntry &entry)
 size_t
 AbandonedCopies::size() const
 {
-    const std::scoped_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     return copies_.size();
 }
 
 size_t
 AbandonedCopies::capacity() const
 {
-    const std::scoped_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     return copies_.capacity();
 }
 
@@ -113,7 +113,7 @@ AbandonedCopies::release(const BufferMap::BufEntry *entry)
     /* The events are queried with the lock held, so a thread that finds
      * none of an entry's copies running can't miss one that another
      * thread is querying. A query doesn't wait for the copy. */
-    const std::scoped_lock<std::mutex> lock(mutex_);
+    const ScopedLock<Mutex> lock(mutex_);
     for (auto it = copies_.begin(); it != copies_.end();) {
         if (entry != nullptr && it->entry.get() != entry) {
             ++it;

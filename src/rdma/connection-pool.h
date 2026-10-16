@@ -7,16 +7,15 @@
 
 #pragma once
 
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "thread-safety.h"
 #include "transport.h"
 
 namespace hipObj {
@@ -104,23 +103,23 @@ public:
      * lease, from any pool, gets Busy instead of waiting: the lease it
      * would wait for could be its own, as when a transfer's callback
      * starts another transfer. */
-    [[nodiscard]] std::variant<Lease, AcquireError> acquire();
+    [[nodiscard]] std::variant<Lease, AcquireError> acquire() HIPOBJ_REQUIRES(!mutex_);
 
     /* Makes acquire() fail with Closed from now on, including the calls
      * that are waiting. Leases already held aren't affected. */
-    void close();
+    void close() HIPOBJ_REQUIRES(!mutex_);
 
     /* The number of connections, leased or not */
-    [[nodiscard]] size_t size() const;
+    [[nodiscard]] size_t size() const HIPOBJ_REQUIRES(!mutex_);
 
     /* The number of connections that aren't leased */
-    [[nodiscard]] size_t available() const;
+    [[nodiscard]] size_t available() const HIPOBJ_REQUIRES(!mutex_);
 
 private:
     /* Takes back the connection at index, from a lease that's ending. If
      * it was connected, it's reset, or replaced if it can't be, without
      * holding mutex_; if it can't be replaced either, it's dropped. */
-    void release(size_t index, bool connected) noexcept;
+    void release(size_t index, bool connected) noexcept HIPOBJ_REQUIRES(!mutex_);
 
     /* Resets conn, or replaces it with a new connection. False, with conn
      * empty, if neither works. */
@@ -133,16 +132,16 @@ private:
      * lock; a dropped slot is empty, and no lease gets it again. */
     std::vector<std::optional<RcConnection>> slots_{};
     /* Guards free_, live_, and closed_ */
-    mutable std::mutex mutex_{};
+    mutable Mutex mutex_{};
     /* Signalled when a connection is returned, or when acquire() has
      * another reason to stop waiting */
-    std::condition_variable returned_{};
+    ConditionVariable returned_{};
     /* The indexes of the connections that aren't leased. Its capacity is
      * the number of slots, so returning a connection doesn't allocate. */
-    std::vector<size_t> free_{};
+    std::vector<size_t> free_ HIPOBJ_GUARDED_BY(mutex_){};
     /* The number of slots that haven't been dropped */
-    size_t live_   = 0;
-    bool   closed_ = false;
+    size_t live_ HIPOBJ_GUARDED_BY(mutex_)   = 0;
+    bool   closed_ HIPOBJ_GUARDED_BY(mutex_) = false;
 };
 
 } // namespace hipObj
