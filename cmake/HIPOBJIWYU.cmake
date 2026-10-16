@@ -16,11 +16,11 @@ if(HIPOBJ_USE_IWYU)
   find_program(HIPOBJ_IWYU_EXE NAMES include-what-you-use REQUIRED)
   message(STATUS "include-what-you-use enabled: ${HIPOBJ_IWYU_EXE}")
 
-  # GoogleTest/GoogleMock expose their public API through umbrella headers
-  # (gtest/gtest.h, gmock/gmock.h) but define symbols in private sub-headers.
-  # Without a mapping, IWYU suggests including those private headers and
-  # confuses the quoted vs. angle-bracket spellings. This mapping file
-  # redirects all gtest/gmock private headers to the public umbrella headers.
+  # GoogleTest exposes its public API through an umbrella header
+  # (gtest/gtest.h) but defines symbols in private sub-headers. Without a
+  # mapping, IWYU suggests including those private headers and confuses
+  # the quoted vs. angle-bracket spellings. This mapping file redirects
+  # all gtest private headers to the public umbrella header.
   # libstdc++/glibc declare some symbols in private bits/* headers that IWYU
   # would otherwise suggest including directly (e.g. <bits/chrono.h> for
   # std::chrono, <bits/statx-generic.h> for statx). These are not part of the

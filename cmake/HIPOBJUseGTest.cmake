@@ -24,14 +24,14 @@ if(NOT GTest_FOUND)
   )
   set(gtest_force_shared_crt ON
     CACHE BOOL "" FORCE)
-  set(BUILD_GMOCK ON
+  set(BUILD_GMOCK OFF
     CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 
   # GoogleTest runs in the same process as the tests, so
   # instrument it when we build it from source.
   if(HIPOBJ_USE_SANITIZERS)
-    foreach(gtest_target gtest gtest_main gmock gmock_main)
+    foreach(gtest_target gtest gtest_main)
       hipobj_add_sanitizers(${gtest_target})
     endforeach()
   endif()
