@@ -28,6 +28,8 @@ hipObject separates control and data planes:
   transport directly between GPU VRAM and storage server
   buffers.
 
+See :doc:`architecture` for how the library works.
+
 Supported S3 Operations
 -----------------------
 
@@ -45,6 +47,7 @@ Operation     Description
    :caption: User Guide
 
    building
+   architecture
    interop
 
 .. toctree::
