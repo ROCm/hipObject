@@ -50,6 +50,10 @@
 #include <mutex>
 #include <shared_mutex>
 
+/* These have to be macros: they expand to attributes, which are part of
+ * a declaration, so a function can't supply them */
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+
 /* clang-format off */
 #ifdef __clang__
     #define HIPOBJ_THREAD_ANNOTATION(x) __attribute__((x))
@@ -88,6 +92,8 @@
  * mutex the lock holds, however it holds it. */
 #define HIPOBJ_RELEASE(...)        HIPOBJ_THREAD_ANNOTATION(release_capability(__VA_ARGS__))
 #define HIPOBJ_RELEASE_SHARED(...) HIPOBJ_THREAD_ANNOTATION(release_shared_capability(__VA_ARGS__))
+
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 namespace hipObj {
 

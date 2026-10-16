@@ -66,6 +66,8 @@ namespace {
         sge.length = static_cast<uint32_t>(size);
         sge.lkey   = localMr->lkey;
 
+        /* libibverbs keeps each opcode's fields (wr.rdma here) in a union */
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
         ibv_send_wr wr{};
         wr.wr_id               = 1;
         wr.opcode              = IBV_WR_RDMA_WRITE;
@@ -74,6 +76,7 @@ namespace {
         wr.num_sge             = 1;
         wr.wr.rdma.remote_addr = clientToken.remoteAddr;
         wr.wr.rdma.rkey        = clientToken.rkey;
+        // NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
         ibv_send_wr *bad = nullptr;
         if (conn.device().verbs().post_send(conn.qp(), &wr, &bad) != 0) {
@@ -90,6 +93,8 @@ namespace {
         sge.length = static_cast<uint32_t>(size);
         sge.lkey   = localMr->lkey;
 
+        /* libibverbs keeps each opcode's fields (wr.rdma here) in a union */
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
         ibv_send_wr wr{};
         wr.wr_id               = 2;
         wr.opcode              = IBV_WR_RDMA_READ;
@@ -98,6 +103,7 @@ namespace {
         wr.num_sge             = 1;
         wr.wr.rdma.remote_addr = clientToken.remoteAddr;
         wr.wr.rdma.rkey        = clientToken.rkey;
+        // NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
         ibv_send_wr *bad = nullptr;
         if (conn.device().verbs().post_send(conn.qp(), &wr, &bad) != 0) {

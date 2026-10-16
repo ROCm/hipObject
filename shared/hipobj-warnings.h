@@ -29,6 +29,10 @@
 
 #pragma once
 
+/* These have to be macros: they expand to _Pragma(), which a function
+ * can't supply */
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+
 #define HIPOBJ_WARN_JOINSTR(x, y) x y
 #define HIPOBJ_WARN_DO_PRAGMA(x)  _Pragma(#x)
 #define HIPOBJ_WARN_PRAGMA(x)     HIPOBJ_WARN_DO_PRAGMA(GCC diagnostic x)
@@ -39,6 +43,8 @@
     #define HIPOBJ_WARN_ON(x)  HIPOBJ_WARN_PRAGMA(pop)
 #endif
 /* clang-format on */
+
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 #ifdef __clang__
 #define HIPOBJ_WARN_NO_EXIT_DTOR_OFF HIPOBJ_WARN_OFF("exit-time-destructors")
