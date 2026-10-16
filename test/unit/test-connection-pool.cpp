@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <latch>
 #include <memory>
 #include <optional>
 #include <set>
@@ -383,6 +384,81 @@ TEST_F(ConnectionPoolTest, DroppingTheLastConnectionStopsAcquireWaiting)
     held.reset();
     waiter.join();
     EXPECT_EQ(err, AcquireError::NoConnections);
+}
+
+// ---- A thread that holds a lease ---------------------------------------
+
+/* A thread that holds a lease gets Busy rather than waiting, since the
+ * lease it would wait for could be its own, and a lease that's moved is
+ * still held */
+TEST_F(ConnectionPoolTest, ThreadHoldingALeaseDoesntWait)
+{
+    const auto           pool  = makePool(2);
+    std::optional<Lease> first = leaseFrom(*pool);
+    ASSERT_TRUE(first);
+    /* One is free, so it's leased */
+    const std::optional<Lease> second = leaseFrom(*pool);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(acquireError(*pool), AcquireError::Busy);
+
+    std::optional<Lease> moved;
+    moved.emplace(std::move(*first));
+    first.reset();
+    EXPECT_EQ(acquireError(*pool), AcquireError::Busy);
+
+    /* Closing takes precedence */
+    pool->close();
+    EXPECT_EQ(acquireError(*pool), AcquireError::Closed);
+}
+
+/* A lease from another pool counts too: threads that each held a lease
+ * and waited for a connection in another pool could wait for each other */
+TEST_F(ConnectionPoolTest, LeaseFromAnotherPoolCounts)
+{
+    const auto                 pool  = makePool(1);
+    const auto                 other = makePool(1);
+    const std::optional<Lease> held  = leaseFrom(*pool);
+    ASSERT_TRUE(held);
+
+    std::optional<AcquireError> err;
+    std::jthread                thread([&] {
+        const std::optional<Lease> otherLease = leaseFrom(*other);
+        ASSERT_TRUE(otherLease);
+        err = acquireError(*pool);
+    });
+    thread.join();
+    EXPECT_EQ(err, AcquireError::Busy);
+}
+
+/* A thread that has returned every lease it held, including one it moved,
+ * waits again */
+TEST_F(ConnectionPoolTest, ThreadThatReturnedItsLeasesWaits)
+{
+    const auto pool = makePool(1);
+    {
+        std::optional<Lease> first = leaseFrom(*pool);
+        ASSERT_TRUE(first);
+        std::optional<Lease> moved;
+        moved.emplace(std::move(*first));
+    }
+
+    /* Another thread holds the only connection until it's told to return
+     * it, after this thread has started waiting */
+    std::latch         leased(1);
+    std::atomic<bool>  giveBack{false};
+    const std::jthread holder([&] {
+        const std::optional<Lease> lease = leaseFrom(*pool);
+        leased.count_down();
+        while (!giveBack) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    leased.wait();
+    const std::jthread releaser([&] {
+        std::this_thread::sleep_for(kStillWaiting);
+        giveBack = true;
+    });
+    EXPECT_TRUE(leaseFrom(*pool));
 }
 
 /* Threads that lease, connect, and return connections at once each get a

@@ -2,29 +2,34 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Thread-safety tests for the public API. The functions that use library
- * state run one at a time, under one lock (ApiGuard, in state.h). These
- * tests call them from several threads at once and check that transfers
- * never overlap, that every call gets a result it could get on its own,
- * and that a callback that calls back into the library gets an error
- * instead of deadlocking. They run without GPU or RDMA hardware, through
- * the same seams as test-seams.cpp, and do the most good in a
- * ThreadSanitizer build, which reports any data race the lock misses.
+ * Thread-safety tests for the public API. There's no API lock: calls run
+ * at the same time, and each transfer leases a connection of its own.
+ * These tests call the library from several threads at once, and from
+ * callbacks, and check that transfers run concurrently and wait for a
+ * connection when every one is leased, that a buffer in use can't be
+ * deregistered, that shutdown leaves the instance to the calls still
+ * using it, and that every call gets a result it could get on its own.
+ * They run without GPU or RDMA hardware, through the same seams as
+ * test-seams.cpp, and do the most good in a ThreadSanitizer build, which
+ * reports any data race the locks miss.
  */
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <latch>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -34,6 +39,7 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "state.h"
+#include "token.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -44,21 +50,37 @@ constexpr int    kThreads    = 8;
 constexpr int    kIterations = 25;
 constexpr size_t kBufSize    = 4096;
 
-/* Runs body(index) on count threads, released together so their calls
- * overlap as much as possible, and returns when all of them are done */
-void
-runThreads(int count, const std::function<void(int)> &body)
+/* How long a test waits for something it expects to happen, so that a
+ * regression fails the test instead of hanging it */
+constexpr auto kTimeout = std::chrono::seconds(10);
+
+/* How long a test waits to see that a thread is still waiting */
+constexpr auto kStillWaiting = std::chrono::milliseconds(50);
+
+/* Starts body(index) on count threads, released together so their calls
+ * overlap as much as possible. Each std::jthread joins its thread when
+ * it's destroyed. The threads can outlive the call, so each one has its
+ * own copy of body, and shares the latch. */
+std::vector<std::jthread>
+startThreads(int count, const std::function<void(int)> &body)
 {
-    std::latch                start(count);
+    const auto                start = std::make_shared<std::latch>(count);
     std::vector<std::jthread> threads;
     threads.reserve(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i) {
-        threads.emplace_back([&start, &body, i] {
-            start.arrive_and_wait();
+        threads.emplace_back([start, body, i] {
+            start->arrive_and_wait();
             body(i);
         });
     }
-    // Each std::jthread joins its thread when it's destroyed
+    return threads;
+}
+
+/* startThreads(), returning when all of the threads are done */
+void
+runThreads(int count, const std::function<void(int)> &body)
+{
+    startThreads(count, body);
 }
 
 // ---- Transfer callbacks ------------------------------------------------
@@ -81,36 +103,103 @@ plainRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
     return 0;
 }
 
-/* Watches transfers for overlap. A transfer is active from its
- * sendRequest callback to its recvReply callback. active and overlaps are
- * atomic, so overlap is counted even if the lock is missing. transfers
- * deliberately isn't: if two transfers ever run at once, ThreadSanitizer
- * reports a data race on it. */
-struct TransferProbe {
-    std::atomic<int> active{0};
-    std::atomic<int> overlaps{0};
-    int              transfers = 0;
-};
-
+/* Counts transfers in an std::atomic<int>, their context */
 int
-probeSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
+countingSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
 {
-    auto *probe = static_cast<TransferProbe *>(ctx);
-    if (probe->active.fetch_add(1) != 0) {
-        probe->overlaps.fetch_add(1);
-    }
-    ++probe->transfers;
-    /* Holds the transfer open long enough that, without the lock, other
-     * threads' transfers would start inside it */
-    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    static_cast<std::atomic<int> *>(ctx)->fetch_add(1);
     return 0;
 }
 
+/* Holds transfers in their sendRequest callback until the test lets them
+ * go, and records what they did. A transfer that isn't let go within
+ * kTimeout fails, so a test whose transfers don't run as it expects
+ * fails instead of hanging. */
+class TransferGate {
+public:
+    /* sendRequest, with token: records the token's QP number, and waits
+     * to be let go */
+    int enter(std::string_view token)
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (const auto decoded = hipObj::decodeRdmaTokenHex(token)) {
+            qpNums_.insert(decoded->qpNum);
+        }
+        repliedAtEntry_.push_back(replied_);
+        changed_.notify_all();
+        if (!changed_.wait_for(lock, kTimeout, [this] { return released_ > 0; })) {
+            return -1;
+        }
+        --released_;
+        return 0;
+    }
+
+    /* recvReply */
+    void replied()
+    {
+        const std::scoped_lock<std::mutex> lock(mutex_);
+        ++replied_;
+    }
+
+    /* Lets count transfers go, now or when they enter */
+    void release(int count)
+    {
+        {
+            const std::scoped_lock<std::mutex> lock(mutex_);
+            released_ += count;
+        }
+        changed_.notify_all();
+    }
+
+    /* Waits until count transfers have entered. False if they don't
+     * within kTimeout. */
+    bool waitForEntered(size_t count)
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return changed_.wait_for(lock, kTimeout, [&] { return repliedAtEntry_.size() >= count; });
+    }
+
+    [[nodiscard]] size_t entered() const
+    {
+        const std::scoped_lock<std::mutex> lock(mutex_);
+        return repliedAtEntry_.size();
+    }
+
+    /* The QP numbers in the tokens of the transfers that entered */
+    [[nodiscard]] std::set<uint32_t> qpNums() const
+    {
+        const std::scoped_lock<std::mutex> lock(mutex_);
+        return qpNums_;
+    }
+
+    /* How many transfers had received their reply when each transfer
+     * entered, in the order they entered */
+    [[nodiscard]] std::vector<int> repliedAtEntry() const
+    {
+        const std::scoped_lock<std::mutex> lock(mutex_);
+        return repliedAtEntry_;
+    }
+
+private:
+    mutable std::mutex      mutex_{};
+    std::condition_variable changed_{};
+    std::set<uint32_t>      qpNums_{};
+    std::vector<int>        repliedAtEntry_{};
+    int                     replied_  = 0;
+    int                     released_ = 0;
+};
+
 int
-probeRecvReply(void *ctx, char *reply, size_t *replyLen)
+gateSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
-    auto *probe = static_cast<TransferProbe *>(ctx);
-    probe->active.fetch_sub(1);
+    return static_cast<TransferGate *>(ctx)->enter(
+        hipObj::asStringView(hipObj::spanFromPointer(token, tokenLen)));
+}
+
+int
+gateRecvReply(void *ctx, char *reply, size_t *replyLen)
+{
+    static_cast<TransferGate *>(ctx)->replied();
     return plainRecvReply(ctx, reply, replyLen);
 }
 
@@ -123,16 +212,19 @@ makeConfig()
     return config;
 }
 
+/* Options with maxTransfers connections for transfers */
+hipObj::Options
+withMaxTransfers(size_t maxTransfers)
+{
+    hipObj::Options options;
+    options.maxTransfers = maxTransfers;
+    return options;
+}
+
 /* Shuts the library down after each test, and checks that nothing but the
  * fixture still holds the fakes */
 class ThreadSafetyTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        probeOps_.sendRequest = &probeSendRequest;
-        probeOps_.recvReply   = &probeRecvReply;
-    }
-
     void TearDown() override
     {
         (void)hipObjShutdown();
@@ -142,9 +234,9 @@ protected:
     /* Initializes the library with the fakes. The fake HIP runtime has no
      * GPU, so with a NIC hint, initialization opens the hinted NIC
      * directly. */
-    [[nodiscard]] hipObjOpError_t init() const
+    [[nodiscard]] hipObjOpError_t init(const hipObj::Options &options = {}) const
     {
-        return hipObjTest::initWithPlatform(makeConfig(), fakes_->platform()).opError;
+        return hipObjTest::initWithPlatform(makeConfig(), fakes_->platform(), options).opError;
     }
 
     /* The buffer for thread index, kBufSize bytes, distinct from every
@@ -154,32 +246,190 @@ protected:
         return std::span(pool_).subspan(static_cast<size_t>(index) * kBufSize, kBufSize).data();
     }
 
+    /* Registers count buffers, from buffer(0) on */
+    void registerBuffers(int count)
+    {
+        for (int i = 0; i < count; ++i) {
+            ASSERT_EQ(hipObjBufRegisterHost(buffer(i), kBufSize).opError, hipObjSuccess);
+        }
+    }
+
     hipObjTest::FakeDevice                      hipDevice_{};
     std::shared_ptr<hipObjTest::FakePlatform<>> fakes_ =
         std::make_shared<hipObjTest::FakePlatform<>>(hipDevice_);
-    std::vector<char> pool_ = std::vector<char>(kThreads * kBufSize);
-    TransferProbe     probe_{};
-    hipObjOps_t       probeOps_{};
+    std::vector<char> pool_        = std::vector<char>(kThreads * kBufSize);
+    hipObjOps_t       plainOps_    = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t       countingOps_ = {.sendRequest = &countingSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t       gateOps_     = {.sendRequest = &gateSendRequest, .recvReply = &gateRecvReply};
 };
 
-TEST_F(ThreadSafetyTest, TransfersRunOneAtATime)
+// ---- Transfers ---------------------------------------------------------
+
+/* Every transfer is in its sendRequest callback at once, which they can
+ * only be if they run at the same time, and each one's token names a
+ * different QP */
+TEST_F(ThreadSafetyTest, TransfersRunConcurrently)
 {
     ASSERT_EQ(init(), hipObjSuccess);
-    for (int t = 0; t < kThreads; ++t) {
-        ASSERT_EQ(hipObjBufRegisterHost(buffer(t), kBufSize).opError, hipObjSuccess);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(kThreads));
+
+    TransferGate                          gate;
+    std::array<hipObjOpError_t, kThreads> results{};
+    {
+        const auto running = startThreads(kThreads, [&](int t) {
+            results.at(static_cast<size_t>(t)) =
+                (t % 2 == 0) ? hipObjGet(nullptr, buffer(t), kBufSize, 0, &gateOps_, &gate).opError
+                             : hipObjPut(nullptr, buffer(t), kBufSize, 0, &gateOps_, &gate).opError;
+        });
+        EXPECT_TRUE(gate.waitForEntered(static_cast<size_t>(kThreads)));
+        gate.release(kThreads);
     }
 
-    runThreads(kThreads, [this](int t) {
-        for (int i = 0; i < kIterations; ++i) {
-            const hipObjError_t err = (i % 2 == 0)
-                                          ? hipObjGet(nullptr, buffer(t), kBufSize, 0, &probeOps_, &probe_)
-                                          : hipObjPut(nullptr, buffer(t), kBufSize, 0, &probeOps_, &probe_);
-            EXPECT_EQ(err.opError, hipObjSuccess);
-        }
-    });
+    for (const hipObjOpError_t err : results) {
+        EXPECT_EQ(err, hipObjSuccess);
+    }
+    EXPECT_EQ(gate.qpNums().size(), static_cast<size_t>(kThreads));
+}
 
-    EXPECT_EQ(probe_.overlaps.load(), 0);
-    EXPECT_EQ(probe_.transfers, kThreads * kIterations);
+/* With two connections, a third transfer waits until one of the first two
+ * has finished */
+TEST_F(ThreadSafetyTest, TransferWaitsForAConnectionWhenAllAreLeased)
+{
+    constexpr int kTransfers = 3;
+    ASSERT_EQ(init(withMaxTransfers(2)), hipObjSuccess);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(kTransfers));
+
+    TransferGate                            gate;
+    std::array<hipObjOpError_t, kTransfers> results{};
+    {
+        const auto running = startThreads(kTransfers, [&](int t) {
+            results.at(static_cast<size_t>(t)) =
+                hipObjGet(nullptr, buffer(t), kBufSize, 0, &gateOps_, &gate).opError;
+        });
+        EXPECT_TRUE(gate.waitForEntered(2));
+        std::this_thread::sleep_for(kStillWaiting);
+        EXPECT_EQ(gate.entered(), 2U);
+        EXPECT_EQ(hipObj::currentInstance()->pool.available(), 0U);
+
+        gate.release(1);
+        EXPECT_TRUE(gate.waitForEntered(static_cast<size_t>(kTransfers)));
+        gate.release(kTransfers - 1);
+    }
+
+    for (const hipObjOpError_t err : results) {
+        EXPECT_EQ(err, hipObjSuccess);
+    }
+    const std::vector<int> replied = gate.repliedAtEntry();
+    ASSERT_EQ(replied.size(), static_cast<size_t>(kTransfers));
+    EXPECT_GE(replied.back(), 1);
+}
+
+/* What nestedSendRequest() needs, and what it got */
+struct NestedProbe {
+    void           *buffer   = nullptr;
+    hipObjOps_t     plainOps = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
+    hipObjOpError_t result   = hipObjInternalError;
+};
+
+/* Starts a transfer from inside a transfer */
+int
+nestedSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
+{
+    auto *probe   = static_cast<NestedProbe *>(ctx);
+    probe->result = hipObjGet(nullptr, probe->buffer, kBufSize, 0, &probe->plainOps, nullptr).opError;
+    return 0;
+}
+
+/* A callback's transfer doesn't wait for the connection its own transfer
+ * holds */
+TEST_F(ThreadSafetyTest, TransferFromACallbackIsBusyWhenNoConnectionIsFree)
+{
+    ASSERT_EQ(init(withMaxTransfers(1)), hipObjSuccess);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(2));
+
+    NestedProbe probe;
+    probe.buffer    = buffer(1);
+    hipObjOps_t ops = {.sendRequest = &nestedSendRequest, .recvReply = &plainRecvReply};
+    EXPECT_EQ(hipObjGet(nullptr, buffer(0), kBufSize, 0, &ops, &probe).opError, hipObjSuccess);
+    EXPECT_EQ(probe.result, hipObjBusy);
+
+    /* The outer transfer returned the connection */
+    EXPECT_EQ(hipObjGet(nullptr, buffer(1), kBufSize, 0, &plainOps_, nullptr).opError, hipObjSuccess);
+}
+
+/* A transfer waiting for a connection stops waiting when the library shuts
+ * down, and the transfer holding the connection finishes */
+TEST_F(ThreadSafetyTest, ShutdownStopsATransferWaitingForAConnection)
+{
+    ASSERT_EQ(init(withMaxTransfers(1)), hipObjSuccess);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(2));
+
+    TransferGate    gate;
+    hipObjOpError_t holding = hipObjInternalError;
+    hipObjOpError_t waiting = hipObjInternalError;
+    {
+        const std::jthread holder(
+            [&] { holding = hipObjGet(nullptr, buffer(0), kBufSize, 0, &gateOps_, &gate).opError; });
+        EXPECT_TRUE(gate.waitForEntered(1));
+
+        std::jthread waiter(
+            [&] { waiting = hipObjGet(nullptr, buffer(1), kBufSize, 0, &plainOps_, nullptr).opError; });
+        std::this_thread::sleep_for(kStillWaiting);
+        EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
+        waiter.join();
+        EXPECT_EQ(waiting, hipObjNotInitialized);
+        gate.release(1);
+    }
+    EXPECT_EQ(holding, hipObjSuccess);
+}
+
+// ---- Buffers -----------------------------------------------------------
+
+TEST_F(ThreadSafetyTest, DeregisterIsBusyWhileATransferUsesTheBuffer)
+{
+    ASSERT_EQ(init(), hipObjSuccess);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(1));
+
+    TransferGate    gate;
+    hipObjOpError_t result = hipObjInternalError;
+    {
+        const std::jthread transfer(
+            [&] { result = hipObjPut(nullptr, buffer(0), kBufSize, 0, &gateOps_, &gate).opError; });
+        EXPECT_TRUE(gate.waitForEntered(1));
+        EXPECT_EQ(hipObjBufDeregister(buffer(0)).opError, hipObjBusy);
+        gate.release(1);
+    }
+    EXPECT_EQ(result, hipObjSuccess);
+    EXPECT_EQ(hipDevice_.log.deregMr, 0);
+    EXPECT_EQ(hipObjBufDeregister(buffer(0)).opError, hipObjSuccess);
+}
+
+/* Of two threads that register the same buffer at once, one succeeds, and
+ * the other's registration, if it made one, is released */
+TEST_F(ThreadSafetyTest, RegisteringTheSameBufferHasOneWinner)
+{
+    ASSERT_EQ(init(), hipObjSuccess);
+
+    for (int i = 0; i < kIterations; ++i) {
+        std::atomic<int> registered{0};
+        std::atomic<int> alreadyRegistered{0};
+        runThreads(2, [&](int) {
+            const hipObjOpError_t err = hipObjBufRegisterHost(buffer(0), kBufSize).opError;
+            if (err == hipObjSuccess) {
+                registered.fetch_add(1);
+            }
+            else if (err == hipObjBufAlreadyRegistered) {
+                alreadyRegistered.fetch_add(1);
+            }
+            else {
+                ADD_FAILURE() << "registration returned " << err;
+            }
+        });
+        EXPECT_EQ(registered.load(), 1);
+        EXPECT_EQ(alreadyRegistered.load(), 1);
+        EXPECT_EQ(hipDevice_.log.registerMr.load() - hipDevice_.log.deregMr.load(), 1);
+        EXPECT_EQ(hipObjBufDeregister(buffer(0)).opError, hipObjSuccess);
+    }
 }
 
 TEST_F(ThreadSafetyTest, BufferCallsFromManyThreads)
@@ -188,13 +438,14 @@ TEST_F(ThreadSafetyTest, BufferCallsFromManyThreads)
 
     /* Each thread works on its own buffer, so every call succeeds, while
      * the other threads' calls change the buffer map under it */
-    runThreads(kThreads, [this](int t) {
+    std::atomic<int> transfers{0};
+    runThreads(kThreads, [&](int t) {
         void *buf = buffer(t);
         for (int i = 0; i < kIterations; ++i) {
             EXPECT_EQ(hipObjBufRegisterHost(buf, kBufSize).opError, hipObjSuccess);
-            EXPECT_EQ(hipObjGet(nullptr, buf, kBufSize, 0, &probeOps_, &probe_).opError, hipObjSuccess);
+            EXPECT_EQ(hipObjGet(nullptr, buf, kBufSize, 0, &countingOps_, &transfers).opError, hipObjSuccess);
             EXPECT_EQ(hipObjBufSync(buf, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
-            EXPECT_EQ(hipObjPut(nullptr, buf, kBufSize, 0, &probeOps_, &probe_).opError, hipObjSuccess);
+            EXPECT_EQ(hipObjPut(nullptr, buf, kBufSize, 0, &countingOps_, &transfers).opError, hipObjSuccess);
             EXPECT_EQ(hipObjBufSync(buf, kBufSize, 0, HIPOBJ_SYNC_TO_DEVICE).opError, hipObjSuccess);
 
             char *token = nullptr;
@@ -207,12 +458,13 @@ TEST_F(ThreadSafetyTest, BufferCallsFromManyThreads)
         }
     });
 
-    EXPECT_EQ(probe_.overlaps.load(), 0);
-    EXPECT_EQ(probe_.transfers, 2 * kThreads * kIterations);
+    EXPECT_EQ(transfers.load(), 2 * kThreads * kIterations);
     for (int t = 0; t < kThreads; ++t) {
         EXPECT_EQ(hipObjBufDeregister(buffer(t)).opError, hipObjBufNotRegistered);
     }
 }
+
+// ---- Initialization and shutdown ---------------------------------------
 
 TEST_F(ThreadSafetyTest, ConcurrentInitHasOneWinner)
 {
@@ -237,6 +489,41 @@ TEST_F(ThreadSafetyTest, ConcurrentInitHasOneWinner)
     EXPECT_EQ(hipDevice_.log.openDevice, 1);
 }
 
+/* Shutdown doesn't wait for a transfer, or release what it uses. New
+ * calls find the library uninitialized, and it can be initialized again,
+ * while the transfer finishes with the old instance. */
+TEST_F(ThreadSafetyTest, ShutdownLeavesATransferToFinish)
+{
+    ASSERT_EQ(init(), hipObjSuccess);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(1));
+    const hipObjTest::CallLog &log = hipDevice_.log;
+    const int                  qps = log.createQp;
+
+    TransferGate    gate;
+    hipObjOpError_t result = hipObjInternalError;
+    {
+        const std::jthread transfer(
+            [&] { result = hipObjGet(nullptr, buffer(0), kBufSize, 0, &gateOps_, &gate).opError; });
+        EXPECT_TRUE(gate.waitForEntered(1));
+
+        EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
+        EXPECT_EQ(log.deregMr, 0);
+        EXPECT_EQ(log.destroyQp, 0);
+        EXPECT_EQ(log.closeDevice, 0);
+
+        EXPECT_EQ(hipObjBufRegisterHost(buffer(1), kBufSize).opError, hipObjNotInitialized);
+        EXPECT_EQ(init(), hipObjSuccess);
+        EXPECT_EQ(log.openDevice, 2);
+        gate.release(1);
+    }
+    EXPECT_EQ(result, hipObjSuccess);
+
+    /* The transfer held the old instance last, so it's released now */
+    EXPECT_EQ(log.deregMr, 1);
+    EXPECT_EQ(log.destroyQp, qps);
+    EXPECT_EQ(log.closeDevice, 1);
+}
+
 TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)
 {
     ASSERT_EQ(init(), hipObjSuccess);
@@ -259,95 +546,120 @@ TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)
         void *buf = buffer(t);
         for (int i = 0; i < kIterations; ++i) {
             EXPECT_PRED1(possible, hipObjBufRegisterHost(buf, kBufSize).opError);
-            EXPECT_PRED1(possible, hipObjGet(nullptr, buf, kBufSize, 0, &probeOps_, &probe_).opError);
+            EXPECT_PRED1(possible, hipObjGet(nullptr, buf, kBufSize, 0, &plainOps_, nullptr).opError);
             EXPECT_PRED1(possible, hipObjBufDeregister(buf).opError);
         }
     });
 
-    EXPECT_EQ(probe_.overlaps.load(), 0);
     EXPECT_NE(hipObj::currentInstance(), nullptr);
 }
 
-/* The number of functions reentrantSendRequest() calls that take the
- * API lock */
-constexpr size_t kLockedFunctions = 9;
+// ---- Callbacks ---------------------------------------------------------
+
+/* One call that reentrantSendRequest() made: what it returned, and what
+ * it should have */
+struct ReentrantCall {
+    std::string_view name;
+    hipObjOpError_t  result;
+    hipObjOpError_t  expected;
+};
+
+/* The number of public functions. reentrantSendRequest() calls each one. */
+constexpr size_t kPublicFunctions = 14;
 
 /* What reentrantSendRequest() needs, and what it found */
 struct ReentryProbe {
-    void       *registered   = nullptr;
-    void       *unregistered = nullptr;
-    hipObjOps_t plainOps     = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
+    void       *registered = nullptr;
+    void       *device     = nullptr;
+    void       *host       = nullptr;
+    hipObjOps_t plainOps   = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
 
-    std::vector<std::pair<std::string_view, hipObjOpError_t>> locked{};
-    char                                                     *token       = nullptr;
-    hipObjOpError_t                                           parseResult = hipObjInternalError;
-    int                                                       parsedCode  = 0;
+    std::vector<ReentrantCall> calls{};
+    const char                *errorString = nullptr;
+    const char                *version     = nullptr;
+
+    void record(std::string_view name, hipObjError_t result, hipObjOpError_t expected)
+    {
+        calls.push_back({.name = name, .result = result.opError, .expected = expected});
+    }
 };
 
-/* Calls every function that takes the API lock, with arguments that would
- * make each one succeed or change something if it ran, and then one that
- * doesn't take the lock */
+/* Calls every public function from inside a transfer's callback, with
+ * arguments that would make each one succeed or change something if it
+ * ran on its own. registered is the transfer's buffer, and device and host
+ * aren't registered. */
 int
 reentrantSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
 {
-    auto          *probe  = static_cast<ReentryProbe *>(ctx);
-    hipObjConfig_t config = makeConfig();
+    auto                 *probe  = static_cast<ReentryProbe *>(ctx);
+    hipObjConfig_t        config = makeConfig();
+    char                 *token  = nullptr;
+    std::array<char, 32>  nicIp{};
+    int                   code   = 0;
+    static constexpr auto kReply = std::string_view("206");
 
-    probe->locked = {
-        {"hipObjInit", hipObjInit(&config).opError},
-        {"hipObjShutdown", hipObjShutdown().opError},
-        {"hipObjBufRegister", hipObjBufRegister(probe->unregistered, kBufSize).opError},
-        {"hipObjBufRegisterHost", hipObjBufRegisterHost(probe->unregistered, kBufSize).opError},
-        {"hipObjBufDeregister", hipObjBufDeregister(probe->registered).opError},
-        {"hipObjGet", hipObjGet(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
-        {"hipObjPut", hipObjPut(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
-        {"hipObjBufSync", hipObjBufSync(probe->registered, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError},
-        {
-            "hipObjGetRdmaToken",
-            hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &probe->token).opError,
-        },
-    };
+    probe->errorString = hipObjGetErrorString(hipObjBusy);
+    probe->version     = hipObjGetVersionString();
 
-    static constexpr std::string_view kReply = "200";
-    probe->parseResult = hipObjParseRdmaReply(kReply.data(), kReply.size(), &probe->parsedCode).opError;
+    probe->record("hipObjInit", hipObjInit(&config), hipObjAlreadyInitialized);
+    probe->record("hipObjBufRegister", hipObjBufRegister(probe->device, kBufSize), hipObjSuccess);
+    probe->record("hipObjBufRegisterHost", hipObjBufRegisterHost(probe->host, kBufSize), hipObjSuccess);
+    /* The transfer that's calling this holds it */
+    probe->record("hipObjBufDeregister", hipObjBufDeregister(probe->registered), hipObjBusy);
+    probe->record("hipObjGet", hipObjGet(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr),
+                  hipObjSuccess);
+    probe->record("hipObjPut", hipObjPut(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr),
+                  hipObjSuccess);
+    probe->record("hipObjBufSync", hipObjBufSync(probe->registered, kBufSize, 0, HIPOBJ_SYNC_TO_HOST),
+                  hipObjSuccess);
+    probe->record("hipObjGetRdmaToken",
+                  hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &token), hipObjSuccess);
+    probe->record("hipObjTokenClientNic", hipObjTokenClientNic(token, nicIp.data(), nicIp.size()),
+                  hipObjSuccess);
+    probe->record("hipObjPutRdmaToken", hipObjPutRdmaToken(token), hipObjSuccess);
+    probe->record("hipObjParseRdmaReply", hipObjParseRdmaReply(kReply.data(), kReply.size(), &code),
+                  hipObjSuccess);
+    probe->record("hipObjShutdown", hipObjShutdown(), hipObjSuccess);
+    probe->record("hipObjBufDeregister after hipObjShutdown", hipObjBufDeregister(probe->device),
+                  hipObjNotInitialized);
     return 0;
 }
 
-TEST_F(ThreadSafetyTest, CallbackReentryFailsInsteadOfDeadlocking)
+TEST_F(ThreadSafetyTest, CallbacksCanCallEveryFunction)
 {
     ASSERT_EQ(init(), hipObjSuccess);
 
     ReentryProbe probe;
-    probe.registered   = buffer(0);
-    probe.unregistered = buffer(1);
-    ASSERT_EQ(hipObjBufRegisterHost(probe.registered, kBufSize).opError, hipObjSuccess);
+    probe.registered = buffer(0);
+    probe.device     = buffer(1);
+    probe.host       = buffer(2);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(1));
 
     hipObjOps_t ops = {.sendRequest = &reentrantSendRequest, .recvReply = &plainRecvReply};
     EXPECT_EQ(hipObjGet(nullptr, probe.registered, kBufSize, 0, &ops, &probe).opError, hipObjSuccess);
 
-    EXPECT_EQ(probe.locked.size(), kLockedFunctions);
-    for (const auto &[name, err] : probe.locked) {
-        EXPECT_EQ(err, hipObjInvalidValue) << name << " from a callback";
+    /* calls has every function but hipObjGetErrorString() and
+     * hipObjGetVersionString(), which return strings rather than an error,
+     * and hipObjBufDeregister() a second time, after hipObjShutdown() */
+    EXPECT_EQ(probe.calls.size(), kPublicFunctions - 2 + 1);
+    for (const ReentrantCall &call : probe.calls) {
+        EXPECT_EQ(call.result, call.expected) << call.name << " from a callback";
     }
-    EXPECT_EQ(probe.token, nullptr);
-    if (probe.token != nullptr) {
-        (void)hipObjPutRdmaToken(probe.token);
-    }
+    EXPECT_STREQ(probe.errorString, "Busy");
+    EXPECT_STREQ(probe.version, hipObjGetVersionString());
 
-    /* Functions that don't take the lock work from a callback */
-    EXPECT_EQ(probe.parseResult, hipObjSuccess);
-    EXPECT_EQ(probe.parsedCode, 200);
-
-    /* The rejected calls changed nothing, and the lock was released */
-    EXPECT_NE(hipObj::currentInstance(), nullptr);
-    EXPECT_EQ(hipObjBufDeregister(probe.unregistered).opError, hipObjBufNotRegistered);
-    EXPECT_EQ(hipObjBufDeregister(probe.registered).opError, hipObjSuccess);
+    /* The callback shut the library down, and the transfer, which held
+     * the instance last, released it and every registration in it */
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+    EXPECT_EQ(hipDevice_.log.registerMr, 3);
+    EXPECT_EQ(hipDevice_.log.deregMr, 3);
+    EXPECT_EQ(hipDevice_.log.closeDevice, 1);
 }
 
 TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
 {
     ASSERT_EQ(init(), hipObjSuccess);
-    ASSERT_EQ(hipObjBufRegisterHost(buffer(0), kBufSize).opError, hipObjSuccess);
+    ASSERT_NO_FATAL_FAILURE(registerBuffers(1));
     char *token = nullptr;
     ASSERT_EQ(hipObjGetRdmaToken(buffer(0), kBufSize, HIPOBJ_RDMA_OP_GET, &token).opError, hipObjSuccess);
     /* Releases the token however the test ends */
@@ -359,7 +671,7 @@ TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
     std::array<const char *, kThreads> versions{};
 
     runThreads(kThreads, [&](int t) {
-        versions[static_cast<size_t>(t)] = hipObjGetVersionString();
+        versions.at(static_cast<size_t>(t)) = hipObjGetVersionString();
         for (int i = 0; i < kIterations; ++i) {
             EXPECT_STREQ(hipObjGetErrorString(hipObjBufNotRegistered), "Buffer not registered");
 

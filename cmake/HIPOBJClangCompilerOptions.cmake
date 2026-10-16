@@ -143,11 +143,7 @@ function(hipobj_get_clang_warning_flags outvar compiler_version)
     -Wdate-time
     -Wdirect-ivar-access
     -Wdisabled-macro-expansion
-    # -Wdocumentation-pedantic only adds -Wdocumentation-unknown-command,
-    # which flags the @serialized and @concurrent Doxygen aliases in the
-    # public header. Declaring them with -fcomment-block-commands just
-    # makes every use warn about an empty paragraph instead.
-    #-Wdocumentation-pedantic
+    -Wdocumentation-pedantic
     -Wdouble-promotion
     -Wdtor-name
     -Wduplicate-enum

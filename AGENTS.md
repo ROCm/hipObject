@@ -98,16 +98,9 @@ Notes:
 
 - After a successful build: `cd build && ctest --output-on-failure`.
 - The ctest suite doesn't need a GPU, an RDMA NIC, or an S3 server; CI runs all
-  of it in a plain container. Tests that need more are skipped or not
-  registered:
-  - `hipobj-package-deb` and `hipobj-package-rpm` are skipped when the tools
-    to build and read their packages (`dpkg`, or `rpmbuild` and `rpm`) aren't
-    installed.
-  - `hipobj-thread-safety-tags` and `hipobj-thread-safety-tags-selftest` are
-    only registered when CMake finds Python 3.10 or later. CI's Build
-    workflow skips changes to only their Python files, and
-    [hipobject-pylint.yml](.github/workflows/hipobject-pylint.yml) runs them
-    with Python 3.10 instead.
+  of it in a plain container. `hipobj-package-deb` and `hipobj-package-rpm`
+  are skipped when the tools to build and read their packages (`dpkg`, or
+  `rpmbuild` and `rpm`) aren't installed.
 - The GPU-direct and RDMA data paths are tested against emulated hardware
   (rocm-ernic's ionic NIC and rocjitsu's GPU, under QEMU) by the
   `.github/workflows/hipobject-hardware-test-*.yml` workflows, and against real
@@ -163,27 +156,50 @@ Notes:
 
 The public header documents what callers can rely on, in its `threads` group
 (the Thread Safety section of the API reference); read it before you add or
-change a public function. These are the rules for keeping the code in line
+change a public function. There's no API lock: every public function can run
+at the same time as any other, on any thread or from a callback, and
+transfers run concurrently. These are the rules for keeping the code in line
 with it:
 
-- **Tag every public function `@serialized` or `@concurrent`** in its
-  documentation comment. The tags are Doxygen aliases defined in
-  [`docs/Doxyfile.in`](docs/Doxyfile.in).
-- **A serialized function takes the API lock on its first line**, by creating
-  a `hipObj::ApiGuard` ([`src/state.h`](src/state.h)), and returns
-  `kReentryError` when the guard's `owns()` is false. Any function that reads
-  or changes library state is serialized. A concurrent function doesn't take
-  the lock, and doesn't touch library state or write to anything else shared,
-  such as a `static` buffer. The `hipobj-thread-safety-tags` test
-  ([`test/thread-safety`](test/thread-safety)) fails when a function's tag
-  and its definition disagree.
-- **Don't call a public function from inside the library.** The lock isn't
-  recursive, so the call would get `kReentryError`.
-- **State that the API lock protects doesn't need a lock of its own.**
+- **Locks guard lookups, not calls.** Everything that changes after
+  `hipObjInit()` has a lock of its own: the current instance (`Current` in
+  [`src/state.cpp`](src/state.cpp)), the registered buffers (`BufferMap`,
+  [`src/buffer.h`](src/buffer.h)), the connections
+  (`ConnectionPool`, [`src/rdma/connection-pool.h`](src/rdma/connection-pool.h)),
+  and the staging copies that timed out (`AbandonedCopies`,
+  [`src/abandoned-copies.h`](src/abandoned-copies.h)). A call holds a lock
+  only while it finds or changes what the lock guards. Anything else shared,
+  such as a `static` buffer, needs a lock too, or has to be written once
+  before any thread can read it.
+- **Lookups copy a `std::shared_ptr` and release the lock.**
+  `currentInstance()` and `BufferMap::find()` return a copy, which keeps the
+  instance or buffer alive for as long as the call holds it, even if another
+  thread shuts the library down; `deregisterBuffer()` refuses to remove a
+  buffer that anything else holds. A transfer holds its connection through a
+  `ConnectionPool::Lease`, which returns it when the transfer ends. Don't keep
+  a raw pointer or reference into a locked container after its lock is
+  released.
+- **No lock is held across a callback, a libibverbs call, or a HIP call.** A
+  callback can call back into the library, and a verbs or HIP call can take a
+  long time. `initWith()` and `shutdownInstance()` are the exception: they
+  hold `Current::initMutex`, which nothing else takes, so they run one at a
+  time. `AbandonedCopies` holds its lock across `eventQuery()`, which doesn't
+  wait, and never with another lock.
+- **Take locks in this order**, and only those a step needs:
+  `Current::initMutex`, then `Current::mutex`, `BufferMap`'s, and
+  `ConnectionPool`'s.
+- **Don't wait for something the calling thread may hold.** A callback runs
+  on the thread of the transfer that called it, so a transfer started from a
+  callback can't wait for a connection: `ConnectionPool::acquire()` returns
+  `Busy` to a thread that already holds a lease. Any new wait needs the same
+  care.
+- **Don't call a public function from inside the library.** It would look up
+  the current instance again, and could get a different one from the call
+  it's part of. Pass the `Instance` the call found to whatever needs it.
 - **Test concurrency changes with ThreadSanitizer** (see
-  [C and C++](#c-and-c)), and add a new serialized function to the tests in
+  [C and C++](#c-and-c)), and add a new public function to the tests in
   [`test/unit/test-thread-safety.cpp`](test/unit/test-thread-safety.cpp),
-  including the list of functions that a callback can't call.
+  including the one whose callback calls every function.
 
 ## C++ code
 
@@ -400,8 +416,7 @@ buffer registration, and shutdown are setup, and can afford more.
 - **Keep the hot path lean.** Avoid heap allocations, copying the payload (the
   host-staged fallback is the only path that copies it), string formatting and
   logging on success, system calls that aren't needed, and HIP calls that
-  synchronize. Don't add locks without a reason, and hold them briefly. The
-  API lock is the exception: it's held for a whole call by design (see
+  synchronize. Don't add locks without a reason, and hold them briefly (see
   [Thread safety](#thread-safety)).
 - **Modern C++ is compatible with this.** `std::unique_ptr`, `std::span`, and
   `std::string_view` cost nothing over their C equivalents. Watch for the

@@ -367,9 +367,9 @@ private:
     hipObj::Platform platform_;
 };
 
-/* initWith() with config, platform, and options, holding the API lock as
- * hipObjInit() does. hipObjInit() always uses the system platform, so
- * this is how a test initializes the library with fakes. */
+/* initWith() with config, platform, and options. hipObjInit() always
+ * uses the system platform, so this is how a test initializes the library
+ * with fakes. */
 hipObjError_t initWithPlatform(const hipObjConfig_t &config, std::shared_ptr<const hipObj::Platform> platform,
                                const hipObj::Options &options = {});
 

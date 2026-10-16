@@ -43,51 +43,60 @@ extern "C" {
 /*!
  * @defgroup threads Thread Safety
  *
- * hipObject can be called from any number of threads. Each function's
- * documentation says which of these it is:
+ * Every hipObject function can be called from any thread at any time,
+ * including from the hipObjOps_t callbacks, and calls on different
+ * threads run at the same time. A call waits for another only briefly,
+ * while the other changes something that both use, such as the list of
+ * registered buffers, with two exceptions: a transfer can wait for an
+ * RDMA connection (see below), and calls to hipObjInit() and
+ * hipObjShutdown() run one at a time.
  *
- * - **Serialized** functions use the library's state: whether it's
- *   initialized, the registered buffers, and the RDMA connection. They
- *   run one at a time across the whole process. Each one takes a
- *   library-wide lock and holds it until it returns, so a serialized
- *   call waits for the one in progress, on any thread, to finish.
- * - **Concurrent** functions don't use the library's state. They can be
- *   called from any thread at any time, including while a serialized
- *   function runs and from a callback. As with any C function, calls that
- *   run at the same time mustn't share a buffer that one of them writes
- *   to, or a token that one of them releases.
+ * **Transfers.** hipObjGet() and hipObjPut() calls run at the same time
+ * as each other, and as every other call. Each transfer uses an RDMA
+ * connection of its own, from a set that hipObjInit() creates. The
+ * HIPOBJ_MAX_TRANSFERS environment variable sets how many it creates,
+ * and so how many transfers can be in progress at once: a whole number
+ * from 1 to 1024. A value that isn't one is ignored, leaving the default
+ * of 16. A transfer that starts while every connection is in use waits
+ * for one to be free.
  *
- * Since serialized calls run one at a time, only one transfer is in
- * progress at a time, and calling hipObject from more threads doesn't
- * move data any faster. A call can also wait a long time for another
- * thread's transfer, which holds the lock for as long as the transfer
- * takes: while the application's callbacks send the S3 request and wait
- * for the response, while hipObject copies the buffer through host
- * memory (for a buffer that the NIC can't reach directly), and while it
- * waits for the RDMA transfer to complete.
+ * **Callbacks.** A callback can call any function, including hipObjGet()
+ * and hipObjPut(). A transfer that a callback starts doesn't wait for a
+ * connection, since the one it would wait for could be the one the
+ * callback's own transfer holds: if none is free, it returns hipObjBusy.
+ * A callback that waits for another thread's transfer can wait forever
+ * for the same reason, and hipObject can't detect it.
  *
- * hipObjShutdown() waits for the serialized call in progress to finish.
- * Calls made after it, on any thread, that need an initialized library
- * fail with hipObjNotInitialized until hipObjInit() is called again.
+ * **Buffers.** hipObjBufDeregister() returns hipObjBusy, and leaves the
+ * buffer registered, while another call is using the buffer: a transfer,
+ * including the one whose callback deregisters it, hipObjBufSync(), or
+ * hipObjGetRdmaToken(). Calls on other buffers don't wait for each
+ * other. As with any C function, calls that run at the same time mustn't
+ * share memory that one of them writes to: overlapping parts of a
+ * registered buffer, or a token that one of them releases. For a buffer
+ * that's staged through host memory (see hipObjBufSync()), hipObjPut()
+ * and HIPOBJ_SYNC_TO_HOST write the staging buffer, so they count as
+ * writing the part of the buffer they use.
  *
- * **Callbacks.** hipObjGet() and hipObjPut() run the hipObjOps_t
- * callbacks with the lock held. A callback can call concurrent
- * functions. If it calls a serialized function, that function returns
- * hipObjInvalidValue instead of waiting for a lock its own thread holds.
- * A callback also mustn't wait for another thread that's calling a
- * serialized function, since that thread is waiting for the lock:
- * neither can continue, and hipObject can't detect it.
+ * **Shutdown.** hipObjShutdown() doesn't wait for the calls in progress.
+ * They finish normally, and hipObject releases its RDMA resources and
+ * buffer registrations when the last of them returns. A transfer that's
+ * waiting for a connection returns hipObjNotInitialized. Calls that start
+ * after hipObjShutdown(), on any thread, and need an initialized library
+ * fail with hipObjNotInitialized until hipObjInit() is called again,
+ * which can be before the earlier calls have finished.
  *
- * **Transfers made of several calls.** The lock covers one call, not a
- * sequence of calls. A transfer that the application drives itself,
- * with hipObjGetRdmaToken(), its own S3 request, and hipObjBufSync(), is
- * several calls, and other threads' calls can run between them.
- * hipObject uses one RDMA connection for every transfer, so the
- * application must make sure that such a transfer doesn't overlap any
- * other transfer, on any thread.
- *
- * Serializing the library is how hipObject works now, not a promise: a
- * later release may run transfers concurrently.
+ * **Transfers made of several calls.** A transfer that the application
+ * drives itself, with hipObjGetRdmaToken(), its own S3 request, and
+ * hipObjBufSync(), is several calls, and hipObject doesn't know that the
+ * transfer is in progress between them. Other threads' calls can run
+ * between them, and nothing keeps those from deregistering the buffer or
+ * shutting hipObject down: the application must keep the buffer
+ * registered, and hipObject initialized, until the transfer ends. Every
+ * token from hipObjGetRdmaToken() names the same RDMA connection, so the
+ * application must also make sure that such transfers don't overlap
+ * each other. They can overlap hipObjGet() and hipObjPut() transfers,
+ * which use connections of their own.
  */
 
 /* -------------------------------------------------------
@@ -126,9 +135,12 @@ typedef enum {
     hipObjSizeTooLarge,
     hipObjInternalError,
     /*!
-     * The buffer is in use: a staging copy of it that timed out is still
-     * running (see hipObjBufSync()). Try again later. hipObject added
-     * this code; cuObject doesn't have it.
+     * The buffer or connection is in use. A staging copy of the buffer
+     * that timed out is still running (see hipObjBufSync()); another
+     * call is using a buffer that hipObjBufDeregister() was given; or a
+     * transfer started from a callback found every RDMA connection in
+     * use (see @ref threads). Try again later. hipObject added this
+     * code; cuObject doesn't have it.
      */
     hipObjBusy,
 } hipObjOpError_t;
@@ -146,7 +158,6 @@ typedef struct {
 /*!
  * @brief Return a human-readable string for an
  *        operation error code
- * @concurrent
  * @ingroup error
  */
 HIPOBJ_API const char *hipObjGetErrorString(hipObjOpError_t err);
@@ -169,8 +180,7 @@ typedef void *hipObjHandle_t;
  * and receive RDMA reply tags from the server.  This
  * mirrors cuObject's CUObjOps_t pattern.
  *
- * The callbacks run while hipObject holds its API lock,
- * so they can't call serialized functions; see
+ * The callbacks can call any hipObject function; see
  * @ref threads.
  *
  * @ingroup core
@@ -236,7 +246,6 @@ typedef struct {
  *
  * @param config  Pointer to configuration struct
  * @return hipObjError_t
- * @serialized
  * @ingroup core
  */
 HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t *config);
@@ -247,11 +256,16 @@ HIPOBJ_API hipObjError_t hipObjInit(hipObjConfig_t *config);
  * Releases all RDMA resources.  All registered
  * buffers are implicitly deregistered.
  *
+ * It doesn't wait for calls in progress on other
+ * threads, or for the transfer whose callback calls
+ * it. They finish normally, and the resources they
+ * use are released when the last of them returns
+ * (see @ref threads).
+ *
  * A staging buffer that a copy that timed out may
  * still use (see hipObjBufSync()) isn't freed.
  *
  * @return hipObjError_t
- * @serialized
  * @ingroup core
  */
 HIPOBJ_API hipObjError_t hipObjShutdown(void);
@@ -272,7 +286,6 @@ HIPOBJ_API hipObjError_t hipObjShutdown(void);
  * @param devPtr  Pointer returned by hipMalloc
  * @param size    Size of the buffer in bytes
  * @return hipObjError_t
- * @serialized
  * @ingroup buffer
  */
 HIPOBJ_API hipObjError_t hipObjBufRegister(void *devPtr, size_t size);
@@ -288,7 +301,6 @@ HIPOBJ_API hipObjError_t hipObjBufRegister(void *devPtr, size_t size);
  * @param hostPtr  Pointer to CPU-accessible memory
  * @param size     Size of the buffer in bytes
  * @return hipObjError_t
- * @serialized
  * @ingroup buffer
  */
 HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void *hostPtr, size_t size);
@@ -296,16 +308,17 @@ HIPOBJ_API hipObjError_t hipObjBufRegisterHost(void *hostPtr, size_t size);
 /*!
  * @brief Deregister a previously registered buffer
  *
- * While a staging copy of the buffer that timed out
- * is still running (see hipObjBufSync()), this
- * returns hipObjBusy and leaves the buffer
- * registered. Call it again once the copy has
- * finished, and don't free the buffer until then.
+ * While another call is using the buffer (see
+ * @ref threads), or a staging copy of the buffer
+ * that timed out is still running (see
+ * hipObjBufSync()), this returns hipObjBusy and
+ * leaves the buffer registered. Call it again once
+ * the call or the copy has finished, and don't free
+ * the buffer until then.
  *
  * @param devPtr  Pointer previously passed to
  *                hipObjBufRegister or hipObjBufRegisterHost
  * @return hipObjError_t
- * @serialized
  * @ingroup buffer
  */
 HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
@@ -329,6 +342,11 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * buffer is still running when you call this. When it
  * returns hipObjSuccess, the data is in the buffer.
  *
+ * If every RDMA connection is in use by other
+ * transfers, this waits for one to be free, or, if
+ * it's called from a callback, returns hipObjBusy
+ * (see @ref threads).
+ *
  * For a buffer that's staged through host memory (see
  * hipObjBufSync()), if the copy into the buffer doesn't
  * finish within the staging timeout (the
@@ -345,7 +363,6 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * @param ops     S3 SDK callbacks
  * @param ctx     User context passed to callbacks
  * @return hipObjError_t
- * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t size, off_t offset,
@@ -367,6 +384,11 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * for example with hipStreamSynchronize(), before you
  * call this.
  *
+ * If every RDMA connection is in use by other
+ * transfers, this waits for one to be free, or, if
+ * it's called from a callback, returns hipObjBusy
+ * (see @ref threads).
+ *
  * For a buffer that's staged through host memory (see
  * hipObjBufSync()), if the copy out of the buffer
  * doesn't finish within the staging timeout (the
@@ -383,7 +405,6 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * @param ops     S3 SDK callbacks
  * @param ctx     User context passed to callbacks
  * @return hipObjError_t
- * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset,
@@ -423,7 +444,6 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
  * example with hipStreamSynchronize(). Before HIPOBJ_SYNC_TO_DEVICE, make
  * sure that no GPU work that reads or writes the buffer is still running.
  *
- * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction);
@@ -437,14 +457,12 @@ HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, 
  * Returns hipObjBusy while a staging copy of the buffer that timed out
  * is still running (see hipObjBufSync()).
  *
- * @serialized
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjGetRdmaToken(const void *devPtr, size_t size, int op, char **outToken);
 
 /*!
  * @brief Release a token allocated by hipObjGetRdmaToken()
- * @concurrent
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char *token);
@@ -455,7 +473,6 @@ HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char *token);
  * On success writes the HTTP-style reply code (200, 204, 206, 501)
  * to @p httpCode.
  *
- * @concurrent
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char *reply, size_t replyLen, int *httpCode);
@@ -467,14 +484,12 @@ HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char *reply, size_t replyLen
  * carries an IPv4-mapped RoCEv2 suffix.  Returns hipObjSuccess with
  * an empty string when no address is encoded.
  *
- * @concurrent
  * @ingroup io
  */
 HIPOBJ_API hipObjError_t hipObjTokenClientNic(const char *token, char *nicIp, size_t nicIpLen);
 
 /*!
  * @brief Return the library version as a string
- * @concurrent
  * @ingroup core
  */
 HIPOBJ_API const char *hipObjGetVersionString(void);

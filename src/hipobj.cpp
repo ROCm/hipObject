@@ -48,10 +48,6 @@ namespace {
      * its type */
     constexpr hipObjError_t kExceptionError = makeError(hipObjInternalError);
 
-    /* Returned by a locked entry point when a callback calls it, where taking
-     * the API lock again would deadlock (see ApiGuard) */
-    constexpr hipObjError_t kReentryError = makeError(hipObjInvalidValue);
-
     /* True when [offset, offset + size) lies inside a registration of regSize
      * bytes. Compares without computing offset + size, which could wrap. */
     bool rangeInRegistration(off_t offset, size_t size, size_t regSize)
@@ -86,6 +82,22 @@ namespace {
         }
         if (result == BufferMap::RegisterResult::AlreadyRegistered) {
             return makeError(hipObjBufAlreadyRegistered);
+        }
+        return makeError(hipObjRdmaError);
+    }
+
+    /* What a transfer returns when it can't lease a connection */
+    hipObjError_t acquireError(ConnectionPool::AcquireError err)
+    {
+        if (err == ConnectionPool::AcquireError::Closed) {
+            /* The pool belongs to an instance that hipObjShutdown() has
+             * removed */
+            return makeError(hipObjNotInitialized);
+        }
+        if (err == ConnectionPool::AcquireError::Busy) {
+            /* The transfer was started from another transfer's callback,
+             * and every connection is leased */
+            return makeError(hipObjBusy);
         }
         return makeError(hipObjRdmaError);
     }
@@ -264,14 +276,14 @@ namespace {
     hipObjError_t runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
                                   off_t offset, const hipObjOps_t &ops, void *ctx)
     {
-        /* Waits for a connection if every one is leased. The lease returns
-         * it when it's destroyed, after the transfer, resetting it if it
-         * was connected. A pool that's closed belongs to an instance that
-         * hipObjShutdown() has removed. */
+        /* Waits for a connection if every one is leased, unless this thread
+         * already holds one. The lease returns it when it's destroyed, after
+         * the transfer, resetting it if it was connected. No lock is held
+         * while the transfer runs, so the callbacks can call any public
+         * function. */
         auto acquired = instance.pool.acquire();
         if (const auto *err = std::get_if<ConnectionPool::AcquireError>(&acquired)) {
-            return makeError(*err == ConnectionPool::AcquireError::Closed ? hipObjNotInitialized
-                                                                          : hipObjRdmaError);
+            return acquireError(*err);
         }
         auto &lease = std::get<ConnectionPool::Lease>(acquired);
 
@@ -348,10 +360,6 @@ hipObjError_t
 hipObjInit(hipObjConfig_t *config)
 // NOLINTEND(misc-const-correctness)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     // flags is reserved, and -1 is the only negative gpuDevice
     if (config == nullptr || config->flags != 0 || config->gpuDevice < -1) {
         return hipObj::makeError(hipObjInvalidValue);
@@ -376,10 +384,6 @@ catch (...) {
 hipObjError_t
 hipObjShutdown(void)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     hipObj::shutdownInstance();
     return hipObj::makeError(hipObjSuccess);
 }
@@ -390,10 +394,6 @@ catch (...) {
 hipObjError_t
 hipObjBufRegister(void *devPtr, size_t size)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
@@ -414,10 +414,6 @@ catch (...) {
 hipObjError_t
 hipObjBufRegisterHost(void *hostPtr, size_t size)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
@@ -436,10 +432,6 @@ catch (...) {
 hipObjError_t
 hipObjBufDeregister(void *devPtr)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
@@ -457,8 +449,8 @@ try {
     if (result == hipObj::BufferMap::DeregisterResult::NotRegistered) {
         return hipObj::makeError(hipObjBufNotRegistered);
     }
-    /* Busy: a staging copy that timed out is still using the buffer. No
-     * other call can be, since this one holds the API lock. */
+    /* Busy: another call, such as a transfer, or a staging copy that timed
+     * out, is still using the buffer */
     return hipObj::makeError(hipObjBusy);
 }
 catch (...) {
@@ -473,10 +465,6 @@ hipObjGet([[maybe_unused]] hipObjHandle_t handle, void *devPtr, size_t size, off
           void *ctx)
 // NOLINTEND(misc-const-correctness)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
@@ -511,10 +499,6 @@ hipObjPut([[maybe_unused]] hipObjHandle_t handle, const void *devPtr, size_t siz
           hipObjOps_t *ops, void *ctx)
 // NOLINTEND(misc-const-correctness)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
@@ -544,10 +528,6 @@ catch (...) {
 hipObjError_t
 hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
@@ -576,10 +556,6 @@ catch (...) {
 hipObjError_t
 hipObjGetRdmaToken(const void *devPtr, size_t size, int op, char **outToken)
 try {
-    hipObj::ApiGuard guard;
-    if (!guard.owns()) {
-        return hipObj::kReentryError;
-    }
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);

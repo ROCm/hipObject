@@ -17,6 +17,14 @@
 
 namespace hipObj {
 
+namespace {
+
+    /* The number of leases the calling thread holds, from any pool. Each
+     * thread has its own, so it needs no lock. */
+    thread_local size_t t_leasesHeld = 0;
+
+} // namespace
+
 ConnectionPool::ConnectionPool(std::shared_ptr<const RdmaDevice> device, size_t count)
     : device_(std::move(device))
 {
@@ -33,10 +41,18 @@ ConnectionPool::ConnectionPool(std::shared_ptr<const RdmaDevice> device, size_t 
     live_ = slots_.size();
 }
 
+ConnectionPool::Lease::Lease(ConnectionPool &pool, size_t index) noexcept : pool_(&pool), index_(index)
+{
+    ++t_leasesHeld;
+}
+
+/* A lease that's been moved from was never counted by the move, so it
+ * isn't uncounted either */
 ConnectionPool::Lease::~Lease()
 {
     if (pool_ != nullptr) {
         pool_->release(index_, connected_);
+        --t_leasesHeld;
     }
 }
 
@@ -57,12 +73,14 @@ std::variant<ConnectionPool::Lease, ConnectionPool::AcquireError>
 ConnectionPool::acquire()
 {
     std::unique_lock<std::mutex> lock(mutex_);
-    returned_.wait(lock, [this] { return closed_ || !free_.empty() || live_ == 0; });
+    if (t_leasesHeld == 0) {
+        returned_.wait(lock, [this] { return closed_ || !free_.empty() || live_ == 0; });
+    }
     if (closed_) {
         return AcquireError::Closed;
     }
     if (free_.empty()) {
-        return AcquireError::NoConnections;
+        return live_ == 0 ? AcquireError::NoConnections : AcquireError::Busy;
     }
     const size_t index = free_.back();
     free_.pop_back();
