@@ -213,16 +213,32 @@ typedef struct {
 
 /*!
  * @brief Configuration for hipObject initialization
+ *
+ * hipObject doesn't make S3 requests, so it doesn't use endpoint,
+ * region, accessKey, or secretKey: the application's S3 client does.
+ *
+ * gpuDevice is the HIP device index of the GPU that hipObject chooses
+ * the closest RDMA NIC to, or -1 for the calling thread's current
+ * device. On a host without a GPU, set it to -1, and set nicHint.
+ *
+ * nicHint lists the RDMA devices that hipObject can choose from, by
+ * name (as ibv_devices lists them), separated by commas; NULL or ""
+ * allows them all. If hipObject can't choose a NIC by where the GPU
+ * is, as on a host without one, it opens the device that nicHint
+ * names, which must then be a single name.
+ *
+ * Set the fields you don't use to 0 or NULL.
+ *
  * @ingroup core
  */
 typedef struct {
-    const char *endpoint;  /*!< S3 endpoint URL           */
-    const char *region;    /*!< AWS region                */
-    const char *accessKey; /*!< S3 access key (optional)  */
-    const char *secretKey; /*!< S3 secret key (optional)  */
+    const char *endpoint;  /*!< Not used                  */
+    const char *region;    /*!< Not used                  */
+    const char *accessKey; /*!< Not used                  */
+    const char *secretKey; /*!< Not used                  */
     uint32_t    flags;     /*!< Reserved, set to 0        */
     int         gpuDevice; /*!< HIP device index, or -1   */
-    const char *nicHint;   /*!< NIC name hint, or NULL    */
+    const char *nicHint;   /*!< RDMA NIC names, or NULL   */
 } hipObjConfig_t;
 
 /*! @brief RDMA token operation: server RDMA READ (client PUT) @ingroup io */
@@ -240,9 +256,25 @@ typedef struct {
 /*!
  * @brief Initialize the hipObject library
  *
- * Opens the RDMA device, selects the closest NIC to
- * the GPU, and prepares internal state.  Must be
- * called before any other hipObj* function.
+ * Selects the closest NIC to the GPU (see
+ * hipObjConfig_t), opens it, and creates the RDMA
+ * connections that transfers use (see @ref threads).
+ *
+ * hipObjGetErrorString(), hipObjGetVersionString(),
+ * hipObjParseRdmaReply(), hipObjTokenClientNic(), and
+ * hipObjPutRdmaToken() work without it, and
+ * hipObjShutdown() does nothing without it. The other
+ * functions return hipObjNotInitialized until it has
+ * succeeded.
+ *
+ * Returns hipObjInvalidValue if config is NULL, flags
+ * isn't 0, or gpuDevice is below -1 or names a GPU that
+ * doesn't exist; hipObjAlreadyInitialized if hipObject
+ * is already initialized; hipObjNicNotFound if there's
+ * no NIC to use; and hipObjRdmaError if libibverbs
+ * doesn't load, a HIP call fails (hipError says which
+ * error), or the NIC can't be opened or the connections
+ * created.
  *
  * @param config  Pointer to configuration struct
  * @return hipObjError_t

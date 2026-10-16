@@ -11,8 +11,9 @@ cmake --build build
 ctest --test-dir build -R 'test-rdma-token|test-rdma-header' --output-on-failure
 ```
 
-Covers token header formatting (`token:buf:size`), numeric
-`x-amz-rdma-reply` parsing, and GID-to-NIC extraction.
+Covers token encoding and decoding (the header carries the 88-hex-digit
+token alone, with no `:`-separated suffix), `x-amz-rdma-reply` parsing,
+and GID-to-NIC extraction.
 
 ## Layer 2 — hipObject smoke (GPU + NIC, no S3)
 
@@ -125,4 +126,10 @@ adapter.
 ## CI limitations
 
 GitHub Actions ROCm containers have no RDMA NIC or AIStor endpoint. Layer 1
-runs in CI; Layers 2–3 require lab hardware or a self-hosted runner.
+runs in CI. The emulated-hardware workflows
+(`.github/workflows/hipobject-hardware-test-*.yml`) run
+`minio-getput-rdma` under QEMU, on rocm-ernic's emulated ionic NIC (and,
+for GPU buffers, rocjitsu's emulated GPU), against
+`hipobj-rdma-test-server` or rocm-ernic's own S3 store. Layer 3 against
+AIStor, and real NICs and GPUs, still require lab hardware or a
+self-hosted runner.

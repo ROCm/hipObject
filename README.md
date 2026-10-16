@@ -38,22 +38,30 @@ vendor-neutral client for GPU-direct object storage.
 
 - Direct GPU VRAM to/from S3 object storage via RDMA
 - Zero-copy data path bypassing host CPU for payloads
-- S3 control plane with RDMA data plane split
-- NUMA-aware NIC selection (closest NIC to target GPU)
+- S3 control plane with RDMA data plane split: your S3 client makes
+  the requests, and hipObject provides the RDMA side
+- Automatic NIC selection (the NIC closest to the GPU, by PCI bus ID)
 - Supports Broadcom Thor-2 (`bnxt_re`) and AMD Pensando
   ionic (`ionic_rdma`) RDMA NICs
 - dmabuf-based GPU memory export for RDMA registration
-- Host-staged fallback when dmabuf is unavailable
+- Host-staged fallback when the NIC can't register GPU memory
+- Host memory buffers, including on hosts without a GPU
+- Thread-safe API, with concurrent transfers
 - Wire-compatible with cuObject `x-amz-rdma-token` protocol
 
-## Supported S3 Operations
+## Transfers
 
-| Operation    | Description                      |
-| ------------ | -------------------------------- |
-| GET          | Fetch object to GPU VRAM         |
-| PUT          | Store GPU VRAM to object         |
-| UPLOAD_PART  | Chunked upload (multipart)       |
-| RANGE_GET    | Byte-range fetch from object     |
+hipObject doesn't make S3 requests. Your S3 client sends each request,
+with an RDMA token from hipObject in its `x-amz-rdma-token` header, and
+the server moves the data by RDMA:
+
+| Call          | Your S3 request                                | The server                    |
+| ------------- | ---------------------------------------------- | ----------------------------- |
+| `hipObjGet()` | GetObject, for a whole object or a byte range  | RDMA WRITEs into your buffer  |
+| `hipObjPut()` | PutObject, or UploadPart of a multipart upload | RDMA READs from your buffer   |
+
+The request selects the object, and the part of it, to transfer; the
+token only describes your buffer.
 
 ## Requirements
 
@@ -66,58 +74,150 @@ vendor-neutral client for GPU-direct object storage.
 - Linux kernel 6.18+ (for `ionic_rdma` driver)
 - CMake 3.25.2+
 - C++20 compiler (e.g., g++ or amdclang++)
+- Optional: libcurl's development files, for the examples' `--live` mode
 
 ### Hardware
 
-- AMD Instinct GPU (MI200 / MI300 series)
+- AMD Instinct GPU (MI200 / MI300 series), for transfers to and from
+  GPU memory
 - Broadcom Thor-2 or AMD Pensando Pollara 400 NIC
 - RoCEv2-capable network fabric with PFC/ECN
+- An S3 server that supports RDMA transfers (see
+  [docs/interop.rst](docs/interop.rst))
 
 ## Building
 
 See [INSTALL.md](INSTALL.md) for detailed build instructions.
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
+sudo cmake --install build
 ```
+
+The tests don't need a GPU, an RDMA NIC, or an S3 server. hipObject
+installs into the ROCm installation (`ROCM_PATH`) by default.
 
 ## Quick Start
 
+This program reads an object into GPU memory. The two callbacks are
+where your S3 client goes; until you fill them in, `hipObjGet()` fails
+with `hipObjS3Error`. The programs in [`examples/`](examples/) fill
+them in with libcurl.
+
 ```c
+#include <stdio.h>
+
+#include <hip/hip_runtime_api.h>
 #include <hipobj.h>
-#include <hip/hip_runtime.h>
 
-void* gpu_buf;
-hipMalloc(&gpu_buf, 64 * 1024 * 1024);
+#define BUF_SIZE ((size_t)64 * 1024 * 1024)
 
-hipObjConfig_t config = {
-  .endpoint = "https://s3.example.com",
-  .region   = "us-east-1",
-};
-hipObjInit(&config);
-hipObjBufRegister(gpu_buf, 64 * 1024 * 1024);
+/* hipObject doesn't make S3 requests: your S3 client does, in these two
+ * callbacks. ctx is the pointer passed to hipObjGet(). */
+static int
+sendRequest(void *ctx, const char *token, size_t tokenLen)
+{
+    /* Send the S3 request, such as GET /bucket/object, with the tokenLen
+     * characters at token as its x-amz-rdma-token header, and wait for
+     * the response. Return 0 on success. */
+    (void)ctx;
+    (void)token;
+    (void)tokenLen;
+    return -1;
+}
 
-hipObjHandle_t handle = /* from S3 SDK */;
-hipObjGet(handle, gpu_buf, 64 * 1024 * 1024, 0);
+static int
+recvReply(void *ctx, char *reply, size_t *replyLen)
+{
+    /* Copy the response's x-amz-rdma-reply header into reply, which has
+     * room for *replyLen characters, and set *replyLen to its length.
+     * Return 0 on success. */
+    (void)ctx;
+    (void)reply;
+    (void)replyLen;
+    return -1;
+}
 
-hipObjBufDeregister(gpu_buf);
-hipObjShutdown();
-hipFree(gpu_buf);
+int
+main(void)
+{
+    /* Use GPU 0 and the RDMA NIC closest to it */
+    hipObjConfig_t config = {.gpuDevice = 0, .nicHint = NULL};
+    hipObjError_t  err    = hipObjInit(&config);
+    if (err.opError != hipObjSuccess) {
+        fprintf(stderr, "hipObjInit: %s\n", hipObjGetErrorString(err.opError));
+        return 1;
+    }
+
+    void *gpuBuf = NULL;
+    if (hipMalloc(&gpuBuf, BUF_SIZE) != hipSuccess) {
+        fprintf(stderr, "hipMalloc failed\n");
+        hipObjShutdown();
+        return 1;
+    }
+
+    err = hipObjBufRegister(gpuBuf, BUF_SIZE);
+    if (err.opError == hipObjSuccess) {
+        /* Read BUF_SIZE bytes into the start of gpuBuf. The handle isn't
+         * used, and ctx (here NULL) is passed to the callbacks. */
+        hipObjOps_t ops = {.sendRequest = sendRequest, .recvReply = recvReply};
+        err             = hipObjGet(NULL, gpuBuf, BUF_SIZE, 0, &ops, NULL);
+
+        /* If a copy through host memory timed out, it can still write
+         * gpuBuf, and deregistering returns hipObjBusy until it's done.
+         * Don't free memory that's still in use: leave it to the end of
+         * the process. */
+        if (hipObjBufDeregister(gpuBuf).opError != hipObjSuccess) {
+            gpuBuf = NULL;
+        }
+    }
+    if (err.opError != hipObjSuccess) {
+        fprintf(stderr, "hipObject: %s\n", hipObjGetErrorString(err.opError));
+    }
+
+    if (gpuBuf != NULL) {
+        (void)hipFree(gpuBuf);
+    }
+    hipObjShutdown();
+    return err.opError == hipObjSuccess ? 0 : 1;
+}
 ```
 
-For CPU-based transfers, allocate a host buffer (for example with `malloc()` or
-`hipHostMalloc()`) and register it with `hipObjBufRegisterHost()`. On GPU-less
-hosts, set `config.nicHint` to the RDMA device name so `hipObjInit()` can open
-that NIC without GPU topology discovery.
+Build it with CMake, against the installed hipObject:
+
+```cmake
+cmake_minimum_required(VERSION 3.25.2)
+project(quickstart LANGUAGES C)
+
+find_package(hip CONFIG REQUIRED)
+find_package(hipobj CONFIG REQUIRED)
+
+add_executable(quickstart quickstart.c)
+target_link_libraries(quickstart PRIVATE hipobj::hipobj hip::host)
+```
+
+Configure it with `-DCMAKE_PREFIX_PATH=/opt/rocm`, or wherever ROCm and
+hipObject are installed. The header is installed as
+`include/hipobj/hipobj.h`, and `hipobj::hipobj` adds its directory to
+the include path. The program uses HIP itself, so it links `hip::host`
+too.
+
+For transfers to and from host memory, allocate a host buffer (for
+example with `malloc()` or `hipHostMalloc()`) and register it with
+`hipObjBufRegisterHost()`. On a host without a GPU, set
+`config.gpuDevice` to -1 and `config.nicHint` to the RDMA device's name
+(as `ibv_devices` lists it), so `hipObjInit()` opens that NIC without
+looking for a GPU.
 
 ## Architecture
 
 hipObject separates control and data planes:
 
 - **Control plane**: Standard S3 REST requests augmented
-  with `x-amz-rdma-token` / `x-amz-rdma-reply` headers
+  with `x-amz-rdma-token` / `x-amz-rdma-reply` headers,
+  made by the application's S3 client
 - **Data plane**: RDMA READ/WRITE over RoCEv2 RC transport
   directly between GPU VRAM and storage server buffers
 
@@ -126,23 +226,31 @@ than DC (Dynamic Connection), since DC is exclusive to
 Mellanox/NVIDIA ConnectX hardware. A server-side [adapter](https://github.com/versity/versitygw/tree/main/cuwrapper)
 bridges RC clients to cuObject's DC-based server library.
 
-See [docs/interop.rst](docs/interop.rst) for the cuObject
-v1.2.0 compatibility matrix and testing guide.
+See [docs/architecture.rst](docs/architecture.rst) for how the
+library works, and [docs/interop.rst](docs/interop.rst) for the
+cuObject v1.2.0 compatibility matrix and testing guide.
 
 ## Testing
 
-- **Unit tests**: `ctest -R test-rdma-token` (no hardware)
-- **RC test server**: `hipobj-rdma-test-server` (see interop doc)
-- **Live examples**: `get-object --live http://host:9000` with libcurl
+- **Unit tests**: `ctest --test-dir build` runs them all, without a
+  GPU, an RDMA NIC, or an S3 server
+- **RC test server**: `hipobj-rdma-test-server`, an S3 server that
+  moves data by RDMA (see [docs/interop.rst](docs/interop.rst))
+- **Examples**: `get-object` and `put-object`, which need a GPU and an
+  RDMA NIC; with libcurl, `get-object 4096 --live http://host:9000`
+  runs against a server (see [examples/README.md](examples/README.md))
 - **MinIO bridge**: `-DHIPOBJ_MINIO_CLIENT=ON` (see
-  `integrations/minio-cpp/TESTING.md`)
+  [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md))
+- **Emulated hardware**: the `HW:` workflows above run the RDMA data
+  path on rocm-ernic's emulated ionic NIC and rocjitsu's emulated GPU,
+  under QEMU
 
 ## Documentation
 
 Full documentation is published at
 <https://rocm.github.io/hipObject/>. Its source lives in the
 [`docs/`](docs/) directory and covers building, the API
-reference, and architecture.
+reference, architecture, and cuObject interoperability.
 
 ## License
 

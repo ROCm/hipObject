@@ -20,6 +20,10 @@ Optional
   against them. The library doesn't need them, since it loads
   libibverbs with ``dlopen``.
 - GTest (fetched automatically if not found)
+- libcurl development files (``libcurl4-openssl-dev`` or
+  ``libcurl-devel``), for the examples' ``--live`` mode.
+  Without them, the examples build with only their stub
+  mode.
 - Doxygen, Python 3, Sphinx, Breathe (for documentation)
 
 Run Time
@@ -38,19 +42,50 @@ Build Steps
 
 .. code-block:: bash
 
-   mkdir build && cd build
-   cmake .. \
-     -DCMAKE_BUILD_TYPE=Release \
-     -DHIPOBJ_BNXT=ON \
-     -DHIPOBJ_IONIC=OFF
+   cmake -B build -DCMAKE_BUILD_TYPE=Release
+   cmake --build build -j"$(nproc)"
 
-   make -j$(nproc)
-
-   # Run tests (requires GPU + RDMA NIC)
-   ctest --output-on-failure
+   # Run the tests (no GPU, RDMA NIC, or S3 server needed)
+   ctest --test-dir build --output-on-failure
 
    # Install (to ROCM_PATH)
-   sudo make install
+   sudo cmake --install build
+
+Add ``-DCMAKE_PREFIX_PATH=/opt/rocm`` if CMake doesn't find
+ROCm's packages. The tests need no hardware, and the ones that
+load the system's libibverbs skip if it isn't installed. The
+GPU-direct and RDMA data paths are tested by the
+emulated-hardware CI workflows, and on lab hardware (see
+:doc:`interop`).
+
+Using hipObject
+---------------
+
+A CMake project finds the installed hipObject with
+``find_package()``, and links the ``hipobj::hipobj`` target:
+
+.. code-block:: cmake
+
+   find_package(hip CONFIG REQUIRED)
+   find_package(hipobj CONFIG REQUIRED)
+
+   add_executable(app app.c)
+   target_link_libraries(app PRIVATE hipobj::hipobj hip::host)
+
+Configure it with ``CMAKE_PREFIX_PATH`` set to where ROCm and
+hipObject are installed, such as ``/opt/rocm``. The header is
+installed as ``include/hipobj/hipobj.h``, and the target adds
+its directory to the include path, so the code includes
+``<hipobj.h>``. The header is C, and C11 and C++11 code can
+include it. A program that calls HIP itself, as one that
+allocates GPU memory does, links ``hip::host`` too.
+
+The README's `Quick Start
+<https://github.com/ROCm/hipObject/blob/develop/README.md#quick-start>`_
+is a short program to start from. The examples, whose sources
+are installed in ``share/doc/hipobject<mm>/examples`` (see
+``HIPOBJ_INSTALL_EXAMPLES``, below), are complete programs
+that make their S3 requests with libcurl.
 
 CMake Options
 -------------
@@ -69,11 +104,15 @@ Option                           Default        Description
 ``HIPOBJ_BUILD_DOCS``            OFF            Build documentation
 ``HIPOBJ_DOCS_ONLY``             OFF            Docs targets only (no HIP)
 ``HIPOBJ_MINIO_CLIENT``          OFF            Build minio-cpp RDMA bridge
-``HIPOBJ_INTEGRATION_TESTS``     ON             Build RC test server
+``HIPOBJ_INTEGRATION_TESTS``     ON             Build RC test server (tests)
 ``HIPOBJ_FETCH_CUOBJECT_CLIENT`` OFF            Fetch libcuobjclient 1.2.0.59
 ``HIPOBJ_FIND_CUOBJECT_SERVER``  OFF            Find libcuobjserver + probe
 ``HIPOBJ_WERROR``                OFF            Treat warnings as errors
 ``HIPOBJ_USE_CODE_COVERAGE``     OFF            Build with code coverage
+``HIPOBJ_USE_SANITIZERS``        OFF            Build with a sanitizer
+``HIPOBJ_SANITIZER_TYPE``        address        Sanitizer to build with
+``HIPOBJ_USE_CLANG_TIDY``        OFF            Run clang-tidy while building
+``HIPOBJ_USE_IWYU``              OFF            Run IWYU while building
 ``ROCM_PATH``                    see below      Path to ROCm install
 ``ROCM_VERSION``                 detected       ROCm version
 ================================ ============== =============================
@@ -91,6 +130,14 @@ and pick the configuration at build time.
 built with, without compiler extensions. ``26`` needs CMake 3.30 or
 later, which is the first version that knows how to ask GCC
 (14 and later) and Clang for C++26.
+
+``HIPOBJ_BNXT`` and ``HIPOBJ_IONIC`` compile in the queue pair
+attributes for Broadcom Thor-2 and AMD Pensando NICs. Without
+them, hipObject still uses those NICs, with its generic
+attributes.
+
+``HIPOBJ_INTEGRATION_TESTS`` only has an effect when
+``BUILD_TESTING`` is on.
 
 ``HIPOBJ_INSTALL_EXAMPLES`` builds the example programs in the
 build tree (``examples/``) and installs their sources, with a
@@ -136,6 +183,16 @@ directory. Every instrumented program writes its profile to
 the profiles add up over runs, so delete ``coverage/profraw`` to start
 over. Since the programs write to the build directory, don't install
 or package a coverage build.
+
+``HIPOBJ_USE_SANITIZERS`` builds hipObject's own targets with the
+sanitizer that ``HIPOBJ_SANITIZER_TYPE`` names: ``address`` (the
+default), ``undefined``, or ``thread``. Use a separate build
+directory for each.
+
+``HIPOBJ_USE_CLANG_TIDY`` runs clang-tidy (19 or later) on
+hipObject's own code as it compiles. It needs Clang as the C++
+compiler. ``HIPOBJ_USE_IWYU`` runs include-what-you-use the same
+way; its suggestions don't fail the build.
 
 ``ROCM_PATH`` and ``ROCM_VERSION`` can also be set in the
 environment. If ``ROCM_PATH`` isn't set but ``ROCM_VERSION`` is,
@@ -381,7 +438,36 @@ toolchain:
 Environment Variables
 ---------------------
 
+When hipObject is configured:
+
 - ``ROCM_PATH``: Override the ROCm installation path.
 - ``ROCM_VERSION``: Override the ROCm version.
-- ``LD_LIBRARY_PATH``: Must include ROCm and rdma-core
-  library paths at runtime.
+
+When a program that uses hipObject runs:
+
+- ``LD_LIBRARY_PATH``: Only needed if the loader can't find
+  ROCm's libraries or ``libibverbs.so.1`` otherwise, such as
+  when they're installed outside the system's library
+  directories. The installed library finds the ROCm libraries
+  it was built with by itself.
+- ``HIPOBJ_NIC_HINT``: Read by the examples and the MinIO
+  bridge, not the library: the name of the RDMA device to use
+  (as ``ibv_devices`` lists it), which they pass to
+  ``hipObjInit()`` as ``nicHint``.
+- ``HIPOBJ_MAX_TRANSFERS``: How many transfers can run at
+  once, from 1 to 1024 (default 16).
+- ``HIPOBJ_STAGE_TIMEOUT_MS``: How long, in milliseconds, a
+  copy to or from a buffer that's staged through host memory
+  can take, up to 24 hours (default 30000).
+- ``HIPOBJ_DMABUF``: A value starting with ``0``, ``n``, or
+  ``N`` turns off dma-buf registration of GPU memory.
+- ``HIPOBJ_REQUIRE_GPU_DIRECT``: Any value but one starting
+  with ``0``, ``n``, or ``N`` makes ``hipObjBufRegister()``
+  fail rather than stage a GPU buffer through host memory.
+- ``HIPOBJ_RDMA_DEBUG``: Any value not starting with ``0``
+  reports failed dma-buf exports on stderr. The MinIO bridge
+  also reports where each of its failed transfers failed.
+
+The library reads the last five in ``hipObjInit()``, each time
+it runs, and ignores an invalid value, leaving the default
+(see :doc:`architecture`).
