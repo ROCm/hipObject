@@ -20,6 +20,7 @@
 #include "hipobj-warnings.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
+#include "require-libibverbs.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -301,6 +302,7 @@ TEST(LoadLibibverbsTest, LoadsWhatTheLibraryNeeds)
 {
     const std::unique_ptr<hipObj::LoadedVerbs> verbs = hipObj::loadLibibverbs();
     if (!verbs) {
+        ASSERT_FALSE(hipObjTest::libibverbsRequired()) << "libibverbs couldn't be loaded";
         GTEST_SKIP() << "libibverbs couldn't be loaded";
     }
 

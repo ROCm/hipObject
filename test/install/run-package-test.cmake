@@ -22,6 +22,9 @@
 #     and that the test programs aren't packaged
 #   - The package dependencies, which depend on the ROCm version and on
 #     the system libraries the installed programs link
+#   - That the package holding the library, and only that one,
+#     recommends libibverbs (except for RPM packages built with a CMake
+#     before 4.1, which can't)
 #   - That the package version includes the ROCm version
 #   - For RPM, that the runtime package provides the library's soname
 #     and that the packages don't own ROCm's directories
@@ -150,6 +153,14 @@ else()
   set(program_depends ${RUNTIME_RPM_DEPENDS})
 endif()
 
+# What the package holding the library recommends. Empty for an RPM
+# package built with a CMake before 4.1 (see HIPOBJInstall.cmake).
+if(GENERATOR STREQUAL "DEB")
+  set(library_recommends ${LIBRARY_DEB_RECOMMENDS})
+else()
+  set(library_recommends ${LIBRARY_RPM_RECOMMENDS})
+endif()
+
 if(SHARED)
   set(runtime_package hipobject)
   set(devel_package hipobject${devel_suffix})
@@ -161,6 +172,8 @@ if(SHARED)
     ${license_file})
   set(${runtime_package}_depends ${rocm_depends} ${program_depends})
   set(${runtime_package}_not_depends ${rocm_not_depends})
+  set(${runtime_package}_recommends ${library_recommends})
+  set(${runtime_package}_not_recommends)
 
   set(${devel_package}_files
     include/hipobj/hipobj.h
@@ -168,6 +181,8 @@ if(SHARED)
     ${cmake_package_files})
   set(${devel_package}_depends ${runtime_package})
   set(${devel_package}_not_depends)
+  set(${devel_package}_recommends)
+  set(${devel_package}_not_recommends ${library_recommends})
 else()
   set(runtime_package)
   set(devel_package hipobject-static${devel_suffix})
@@ -181,6 +196,8 @@ else()
   set(${devel_package}_depends ${rocm_depends})
   # The installed programs aren't packaged
   set(${devel_package}_not_depends ${rocm_not_depends} ${program_depends})
+  set(${devel_package}_recommends ${library_recommends})
+  set(${devel_package}_not_recommends)
 endif()
 
 # rocm_create_package() appends ROCM_LIBPATCH_VERSION to the version.
@@ -204,17 +221,36 @@ set(rocm_dirs
   ${INSTALL_PREFIX}/share
   ${INSTALL_PREFIX}/share/doc)
 
+# Turn a DEB relationship field into a list of package names, without
+# version constraints: "pkg (>= 1), a | b" -> "pkg;a;b"
+function(parse_deb_relations out_var text)
+  string(REGEX REPLACE "\\([^)]*\\)" "" text "${text}")
+  string(REGEX REPLACE "[ \t\n]" "" text "${text}")
+  string(REGEX REPLACE "[,|]" ";" text "${text}")
+  set(${out_var} "${text}" PARENT_SCOPE)
+endfunction()
+
+# Turn rpm's list of relationships, one "<name> [<op> <version>]" per
+# line, into a list of names
+function(parse_rpm_relations out_var text)
+  string(REGEX REPLACE " [^\n]*" "" text "${text}")
+  string(STRIP "${text}" text)
+  string(REPLACE "\n" ";" text "${text}")
+  set(${out_var} "${text}" PARENT_SCOPE)
+endfunction()
+
 # Read a package
 #
 # Sets, in the caller's scope:
-#   package_name     The package name
-#   package_version  The package version
-#   package_depends  The names of the packages and capabilities it
-#                    depends on, without version constraints
-#   package_provides The capabilities it provides (RPM only)
-#   package_files    The absolute paths of the files it contains
-#   package_dirs     The absolute paths of the directories it contains
-#                    (DEB) or owns (RPM)
+#   package_name       The package name
+#   package_version    The package version
+#   package_depends    The names of the packages and capabilities it
+#                      depends on, without version constraints
+#   package_recommends The same for what it recommends
+#   package_provides   The capabilities it provides (RPM only)
+#   package_files      The absolute paths of the files it contains
+#   package_dirs       The absolute paths of the directories it contains
+#                      (DEB) or owns (RPM)
 function(read_package package)
   set(files)
   set(dirs)
@@ -224,12 +260,12 @@ function(read_package package)
     run_command(name "read ${package}" ${DPKG_DEB} -f ${package} Package)
     run_command(version "read ${package}" ${DPKG_DEB} -f ${package} Version)
     run_command(depends "read ${package}" ${DPKG_DEB} -f ${package} Depends)
+    run_command(recommends "read ${package}"
+      ${DPKG_DEB} -f ${package} Recommends)
     run_command(listing "list ${package}" ${DPKG_DEB} -c ${package})
 
-    # "pkg (>= 1), a | b" -> "pkg;a;b"
-    string(REGEX REPLACE "\\([^)]*\\)" "" depends "${depends}")
-    string(REGEX REPLACE "[ \t\n]" "" depends "${depends}")
-    string(REGEX REPLACE "[,|]" ";" depends "${depends}")
+    parse_deb_relations(depends "${depends}")
+    parse_deb_relations(recommends "${recommends}")
 
     # <mode> <owner> <size> <date> <time> ./<path>[ -> <target>]
     string(REPLACE "\n" ";" listing "${listing}")
@@ -251,15 +287,15 @@ function(read_package package)
     run_command(version "read ${package}"
       ${RPM} -qp --queryformat "%{VERSION}" ${package})
     run_command(depends "read ${package}" ${RPM} -qp --requires ${package})
+    run_command(recommends "read ${package}"
+      ${RPM} -qp --recommends ${package})
     run_command(provides "read ${package}" ${RPM} -qp --provides ${package})
     run_command(listing "list ${package}"
       ${RPM} -qp --queryformat "[%{FILEMODES:perms} %{FILENAMES}\n]"
         ${package})
 
-    # One "<name> [<op> <version>]" per line
-    string(REGEX REPLACE " [^\n]*" "" depends "${depends}")
-    string(STRIP "${depends}" depends)
-    string(REPLACE "\n" ";" depends "${depends}")
+    parse_rpm_relations(depends "${depends}")
+    parse_rpm_relations(recommends "${recommends}")
     string(STRIP "${provides}" provides)
     string(REPLACE "\n" ";" provides "${provides}")
 
@@ -282,6 +318,7 @@ function(read_package package)
   set(package_name "${name}" PARENT_SCOPE)
   set(package_version "${version}" PARENT_SCOPE)
   set(package_depends "${depends}" PARENT_SCOPE)
+  set(package_recommends "${recommends}" PARENT_SCOPE)
   set(package_provides "${provides}" PARENT_SCOPE)
   set(package_files "${files}" PARENT_SCOPE)
   set(package_dirs "${dirs}" PARENT_SCOPE)
@@ -320,6 +357,19 @@ foreach(package IN LISTS packages)
   foreach(depend IN LISTS ${package_name}_not_depends)
     if(depend IN_LIST package_depends)
       fail("${what}: depends on ${depend}")
+    endif()
+  endforeach()
+
+  list(JOIN package_recommends ", " recommends_text)
+  foreach(recommend IN LISTS ${package_name}_recommends)
+    if(NOT recommend IN_LIST package_recommends)
+      fail("${what}: doesn't recommend ${recommend} (recommends "
+        "${recommends_text})")
+    endif()
+  endforeach()
+  foreach(recommend IN LISTS ${package_name}_not_recommends)
+    if(recommend IN_LIST package_recommends)
+      fail("${what}: recommends ${recommend}")
     endif()
   endforeach()
 

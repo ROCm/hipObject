@@ -17,6 +17,7 @@
 #include "dl-handle.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
+#include "require-libibverbs.h"
 #include "state.h"
 
 /* Google Test registers each test with a global constructor */
@@ -42,6 +43,7 @@ TEST(IbvLazyLoad, LibibverbsLoadsOnFirstUse)
 
     const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
     if (!platform) {
+        ASSERT_FALSE(hipObjTest::libibverbsRequired()) << "libibverbs couldn't be loaded";
         GTEST_SKIP() << "libibverbs couldn't be loaded";
     }
     EXPECT_TRUE(libibverbsIsLoaded());

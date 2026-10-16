@@ -40,6 +40,7 @@
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "rdma-topology.h"
+#include "require-libibverbs.h"
 #include "state.h"
 #include "transport.h"
 
@@ -577,6 +578,7 @@ TEST(PlatformTest, SystemPlatformIsTheSystem)
 {
     const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
     if (!platform) {
+        ASSERT_FALSE(hipObjTest::libibverbsRequired()) << "libibverbs couldn't be loaded";
         GTEST_SKIP() << "libibverbs couldn't be loaded";
     }
     EXPECT_EQ(hipObj::systemPlatform(), platform);

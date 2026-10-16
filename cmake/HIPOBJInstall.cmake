@@ -56,8 +56,6 @@ rocm_export_targets(
 # The packages depend on both the ROCm runtime and development
 # packages until there are separate release and development builds.
 #
-# libibverbs isn't a dependency, since hipObject loads it with dlopen().
-#
 # rocm-core is a meta-package all legacy ROCm packages depend on. It
 # doesn't exist in the current ROCm package repository, so suppress the
 # dependency on it that rocm-cmake adds.
@@ -88,6 +86,47 @@ if(BUILD_SHARED_LIBS)
     rocm_package_add_rpm_dependencies(DEPENDS ${HIPOBJ_RUNTIME_RPM_DEPENDS})
   endif()
 endif()
+
+# libibverbs is a weak dependency (Recommends), of the package that
+# holds the library: the runtime package, or a static build's one
+# package. hipObject loads it with dlopen(), by its soname
+# (libibverbs.so.1), so it needs the runtime package (libibverbs1 or
+# libibverbs) and not the development package. hipObjInit() fails
+# without it, but hipObject can be installed and built against without
+# it, such as on a build machine with no RDMA NIC. Debian's libibverbs1
+# recommends ibverbs-providers, which has the NIC drivers. The RPM
+# package names the soname, like its other dependencies.
+#
+# CPack only writes an RPM Recommends from CMake 4.1, so an RPM package
+# built with an earlier CMake doesn't recommend libibverbs. (Before 4.0,
+# CPack doesn't write any weak dependency, including the Suggests that
+# rocm_create_package() adds, since its check for rpmbuild's support of
+# them runs an rpm command it never finds.)
+if(BUILD_SHARED_LIBS)
+  set(HIPOBJ_LIBRARY_COMPONENT RUNTIME)
+else()
+  set(HIPOBJ_LIBRARY_COMPONENT DEVEL)
+endif()
+set(HIPOBJ_LIBIBVERBS_DEB libibverbs1)
+if(CMAKE_VERSION VERSION_LESS 4.1)
+  set(HIPOBJ_LIBIBVERBS_RPM)
+elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  set(HIPOBJ_LIBIBVERBS_RPM "libibverbs.so.1()(64bit)")
+else()
+  set(HIPOBJ_LIBIBVERBS_RPM "libibverbs.so.1")
+endif()
+# rocm_create_package() appends its own recommendations to the DEB one
+set(CPACK_DEBIAN_${HIPOBJ_LIBRARY_COMPONENT}_PACKAGE_RECOMMENDS
+  "${HIPOBJ_LIBIBVERBS_DEB}")
+if(HIPOBJ_LIBIBVERBS_RPM)
+  set(CPACK_RPM_${HIPOBJ_LIBRARY_COMPONENT}_PACKAGE_RECOMMENDS
+    "${HIPOBJ_LIBIBVERBS_RPM}")
+endif()
+# For the package tests (see test/install/CMakeLists.txt)
+set_property(GLOBAL PROPERTY
+  HIPOBJ_LIBRARY_DEB_RECOMMENDS "${HIPOBJ_LIBIBVERBS_DEB}")
+set_property(GLOBAL PROPERTY
+  HIPOBJ_LIBRARY_RPM_RECOMMENDS "${HIPOBJ_LIBIBVERBS_RPM}")
 
 # CPack license setup
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE.md")

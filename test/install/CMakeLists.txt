@@ -85,15 +85,21 @@ endif()
 
 # The directories added after this one declare the system libraries the
 # runtime package depends on (see hipobj_add_runtime_library_dependency()),
-# so write those once the whole project is configured
+# and HIPOBJInstall.cmake, included after them, declares what the
+# library's package recommends, so write those once the whole project is
+# configured
 function(hipobj_write_package_test_dependencies file)
   get_property(deb_depends GLOBAL PROPERTY HIPOBJ_RUNTIME_DEB_DEPENDS)
   get_property(rpm_depends GLOBAL PROPERTY HIPOBJ_RUNTIME_RPM_DEPENDS)
+  get_property(deb_recommends GLOBAL PROPERTY HIPOBJ_LIBRARY_DEB_RECOMMENDS)
+  get_property(rpm_recommends GLOBAL PROPERTY HIPOBJ_LIBRARY_RPM_RECOMMENDS)
   file(CONFIGURE
     OUTPUT ${file}
     CONTENT [[
 set(RUNTIME_DEB_DEPENDS "@deb_depends@")
 set(RUNTIME_RPM_DEPENDS "@rpm_depends@")
+set(LIBRARY_DEB_RECOMMENDS "@deb_recommends@")
+set(LIBRARY_RPM_RECOMMENDS "@rpm_recommends@")
 ]]
     @ONLY)
 endfunction()

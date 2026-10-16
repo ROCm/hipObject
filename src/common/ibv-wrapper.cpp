@@ -53,16 +53,18 @@ namespace {
         return true;
     }
 
-    /* Loads libibverbs, trying Debian and Ubuntu's x86-64 library
-     * directory when the loader's search path doesn't find it. Empty when
-     * neither loads. */
+    /* Loads libibverbs from the loader's search path. Empty when it doesn't
+     * load.
+     *
+     * Loads it by its soname, which the runtime package (libibverbs1 on
+     * Debian and Ubuntu, libibverbs on Fedora and RHEL) installs. The
+     * unversioned libibverbs.so is a link to it that only the development
+     * package installs. Don't fall back to that name: it only finds a
+     * library that this one doesn't when it names a different ABI version,
+     * which ibv-core.h's structures don't match. */
     DlHandle open_libibverbs()
     {
-        DlHandle handle(dlopen("libibverbs.so", RTLD_NOW));
-        if (!handle) {
-            handle.reset(dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW));
-        }
-        return handle;
+        return DlHandle(dlopen("libibverbs.so.1", RTLD_NOW));
     }
 
     /* Fills in funcs from libibverbs. False when a function that has to be
@@ -105,13 +107,16 @@ loadLibibverbs()
 {
     DlHandle library = open_libibverbs();
     if (!library) {
-        fprintf(stderr, "hipObj: Could not open libibverbs.so. RDMA disabled.\n");
+        /* dlerror()'s message names the library and says why it didn't load */
+        const char       *err      = dlerror();
+        const std::string errorStr = err != nullptr ? err : "unknown error";
+        fprintf(stderr, "hipObj: Could not load libibverbs: %s\n", errorStr.c_str());
         return nullptr;
     }
 
     LoadedVerbs::Funcs funcs{};
     if (!load_functions(funcs, library.get())) {
-        fprintf(stderr, "hipObj: Could not init IBV function table. RDMA disabled.\n");
+        fprintf(stderr, "hipObj: Could not init IBV function table.\n");
         return nullptr;
     }
 
