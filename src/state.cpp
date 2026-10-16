@@ -8,9 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -26,28 +24,30 @@
 #include "nic-seam.h"
 #include "no-destructor.h"
 #include "rdma-topology.h"
+#include "thread-safety.h"
 
 namespace hipObj {
 
 namespace {
 
     /* The current instance, and the locks that guard it. They're taken in
-     * the order they're declared. */
+     * the order they're declared, which the thread safety analysis
+     * checks. */
     struct Current {
         /* Held for the whole of initWith() and shutdownInstance(), so they
          * run one at a time. Calls that only read the instance never take
          * it. */
-        std::mutex initMutex{};
+        Mutex initMutex{};
         /* Guards instance. Calls that read it take it shared, so they
          * don't wait for each other, and only initWith() and
          * shutdownInstance(), which change it, take it exclusively. */
-        std::shared_mutex         mutex{};
-        std::shared_ptr<Instance> instance{};
+        SharedMutex               mutex HIPOBJ_ACQUIRED_AFTER(initMutex){};
+        std::shared_ptr<Instance> instance HIPOBJ_GUARDED_BY(mutex){};
     };
 
     /* Never destroyed: destroying an instance releases verbs and HIP
      * resources, which isn't safe during static destruction, so
-     * hipObjShutdown() is what releases it. std::shared_mutex has a
+     * hipObjShutdown() is what releases it. SharedMutex has a
      * destructor, so it's never destroyed either. Clang still warns, since
      * NoDestructor's empty destructor isn't trivial. */
     Current &current()
@@ -181,22 +181,22 @@ Instance::Instance(std::shared_ptr<const Platform> instancePlatform, const Optio
 std::shared_ptr<Instance>
 currentInstance()
 {
-    Current                                  &state = current();
-    const std::shared_lock<std::shared_mutex> lock(state.mutex);
+    Current         &state = current();
+    const SharedLock lock(state.mutex);
     return state.instance;
 }
 
 void
 shutdownInstance()
 {
-    Current                           &state = current();
-    const std::scoped_lock<std::mutex> initLock(state.initMutex);
+    Current                &state = current();
+    const ScopedLock<Mutex> initLock(state.initMutex);
 
     /* Moving the instance out leaves state.instance null. Calls that
      * already hold a copy keep the instance alive. */
     std::shared_ptr<Instance> instance;
     {
-        const std::scoped_lock<std::shared_mutex> lock(state.mutex);
+        const ScopedLock<SharedMutex> lock(state.mutex);
         instance = std::move(state.instance);
     }
 
@@ -212,8 +212,8 @@ shutdownInstance()
 hipObjError_t
 initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform, const Options &options)
 {
-    Current                           &state = current();
-    const std::scoped_lock<std::mutex> initLock(state.initMutex);
+    Current                &state = current();
+    const ScopedLock<Mutex> initLock(state.initMutex);
     if (currentInstance()) {
         return makeError(hipObjAlreadyInitialized);
     }
@@ -294,7 +294,7 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
 
     /* If taking the lock throws, the instance is released, and nothing
      * has changed. Moving the instance in can't throw. */
-    const std::scoped_lock<std::shared_mutex> lock(state.mutex);
+    const ScopedLock<SharedMutex> lock(state.mutex);
     state.instance = std::move(instance);
     return makeError(hipObjSuccess);
 }

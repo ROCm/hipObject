@@ -13,11 +13,11 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <shared_mutex>
 #include <utility>
 
 #include "ibv-core.h"
 #include "ibv-ptr.h"
+#include "thread-safety.h"
 
 namespace hipObj {
 
@@ -143,37 +143,40 @@ public:
      * holding the map's lock. When two threads register the same address
      * at once, one gets Registered, and the other AlreadyRegistered, and
      * its registration is released. */
-    [[nodiscard]] RegisterResult registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd);
-    [[nodiscard]] RegisterResult registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd);
+    [[nodiscard]] RegisterResult registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
+        HIPOBJ_REQUIRES(!mutex_);
+    [[nodiscard]] RegisterResult registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
+        HIPOBJ_REQUIRES(!mutex_);
     /* Removes the entry, and releases its registration and any staging
      * buffer without holding the map's lock */
-    [[nodiscard]] DeregisterResult deregisterBuffer(void *devPtr);
+    [[nodiscard]] DeregisterResult deregisterBuffer(void *devPtr) HIPOBJ_REQUIRES(!mutex_);
     /* The registration at devPtr, or null if there isn't one. Looked up
      * once per transfer and passed down. The copy keeps the entry alive,
      * and makes deregisterBuffer() report Busy, until it's released. */
-    [[nodiscard]] std::shared_ptr<const BufEntry> find(const void *devPtr) const;
+    [[nodiscard]] std::shared_ptr<const BufEntry> find(const void *devPtr) const HIPOBJ_REQUIRES(!mutex_);
 
-    [[nodiscard]] size_t size() const;
+    [[nodiscard]] size_t size() const HIPOBJ_REQUIRES(!mutex_);
 
 private:
     /* Why an entry can't be inserted at key, or std::nullopt if it can.
      * The caller holds mutex_, shared or exclusively. */
-    [[nodiscard]] std::optional<RegisterResult> refusal(uintptr_t key) const;
+    [[nodiscard]] std::optional<RegisterResult> refusal(uintptr_t key) const HIPOBJ_REQUIRES_SHARED(mutex_);
     /* refusal(), with mutex_ held shared. A registration checks it before
      * registering, so a duplicate or a full map doesn't register for
      * nothing, and insert() checks again. */
-    [[nodiscard]] std::optional<RegisterResult> precheck(uintptr_t key) const;
+    [[nodiscard]] std::optional<RegisterResult> precheck(uintptr_t key) const HIPOBJ_REQUIRES(!mutex_);
     /* Inserts entry at key, unless another thread registered key, or
      * filled the map, after precheck(). An entry it doesn't insert is
      * released after mutex_ is. */
-    [[nodiscard]] RegisterResult insert(uintptr_t key, std::shared_ptr<const BufEntry> entry);
+    [[nodiscard]] RegisterResult insert(uintptr_t key, std::shared_ptr<const BufEntry> entry)
+        HIPOBJ_REQUIRES(!mutex_);
 
     const Verbs      *verbs_;
     const HipRuntime *runtime_;
     /* Guards entries_. Lookups take it shared, so they don't wait for each
      * other; insertions and removals take it exclusively. */
-    mutable std::shared_mutex                            mutex_{};
-    std::map<uintptr_t, std::shared_ptr<const BufEntry>> entries_{};
+    mutable SharedMutex                                  mutex_{};
+    std::map<uintptr_t, std::shared_ptr<const BufEntry>> entries_ HIPOBJ_GUARDED_BY(mutex_){};
     DmabufPolicy                                         dmabuf_;
     bool                                                 requireGpuDirect_;
 };

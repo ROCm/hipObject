@@ -9,12 +9,12 @@
 
 #include <cstddef>
 #include <memory>
-#include <mutex>
 #include <utility>
 #include <vector>
 
 #include "buffer.h"
 #include "hip-seam.h"
+#include "thread-safety.h"
 
 namespace hipObj {
 
@@ -80,26 +80,27 @@ public:
     /* Sets aside room for a copy that's about to start, so that if it
      * times out, add() can take it over without allocating, and so
      * without failing. Can throw std::bad_alloc, before the copy starts. */
-    [[nodiscard]] Slot reserve();
+    [[nodiscard]] Slot reserve() HIPOBJ_REQUIRES(!mutex_);
 
     /* Takes over a copy that timed out, in the room slot set aside: done
      * is the event that tracks it, and entry is the registration whose
      * staging buffer it uses. slot has to have come from this list's
      * reserve(), and not been used or moved from. */
-    void add(Slot &slot, HipEventPtr done, std::shared_ptr<const BufferMap::BufEntry> entry) noexcept;
+    void add(Slot &slot, HipEventPtr done, std::shared_ptr<const BufferMap::BufEntry> entry) noexcept
+        HIPOBJ_REQUIRES(!mutex_);
 
     /* Releases the copies that are over */
-    void reclaim();
+    void reclaim() HIPOBJ_REQUIRES(!mutex_);
 
     /* Whether a copy that uses entry's staging buffer is still running,
      * after releasing those of its copies that are over */
-    [[nodiscard]] bool running(const BufferMap::BufEntry &entry);
+    [[nodiscard]] bool running(const BufferMap::BufEntry &entry) HIPOBJ_REQUIRES(!mutex_);
 
     /* The number of copies that haven't been released */
-    [[nodiscard]] size_t size() const;
+    [[nodiscard]] size_t size() const HIPOBJ_REQUIRES(!mutex_);
 
     /* The number of copies the list can hold without allocating */
-    [[nodiscard]] size_t capacity() const;
+    [[nodiscard]] size_t capacity() const HIPOBJ_REQUIRES(!mutex_);
 
 private:
     /* done is declared after entry, so the event is destroyed before the
@@ -112,19 +113,19 @@ private:
     /* Releases the copies of entry, or of every registration if it's
      * null, that are over. Returns whether any of them are still
      * running. */
-    bool release(const BufferMap::BufEntry *entry);
+    bool release(const BufferMap::BufEntry *entry) HIPOBJ_REQUIRES(!mutex_);
 
     /* Whether copy has finished or failed. Doesn't wait for it. */
     [[nodiscard]] bool isOver(const Copy &copy) const;
 
     const HipRuntime *runtime_;
     /* Guards copies_ and reserved_ */
-    mutable std::mutex mutex_{};
+    mutable Mutex mutex_{};
     /* Its capacity is always at least its size plus reserved_ */
-    std::vector<Copy> copies_{};
+    std::vector<Copy> copies_ HIPOBJ_GUARDED_BY(mutex_){};
     /* The number of slots that reserve() has set aside, and that haven't
      * been used or given back */
-    size_t reserved_ = 0;
+    size_t reserved_ HIPOBJ_GUARDED_BY(mutex_) = 0;
 };
 
 } // namespace hipObj
