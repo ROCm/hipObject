@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: MIT
 
 # Install hipObject into a scratch prefix and build a C-only consumer
-# against the installed package, and the installed examples, if any (see
-# run-install-test.cmake). This catches problems with the exported
-# targets, package config, install components, and run paths, none of
-# which the in-tree tests use, and builds the examples as the C++11 they
-# have to be.
+# against the installed package, and the installed examples, if any, and
+# run the installed tools, if any (see run-install-test.cmake). This
+# catches problems with the exported targets, package config, install
+# components, and run paths, none of which the in-tree tests use, and
+# builds the examples as the C++11 they have to be.
 
 # The consumer must use the same sanitizer as an instrumented libhipobj,
 # or it can't link against the sanitizer runtime the library needs.
@@ -64,6 +64,7 @@ set(BUILD_DIR "@PROJECT_BINARY_DIR@")
 set(TEST_DIR "@CMAKE_CURRENT_BINARY_DIR@/install-test")
 set(CONSUMER_SOURCE_DIR "@CMAKE_CURRENT_SOURCE_DIR@/consumer")
 set(EXAMPLES_DIR "@HIPOBJ_INSTALL_TEST_EXAMPLES_DIR@")
+set(TOOLS "@HIPOBJ_INSTALL_TOOLS@")
 set(WERROR "@HIPOBJ_WERROR@")
 set(GENERATOR "@CMAKE_GENERATOR@")
 set(MAKE_PROGRAM "@CMAKE_MAKE_PROGRAM@")
@@ -139,6 +140,7 @@ set(TEST_DIR "@CMAKE_CURRENT_BINARY_DIR@/package-test")
 set(CPACK_CONFIG "@CMAKE_BINARY_DIR@/CPackConfig.cmake")
 set(INSTALL_PREFIX "@CMAKE_INSTALL_PREFIX@")
 set(EXAMPLES_DIR "@HIPOBJ_INSTALL_TEST_EXAMPLES_DIR@")
+set(TOOLS "@HIPOBJ_INSTALL_TOOLS@")
 set(SHARED "@BUILD_SHARED_LIBS@")
 set(LIBRARY_VERSION "@HIPOBJ_LIBRARY_VERSION@")
 set(LIBRARY_SOVERSION "@HIPOBJ_LIBRARY_SOVERSION@")
