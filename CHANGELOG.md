@@ -162,6 +162,14 @@
   where the C library needs it (glibc before 2.34, for example). The
   static library's CMake package finds `Threads` for consumers, as it
   does `hip` and `hsa-runtime64`.
+- The library, the examples, and the tests are linked with the OpenSSF
+  hardening options whenever the linker supports them: the programs as
+  position-independent executables, and everything with full RELRO
+  (`-z relro -z now`), a non-executable stack (`-z noexecstack`), and
+  `--as-needed --no-copy-dt-needed-entries`. Ubuntu's GCC already did
+  all of this by default, but other toolchains, such as upstream Clang,
+  didn't. As a result, `libhipobj.so` and the programs no longer record a
+  dependency on a shared library they don't call, such as `libm`.
 - Building the documentation (`HIPOBJ_BUILD_DOCS`) requires Breathe 4.36
   or later, up from 4.35. The documentation build installs it from
   `requirements.txt` into its own virtual environment.

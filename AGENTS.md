@@ -391,9 +391,11 @@ takes priority over speed and convenience.
   behind an internal interface (see [Portability](#portability)), never from
   `rand()` or a `<random>` engine.
 - **Keep the hardening flags.** Don't remove or weaken `_FORTIFY_SOURCE`, the
-  stack protector, `-fstack-clash-protection`, or `-z noexecstack`
-  ([`cmake/`](cmake/)), and ask before changing any compile or link options
-  (see [Project direction](#project-direction)).
+  stack protector, `-fstack-clash-protection` ([`cmake/`](cmake/)), or the
+  linker hardening in `hipobj_set_linker_flags()`
+  ([`HIPOBJCompilerOptions.cmake`](cmake/HIPOBJCompilerOptions.cmake)): PIE,
+  full RELRO, a non-executable stack, and `--as-needed`. Ask before changing
+  any compile or link options (see [Project direction](#project-direction)).
 - **Fix security scan findings.** CodeQL
   ([codeql.yml](.github/workflows/codeql.yml)) and the PR security scan
   ([pr-security-scan.yml](.github/workflows/pr-security-scan.yml): bandit,
