@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: MIT
 
 # Install hipObject into a scratch prefix and build a C-only consumer
-# against the installed package (see run-install-test.cmake). This
-# catches problems with the exported targets, package config, install
-# components, and run paths, none of which the in-tree tests use.
+# against the installed package, and the installed examples, if any (see
+# run-install-test.cmake). This catches problems with the exported
+# targets, package config, install components, and run paths, none of
+# which the in-tree tests use, and builds the examples as the C++11 they
+# have to be.
 
 # The consumer must use the same sanitizer as an instrumented libhipobj,
 # or it can't link against the sanitizer runtime the library needs.
@@ -45,6 +47,14 @@ foreach(package IN ITEMS hip hsa-runtime64)
 endforeach()
 list(REMOVE_DUPLICATES HIPOBJ_INSTALL_TEST_PREFIX_PATH)
 
+# Where HIPOBJInstall.cmake installs the examples' sources, relative to
+# the install prefix
+set(HIPOBJ_INSTALL_TEST_EXAMPLES_DIR)
+if(HIPOBJ_INSTALL_EXAMPLES)
+  set(HIPOBJ_INSTALL_TEST_EXAMPLES_DIR
+    "share/doc/hipobject${HIPOBJ_ROCM_VERSION_MAJOR}.${HIPOBJ_ROCM_VERSION_MINOR}/examples")
+endif()
+
 set(HIPOBJ_INSTALL_TEST_SETTINGS
   ${CMAKE_CURRENT_BINARY_DIR}/install-test-settings.cmake)
 file(CONFIGURE
@@ -53,9 +63,12 @@ file(CONFIGURE
 set(BUILD_DIR "@PROJECT_BINARY_DIR@")
 set(TEST_DIR "@CMAKE_CURRENT_BINARY_DIR@/install-test")
 set(CONSUMER_SOURCE_DIR "@CMAKE_CURRENT_SOURCE_DIR@/consumer")
+set(EXAMPLES_DIR "@HIPOBJ_INSTALL_TEST_EXAMPLES_DIR@")
+set(WERROR "@HIPOBJ_WERROR@")
 set(GENERATOR "@CMAKE_GENERATOR@")
 set(MAKE_PROGRAM "@CMAKE_MAKE_PROGRAM@")
 set(C_COMPILER "@CMAKE_C_COMPILER@")
+set(CXX_COMPILER "@CMAKE_CXX_COMPILER@")
 set(CONSUMER_FLAGS "@HIPOBJ_INSTALL_TEST_CONSUMER_FLAGS@")
 set(CONSUMER_LINK_FLAGS "@HIPOBJ_INSTALL_TEST_CONSUMER_LINK_FLAGS@")
 set(CONSUMER_PREFIX_PATH "@HIPOBJ_INSTALL_TEST_PREFIX_PATH@")
@@ -125,6 +138,7 @@ set(DEPENDENCIES "@HIPOBJ_PACKAGE_TEST_DEPENDENCIES@")
 set(TEST_DIR "@CMAKE_CURRENT_BINARY_DIR@/package-test")
 set(CPACK_CONFIG "@CMAKE_BINARY_DIR@/CPackConfig.cmake")
 set(INSTALL_PREFIX "@CMAKE_INSTALL_PREFIX@")
+set(EXAMPLES_DIR "@HIPOBJ_INSTALL_TEST_EXAMPLES_DIR@")
 set(SHARED "@BUILD_SHARED_LIBS@")
 set(LIBRARY_VERSION "@HIPOBJ_LIBRARY_VERSION@")
 set(LIBRARY_SOVERSION "@HIPOBJ_LIBRARY_SOVERSION@")

@@ -13,11 +13,13 @@ include(ROCMCreatePackage)
 # Components, which rocm_create_package() turns into packages:
 #   runtime  What programs need at run time: the versioned shared
 #            library (libhipobj.so.<major> and libhipobj.so.<version>),
-#            the license, and the examples. A static build puts the
-#            license in devel instead.
+#            the license, and with HIPOBJ_MINIO_CLIENT, the MinIO
+#            example program. A static build puts the license in
+#            devel instead.
 #   devel    What's needed to build against hipObject: the
 #            libhipobj.so symlink used at link time, the static
-#            library, the header, and the CMake package files
+#            library, the header, the CMake package files, and the
+#            examples' sources
 
 # Let the installed library find libamdhip64 and libhsa-runtime64 even
 # when they aren't in the loader's search path:
@@ -25,7 +27,7 @@ include(ROCMCreatePackage)
 #     hipObject is installed into the ROCm prefix
 #   - INSTALL_RPATH_USE_LINK_PATH adds the directory they were linked
 #     from (the ROCm lib directory)
-# The installed examples get their run path from
+# The installed programs get their run path from
 # hipobj_install_executable().
 set_target_properties(hipobj PROPERTIES
   INSTALL_RPATH_USE_LINK_PATH ON)
@@ -258,6 +260,29 @@ if(BUILD_SHARED_LIBS)
     "${HIPOBJ_PACKAGE_NAME} (= ${HIPOBJ_PACKAGE_VERSION}-${HIPOBJ_DEB_RELEASE})")
   set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES
     "${HIPOBJ_PACKAGE_NAME} = %{version}-%{release}")
+endif()
+
+# The examples' sources, for users to build against the installed
+# hipObject, in the directory that rocm_create_package() installs the
+# license in, share/doc/<runtime package name>. CMakeLists.install.cmake
+# is their CMakeLists.txt; the one in the source tree uses hipObject's
+# build settings. They go in the devel package, which has what they
+# build against, and which a static build also has.
+if(HIPOBJ_INSTALL_EXAMPLES)
+  install(
+    FILES
+      ${PROJECT_SOURCE_DIR}/examples/README.md
+      ${PROJECT_SOURCE_DIR}/examples/get-object.cpp
+      ${PROJECT_SOURCE_DIR}/examples/put-object.cpp
+      ${PROJECT_SOURCE_DIR}/examples/s3_curl_ops.cpp
+      ${PROJECT_SOURCE_DIR}/examples/s3_curl_ops.h
+    DESTINATION share/doc/${HIPOBJ_PACKAGE_NAME}/examples
+    COMPONENT devel)
+  install(
+    FILES ${PROJECT_SOURCE_DIR}/examples/CMakeLists.install.cmake
+    DESTINATION share/doc/${HIPOBJ_PACKAGE_NAME}/examples
+    RENAME CMakeLists.txt
+    COMPONENT devel)
 endif()
 
 # The nightly packages were named hipobject, hipobject-dev or

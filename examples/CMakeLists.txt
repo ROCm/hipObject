@@ -21,10 +21,11 @@ function(hipobj_add_example name)
     ${PROJECT_SOURCE_DIR}/src/s3)
   target_link_libraries(${name} PRIVATE
     hipobj hip::host dl)
-  hipobj_install_executable(
-    NAME ${name}
-    DESTINATION bin/hipobj-examples)
 endfunction()
+
+# The programs are built here but not installed. HIPOBJInstall.cmake
+# installs their sources, with CMakeLists.install.cmake as their
+# CMakeLists.txt, for users to build against the installed hipObject.
 
 find_package(CURL QUIET)
 
@@ -35,9 +36,6 @@ if(CURL_FOUND)
   target_compile_definitions(put-object PRIVATE HIPOBJ_HAVE_CURL)
   target_link_libraries(get-object PRIVATE CURL::libcurl)
   target_link_libraries(put-object PRIVATE CURL::libcurl)
-  hipobj_add_runtime_library_dependency(
-    SONAMES libcurl.so.4
-    DEB libcurl4t64)
   message(STATUS "hipObject examples: libcurl enabled (--live mode)")
 else()
   hipobj_add_example(get-object get-object.cpp)

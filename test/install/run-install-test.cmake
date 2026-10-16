@@ -15,6 +15,10 @@
 #      and development packages contain) into a scratch prefix
 #   2. Configure, build, and run the consumer project in consumer/
 #      against that prefix
+#   3. If the examples' sources were installed (EXAMPLES_DIR), configure
+#      and build them against that prefix with the CMakeLists.txt
+#      installed with them, which builds them as C++11. They need a GPU
+#      and an RDMA NIC, so they aren't run.
 
 if(NOT SETTINGS)
   message(FATAL_ERROR "run-install-test: SETTINGS is not set")
@@ -80,3 +84,33 @@ endif()
 run_step("run the consumer"
   ${CMAKE_CTEST_COMMAND} --test-dir ${consumer_build_dir}
     --output-on-failure ${ctest_config_args})
+
+if(EXAMPLES_DIR)
+  set(examples_source_dir ${prefix}/${EXAMPLES_DIR})
+  set(examples_build_dir ${TEST_DIR}/examples-build)
+  if(NOT EXISTS ${examples_source_dir}/CMakeLists.txt)
+    message(FATAL_ERROR
+      "run-install-test: the examples weren't installed in "
+      "${examples_source_dir}")
+  endif()
+
+  # Build them with the C++ compiler hipObject is built with. With
+  # HIPOBJ_WERROR, their warnings are errors, as hipObject's are.
+  set(examples_werror OFF)
+  if(WERROR)
+    set(examples_werror ON)
+  endif()
+  file(WRITE ${TEST_DIR}/examples-cache.cmake
+    "set(CMAKE_CXX_COMPILER \"${CXX_COMPILER}\" CACHE FILEPATH \"\")\n"
+    "set(CMAKE_CXX_FLAGS \"${CONSUMER_FLAGS}\" CACHE STRING \"\")\n"
+    "set(CMAKE_EXE_LINKER_FLAGS \"${CONSUMER_LINK_FLAGS}\" CACHE STRING \"\")\n"
+    "set(CMAKE_PREFIX_PATH \"${CONSUMER_PREFIX_PATH}\" CACHE STRING \"\")\n"
+    "set(CMAKE_COMPILE_WARNING_AS_ERROR ${examples_werror} CACHE BOOL \"\")\n")
+
+  run_step("configure the installed examples"
+    ${CMAKE_COMMAND} -S ${examples_source_dir} -B ${examples_build_dir}
+      ${generator_args} -C ${TEST_DIR}/examples-cache.cmake)
+
+  run_step("build the installed examples"
+    ${CMAKE_COMMAND} --build ${examples_build_dir} ${config_args})
+endif()
