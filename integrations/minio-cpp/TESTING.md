@@ -23,7 +23,7 @@ ibv_devinfo
 rocminfo
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/hipobj-examples/get-object 67108864
+./build/examples/get-object 67108864
 ```
 
 This invocation uses the example's stub callbacks: it does not contact

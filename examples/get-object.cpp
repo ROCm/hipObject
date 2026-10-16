@@ -229,7 +229,10 @@ main(int argc, char *argv[])
     else
 #endif
     {
+        // Only --live uses these, and only with libcurl
         (void)live;
+        (void)bucket;
+        (void)object;
         ops.sendRequest = stubSendRequest;
         ops.recvReply   = stubRecvReply;
     }

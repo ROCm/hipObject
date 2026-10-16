@@ -318,6 +318,10 @@
   as `12abc` as its leading number, and a negative one such as `-1` as
   a huge size. They now reject anything but a plain decimal number of
   bytes that fits in a `size_t`.
+- Building the `get-object` and `put-object` examples without libcurl
+  warned that `bucket` and `object` were set but never used, and failed
+  with `HIPOBJ_WERROR=ON`, or with warnings as errors when building the
+  installed examples.
 - `hipObjInit()` failed with `hipObjRdmaError` unless libibverbs'
   development package (`libibverbs-dev` or `rdma-core-devel`) was
   installed, since hipObject loaded the unversioned `libibverbs.so` link
