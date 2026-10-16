@@ -100,7 +100,10 @@ Notes:
 - The ctest suite doesn't need a GPU, an RDMA NIC, or an S3 server; CI runs all
   of it in a plain container. `hipobj-package-deb` and `hipobj-package-rpm`
   are skipped when the tools to build and read their packages (`dpkg`, or
-  `rpmbuild` and `rpm`) aren't installed.
+  `rpmbuild` and `rpm`) aren't installed. The tests that load the system's
+  libibverbs skip without it; `HIPOBJ_TEST_REQUIRE_LIBIBVERBS=1` makes them
+  fail instead, as CI's build workflow does
+  ([`test/unit/require-libibverbs.h`](test/unit/require-libibverbs.h)).
 - The GPU-direct and RDMA data paths are tested against emulated hardware
   (rocm-ernic's ionic NIC and rocjitsu's GPU, under QEMU) by the
   `.github/workflows/hipobject-hardware-test-*.yml` workflows, and against real

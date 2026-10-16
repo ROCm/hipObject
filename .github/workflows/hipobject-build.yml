@@ -95,6 +95,9 @@ jobs:
       # The full ROCm image ships libamdhip64 in /opt/rocm/lib but leaves it out
       # of the loader cache, so ctest binaries fail to start without this.
       LD_LIBRARY_PATH: /opt/rocm/lib
+      # The tests that load the system's libibverbs fail, rather than skip,
+      # if it doesn't load (see test/unit/require-libibverbs.h)
+      HIPOBJ_TEST_REQUIRE_LIBIBVERBS: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -152,6 +155,25 @@ jobs:
       - name: Test
         run: |
           cd build && ctest --output-on-failure -j"$(nproc)"
+
+      # hipObject has to load libibverbs with only its runtime package
+      # (libibverbs1) installed, not the development package that the
+      # build needs, whose libibverbs.so link a user may not have. Remove
+      # the development package and run the tests that load libibverbs
+      # again. The coverage job skips this, since running tests again would
+      # add to its coverage.
+      - name: Test with only libibverbs' runtime package
+        if: matrix.coverage != 'ON'
+        run: |
+          link=$(dpkg -L libibverbs-dev | grep '/libibverbs\.so$')
+          apt-get remove -y libibverbs-dev
+          if [[ -e "${link}" ]]; then
+            echo "::error::${link} is still there"
+            exit 1
+          fi
+          dpkg -s libibverbs1 > /dev/null
+          cd build && ctest --output-on-failure --no-tests=error \
+            -R '^(test-ibv-lazy-load|test-loaded-verbs|test-seams)$'
 
       # The report's summary goes on the run's summary page. The job fails
       # if the library's line coverage is below the target in AGENTS.md.
