@@ -374,6 +374,7 @@
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-steps">Build Steps</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#using-hipobject">Using hipObject</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cmake-options">CMake Options</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#package-dependencies">Package Dependencies</a></li>
@@ -416,6 +417,10 @@ that checks hipObject’s copies of the libibverbs structures
 against them. The library doesn’t need them, since it loads
 libibverbs with <code class="docutils literal notranslate"><span class="pre">dlopen</span></code>.</p></li>
 <li><p>GTest (fetched automatically if not found)</p></li>
+<li><p>libcurl development files (<code class="docutils literal notranslate"><span class="pre">libcurl4-openssl-dev</span></code> or
+<code class="docutils literal notranslate"><span class="pre">libcurl-devel</span></code>), for the examples’ <code class="docutils literal notranslate"><span class="pre">--live</span></code> mode.
+Without them, the examples build with only their stub
+mode.</p></li>
 <li><p>Doxygen, Python 3, Sphinx, Breathe (for documentation)</p></li>
 </ul>
 </section>
@@ -432,21 +437,46 @@ libibverbs didn’t load and fails with <code class="docutils literal notranslat
 </section>
 <section id="build-steps">
 <h2>Build Steps<a class="headerlink" href="#build-steps" title="Link to this heading">#</a></h2>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mkdir<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>build
-cmake<span class="w"> </span>..<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DHIPOBJ_BNXT<span class="o">=</span>ON<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-DHIPOBJ_IONIC<span class="o">=</span>OFF
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release
+cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j<span class="s2">"</span><span class="k">$(</span>nproc<span class="k">)</span><span class="s2">"</span>
 
-make<span class="w"> </span>-j<span class="k">$(</span>nproc<span class="k">)</span>
-
-<span class="c1"># Run tests (requires GPU + RDMA NIC)</span>
-ctest<span class="w"> </span>--output-on-failure
+<span class="c1"># Run the tests (no GPU, RDMA NIC, or S3 server needed)</span>
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure
 
 <span class="c1"># Install (to ROCM_PATH)</span>
-sudo<span class="w"> </span>make<span class="w"> </span>install
+sudo<span class="w"> </span>cmake<span class="w"> </span>--install<span class="w"> </span>build
 </pre></div>
 </div>
+<p>Add <code class="docutils literal notranslate"><span class="pre">-DCMAKE_PREFIX_PATH=/opt/rocm</span></code> if CMake doesn’t find
+ROCm’s packages. The tests need no hardware, and the ones that
+load the system’s libibverbs skip if it isn’t installed. The
+GPU-direct and RDMA data paths are tested by the
+emulated-hardware CI workflows, and on lab hardware (see
+<a class="reference internal" href="interop.html"><span class="doc">hipObject cuObject Interoperability</span></a>).</p>
+</section>
+<section id="using-hipobject">
+<h2>Using hipObject<a class="headerlink" href="#using-hipobject" title="Link to this heading">#</a></h2>
+<p>A CMake project finds the installed hipObject with
+<code class="docutils literal notranslate"><span class="pre">find_package()</span></code>, and links the <code class="docutils literal notranslate"><span class="pre">hipobj::hipobj</span></code> target:</p>
+<div class="highlight-cmake notranslate"><div class="highlight"><pre><span></span><span class="nb">find_package</span><span class="p">(</span><span class="s">hip</span><span class="w"> </span><span class="s">CONFIG</span><span class="w"> </span><span class="s">REQUIRED</span><span class="p">)</span>
+<span class="nb">find_package</span><span class="p">(</span><span class="s">hipobj</span><span class="w"> </span><span class="s">CONFIG</span><span class="w"> </span><span class="s">REQUIRED</span><span class="p">)</span>
+
+<span class="nb">add_executable</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">app.c</span><span class="p">)</span>
+<span class="nb">target_link_libraries</span><span class="p">(</span><span class="s">app</span><span class="w"> </span><span class="s">PRIVATE</span><span class="w"> </span><span class="s">hipobj::hipobj</span><span class="w"> </span><span class="s">hip::host</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Configure it with <code class="docutils literal notranslate"><span class="pre">CMAKE_PREFIX_PATH</span></code> set to where ROCm and
+hipObject are installed, such as <code class="docutils literal notranslate"><span class="pre">/opt/rocm</span></code>. The header is
+installed as <code class="docutils literal notranslate"><span class="pre">include/hipobj/hipobj.h</span></code>, and the target adds
+its directory to the include path, so the code includes
+<code class="docutils literal notranslate"><span class="pre">&lt;hipobj.h&gt;</span></code>. The header is C, and C11 and C++11 code can
+include it. A program that calls HIP itself, as one that
+allocates GPU memory does, links <code class="docutils literal notranslate"><span class="pre">hip::host</span></code> too.</p>
+<p>The README’s <a class="reference external" href="https://github.com/ROCm/hipObject/blob/develop/README.md#quick-start">Quick Start</a>
+is a short program to start from. The examples, whose sources
+are installed in <code class="docutils literal notranslate"><span class="pre">share/doc/hipobject&lt;mm&gt;/examples</span></code> (see
+<code class="docutils literal notranslate"><span class="pre">HIPOBJ_INSTALL_EXAMPLES</span></code>, below), are complete programs
+that make their S3 requests with libcurl.</p>
 </section>
 <section id="cmake-options">
 <h2>CMake Options<a class="headerlink" href="#cmake-options" title="Link to this heading">#</a></h2>
@@ -504,7 +534,7 @@ sudo<span class="w"> </span>make<span class="w"> </span>install
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INTEGRATION_TESTS</span></code></p></td>
 <td><p>ON</p></td>
-<td><p>Build RC test server</p></td>
+<td><p>Build RC test server (tests)</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_FETCH_CUOBJECT_CLIENT</span></code></p></td>
 <td><p>OFF</p></td>
@@ -521,6 +551,22 @@ sudo<span class="w"> </span>make<span class="w"> </span>install
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CODE_COVERAGE</span></code></p></td>
 <td><p>OFF</p></td>
 <td><p>Build with code coverage</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_SANITIZERS</span></code></p></td>
+<td><p>OFF</p></td>
+<td><p>Build with a sanitizer</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_SANITIZER_TYPE</span></code></p></td>
+<td><p>address</p></td>
+<td><p>Sanitizer to build with</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CLANG_TIDY</span></code></p></td>
+<td><p>OFF</p></td>
+<td><p>Run clang-tidy while building</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_IWYU</span></code></p></td>
+<td><p>OFF</p></td>
+<td><p>Run IWYU while building</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code></p></td>
 <td><p>see below</p></td>
@@ -545,6 +591,12 @@ and pick the configuration at build time.</p>
 built with, without compiler extensions. <code class="docutils literal notranslate"><span class="pre">26</span></code> needs CMake 3.30 or
 later, which is the first version that knows how to ask GCC
 (14 and later) and Clang for C++26.</p>
+<p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_BNXT</span></code> and <code class="docutils literal notranslate"><span class="pre">HIPOBJ_IONIC</span></code> compile in the queue pair
+attributes for Broadcom Thor-2 and AMD Pensando NICs. Without
+them, hipObject still uses those NICs, with its generic
+attributes.</p>
+<p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INTEGRATION_TESTS</span></code> only has an effect when
+<code class="docutils literal notranslate"><span class="pre">BUILD_TESTING</span></code> is on.</p>
 <p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_INSTALL_EXAMPLES</span></code> builds the example programs in the
 build tree (<code class="docutils literal notranslate"><span class="pre">examples/</span></code>) and installs their sources, with a
 <code class="docutils literal notranslate"><span class="pre">CMakeLists.txt</span></code> that builds them against the installed hipObject,
@@ -584,6 +636,14 @@ directory. Every instrumented program writes its profile to
 the profiles add up over runs, so delete <code class="docutils literal notranslate"><span class="pre">coverage/profraw</span></code> to start
 over. Since the programs write to the build directory, don’t install
 or package a coverage build.</p>
+<p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_SANITIZERS</span></code> builds hipObject’s own targets with the
+sanitizer that <code class="docutils literal notranslate"><span class="pre">HIPOBJ_SANITIZER_TYPE</span></code> names: <code class="docutils literal notranslate"><span class="pre">address</span></code> (the
+default), <code class="docutils literal notranslate"><span class="pre">undefined</span></code>, or <code class="docutils literal notranslate"><span class="pre">thread</span></code>. Use a separate build
+directory for each.</p>
+<p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CLANG_TIDY</span></code> runs clang-tidy (19 or later) on
+hipObject’s own code as it compiles. It needs Clang as the C++
+compiler. <code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_IWYU</span></code> runs include-what-you-use the same
+way; its suggestions don’t fail the build.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> and <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> can also be set in the
 environment. If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> isn’t set but <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is,
 <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>. If
@@ -843,12 +903,39 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"
 </section>
 <section id="environment-variables">
 <h2>Environment Variables<a class="headerlink" href="#environment-variables" title="Link to this heading">#</a></h2>
+<p>When hipObject is configured:</p>
 <ul class="simple">
 <li><p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code>: Override the ROCm installation path.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code>: Override the ROCm version.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">LD_LIBRARY_PATH</span></code>: Must include ROCm and rdma-core
-library paths at runtime.</p></li>
 </ul>
+<p>When a program that uses hipObject runs:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LD_LIBRARY_PATH</span></code>: Only needed if the loader can’t find
+ROCm’s libraries or <code class="docutils literal notranslate"><span class="pre">libibverbs.so.1</span></code> otherwise, such as
+when they’re installed outside the system’s library
+directories. The installed library finds the ROCm libraries
+it was built with by itself.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_NIC_HINT</span></code>: Read by the examples and the MinIO
+bridge, not the library: the name of the RDMA device to use
+(as <code class="docutils literal notranslate"><span class="pre">ibv_devices</span></code> lists it), which they pass to
+<code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code> as <code class="docutils literal notranslate"><span class="pre">nicHint</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_MAX_TRANSFERS</span></code>: How many transfers can run at
+once, from 1 to 1024 (default 16).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_STAGE_TIMEOUT_MS</span></code>: How long, in milliseconds, a
+copy to or from a buffer that’s staged through host memory
+can take, up to 24 hours (default 30000).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_DMABUF</span></code>: A value starting with <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">n</span></code>, or
+<code class="docutils literal notranslate"><span class="pre">N</span></code> turns off dma-buf registration of GPU memory.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_REQUIRE_GPU_DIRECT</span></code>: Any value but one starting
+with <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">n</span></code>, or <code class="docutils literal notranslate"><span class="pre">N</span></code> makes <code class="docutils literal notranslate"><span class="pre">hipObjBufRegister()</span></code>
+fail rather than stage a GPU buffer through host memory.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_RDMA_DEBUG</span></code>: Any value not starting with <code class="docutils literal notranslate"><span class="pre">0</span></code>
+reports failed dma-buf exports on stderr. The MinIO bridge
+also reports where each of its failed transfers failed.</p></li>
+</ul>
+<p>The library reads the last five in <code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code>, each time
+it runs, and ignores an invalid value, leaving the default
+(see <a class="reference internal" href="architecture.html"><span class="doc">Architecture</span></a>).</p>
 </section>
 </section>
 
@@ -906,6 +993,7 @@ library paths at runtime.</p></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-steps">Build Steps</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#using-hipobject">Using hipObject</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cmake-options">CMake Options</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#packaging">Packaging</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#package-dependencies">Package Dependencies</a></li>

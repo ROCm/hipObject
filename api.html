@@ -469,7 +469,9 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv410hipObjInitP14hipObjConfig_t">
 <span id="_CPPv310hipObjInitP14hipObjConfig_t"></span><span id="_CPPv210hipObjInitP14hipObjConfig_t"></span><span id="hipObjInit__hipObjConfig_tP"></span><span class="target" id="group__core_1ga2b4e5bd6f1170f792720293c41864619"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjInit</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjConfig_t" title="hipObjConfig_t"><span class="n"><span class="pre">hipObjConfig_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">config</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv410hipObjInitP14hipObjConfig_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Initialize the hipObject library. </p>
-<p>Opens the RDMA device, selects the closest NIC to the GPU, and prepares internal state. Must be called before any other hipObj* function.</p>
+<p>Selects the closest NIC to the GPU (see <a class="reference internal" href="#structhipObjConfig__t"><span class="std std-ref">hipObjConfig_t</span></a>), opens it, and creates the RDMA connections that transfers use (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
+<p><a class="reference internal" href="#group__error_1ga3d847cc075755e1e3cc4ca1a21e24f52"><span class="std std-ref">hipObjGetErrorString()</span></a>, <a class="reference internal" href="#group__core_1ga9e1534d88db59149240b934840c70391"><span class="std std-ref">hipObjGetVersionString()</span></a>, <a class="reference internal" href="#group__io_1ga3878729f7564208a6160f667aea8a500"><span class="std std-ref">hipObjParseRdmaReply()</span></a>, <a class="reference internal" href="#group__io_1ga85ce7d367ff2f1fe671d1e41c37fb8f0"><span class="std std-ref">hipObjTokenClientNic()</span></a>, and <a class="reference internal" href="#group__io_1gaae230e1f71aa7243d882deff8ff4efcf"><span class="std std-ref">hipObjPutRdmaToken()</span></a> work without it, and <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> does nothing without it. The other functions return hipObjNotInitialized until it has succeeded.</p>
+<p>Returns hipObjInvalidValue if config is NULL, flags isn’t 0, or gpuDevice is below -1 or names a GPU that doesn’t exist; hipObjAlreadyInitialized if hipObject is already initialized; hipObjNicNotFound if there’s no NIC to use; and hipObjRdmaError if libibverbs doesn’t load, a HIP call fails (hipError says which error), or the NIC can’t be opened or the connections created.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>config</strong> – Pointer to configuration struct </p>
@@ -518,12 +520,16 @@ rendered via Breathe.</p>
 <dd><div class="docutils container">
 <em>#include &lt;hipobj.h&gt;</em></div>
 <p>Configuration for hipObject initialization. </p>
+<p>hipObject doesn’t make S3 requests, so it doesn’t use endpoint, region, accessKey, or secretKey: the application’s S3 client does.</p>
+<p>gpuDevice is the HIP device index of the GPU that hipObject chooses the closest RDMA NIC to, or -1 for the calling thread’s current device. On a host without a GPU, set it to -1, and set nicHint.</p>
+<p>nicHint lists the RDMA devices that hipObject can choose from, by name (as ibv_devices lists them), separated by commas; NULL or “” allows them all. If hipObject can’t choose a NIC by where the GPU is, as on a host without one, it opens the device that nicHint names, which must then be a single name.</p>
+<p>Set the fields you don’t use to 0 or NULL. </p>
 <div class="breathe-sectiondef docutils container">
 <p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
 <dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9accessKeyE">
 <span id="_CPPv3N14hipObjConfig_t9accessKeyE"></span><span id="_CPPv2N14hipObjConfig_t9accessKeyE"></span><span id="hipObjConfig_t::accessKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a0b5dcc5a7b3ca31fcb0848a362f0654e"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">accessKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9accessKeyE" title="Link to this definition">#</a><br /></dt>
-<dd><p>S3 access key (optional) 
+<dd><p>Not used 
 
  </p>
 </dd></dl>
@@ -531,7 +537,7 @@ rendered via Breathe.</p>
 <dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t8endpointE">
 <span id="_CPPv3N14hipObjConfig_t8endpointE"></span><span id="_CPPv2N14hipObjConfig_t8endpointE"></span><span id="hipObjConfig_t::endpoint__cCP"></span><span class="target" id="structhipObjConfig__t_1a3a54a13819c14885fa8f9678bed8028b"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">endpoint</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t8endpointE" title="Link to this definition">#</a><br /></dt>
-<dd><p>S3 endpoint URL 
+<dd><p>Not used 
 
  </p>
 </dd></dl>
@@ -555,7 +561,7 @@ rendered via Breathe.</p>
 <dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t7nicHintE">
 <span id="_CPPv3N14hipObjConfig_t7nicHintE"></span><span id="_CPPv2N14hipObjConfig_t7nicHintE"></span><span id="hipObjConfig_t::nicHint__cCP"></span><span class="target" id="structhipObjConfig__t_1ac5fcea279bee344f92fe5bac7efcaae3"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">nicHint</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t7nicHintE" title="Link to this definition">#</a><br /></dt>
-<dd><p>NIC name hint, or NULL 
+<dd><p>RDMA NIC names, or NULL 
 
  </p>
 </dd></dl>
@@ -563,7 +569,7 @@ rendered via Breathe.</p>
 <dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t6regionE">
 <span id="_CPPv3N14hipObjConfig_t6regionE"></span><span id="_CPPv2N14hipObjConfig_t6regionE"></span><span id="hipObjConfig_t::region__cCP"></span><span class="target" id="structhipObjConfig__t_1aa53af17a63bc86a33f9834259f2739c8"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">region</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t6regionE" title="Link to this definition">#</a><br /></dt>
-<dd><p>AWS region 
+<dd><p>Not used 
 
  </p>
 </dd></dl>
@@ -571,7 +577,7 @@ rendered via Breathe.</p>
 <dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9secretKeyE">
 <span id="_CPPv3N14hipObjConfig_t9secretKeyE"></span><span id="_CPPv2N14hipObjConfig_t9secretKeyE"></span><span id="hipObjConfig_t::secretKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a234137e07eb2ff71d7b4cacc6e499a65"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">secretKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9secretKeyE" title="Link to this definition">#</a><br /></dt>
-<dd><p>S3 secret key (optional) 
+<dd><p>Not used 
 
  </p>
 </dd></dl>

@@ -103,14 +103,17 @@ Testing paths
 Layer 1 — Unit tests (CI)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Token encoding, reply parsing, and header formatting run in GitHub
-Actions without GPU or RDMA hardware:
+``test-rdma-token`` tests token encoding and decoding and reply
+parsing. It's part of the ctest suite, which runs in GitHub Actions
+without a GPU, an RDMA NIC, or an S3 server:
 
 .. code-block:: bash
 
    cmake -B build -DBUILD_TESTING=ON
    cmake --build build
    ctest --test-dir build -R test-rdma-token --output-on-failure
+
+Leave out ``-R test-rdma-token`` to run the whole suite.
 
 Layer 2 — RC integration test server
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -159,6 +162,15 @@ When ``libcuobjserver`` is installed locally:
 
 This verifies linkage only.  End-to-end cuObject interop still requires
 ConnectX hardware and the RC adapter on the storage gateway.
+
+Emulated hardware (CI)
+~~~~~~~~~~~~~~~~~~~~~~
+
+The ``hipobject-hardware-test-*`` workflows run the RDMA data path
+under QEMU, on rocm-ernic's emulated ionic NIC and, for GPU buffers,
+rocjitsu's emulated GPU. They move data between
+``minio-getput-rdma`` (see Layer 3) and ``hipobj-rdma-test-server``
+or rocm-ernic's own S3 store, in host and GPU memory.
 
 Hardware topology
 -----------------

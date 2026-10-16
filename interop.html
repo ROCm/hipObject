@@ -377,6 +377,7 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#layer-2-rc-integration-test-server">Layer 2 — RC integration test server</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#layer-3-minio-aistor-bridge">Layer 3 — MinIO AIStor bridge</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#layer-4-cuobject-server-probe-optional">Layer 4 — cuObject server probe (optional)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#emulated-hardware-ci">Emulated hardware (CI)</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#hardware-topology">Hardware topology</a></li>
@@ -532,13 +533,15 @@ cuObject-equipped storage gateways in production deployments.</p>
 <h2>Testing paths<a class="headerlink" href="#testing-paths" title="Link to this heading">#</a></h2>
 <section id="layer-1-unit-tests-ci">
 <h3>Layer 1 — Unit tests (CI)<a class="headerlink" href="#layer-1-unit-tests-ci" title="Link to this heading">#</a></h3>
-<p>Token encoding, reply parsing, and header formatting run in GitHub
-Actions without GPU or RDMA hardware:</p>
+<p><code class="docutils literal notranslate"><span class="pre">test-rdma-token</span></code> tests token encoding and decoding and reply
+parsing. It’s part of the ctest suite, which runs in GitHub Actions
+without a GPU, an RDMA NIC, or an S3 server:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-DBUILD_TESTING<span class="o">=</span>ON
 cmake<span class="w"> </span>--build<span class="w"> </span>build
 ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>-R<span class="w"> </span>test-rdma-token<span class="w"> </span>--output-on-failure
 </pre></div>
 </div>
+<p>Leave out <code class="docutils literal notranslate"><span class="pre">-R</span> <span class="pre">test-rdma-token</span></code> to run the whole suite.</p>
 </section>
 <section id="layer-2-rc-integration-test-server">
 <h3>Layer 2 — RC integration test server<a class="headerlink" href="#layer-2-rc-integration-test-server" title="Link to this heading">#</a></h3>
@@ -577,6 +580,14 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"
 </div>
 <p>This verifies linkage only.  End-to-end cuObject interop still requires
 ConnectX hardware and the RC adapter on the storage gateway.</p>
+</section>
+<section id="emulated-hardware-ci">
+<h3>Emulated hardware (CI)<a class="headerlink" href="#emulated-hardware-ci" title="Link to this heading">#</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">hipobject-hardware-test-*</span></code> workflows run the RDMA data path
+under QEMU, on rocm-ernic’s emulated ionic NIC and, for GPU buffers,
+rocjitsu’s emulated GPU. They move data between
+<code class="docutils literal notranslate"><span class="pre">minio-getput-rdma</span></code> (see Layer 3) and <code class="docutils literal notranslate"><span class="pre">hipobj-rdma-test-server</span></code>
+or rocm-ernic’s own S3 store, in host and GPU memory.</p>
 </section>
 </section>
 <section id="hardware-topology">
@@ -662,6 +673,7 @@ ConnectX hardware and the RC adapter on the storage gateway.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#layer-2-rc-integration-test-server">Layer 2 — RC integration test server</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#layer-3-minio-aistor-bridge">Layer 3 — MinIO AIStor bridge</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#layer-4-cuobject-server-probe-optional">Layer 4 — cuObject server probe (optional)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#emulated-hardware-ci">Emulated hardware (CI)</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#hardware-topology">Hardware topology</a></li>
