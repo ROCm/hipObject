@@ -67,7 +67,9 @@
  * at least shared, and writing it requires mutex to be held
  * exclusively */
 #define HIPOBJ_GUARDED_BY(mutex) HIPOBJ_THREAD_ANNOTATION(guarded_by(mutex))
-/* On a mutex: it's never taken while one of the others is held */
+/* On a mutex: when it's held with any of the others, it's taken after
+ * them. It can be taken while they're held, but they can't be taken while
+ * it is. */
 #define HIPOBJ_ACQUIRED_AFTER(...) HIPOBJ_THREAD_ANNOTATION(acquired_after(__VA_ARGS__))
 
 /* On a function: the caller has to hold the mutexes exclusively, or for
