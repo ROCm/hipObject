@@ -6,7 +6,7 @@
 #
 # The examples are written to C++11 (see AGENTS.md), but the build
 # compiles them as C++20, so clang-tidy would suggest newer constructs.
-# This turns off the checks whose fixes need C++14 or later, one whose
+# This turns off the checks whose fixes need C++14 or later, two whose
 # fixes would make the examples harder to follow, and one that older
 # versions of clang-tidy get wrong (below). It also keeps
 # misc-const-correctness off parameters, so the examples don't need
@@ -44,6 +44,11 @@ Checks:
   # The examples print with printf() and fprintf(), since std::format is
   # C++20
   - -cppcoreguidelines-pro-type-vararg
+  # Naming argv's positions, HTTP status codes, and buffer sizes would
+  # only make the examples harder to read, and s3_curl_ops.h, which C
+  # includes too, would need a macro for its array's size
+  - -readability-magic-numbers
+  - -cppcoreguidelines-avoid-magic-numbers
   # clang-tidy 20 and 21 report the typedef in s3_curl_ops.h, which C
   # includes too, so it can't be a using declaration. Later versions skip
   # typedefs inside extern "C".

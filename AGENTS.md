@@ -532,8 +532,12 @@ configuration files.
   [`examples/.clang-tidy`](examples/.clang-tidy) turns off the ones that
   would suggest constructs newer than C++11 there, or make the examples
   harder to follow. [`test/unit/.clang-tidy`](test/unit/.clang-tidy) turns
-  off the one that Google Test's fixtures can't satisfy. ROCm's clang-tidy
-  lacks the `clang-analyzer-*` checks, so prefer an upstream one. CI:
+  off the one that Google Test's fixtures can't satisfy, and, as
+  [`integrations/minio-cpp/test/.clang-tidy`](integrations/minio-cpp/test/.clang-tidy)
+  does, `readability-magic-numbers`, since a unit test's numbers are its
+  data. Other code names its constants, the test server included. ROCm's
+  clang-tidy lacks the `clang-analyzer-*` checks, so prefer an upstream one.
+  CI:
   [hipobject-clang-tidy.yml](.github/workflows/hipobject-clang-tidy.yml),
   with upstream clang-tidy 23.
 - **include-what-you-use (IWYU)**: configure with `-DHIPOBJ_USE_IWYU=ON` and

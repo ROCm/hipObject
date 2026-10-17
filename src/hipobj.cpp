@@ -48,6 +48,10 @@ namespace {
      * its type */
     constexpr hipObjError_t kExceptionError = makeError(hipObjInternalError);
 
+    /* The room a transfer gives recvReply for the x-amz-rdma-reply value.
+     * The longest valid value, "200:" and a peer token, takes 92 bytes. */
+    constexpr size_t kReplyBufLen = 512;
+
     /* A token that hipObjGetRdmaToken() hands to its caller, and
      * hipObjPutRdmaToken() takes back. The [] is std::unique_ptr's form for
      * an array allocated at run time, which std::array can't replace, not a
@@ -309,8 +313,8 @@ namespace {
         if (!injectRdmaToken(ops, ctx, asStringView(std::span(encoded).first<kRdmaTokenHexLen>()))) {
             return makeError(hipObjS3Error);
         }
-        std::array<char, 512> replyBuf{};
-        const auto            reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
+        std::array<char, kReplyBufLen> replyBuf{};
+        const auto                     reply = receiveRdmaReplyRaw(ops, ctx, replyBuf);
         if (!reply || reply->status != RdmaReplyStatus::Success) {
             return makeError(hipObjS3Error);
         }

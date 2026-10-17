@@ -10,12 +10,14 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -41,22 +43,19 @@ namespace {
         return gid != Gid{};
     }
 
+    /* The first two bytes of a link-local IPv6 address */
+    constexpr auto kLinkLocalPrefix = std::to_array<uint8_t>({0xfe, 0x80});
+
     bool LinkLocalGid(const Gid &gid)
     {
-        return gid[0] == 0xfe && gid[1] == 0x80;
-    }
-
-    bool IsIPv4MappedIPv6(const Gid &gid)
-    {
-        return gid[0] == 0 && gid[1] == 0 && gid[2] == 0 && gid[3] == 0 && gid[4] == 0 && gid[5] == 0 &&
-               gid[6] == 0 && gid[7] == 0 && gid[8] == 0 && gid[9] == 0 && gid[10] == 0xff && gid[11] == 0xff;
+        return std::ranges::equal(std::span(gid).first<kLinkLocalPrefix.size()>(), kLinkLocalPrefix);
     }
 
     GidPriority ClassifyGid(const Gid &gid, RoceVersion roce_ver)
     {
         switch (roce_ver) {
             case RoceVersion::V2:
-                if (IsIPv4MappedIPv6(gid)) {
+                if (isIpv4MappedGid(gid)) {
                     return GidPriority::RoceV2Ipv4;
                 }
                 if (LinkLocalGid(gid)) {
@@ -241,8 +240,8 @@ std::optional<RdmaNic>
 GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int gpuIndex,
                    std::string_view hcaList)
 {
-    std::array<char, 32> gpu_bus_id{};
-    const int            len = static_cast<int>(gpu_bus_id.size());
+    std::array<char, kPciBusIdBufLen> gpu_bus_id{};
+    const int                         len = static_cast<int>(gpu_bus_id.size());
     if (runtime.deviceGetPCIBusId(gpu_bus_id.data(), len, gpuIndex) != hipSuccess) {
         return std::nullopt;
     }

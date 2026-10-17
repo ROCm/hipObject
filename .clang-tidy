@@ -99,8 +99,6 @@ Checks:
   - -cert-err33-c  # TODO(43): unchecked fprintf() and snprintf()
   - -google-runtime-int  # TODO(11): long and long long in the examples and MinIO bridge
   - -readability-function-cognitive-complexity  # TODO(14)
-  - -readability-magic-numbers  # TODO(289)
-  - -cppcoreguidelines-avoid-magic-numbers  # TODO: the same check
 WarningsAsErrors: '*'
 
 CheckOptions:

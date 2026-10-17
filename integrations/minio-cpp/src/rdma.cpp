@@ -17,6 +17,7 @@
 #include <utility>
 
 #include <hipobj.h>
+#include <netinet/in.h>
 #include <miniocpp/credentials.h>
 #include <miniocpp/error.h>
 #include <miniocpp/http.h>
@@ -34,6 +35,12 @@ namespace hipobj::minio {
 namespace {
 
     using namespace std::string_view_literals;
+
+    // The HTTP status of a successful PUT
+    constexpr int kHttpOk = 200;
+
+    // S3 numbers the parts of a multipart upload from 1 to 10,000
+    constexpr unsigned int kMaxPartNumber = 10000;
 
     // A failed transfer used to surface as a bare -1 with no indication of which
     // of the dozen failure points produced it. Set HIPOBJ_RDMA_DEBUG=1 to get one.
@@ -82,8 +89,8 @@ namespace {
 
     std::string clientNicFromToken(const char *token)
     {
-        std::array<char, 32> nicIp{};
-        const hipObjError_t  err = hipObjTokenClientNic(token, nicIp.data(), nicIp.size());
+        std::array<char, INET_ADDRSTRLEN> nicIp{};
+        const hipObjError_t               err = hipObjTokenClientNic(token, nicIp.data(), nicIp.size());
         if (err.opError != hipObjSuccess) {
             return {};
         }
@@ -132,7 +139,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
 
     if (!sctx->uploadId.empty()) {
         query_params.Add("uploadId", sctx->uploadId);
-        if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
+        if (sctx->partNumber == 0 || sctx->partNumber > kMaxPartNumber) {
             return {.status = RdmaStatus::Failed};
         }
         query_params.Add("partNumber", std::to_string(sctx->partNumber));
@@ -183,7 +190,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     }
 
     const std::string etag = res.headers.GetFront("etag");
-    if (res.status_code == 200 && !etag.empty()) {
+    if (res.status_code == kHttpOk && !etag.empty()) {
         sctx->etag = ::minio::utils::Trim(etag, '"');
         return {.status = RdmaStatus::Ok, .bytes = size};
     }

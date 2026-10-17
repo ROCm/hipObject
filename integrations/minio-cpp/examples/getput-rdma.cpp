@@ -6,6 +6,7 @@
 /* AMD port of minio-cpp GetPutRDMA: PUT + GET over hipObject RDMA */
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <fstream>
@@ -32,6 +33,23 @@
 
 namespace {
 
+/* The positions of the optional arguments in argv */
+constexpr size_t kSizeArg = 4;
+constexpr size_t kGpuArg  = 5;
+
+/* The size of the object when the arguments don't give one: 10 MiB */
+constexpr size_t kDefaultBufSize = size_t{10} * 1024 * 1024;
+
+/* What the buffer is filled with between the PUT and the GET */
+constexpr char kClobberByte = 0x55;
+
+/* PatternByte()'s constants: Knuth's MMIX LCG multiplier, and the
+ * multiplier and shift of MurmurHash3's 64-bit finalizer, which mixes the
+ * LCG's bits so every bit of the offset reaches the low byte */
+constexpr uint64_t kLcgMultiplier = 6364136223846793005ULL;
+constexpr uint64_t kMixMultiplier = 0xff51afd7ed558ccdULL;
+constexpr unsigned kMixShift      = 33;
+
 /* A position-dependent pattern, not a constant fill.
  *
  * This used to memset the buffer to 'A' and check afterwards that every byte
@@ -44,11 +62,12 @@ namespace {
 uint8_t
 PatternByte(size_t offset, uint32_t seed)
 {
-    uint64_t x = ((offset + 1ULL) * 6364136223846793005ULL) + seed;
-    x ^= x >> 33;
-    x *= 0xff51afd7ed558ccdULL;
-    x ^= x >> 33;
-    return static_cast<uint8_t>(x & 0xff);
+    uint64_t x = ((offset + 1ULL) * kLcgMultiplier) + seed;
+    x ^= x >> kMixShift;
+    x *= kMixMultiplier;
+    x ^= x >> kMixShift;
+    /* The low byte */
+    return static_cast<uint8_t>(x);
 }
 
 void
@@ -106,21 +125,21 @@ main(int argc, char *argv[])
     const std::string &host        = args[1];
     const std::string &access_key  = args[2];
     const std::string &secret_key  = args[3];
-    size_t             bufsize     = size_t{10} * 1024 * 1024;
+    size_t             bufsize     = kDefaultBufSize;
     bool               gpu_enabled = true;
 
-    if (args.size() >= 5) {
+    if (args.size() > kSizeArg) {
         /* parseNumber() rejects signs, trailing junk, and values that don't
          * fit in size_t, all of which atol() would quietly accept. */
-        const std::optional<size_t> parsed = hipObj::parseNumber<size_t>(args[4]);
+        const std::optional<size_t> parsed = hipObj::parseNumber<size_t>(args[kSizeArg]);
         if (!parsed) {
-            std::cerr << "invalid size_bytes: " << args[4] << "\n";
+            std::cerr << "invalid size_bytes: " << args[kSizeArg] << "\n";
             return 1;
         }
         bufsize = *parsed;
     }
-    if (args.size() >= 6) {
-        gpu_enabled = args[5] == "gpu";
+    if (args.size() > kGpuArg) {
+        gpu_enabled = args[kGpuArg] == "gpu";
     }
 
     /* Seeded per run, and printed, so a stale object left in the store by an
@@ -196,11 +215,11 @@ main(int argc, char *argv[])
      * satisfied by whatever the PUT left behind, and a GET that transferred
      * nothing at all would still verify. */
     if (gpu_enabled) {
-        (void)hipMemset(dev_ptr, 0x55, bufsize);
+        (void)hipMemset(dev_ptr, kClobberByte, bufsize);
         (void)hipDeviceSynchronize();
     }
     else {
-        std::ranges::fill(host_buf, 0x55);
+        std::ranges::fill(host_buf, kClobberByte);
     }
 
     minio::s3::GetObjectArgs gargs;

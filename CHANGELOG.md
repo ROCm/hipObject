@@ -277,6 +277,11 @@
 
 ### Resolved issues
 
+- `hipObjTokenClientNic()` reported an IPv4 address for any GID whose
+  eleventh and twelfth bytes were `0xff`, such as a link-local IPv6 GID
+  like `fe80::ffff:c0a8:12a`. It now reports one only for an IPv4-mapped
+  GID (`::ffff:a.b.c.d`), as its documentation says, and returns an empty
+  string for the others.
 - `hipObjGet()`, `hipObjPut()`, and `hipObjBufSync()` could accept an
   offset and size whose sum wrapped around, and advertise a range outside
   the registered buffer to the server or copy outside it.

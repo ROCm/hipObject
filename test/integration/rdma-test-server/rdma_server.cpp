@@ -18,6 +18,7 @@
 
 #include "hipobj-address.h"
 #include "hipobj-print.h"
+#include "http_server.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -41,6 +42,15 @@ namespace {
         hipObj::printTo(stderr, "hipobj-rdma-test-server: {} failed: {}\n", op, why);
         return std::nullopt;
     }
+
+    /* How long a transfer waits for its work completion */
+    constexpr std::chrono::seconds kCompletionTimeout{10};
+
+    /* The connection's CQ size, and how many work requests its QP can have
+     * posted */
+    constexpr int      kCqSize    = 256;
+    constexpr uint32_t kMaxSendWr = 128;
+    constexpr uint32_t kMaxRecvWr = 128;
 
     /* The size of the buffer each transfer is staged through */
     constexpr size_t kStagingSize = size_t{64} * 1024 * 1024;
@@ -83,7 +93,7 @@ namespace {
         if (conn.device().verbs().post_send(conn.qp(), &wr, &bad) != 0) {
             return false;
         }
-        return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, std::chrono::seconds(10));
+        return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, kCompletionTimeout);
     }
 
     [[nodiscard]] bool postRdmaRead(hipObj::RcConnection &conn, const struct ibv_mr *localMr, size_t size,
@@ -110,7 +120,7 @@ namespace {
         if (conn.device().verbs().post_send(conn.qp(), &wr, &bad) != 0) {
             return false;
         }
-        return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::seconds(10));
+        return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, kCompletionTimeout);
     }
 
 } // namespace
@@ -136,7 +146,7 @@ struct RdmaTestServer::Impl {
 
     static std::optional<hipObj::RcConnection> createConnection(const hipObj::RdmaDevice &rdmaDevice)
     {
-        return hipObj::createRcConnection(rdmaDevice, 256, 128, 128);
+        return hipObj::createRcConnection(rdmaDevice, kCqSize, kMaxSendWr, kMaxRecvWr);
     }
 
     /* One QP serves every request in turn, so it has to come back to INIT
@@ -230,7 +240,7 @@ RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vec
         return rdmaFail("GET", "RDMA WRITE to the client buffer did not complete");
     }
     const hipObj::RdmaToken serverToken = buildServerToken(*impl_->conn, impl_->stagingMr.get(), xferSize);
-    return hipObj::encodeReplyWithPeerToken(200, serverToken);
+    return hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken);
 }
 
 std::optional<RdmaTestServer::ReadResult>
@@ -267,7 +277,7 @@ RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size)
     const hipObj::RdmaToken serverToken = buildServerToken(*impl_->conn, impl_->stagingMr.get(), xferSize);
     return ReadResult{
         .data        = std::vector<uint8_t>(received.begin(), received.end()),
-        .replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken),
+        .replyHeader = hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken),
     };
 }
 

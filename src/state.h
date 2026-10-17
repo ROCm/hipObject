@@ -74,16 +74,19 @@ struct Options {
      * BusyWaitSignal::WaitRelaxed, which spins in userspace rather than
      * blocking, so a wedged copy shows up as a busy core and no kernel log
      * at all -- there is no other layer that will ever time this out. */
-    std::chrono::milliseconds stageTimeout = std::chrono::seconds(30);
+    static constexpr std::chrono::seconds kDefaultStageTimeout{30};
+    std::chrono::milliseconds             stageTimeout = kDefaultStageTimeout;
 
     /* How long a transfer waits for its work completion. It isn't read
      * from the environment. */
-    std::chrono::milliseconds pollTimeout = std::chrono::seconds(5);
+    static constexpr std::chrono::seconds kDefaultPollTimeout{5};
+    std::chrono::milliseconds             pollTimeout = kDefaultPollTimeout;
 
     /* How many connections hipObjInit() creates for transfers
      * (HIPOBJ_MAX_TRANSFERS, from 1 to 1024), and so how many transfers
      * can run at once. Each one is a QP and a CQ on the NIC. */
-    size_t maxTransfers = 16;
+    static constexpr size_t kDefaultMaxTransfers = 16;
+    size_t                  maxTransfers         = kDefaultMaxTransfers;
 
     /* Strict GPU-direct mode (HIPOBJ_REQUIRE_GPU_DIRECT). Registering a
      * device buffer is supposed to hand the NIC the device memory itself;

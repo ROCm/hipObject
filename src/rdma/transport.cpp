@@ -6,6 +6,7 @@
 #include "transport.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -100,6 +101,14 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, std::strin
 
 namespace {
 
+    /* How long a sender waits before it retries, when this QP reports that
+     * no receive was posted for its request: 12 is 0.64 ms */
+    constexpr uint8_t kMinRnrTimer = 12;
+
+    /* The hop limit of the IPv6 header that RoCEv2 packets carry, which is
+     * how many routers a packet can pass through */
+    constexpr uint8_t kHopLimit = 64;
+
     [[nodiscard]] bool transitionQpToInit(RcConnection &conn)
     {
         auto attr            = zeroedObject<ibv_qp_attr>();
@@ -178,7 +187,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.dest_qp_num               = destQpNum;
     attr.rq_psn                    = 0;
     attr.max_dest_rd_atomic        = 1;
-    attr.min_rnr_timer             = 12;
+    attr.min_rnr_timer             = kMinRnrTimer;
     attr.ah_attr.is_global         = 1;
     attr.ah_attr.dlid              = destLid;
     attr.ah_attr.sl                = 0;
@@ -186,7 +195,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.port_num          = device.portNum();
     attr.ah_attr.grh.dgid          = destGid;
     attr.ah_attr.grh.flow_label    = 0;
-    attr.ah_attr.grh.hop_limit     = 64;
+    attr.ah_attr.grh.hop_limit     = kHopLimit;
     attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(device.gidIndex());
     attr.ah_attr.grh.traffic_class = 0;
     const int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
@@ -200,9 +209,9 @@ transitionQpToRts(RcConnection &conn)
     auto attr     = zeroedObject<ibv_qp_attr>();
     attr.qp_state = IBV_QPS_RTS;
     applyVendorQpAttrs(conn.device(), attr);
-    attr.timeout       = 14;
-    attr.retry_cnt     = 7;
-    attr.rnr_retry     = 7;
+    attr.timeout       = kQpTimeout;
+    attr.retry_cnt     = kQpRetryCount;
+    attr.rnr_retry     = kQpRnrRetry;
     attr.sq_psn        = 0;
     attr.max_rd_atomic = 1;
     const int mask     = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
