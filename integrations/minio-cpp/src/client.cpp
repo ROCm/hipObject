@@ -268,7 +268,9 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
 
     const size_t size = *args.size;
     // minio-cpp's object_size is a long, which the HTTP paths below set, and
-    // long is only 32 bits on some platforms
+    // long is only 32 bits on some platforms. The NOLINTs here and below
+    // are for that long.
+    // NOLINTNEXTLINE(google-runtime-int)
     if (!std::in_range<long>(size)) {
         return ::minio::s3::PutObjectResponse(::minio::error::Error("object size is too large"));
     }
@@ -284,7 +286,7 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
         http_args.stream                     = &ss;
         http_args.buf                        = nullptr;
         http_args.size                       = std::nullopt;
-        http_args.object_size                = static_cast<long>(size);
+        http_args.object_size                = static_cast<long>(size); // NOLINT(google-runtime-int)
         http_args.part_size                  = 0;
         CountHttpPut(size);
         return s3_client_.PutObject(http_args);
@@ -336,7 +338,7 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
     http_args.stream      = &ss;
     http_args.buf         = nullptr;
     http_args.size        = std::nullopt;
-    http_args.object_size = static_cast<long>(size);
+    http_args.object_size = static_cast<long>(size); // NOLINT(google-runtime-int)
     // Validate() clamped part_size down to the object size on the way in, and
     // anything under 5MiB fails the next Validate. Let it be recomputed.
     http_args.part_size = 0;

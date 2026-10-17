@@ -178,6 +178,8 @@ main(int argc, char *argv[])
         std::cout << "GPU buffer " << bufsize << " bytes\n";
     }
     else {
+        /* sysconf() returns a long */
+        // NOLINTNEXTLINE(google-runtime-int)
         const long pagesize = sysconf(_SC_PAGESIZE);
         if (pagesize <= 0) {
             std::cerr << "sysconf(_SC_PAGESIZE) failed\n";

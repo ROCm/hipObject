@@ -140,9 +140,12 @@ parseSize(const char *arg)
     if (arg[0] < '0' || arg[0] > '9') {
         return 0;
     }
+    // std::strtoull() returns an unsigned long long
+    // NOLINTBEGIN(google-runtime-int)
     errno                        = 0;
     char                    *end = nullptr;
     const unsigned long long n   = std::strtoull(arg, &end, 10);
+    // NOLINTEND(google-runtime-int)
     if (errno != 0 || *end != '\0' || static_cast<size_t>(n) != n) {
         return 0;
     }
