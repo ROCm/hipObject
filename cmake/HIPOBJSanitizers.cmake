@@ -17,12 +17,12 @@
 # contain one sanitizer runtime.
 #
 # HIPOBJ_SANITIZER_SHARED_RUNTIME selects how programs get the sanitizer
-# runtime. When it's on, which is the default, they link the runtime's
-# shared library. Libraries from another sanitizer build that uses the
-# shared runtime, such as a sanitizer build of ROCm, can then be loaded
-# into the same program. When it's off, programs link the static runtime
-# instead. (Without an option, Clang links the static runtime and GCC
-# links the shared one.)
+# runtime. When it's on, they link the runtime's shared library.
+# Libraries from another sanitizer build that uses the shared runtime,
+# such as a sanitizer build of ROCm, can then be loaded into the same
+# program. When it's off, programs link the static runtime instead. It
+# defaults to what the compiler does without an option: on with GCC, and
+# off with Clang (see the option, below, for why).
 #
 # A sanitizer build instruments every target that hipObject builds,
 # including third-party code that it builds from source, such as
@@ -45,9 +45,31 @@ option(HIPOBJ_USE_SANITIZERS
 option(HIPOBJ_USE_THREAD_SANITIZER
   "Build with ThreadSanitizer (not with HIPOBJ_USE_SANITIZERS)"
   OFF)
+
+# HIPOBJ_SANITIZER_SHARED_RUNTIME defaults to off with Clang, since Clang
+# 18's shared runtimes (Ubuntu 24.04's clang 18.1.8, at least) never call
+# a program's __asan_default_options() or __tsan_default_options(). The
+# defaults in sanitizer-default-options.c are then ignored without a
+# word: ThreadSanitizer doesn't stop at the first report, for example.
+# Clang 19 and later, and amdclang 24, call them from either runtime.
+#
+# TheRock: TheRock's sanitizer builds of ROCm link Clang's shared runtime
+# (-shared-libsan), and a program can only contain one runtime. To run
+# hipObject's tests against a sanitizer build of ROCm, turn this option
+# on. Inside TheRock, hipObject's options may not be used at all: TheRock
+# adds its own -fsanitize flags (and -shared-libsan) to every subproject
+# through its toolchain file, and adds the RPATH to Clang's runtimes
+# itself (see therock_sanitizers.cmake and
+# therock_subproject_dep_provider.cmake in TheRock). Check how the two
+# interact before relying on either.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  set(hipobj_sanitizer_shared_runtime_default ON)
+else()
+  set(hipobj_sanitizer_shared_runtime_default OFF)
+endif()
 option(HIPOBJ_SANITIZER_SHARED_RUNTIME
   "Link the shared sanitizer runtime instead of the static one"
-  ON)
+  ${hipobj_sanitizer_shared_runtime_default})
 
 # Store the flags that compile and link hipObject's code with the enabled
 # sanitizer in compile_var and link_var. Both are empty lists if neither
@@ -218,13 +240,6 @@ endif()
 #   - undefined: UndefinedBehaviorSanitizer's default checks.
 #   - float-divide-by-zero: floating-point division by zero, which
 #     "undefined" leaves out.
-#   - pointer-compare and pointer-subtract: AddressSanitizer checks for
-#     comparing or subtracting pointers into different objects. They only
-#     run when the run-time option detect_invalid_pointer_pairs is set,
-#     which sanitizer-default-options.c does. With Clang,
-#     sanitizer-ignorelist.txt turns them off in the C++ standard
-#     library's comparison function objects, such as std::less, which
-#     compare such pointers on purpose.
 #
 # Clang also gets these checks, which its "undefined" leaves out:
 #
@@ -248,6 +263,19 @@ endif()
 #     of a struct.
 #   - float-cast-overflow: conversions from floating point to an integer
 #     type that can't hold the value. Clang's "undefined" includes it.
+#   - pointer-compare and pointer-subtract: AddressSanitizer checks for
+#     comparing or subtracting pointers into different objects. They only
+#     run when the run-time option detect_invalid_pointer_pairs is set,
+#     which sanitizer-default-options.c does.
+#
+# Clang doesn't get pointer-compare and pointer-subtract. It instruments
+# comparisons and subtractions after it optimizes, so at -O1 and above it
+# reports ones that the optimizer made. For example, it moves the
+# subtraction in "e != nullptr ? e - b : 0" ahead of the null check, and
+# then reports subtracting b from a null pointer. It also reports
+# std::less, which libstdc++ implements by comparing the pointers as
+# integers. GCC instruments them before it optimizes, and has neither
+# problem.
 if(HIPOBJ_USE_THREAD_SANITIZER)
   set(hipobj_sanitizer_checks thread)
   set(hipobj_sanitizer_runtime tsan)
@@ -256,8 +284,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     address
     undefined
     float-divide-by-zero
-    pointer-compare
-    pointer-subtract
     implicit-conversion
     local-bounds
     nullability)
@@ -267,10 +293,10 @@ else()
     address
     undefined
     float-divide-by-zero
-    pointer-compare
-    pointer-subtract
     bounds-strict
-    float-cast-overflow)
+    float-cast-overflow
+    pointer-compare
+    pointer-subtract)
   set(hipobj_sanitizer_runtime asan)
 endif()
 list(JOIN hipobj_sanitizer_checks "," hipobj_sanitizer_checks)

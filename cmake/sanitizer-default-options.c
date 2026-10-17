@@ -25,8 +25,9 @@
 
 /* AddressSanitizer
  *
- *   - detect_invalid_pointer_pairs=2 turns on the pointer-compare and
- *     pointer-subtract checks, including for null pointers.
+ *   - detect_invalid_pointer_pairs=2 turns on GCC's pointer-compare and
+ *     pointer-subtract checks, including for null pointers. (Clang
+ *     builds don't have the checks; see HIPOBJSanitizers.cmake.)
  *   - detect_stack_use_after_return=1 finds uses of a function's local
  *     variables after it returns.
  *   - check_initialization_order=1 and strict_init_order=1 find global

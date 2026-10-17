@@ -114,7 +114,7 @@ Option                              Default        Description
 ``HIPOBJ_USE_CODE_COVERAGE``        OFF            Build with code coverage
 ``HIPOBJ_USE_SANITIZERS``           OFF            ASan, LSan, UBSan, and more
 ``HIPOBJ_USE_THREAD_SANITIZER``     OFF            ThreadSanitizer
-``HIPOBJ_SANITIZER_SHARED_RUNTIME`` ON             Shared sanitizer runtime
+``HIPOBJ_SANITIZER_SHARED_RUNTIME`` see below      Shared sanitizer runtime
 ``HIPOBJ_USE_CLANG_TIDY``           OFF            Run clang-tidy while building
 ``HIPOBJ_USE_IWYU``                 OFF            Run IWYU while building
 ``ROCM_PATH``                       see below      Path to ROCm install
@@ -193,16 +193,18 @@ except ThreadSanitizer that the compiler supports and that can be
 combined with AddressSanitizer:
 
 - With GCC and Clang: AddressSanitizer (including LeakSanitizer),
-  UndefinedBehaviorSanitizer, and the ``float-divide-by-zero``,
+  UndefinedBehaviorSanitizer, and the ``float-divide-by-zero`` check.
+- With GCC: the ``bounds-strict``, ``float-cast-overflow``,
   ``pointer-compare``, and ``pointer-subtract`` checks.
-- With GCC: the ``bounds-strict`` and ``float-cast-overflow`` checks.
 - With Clang: the ``implicit-conversion``, ``local-bounds``, and
   ``nullability`` checks.
 
-With Clang, ``cmake/sanitizer-ignorelist.txt`` turns some checks off
-in the C++ standard library headers, where they report code that's
-correct: the ``implicit-conversion`` checks, and the
-``pointer-compare`` check in function objects such as ``std::less``.
+Clang doesn't get ``pointer-compare`` and ``pointer-subtract``, since
+in an optimized build they report comparisons and subtractions that
+the optimizer made, not just the ones in the code. With Clang,
+``cmake/sanitizer-ignorelist.txt`` turns the ``implicit-conversion``
+checks off in the C++ standard library headers, whose conversions are
+deliberate.
 
 ``HIPOBJ_USE_THREAD_SANITIZER`` builds hipObject with
 ThreadSanitizer. ThreadSanitizer can't be combined with
@@ -231,20 +233,27 @@ such as the HIP runtime, are not instrumented.
 
 Every sanitizer report is fatal, so a test with a report fails. Each
 program that hipObject builds sets some of the sanitizers' run-time
-options, such as the one that turns on the ``pointer-compare`` and
+options, such as the one that turns on GCC's ``pointer-compare`` and
 ``pointer-subtract`` checks (see
 ``cmake/sanitizer-default-options.c``). The ``ASAN_OPTIONS``,
 ``UBSAN_OPTIONS``, and ``TSAN_OPTIONS`` environment variables override
 them.
 
 ``HIPOBJ_SANITIZER_SHARED_RUNTIME`` links programs with the shared
-library version of the sanitizer runtime, which is the default.
-Libraries from another build that also uses the shared runtime, such
-as a sanitizer build of ROCm, can then be used in the same program.
-If the runtime isn't in a directory that the dynamic linker searches,
-as with Clang's, the programs get an RPATH to it. Set the option to
-``OFF`` to link the static runtime instead. The shared ``libhipobj``
-then leaves the runtime's symbols for the program to provide.
+library version of the sanitizer runtime. Libraries from another build
+that also uses the shared runtime, such as a sanitizer build of ROCm,
+can then be used in the same program. If the runtime isn't in a
+directory that the dynamic linker searches, as with Clang's, the
+programs get an RPATH to it. When the option is ``OFF``, programs link
+the static runtime instead, and the shared ``libhipobj`` leaves the
+runtime's symbols for the program to provide.
+
+The option defaults to what the compiler does without it: ``ON`` with
+GCC, and ``OFF`` with Clang. Clang 18's shared runtimes (Ubuntu
+24.04's, at least) ignore the run-time options that hipObject's
+programs set, so with them, for example, ThreadSanitizer doesn't stop
+at the first report. Turn the option on with Clang 19 or later to test
+against a sanitizer build of ROCm, which uses Clang's shared runtime.
 
 If ThreadSanitizer stops a program at startup with an "unexpected
 memory mapping" error, the kernel's address space layout randomization

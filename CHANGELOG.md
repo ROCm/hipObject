@@ -261,10 +261,10 @@
 - `HIPOBJ_USE_SANITIZERS` now builds with every sanitizer except
   ThreadSanitizer that the compiler supports and that can be combined
   with AddressSanitizer: AddressSanitizer (including LeakSanitizer),
-  UndefinedBehaviorSanitizer, and the `float-divide-by-zero`,
-  `pointer-compare`, and `pointer-subtract` checks, plus
-  `bounds-strict` and `float-cast-overflow` with GCC, or
-  `implicit-conversion`, `local-bounds`, and `nullability` with Clang.
+  UndefinedBehaviorSanitizer, and the `float-divide-by-zero` check,
+  plus `bounds-strict`, `float-cast-overflow`, `pointer-compare`, and
+  `pointer-subtract` with GCC, or `implicit-conversion`, `local-bounds`,
+  and `nullability` with Clang.
   The new `HIPOBJ_USE_THREAD_SANITIZER` option builds with
   ThreadSanitizer. Only one of them can be on. The C and C++ compilers
   must both be GCC or both be Clang, and configuring fails if they can't
@@ -277,11 +277,12 @@
   same sanitizers, instead of using an installed copy, and also
   instruments the other third-party code that it builds from source,
   such as the MinIO bridge's dependencies.
-- Sanitizer builds now link the shared sanitizer runtime by default, with
-  Clang as well as GCC, so they can load libraries from another sanitizer
-  build, such as a sanitizer build of ROCm. The new
-  `HIPOBJ_SANITIZER_SHARED_RUNTIME` option (default `ON`) selects it; set
-  it to `OFF` to link the static runtime.
+- The new `HIPOBJ_SANITIZER_SHARED_RUNTIME` option selects the shared or
+  the static sanitizer runtime. The shared runtime lets a program load
+  libraries from another sanitizer build, such as a sanitizer build of
+  ROCm. The option defaults to what the compiler does without it: `ON`
+  with GCC, and `OFF` with Clang, since Clang 18's shared runtimes ignore
+  the run-time options that hipObject's programs set.
 
 ### Removed
 
