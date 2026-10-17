@@ -87,7 +87,7 @@ if(HIPOBJ_BUILD_DOCS)
     ESCAPE_QUOTES
   )
 
-  # Configure conf.py (substitutes Breathe XML path)
+  # Configure conf.py (substitutes the version and Breathe XML path)
   configure_file(
     ${PROJECT_SOURCE_DIR}/docs/conf.py
     ${PROJECT_BINARY_DIR}/docs-sphinx/conf.py

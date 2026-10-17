@@ -538,8 +538,8 @@ model, uses the lower-level calls instead:
   GID, when the GID is IPv4-mapped.
 
 These calls don't connect a QP or wait for a completion. The last
-two, like ``hipObjGetErrorString()`` and ``hipObjGetVersionString()``,
-don't need an initialized library.
+two, like ``hipObjGetErrorString()``, ``hipObjGetVersionString()``,
+and ``hipObjGetVersion()``, don't need an initialized library.
 
 Tokens and Replies
 ^^^^^^^^^^^^^^^^^^

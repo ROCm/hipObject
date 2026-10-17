@@ -21,6 +21,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <latch>
 #include <memory>
@@ -565,7 +566,7 @@ struct ReentrantCall {
 };
 
 /* The number of public functions. reentrantSendRequest() calls each one. */
-constexpr size_t kPublicFunctions = 14;
+constexpr size_t kPublicFunctions = 15;
 
 /* What reentrantSendRequest() needs, and what it found */
 struct ReentryProbe {
@@ -596,6 +597,9 @@ reentrantSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
     char                 *token  = nullptr;
     std::array<char, 32>  nicIp{};
     int                   code   = 0;
+    unsigned              major  = 0;
+    unsigned              minor  = 0;
+    unsigned              patch  = 0;
     static constexpr auto kReply = std::string_view("206");
 
     probe->errorString = hipObjGetErrorString(hipObjBusy);
@@ -619,6 +623,7 @@ reentrantSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
     probe->record("hipObjPutRdmaToken", hipObjPutRdmaToken(token), hipObjSuccess);
     probe->record("hipObjParseRdmaReply", hipObjParseRdmaReply(kReply.data(), kReply.size(), &code),
                   hipObjSuccess);
+    probe->record("hipObjGetVersion", hipObjGetVersion(&major, &minor, &patch), hipObjSuccess);
     probe->record("hipObjShutdown", hipObjShutdown(), hipObjSuccess);
     probe->record("hipObjBufDeregister after hipObjShutdown", hipObjBufDeregister(probe->device),
                   hipObjNotInitialized);
@@ -682,6 +687,12 @@ TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
 
             std::array<char, 32> nicIp{};
             EXPECT_EQ(hipObjTokenClientNic(token, nicIp.data(), nicIp.size()).opError, hipObjSuccess);
+
+            unsigned major = 0;
+            unsigned minor = 0;
+            unsigned patch = 0;
+            EXPECT_EQ(hipObjGetVersion(&major, &minor, &patch).opError, hipObjSuccess);
+            EXPECT_EQ(std::format("{}.{}.{}", major, minor, patch), expectedVersion);
         }
     });
 

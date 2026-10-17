@@ -7,12 +7,27 @@
 # value, which breaks the download.
 cmake_minimum_required(VERSION 3.25.2)
 
+# The version is here and in the HIPOBJ_VERSION_* macros in
+# include/hipobj.h, and they must match. The hipobj-install test fails if
+# they don't: the installed library reports the header's version, and
+# the test expects this one. It isn't a cache variable, so changing it
+# here takes effect when an existing build directory is reconfigured.
 set(HIPOBJ_VERSION_MAJOR 0)
 set(HIPOBJ_VERSION_MINOR 1)
 set(HIPOBJ_VERSION_PATCH 0)
 set(HIPOBJ_LIBRARY_VERSION
-  "${HIPOBJ_VERSION_MAJOR}.${HIPOBJ_VERSION_MINOR}.${HIPOBJ_VERSION_PATCH}"
-  CACHE STRING "hipObject library version")
+  "${HIPOBJ_VERSION_MAJOR}.${HIPOBJ_VERSION_MINOR}.${HIPOBJ_VERSION_PATCH}")
+
+# The shared library's soname has only the major version
+# (libhipobj.so.<major>), so a program linked against one release loads
+# any later release with the same major version. A minor or patch release
+# must NEVER break the ABI, even in a way that keeps the API
+# source-compatible, such as reordering a struct's fields or changing an
+# enumerator's value. CMake would otherwise put the whole version in the
+# soname.
+#
+# While the major version is 0, hipObject is in development, and its ABI
+# changes between minor versions without a change to the soname.
 set(HIPOBJ_LIBRARY_SOVERSION
   "${HIPOBJ_VERSION_MAJOR}")
 

@@ -27,6 +27,13 @@ endfunction()
 # installs their sources, with CMakeLists.install.cmake as their
 # CMakeLists.txt, for users to build against the installed hipObject.
 
+hipobj_add_example(get-version get-version.cpp)
+# It needs no GPU or NIC, so the tests run it
+if(BUILD_TESTING)
+  add_test(NAME hipobj-example-get-version
+    COMMAND get-version)
+endif()
+
 find_package(CURL QUIET)
 
 if(CURL_FOUND)

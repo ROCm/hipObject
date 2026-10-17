@@ -145,12 +145,13 @@ set(license_file share/doc/hipobject${rocm_mm}/LICENSE.md)
 # installed. The example programs themselves aren't installed.
 set(example_files)
 if(EXAMPLES_DIR)
-  foreach(file IN ITEMS CMakeLists.txt README.md get-object.cpp
-      put-object.cpp s3_curl_ops.cpp s3_curl_ops.h)
+  foreach(file IN ITEMS CMakeLists.txt README.md get-version.cpp
+      get-object.cpp put-object.cpp s3_curl_ops.cpp s3_curl_ops.h)
     list(APPEND example_files ${EXAMPLES_DIR}/${file})
   endforeach()
 endif()
 set(not_packaged_files
+  bin/hipobj-examples/get-version
   bin/hipobj-examples/get-object
   bin/hipobj-examples/put-object)
 

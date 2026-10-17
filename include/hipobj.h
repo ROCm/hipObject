@@ -261,7 +261,8 @@ typedef struct {
  * connections that transfers use (see @ref threads).
  *
  * hipObjGetErrorString(), hipObjGetVersionString(),
- * hipObjParseRdmaReply(), hipObjTokenClientNic(), and
+ * hipObjGetVersion(), hipObjParseRdmaReply(),
+ * hipObjTokenClientNic(), and
  * hipObjPutRdmaToken() work without it, and
  * hipObjShutdown() does nothing without it. The other
  * functions return hipObjNotInitialized until it has
@@ -525,6 +526,26 @@ HIPOBJ_API hipObjError_t hipObjTokenClientNic(const char *token, char *nicIp, si
  * @ingroup core
  */
 HIPOBJ_API const char *hipObjGetVersionString(void);
+
+/*!
+ * @brief Get the library's version as numbers
+ *
+ * Writes the major, minor, and patch version of the hipObject library
+ * that's running. These can differ from the HIPOBJ_VERSION_MAJOR,
+ * HIPOBJ_VERSION_MINOR, and HIPOBJ_VERSION_PATCH macros of the header
+ * that the application was compiled with, if it's linked against a
+ * different hipObject.
+ *
+ * A NULL pointer skips that part of the version, and the others are
+ * still written. It always returns hipObjSuccess.
+ *
+ * @param major  Where to write the major version, or NULL
+ * @param minor  Where to write the minor version, or NULL
+ * @param patch  Where to write the patch version, or NULL
+ * @return hipObjError_t
+ * @ingroup core
+ */
+HIPOBJ_API hipObjError_t hipObjGetVersion(unsigned *major, unsigned *minor, unsigned *patch);
 
 #ifdef __cplusplus
 }
