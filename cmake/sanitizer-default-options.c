@@ -59,6 +59,9 @@ __ubsan_default_options(void)
 
 /* ThreadSanitizer
  *
+ *   - halt_on_error=1 stops the program at the first report, as the
+ *     other sanitizers do. Otherwise it keeps running, and only fails
+ *     when it exits.
  *   - second_deadlock_stack=1 shows where both locks in a possible
  *     deadlock were taken, not just one.
  */
@@ -66,7 +69,8 @@ HIPOBJ_SANITIZER_DEFAULT_OPTIONS const char *__tsan_default_options(void);
 const char *
 __tsan_default_options(void)
 {
-    return "second_deadlock_stack=1";
+    return "halt_on_error=1:"
+           "second_deadlock_stack=1";
 }
 
 /* NOLINTEND(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp) */

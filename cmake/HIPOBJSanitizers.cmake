@@ -151,13 +151,28 @@ function(hipobj_find_sanitizer_runtime_dir out_var runtime)
   endif()
 
   # GCC's libasan.so, for example, is a link to the libasan.so.8 in a
-  # system library directory, which the dynamic linker searches already
+  # system library directory, which the dynamic linker searches already.
+  # An RPATH to a system directory would put it ahead of the program's
+  # other RPATH entries, such as ROCm's, so it's left out.
+  #
+  # The system directories are CMake's list for the platform, plus the
+  # multiarch directories, such as Debian's /usr/lib/x86_64-linux-gnu.
+  # CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES isn't used, since it also has the
+  # compiler's own directories, such as GCC's
+  # /usr/lib/gcc/x86_64-linux-gnu/<version>, which the linker searches
+  # but the dynamic linker doesn't.
   file(REAL_PATH "${path}" path)
   cmake_path(GET path PARENT_PATH dir)
+  set(system_dirs ${CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES})
+  if(CMAKE_LIBRARY_ARCHITECTURE)
+    list(APPEND system_dirs
+      /lib/${CMAKE_LIBRARY_ARCHITECTURE}
+      /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE})
+  endif()
   set(${out_var} PARENT_SCOPE)
-  foreach(implicit_dir IN LISTS CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES)
-    file(REAL_PATH "${implicit_dir}" implicit_dir)
-    if(dir STREQUAL implicit_dir)
+  foreach(system_dir IN LISTS system_dirs)
+    file(REAL_PATH "${system_dir}" system_dir)
+    if(dir STREQUAL system_dir)
       return()
     endif()
   endforeach()
@@ -260,9 +275,11 @@ else()
 endif()
 list(JOIN hipobj_sanitizer_checks "," hipobj_sanitizer_checks)
 
-# -fno-sanitize-recover=all makes every report fatal, so a test with a
-# report fails. Without it, UndefinedBehaviorSanitizer prints the report
-# and the program keeps running.
+# -fno-sanitize-recover=all makes AddressSanitizer's and
+# UndefinedBehaviorSanitizer's reports fatal, so a test with a report
+# fails. Without it, UndefinedBehaviorSanitizer prints the report and the
+# program keeps running. It doesn't affect ThreadSanitizer, which a
+# run-time option makes stop instead (see sanitizer-default-options.c).
 set(hipobj_sanitizer_options
   -fsanitize=${hipobj_sanitizer_checks}
   -fno-sanitize-recover=all)
