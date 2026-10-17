@@ -368,6 +368,7 @@
                 <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#core-functionality">Core Functionality</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjHandle_t"><code class="docutils literal notranslate"><span class="pre">hipObjHandle_t</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv416hipObjGetVersionPjPjPj"><code class="docutils literal notranslate"><span class="pre">hipObjGetVersion()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv422hipObjGetVersionStringv"><code class="docutils literal notranslate"><span class="pre">hipObjGetVersionString()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv410hipObjInitP14hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjShutdownv"><code class="docutils literal notranslate"><span class="pre">hipObjShutdown()</span></code></a></li>
@@ -460,6 +461,26 @@ rendered via Breathe.</p>
 </dd></dl>
 
 <dl class="cpp function">
+<dt class="sig sig-object cpp" id="_CPPv416hipObjGetVersionPjPjPj">
+<span id="_CPPv316hipObjGetVersionPjPjPj"></span><span id="_CPPv216hipObjGetVersionPjPjPj"></span><span id="hipObjGetVersion__unsignedP.unsignedP.unsignedP"></span><span class="target" id="group__core_1ga6b3dfa4a04d7cbb5fb16d79f090a5c1d"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetVersion</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">major</span></span>, <span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">minor</span></span>, <span class="kt"><span class="pre">unsigned</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">patch</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv416hipObjGetVersionPjPjPj" title="Link to this definition">#</a><br /></dt>
+<dd><p>Get the library’s version as numbers. </p>
+<p>Writes the major, minor, and patch version of the hipObject library that’s running. These can differ from the HIPOBJ_VERSION_MAJOR, HIPOBJ_VERSION_MINOR, and HIPOBJ_VERSION_PATCH macros of the header that the application was compiled with, if it’s linked against a different hipObject.</p>
+<p>A NULL pointer skips that part of the version, and the others are still written. It always returns hipObjSuccess.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>major</strong> – Where to write the major version, or NULL </p></li>
+<li><p><strong>minor</strong> – Where to write the minor version, or NULL </p></li>
+<li><p><strong>patch</strong> – Where to write the patch version, or NULL </p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="cpp function">
 <dt class="sig sig-object cpp" id="_CPPv422hipObjGetVersionStringv">
 <span id="_CPPv322hipObjGetVersionStringv"></span><span id="_CPPv222hipObjGetVersionStringv"></span><span id="hipObjGetVersionString__void"></span><span class="target" id="group__core_1ga9e1534d88db59149240b934840c70391"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">hipObjGetVersionString</span></span></span><span class="sig-paren">(</span><span class="kt"><span class="pre">void</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv422hipObjGetVersionStringv" title="Link to this definition">#</a><br /></dt>
 <dd><p>Return the library version as a string. </p>
@@ -470,7 +491,7 @@ rendered via Breathe.</p>
 <span id="_CPPv310hipObjInitP14hipObjConfig_t"></span><span id="_CPPv210hipObjInitP14hipObjConfig_t"></span><span id="hipObjInit__hipObjConfig_tP"></span><span class="target" id="group__core_1ga2b4e5bd6f1170f792720293c41864619"></span><a class="reference internal" href="#_CPPv413hipObjError_t" title="hipObjError_t"><span class="n"><span class="pre">hipObjError_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjInit</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#_CPPv414hipObjConfig_t" title="hipObjConfig_t"><span class="n"><span class="pre">hipObjConfig_t</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n sig-param"><span class="pre">config</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv410hipObjInitP14hipObjConfig_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Initialize the hipObject library. </p>
 <p>Selects the closest NIC to the GPU (see <a class="reference internal" href="#structhipObjConfig__t"><span class="std std-ref">hipObjConfig_t</span></a>), opens it, and creates the RDMA connections that transfers use (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
-<p><a class="reference internal" href="#group__error_1ga3d847cc075755e1e3cc4ca1a21e24f52"><span class="std std-ref">hipObjGetErrorString()</span></a>, <a class="reference internal" href="#group__core_1ga9e1534d88db59149240b934840c70391"><span class="std std-ref">hipObjGetVersionString()</span></a>, <a class="reference internal" href="#group__io_1ga3878729f7564208a6160f667aea8a500"><span class="std std-ref">hipObjParseRdmaReply()</span></a>, <a class="reference internal" href="#group__io_1ga85ce7d367ff2f1fe671d1e41c37fb8f0"><span class="std std-ref">hipObjTokenClientNic()</span></a>, and <a class="reference internal" href="#group__io_1gaae230e1f71aa7243d882deff8ff4efcf"><span class="std std-ref">hipObjPutRdmaToken()</span></a> work without it, and <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> does nothing without it. The other functions return hipObjNotInitialized until it has succeeded.</p>
+<p><a class="reference internal" href="#group__error_1ga3d847cc075755e1e3cc4ca1a21e24f52"><span class="std std-ref">hipObjGetErrorString()</span></a>, <a class="reference internal" href="#group__core_1ga9e1534d88db59149240b934840c70391"><span class="std std-ref">hipObjGetVersionString()</span></a>, <a class="reference internal" href="#group__core_1ga6b3dfa4a04d7cbb5fb16d79f090a5c1d"><span class="std std-ref">hipObjGetVersion()</span></a>, <a class="reference internal" href="#group__io_1ga3878729f7564208a6160f667aea8a500"><span class="std std-ref">hipObjParseRdmaReply()</span></a>, <a class="reference internal" href="#group__io_1ga85ce7d367ff2f1fe671d1e41c37fb8f0"><span class="std std-ref">hipObjTokenClientNic()</span></a>, and <a class="reference internal" href="#group__io_1gaae230e1f71aa7243d882deff8ff4efcf"><span class="std std-ref">hipObjPutRdmaToken()</span></a> work without it, and <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> does nothing without it. The other functions return hipObjNotInitialized until it has succeeded.</p>
 <p>Returns hipObjInvalidValue if config is NULL, flags isn’t 0, or gpuDevice is below -1 or names a GPU that doesn’t exist; hipObjAlreadyInitialized if hipObject is already initialized; hipObjNicNotFound if there’s no NIC to use; and hipObjRdmaError if libibverbs doesn’t load, a HIP call fails (hipError says which error), or the NIC can’t be opened or the connections created.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
@@ -965,6 +986,7 @@ rendered via Breathe.</p>
     <ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#core-functionality">Core Functionality</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjHandle_t"><code class="docutils literal notranslate"><span class="pre">hipObjHandle_t</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv416hipObjGetVersionPjPjPj"><code class="docutils literal notranslate"><span class="pre">hipObjGetVersion()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv422hipObjGetVersionStringv"><code class="docutils literal notranslate"><span class="pre">hipObjGetVersionString()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv410hipObjInitP14hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjShutdownv"><code class="docutils literal notranslate"><span class="pre">hipObjShutdown()</span></code></a></li>
