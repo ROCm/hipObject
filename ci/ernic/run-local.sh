@@ -185,6 +185,11 @@ _rocm_build() {
         ca_args="-v ${AMD_CA_CERT}:/tmp/amd-root-ca.crt:ro"
     fi
 
+    # Builds with amdclang, as CI does. The compilers are set on the cmake
+    # command line, not with CC and CXX, so a build directory left from an
+    # earlier run with another compiler is reconfigured: CMake ignores CC
+    # and CXX once it has cached a compiler.
+    #
     # shellcheck disable=SC2086
     docker run --rm \
         --user root \
@@ -204,6 +209,8 @@ _rocm_build() {
             libcurl4-openssl-dev libssl-dev \
             nlohmann-json3-dev libpugixml-dev && \
           cmake -B /hipobject-build -G Ninja -S /hipobject \
+            -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/amdclang \
+            -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/amdclang++ \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DBUILD_TESTING=ON \

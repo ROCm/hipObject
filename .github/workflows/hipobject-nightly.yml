@@ -127,6 +127,9 @@ jobs:
       # and install into, the version's own directory instead, as ROCm's
       # packages do. The test programs find libamdhip64 through
       # LD_LIBRARY_PATH (see hipobject-build.yml).
+      #
+      # The packages are built with that version's amdclang, as TheRock
+      # builds ROCm. CMake picks the compilers up from CC and CXX.
       - name: Find ROCm
         run: |
           rocm_path="/opt/rocm/core-${ROCM_VERSION%.*}"
@@ -134,16 +137,24 @@ jobs:
             echo "::error::ROCm ${ROCM_VERSION} isn't in ${rocm_path}"
             exit 1
           fi
+          for compiler in amdclang amdclang++; do
+            if [[ ! -x "${rocm_path}/llvm/bin/${compiler}" ]]; then
+              echo "::error::${compiler} isn't in ${rocm_path}/llvm/bin"
+              exit 1
+            fi
+          done
           {
             echo "ROCM_PATH=${rocm_path}"
             echo "LD_LIBRARY_PATH=${rocm_path}/lib"
+            echo "CC=${rocm_path}/llvm/bin/amdclang"
+            echo "CXX=${rocm_path}/llvm/bin/amdclang++"
           } >> "${GITHUB_ENV}"
 
       # rocm-cmake reads the package release from the environment when
       # hipObject is configured.
       #
       # Warnings aren't errors here. The build workflow checks them, but
-      # only on Ubuntu 24.04, so a newer release's compiler can warn about
+      # only with ROCm 10.1.0, so another version's compiler can warn about
       # code that workflow passes. That shouldn't stop the packages.
       - name: Configure
         env:

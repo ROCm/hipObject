@@ -52,7 +52,7 @@ one or edit the other project without asking.
   7.11+ layout) and to `/opt/rocm` otherwise; setting `ROCM_VERSION` changes
   this (see [docs/building.rst](docs/building.rst)). Put `/opt/rocm/bin` on
   `PATH` and include `/opt/rocm/lib` in `LD_LIBRARY_PATH` when running binaries
-  you build. The `rocm/dev-ubuntu-24.04` full image that CI uses leaves
+  you build. The `rocm/dev-ubuntu` full images that CI uses leave
   `libamdhip64` out of the loader cache, so test binaries won't start there
   without it.
 - **Compiler**: hipObject is host-only C/C++ (no GPU kernels), so any C++20
@@ -77,17 +77,27 @@ Notes:
 
 - `HIPOBJ_BNXT` and `HIPOBJ_IONIC` are on by default, and the build steps in
   [docs/building.rst](docs/building.rst) leave them that way, so they compile
-  both RDMA backends, as CI's build workflow does. The emulated-hardware
-  workflows turn `HIPOBJ_BNXT` off, since their NIC is an ionic one.
-- CI ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) builds this
-  configuration in the `rocm/dev-ubuntu-24.04:10.0.0-full` image, along with
-  variants that add `-DBUILD_SHARED_LIBS=OFF`, `-DHIPOBJ_USE_SANITIZERS=ON`
-  (every sanitizer except ThreadSanitizer), `-DHIPOBJ_USE_THREAD_SANITIZER=ON`,
-  or `-DHIPOBJ_USE_CODE_COVERAGE=ON`. The sanitizer and coverage variants are
-  built with ROCm's amdclang. Coverage is reported on the run's summary page,
-  and the job fails below the [coverage target](#tests); on `develop`, a job
-  then publishes the result to the `badges` branch for the README's Coverage
-  badge. It is the only workflow that builds these variants.
+  both RDMA backends, as all but one of CI's build jobs do. The
+  emulated-hardware workflows turn `HIPOBJ_BNXT` off, since their NIC is an
+  ionic one.
+- CI's build workflow
+  ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) focuses on
+  the latest ROCm and its amdclang, which is how TheRock will build hipObject.
+  Every job uses ROCm 10.1.0, with `HIPOBJ_WERROR` on. Its core jobs build
+  this configuration with amdclang on Ubuntu 26.04 (the
+  `rocm/dev-ubuntu-26.04:10.1.0-full` image): `RelWithDebInfo`, then Debug
+  with `-DHIPOBJ_USE_SANITIZERS=ON` (every sanitizer except ThreadSanitizer),
+  `RelWithDebInfo` with `-DHIPOBJ_USE_THREAD_SANITIZER=ON`, and Debug with
+  `-DHIPOBJ_USE_CODE_COVERAGE=ON`. Single jobs smoke-test the rest: with
+  amdclang, a static `Release` build (`-DBUILD_SHARED_LIBS=OFF`), one with
+  both backends off, and C++23 and C++26 (`HIPOBJ_CXX_STANDARD`); upstream
+  Clang 21; GCC 15, with and without `-DHIPOBJ_USE_SANITIZERS=ON`; and GCC 13
+  and Clang 18 on Ubuntu 24.04, which also has an older CMake (3.28).
+  Coverage is reported on the run's summary page, and the job fails below the
+  [coverage target](#tests); on `develop`, a job then publishes the result to
+  the `badges` branch for the README's Coverage badge. The nightly packages
+  ([hipobject-nightly.yml](.github/workflows/hipobject-nightly.yml)) are
+  built with amdclang for ROCm 10.1.0 and 7.14.1, on Ubuntu 24.04 and 26.04.
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON`, plus the system
   packages listed in [docs/building.rst](docs/building.rst); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
@@ -502,8 +512,8 @@ configuration files.
 - **No compiler warnings, with both GCC and Clang.** They warn about different
   things, so build with each, in separate build directories
   (`-DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++`, and `clang`/`clang++`).
-  CI builds with GCC, apart from its one code coverage job, so it doesn't check
-  Clang's warnings across configurations. The build turns on a long list of
+  CI builds with both, but mostly with amdclang, and only a few
+  configurations with GCC and upstream Clang. The build turns on a long list of
   warnings
   ([`HIPOBJGNUCompilerOptions.cmake`](cmake/HIPOBJGNUCompilerOptions.cmake),
   [`HIPOBJClangCompilerOptions.cmake`](cmake/HIPOBJClangCompilerOptions.cmake))
@@ -545,11 +555,15 @@ configuration files.
   with upstream clang-tidy 23.
 - **include-what-you-use (IWYU)**: configure with `-DHIPOBJ_USE_IWYU=ON` and
   build; IWYU prints the `#include` lines it suggests adding or removing for
-  each file. Unlike the other checks, it doesn't have to report nothing, since
-  some of its suggestions are wrong. Make the suggestions that are right for
-  the files you touch, such as adding a header for a symbol the file uses but
-  only gets indirectly. Ignore the ones that are wrong, and leave the code as
-  it is. For example, IWYU asks for `<compare>` in files that compare
+  each file. Use a separate build directory, only for IWYU: when the compiler
+  is a newer Clang than IWYU's, such as amdclang, the build leaves out the
+  flags IWYU's clang doesn't have, hardening flags included
+  ([`HIPOBJIWYU.cmake`](cmake/HIPOBJIWYU.cmake)). Use Clang; IWYU rejects
+  some of GCC's flags. Unlike the other checks, it doesn't have to report
+  nothing, since some of its suggestions are wrong. Make the suggestions that
+  are right for the files you touch, such as adding a header for a symbol the
+  file uses but only gets indirectly. Ignore the ones that are wrong, and
+  leave the code as it is. For example, IWYU asks for `<compare>` in files that compare
   `std::chrono` time points (`steady_clock::now() < deadline`), because
   libstdc++ implements those comparisons with `operator<=>`, but `<chrono>`
   already includes `<compare>`, as the standard requires. Other wrong
@@ -589,7 +603,8 @@ configuration files.
   fetches and instruments GoogleTest, so it needs network access the first
   time it's configured. Don't add sanitizer flags or conditions anywhere but
   `HIPOBJSanitizers.cmake`: it instruments every target itself, at the end
-  of the configuration. CI runs both builds with amdclang.
+  of the configuration. CI runs both builds with amdclang, and
+  `HIPOBJ_USE_SANITIZERS` with GCC too.
 - **Lifetime safety, when a change could leave something dangling.** Clang
   23's `-Wlifetime-safety` looks for use-after-free, use-after-scope, and
   dangling references, but it reports too many false positives to leave

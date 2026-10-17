@@ -63,7 +63,14 @@ function(hipobj_set_compiler_flags target)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     hipobj_get_gnu_warning_flags(flags ${CMAKE_CXX_COMPILER_VERSION})
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    hipobj_get_clang_warning_flags(flags ${CMAKE_CXX_COMPILER_VERSION})
+    # IWYU gets the same flags as the compiler, so in an IWYU build, use
+    # only the flags that IWYU's clang has too (see HIPOBJIWYU.cmake)
+    set(clang_version ${CMAKE_CXX_COMPILER_VERSION})
+    if(HIPOBJ_USE_IWYU AND HIPOBJ_IWYU_CLANG_VERSION
+        AND HIPOBJ_IWYU_CLANG_VERSION VERSION_LESS clang_version)
+      set(clang_version ${HIPOBJ_IWYU_CLANG_VERSION})
+    endif()
+    hipobj_get_clang_warning_flags(flags ${clang_version})
   endif()
   target_compile_options(${target} PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${flags}>")

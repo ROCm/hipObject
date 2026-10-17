@@ -197,6 +197,8 @@ jobs:
             -v "${{ github.workspace }}:/hipobject:ro" \
             -v "${{ github.workspace }}/ernic-build:/hipobject-build" \
             -e ROCM_PATH=/opt/rocm \
+            -e CC=/opt/rocm/llvm/bin/amdclang \
+            -e CXX=/opt/rocm/llvm/bin/amdclang++ \
             "$ROCM_IMAGE" \
             bash -c "
               apt-get update -qq && \

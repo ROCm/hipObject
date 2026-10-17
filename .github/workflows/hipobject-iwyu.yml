@@ -57,7 +57,7 @@ jobs:
     name: include-what-you-use (advisory)
     runs-on: ubuntu-latest
     container:
-      image: rocm/dev-ubuntu-24.04:10.0.0-full
+      image: rocm/dev-ubuntu-26.04:10.1.0-full
       options: --user root
     env:
       ROCM_PATH: /opt/rocm
@@ -89,17 +89,18 @@ jobs:
       # runs IWYU through a wrapper that records every run for the check
       # step.
       #
-      # The iwyu package installs clang, so the compilers are set to GCC
-      # rather than left to whichever c++ CMake finds first. GCC also
-      # checks that IWYU's clang copes with the GCC-only warning flags.
+      # The compiler is amdclang, as in the other workflows. IWYU's clang
+      # is older, so the build leaves out the flags it doesn't have (see
+      # HIPOBJIWYU.cmake).
       #
       # HIPOBJ_WERROR is off: the Build workflow checks for warnings, and
       # this job is only about IWYU.
       - name: Configure
+        env:
+          CC: /opt/rocm/llvm/bin/amdclang
+          CXX: /opt/rocm/llvm/bin/amdclang++
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_C_COMPILER=gcc \
-            -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_BNXT=ON \
