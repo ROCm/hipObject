@@ -262,8 +262,13 @@ uses more bits than ThreadSanitizer supports. Reduce it with
 
 ``HIPOBJ_USE_CLANG_TIDY`` runs clang-tidy (19 or later) on
 hipObject's own code as it compiles. It needs Clang as the C++
-compiler. ``HIPOBJ_USE_IWYU`` runs include-what-you-use the same
-way; its suggestions don't fail the build.
+compiler. Configuring looks on ``PATH`` for ``clang-tidy``, then for
+versioned names such as ``clang-tidy-23``, newest first, and then in
+``ROCM_PATH``/llvm/bin, and passes over any older than 19. ROCm's
+clang-tidy comes last because it's built without the
+``clang-analyzer-*`` checks. Set ``HIPOBJ_CLANG_TIDY_EXE`` to the
+path of the one to use. ``HIPOBJ_USE_IWYU`` runs include-what-you-use
+the same way; its suggestions don't fail the build.
 
 ``ROCM_PATH`` and ``ROCM_VERSION`` can also be set in the
 environment. If ``ROCM_PATH`` isn't set but ``ROCM_VERSION`` is,
