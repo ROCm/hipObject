@@ -82,16 +82,32 @@ Checks:
   # adds an exception path to the hot path's loops
   - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
   - -cppcoreguidelines-pro-bounds-constant-array-index
+  # It reports every function with adjacent parameters of the same type,
+  # such as a pair of sizes or addresses. Telling them apart would take a
+  # separate type for each, which would make those functions harder to
+  # call without catching anything the names and the tests don't
+  - -bugprone-easily-swappable-parameters
+  # It reports a catch block that only holds a comment. hipObject's empty
+  # catch blocks are deliberate, such as printTo()'s, which has nowhere
+  # left to report a failure, and each says why it's empty
+  - -bugprone-empty-catch
+  # It reports zero-initializing an enum, or a struct holding one, whose
+  # enumerators don't include 0, such as libibverbs' ibv_mtu and
+  # ibv_qp_type. hipObject zeroes every libibverbs struct before filling it
+  # in (see AGENTS.md), and sets the fields it uses
+  - -bugprone-invalid-enum-default-initialization
+  # It reports the examples' memcpy() of an x-amz-rdma-reply value, which
+  # is length-delimited and needs no NUL
+  - -bugprone-not-null-terminated-result
+  # It reports bitwise operations on signed integers, and libibverbs'
+  # flags and attribute masks are int enumerators that its functions take
+  # as int, so every combination of them would need casts
+  - -bugprone-signed-bitwise
+  - -hicpp-signed-bitwise
 
   # TODO: These checks report problems in the current code. Fix the code
   # and delete the check's line here, or move it to "Not wanted" with a
   # reason. The count is the number of places clang-tidy 23 reports.
-  - -bugprone-easily-swappable-parameters  # TODO(10)
-  - -bugprone-empty-catch  # TODO(2)
-  - -bugprone-invalid-enum-default-initialization  # TODO(10): ibv_mtu{}, ibv_qp_type{}, ... are 0
-  - -bugprone-not-null-terminated-result  # TODO(2)
-  - -bugprone-signed-bitwise  # TODO(21): bitwise ops on int flags
-  - -hicpp-signed-bitwise  # TODO: the same check
   - -bugprone-sizeof-expression  # TODO(24)
   - -bugprone-throwing-static-initialization  # TODO(4)
   - -cert-err58-cpp  # TODO: the same check
