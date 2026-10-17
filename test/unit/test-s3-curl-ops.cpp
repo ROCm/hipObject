@@ -78,7 +78,7 @@ public:
         int one = 1;
         setsockopt(listenFd_.get(), SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
-        struct sockaddr_in addr {};
+        sockaddr_in addr{};
         addr.sin_family      = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port        = 0;
@@ -435,7 +435,7 @@ TEST(S3CurlOps, ConnectionRefusedFails)
     // are refused deterministically.
     const hipObj::UniqueFd fd(socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
     ASSERT_TRUE(fd);
-    struct sockaddr_in addr {};
+    sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port        = 0;

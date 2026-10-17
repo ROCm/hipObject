@@ -52,10 +52,10 @@ struct DmabufLog {
 
 DmabufLog g_log;
 
-struct ibv_pd *
+ibv_pd *
 fakePd()
 {
-    return hipObj::addressToPointer<struct ibv_pd *>(1);
+    return hipObj::addressToPointer<ibv_pd *>(1);
 }
 
 /* A libibverbs with ibv_reg_dmabuf_mr() */
@@ -70,8 +70,8 @@ public:
 
     /* Leaves the MR's addr NULL, as the real ibv_reg_dmabuf_mr() does,
      * which also tells the tests which path registered it */
-    struct ibv_mr *reg_dmabuf_mr(struct ibv_pd * /*pd*/, uint64_t offset, size_t /*length*/, uint64_t iova,
-                                 int fd, int /*access*/) const override
+    ibv_mr *reg_dmabuf_mr(ibv_pd * /*pd*/, uint64_t offset, size_t /*length*/, uint64_t iova, int fd,
+                          int /*access*/) const override
     {
         ++g_log.dmabufRegisterCalls;
         g_log.registeredFd             = fd;
@@ -83,7 +83,7 @@ public:
             return nullptr;
         }
         /* Released by FakeVerbs::dereg_mr() */
-        return std::make_unique<struct ibv_mr>().release();
+        return std::make_unique<ibv_mr>().release();
     }
 };
 

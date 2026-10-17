@@ -43,7 +43,7 @@ public:
     explicit IbvContextDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    void operator()(struct ibv_context *ctx) const noexcept;
+    void operator()(ibv_context *ctx) const noexcept;
 
 private:
     const Verbs *verbs_;
@@ -54,7 +54,7 @@ public:
     explicit IbvPdDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    void operator()(struct ibv_pd *pd) const noexcept;
+    void operator()(ibv_pd *pd) const noexcept;
 
 private:
     const Verbs *verbs_;
@@ -65,7 +65,7 @@ public:
     explicit IbvCqDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    void operator()(struct ibv_cq *cq) const noexcept;
+    void operator()(ibv_cq *cq) const noexcept;
 
 private:
     const Verbs *verbs_;
@@ -76,7 +76,7 @@ public:
     explicit IbvQpDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    void operator()(struct ibv_qp *qp) const noexcept;
+    void operator()(ibv_qp *qp) const noexcept;
 
 private:
     const Verbs *verbs_;
@@ -87,7 +87,7 @@ public:
     explicit IbvMrDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    void operator()(struct ibv_mr *mr) const noexcept;
+    void operator()(ibv_mr *mr) const noexcept;
 
 private:
     const Verbs *verbs_;
@@ -98,27 +98,27 @@ public:
     explicit IbvDeviceListDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    void operator()(struct ibv_device **list) const noexcept;
+    void operator()(ibv_device **list) const noexcept;
 
 private:
     const Verbs *verbs_;
 };
 
-using IbvContextPtr = std::unique_ptr<struct ibv_context, IbvContextDeleter>;
-using IbvPdPtr      = std::unique_ptr<struct ibv_pd, IbvPdDeleter>;
-using IbvCqPtr      = std::unique_ptr<struct ibv_cq, IbvCqDeleter>;
-using IbvQpPtr      = std::unique_ptr<struct ibv_qp, IbvQpDeleter>;
-using IbvMrPtr      = std::unique_ptr<struct ibv_mr, IbvMrDeleter>;
+using IbvContextPtr = std::unique_ptr<ibv_context, IbvContextDeleter>;
+using IbvPdPtr      = std::unique_ptr<ibv_pd, IbvPdDeleter>;
+using IbvCqPtr      = std::unique_ptr<ibv_cq, IbvCqDeleter>;
+using IbvQpPtr      = std::unique_ptr<ibv_qp, IbvQpDeleter>;
+using IbvMrPtr      = std::unique_ptr<ibv_mr, IbvMrDeleter>;
 
 /* The NULL-terminated array returned by ibv_get_device_list(). The []
  * is std::unique_ptr's form for an array allocated at run time, which
  * std::array can't replace, not a C array. */
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-using IbvDeviceListPtr = std::unique_ptr<struct ibv_device *[], IbvDeviceListDeleter>;
+using IbvDeviceListPtr = std::unique_ptr<ibv_device *[], IbvDeviceListDeleter>;
 
 /* Views the devices in list, given the count ibv_get_device_list()
  * returned with it. Empty when list is null or count isn't positive. */
-inline std::span<struct ibv_device *>
+inline std::span<ibv_device *>
 deviceSpan(const IbvDeviceListPtr &list, int count) noexcept
 {
     if (!list || count <= 0) {

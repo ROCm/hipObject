@@ -38,7 +38,7 @@ struct DmabufPolicy {
  * GPU memory. Otherwise, or when either step fails, it registers the
  * memory as host memory, which fails for GPU memory. Null when nothing
  * registers. */
-IbvMrPtr registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_pd *pd, void *addr,
+IbvMrPtr registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, ibv_pd *pd, void *addr,
                               size_t length, int access, const DmabufPolicy &policy);
 
 /* Frees a host staging buffer through the runtime whose hostMalloc()
@@ -146,9 +146,9 @@ public:
      * holding the map's lock. When two threads register the same address
      * at once, one gets Registered, and the other AlreadyRegistered, and
      * its registration is released. */
-    [[nodiscard]] RegisterResult registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
+    [[nodiscard]] RegisterResult registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
         HIPOBJ_REQUIRES(!mutex_);
-    [[nodiscard]] RegisterResult registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
+    [[nodiscard]] RegisterResult registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
         HIPOBJ_REQUIRES(!mutex_);
     /* Removes the entry, and releases its registration and any staging
      * buffer without holding the map's lock */

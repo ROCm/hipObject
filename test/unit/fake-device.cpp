@@ -86,7 +86,7 @@ namespace {
 
     /* Whether a QP can move from one state to another, for the states
      * hipObject uses. Any state can move to RESET or ERR. */
-    bool isValidTransition(enum ibv_qp_state from, enum ibv_qp_state to)
+    bool isValidTransition(ibv_qp_state from, ibv_qp_state to)
     {
         if (to == IBV_QPS_RESET || to == IBV_QPS_ERR) {
             return true;
@@ -105,7 +105,7 @@ namespace {
 
 } // namespace
 
-struct ibv_device **
+ibv_device **
 FakeVerbs::get_device_list(int *num_devices) const
 {
     if (device_->fail.getDeviceList) {
@@ -116,43 +116,43 @@ FakeVerbs::get_device_list(int *num_devices) const
     }
     /* Local, so it's initialized on first use rather than by a global
      * constructor */
-    static std::array<struct ibv_device *, 2> devices = {
-        {hipObj::addressToPointer<struct ibv_device *>(0x1), nullptr},
+    static std::array<ibv_device *, 2> devices = {
+        {hipObj::addressToPointer<ibv_device *>(0x1), nullptr},
     };
     return devices.data();
 }
 
 void
-FakeVerbs::free_device_list(struct ibv_device ** /*list*/) const
+FakeVerbs::free_device_list(ibv_device ** /*list*/) const
 {
     ++device_->log.freeDeviceList;
 }
 
-struct ibv_context *
-FakeVerbs::open_device(struct ibv_device * /*device*/) const
+ibv_context *
+FakeVerbs::open_device(ibv_device * /*device*/) const
 {
     if (device_->fail.openDevice) {
         return nullptr;
     }
     ++device_->log.openDevice;
-    return hipObj::addressToPointer<struct ibv_context *>(0x2);
+    return hipObj::addressToPointer<ibv_context *>(0x2);
 }
 
 int
-FakeVerbs::close_device(struct ibv_context * /*context*/) const
+FakeVerbs::close_device(ibv_context * /*context*/) const
 {
     ++device_->log.closeDevice;
     return 0;
 }
 
 const char *
-FakeVerbs::get_device_name(struct ibv_device * /*device*/) const
+FakeVerbs::get_device_name(ibv_device * /*device*/) const
 {
     return "mlx5_0";
 }
 
 int
-FakeVerbs::query_device(struct ibv_context * /*context*/, struct ibv_device_attr *attr) const
+FakeVerbs::query_device(ibv_context * /*context*/, ibv_device_attr *attr) const
 {
     ++device_->log.queryDevice;
     if (device_->fail.queryDevice) {
@@ -165,8 +165,7 @@ FakeVerbs::query_device(struct ibv_context * /*context*/, struct ibv_device_attr
 
 /* An empty GID table, so GID selection never looks at the device */
 int
-FakeVerbs::query_port(struct ibv_context * /*context*/, uint8_t /*port_num*/,
-                      struct ibv_port_attr *attr) const
+FakeVerbs::query_port(ibv_context * /*context*/, uint8_t /*port_num*/, ibv_port_attr *attr) const
 {
     if (device_->fail.queryPort) {
         return -1;
@@ -178,8 +177,7 @@ FakeVerbs::query_port(struct ibv_context * /*context*/, uint8_t /*port_num*/,
 }
 
 int
-FakeVerbs::query_gid(struct ibv_context * /*context*/, uint8_t /*port_num*/, int /*index*/,
-                     union ibv_gid *gid) const
+FakeVerbs::query_gid(ibv_context * /*context*/, uint8_t /*port_num*/, int /*index*/, ibv_gid *gid) const
 {
     if (device_->fail.queryGid) {
         return -1;
@@ -190,25 +188,25 @@ FakeVerbs::query_gid(struct ibv_context * /*context*/, uint8_t /*port_num*/, int
     return 0;
 }
 
-struct ibv_pd *
-FakeVerbs::alloc_pd(struct ibv_context * /*context*/) const
+ibv_pd *
+FakeVerbs::alloc_pd(ibv_context * /*context*/) const
 {
     if (device_->fail.allocPd) {
         return nullptr;
     }
     ++device_->log.allocPd;
-    return hipObj::addressToPointer<struct ibv_pd *>(0x3);
+    return hipObj::addressToPointer<ibv_pd *>(0x3);
 }
 
 int
-FakeVerbs::dealloc_pd(struct ibv_pd * /*pd*/) const
+FakeVerbs::dealloc_pd(ibv_pd * /*pd*/) const
 {
     ++device_->log.deallocPd;
     return 0;
 }
 
-struct ibv_mr *
-FakeVerbs::reg_mr(struct ibv_pd * /*pd*/, void *addr, size_t /*length*/, int access) const
+ibv_mr *
+FakeVerbs::reg_mr(ibv_pd * /*pd*/, void *addr, size_t /*length*/, int access) const
 {
     ++device_->log.registerMr;
     device_->log.mrAccess = access;
@@ -216,7 +214,7 @@ FakeVerbs::reg_mr(struct ibv_pd * /*pd*/, void *addr, size_t /*length*/, int acc
         return nullptr;
     }
     /* Released by dereg_mr() */
-    auto mr  = std::make_unique<struct ibv_mr>();
+    auto mr  = std::make_unique<ibv_mr>();
     mr->addr = addr;
     mr->rkey = 0x1234;
     return mr.release();
@@ -228,8 +226,8 @@ FakeVerbs::supportsDmabuf() const
     return false;
 }
 
-struct ibv_mr *
-FakeVerbs::reg_dmabuf_mr(struct ibv_pd * /*pd*/, uint64_t /*offset*/, size_t /*length*/, uint64_t /*iova*/,
+ibv_mr *
+FakeVerbs::reg_dmabuf_mr(ibv_pd * /*pd*/, uint64_t /*offset*/, size_t /*length*/, uint64_t /*iova*/,
                          int /*fd*/, int /*access*/) const
 {
     errno = EOPNOTSUPP;
@@ -237,52 +235,52 @@ FakeVerbs::reg_dmabuf_mr(struct ibv_pd * /*pd*/, uint64_t /*offset*/, size_t /*l
 }
 
 int
-FakeVerbs::dereg_mr(struct ibv_mr *mr) const
+FakeVerbs::dereg_mr(ibv_mr *mr) const
 {
     ++device_->log.deregMr;
     /* From reg_mr(), or a test's fake reg_dmabuf_mr() */
-    const std::unique_ptr<struct ibv_mr> owned(mr);
+    const std::unique_ptr<ibv_mr> owned(mr);
     return 0;
 }
 
-struct ibv_cq *
-FakeVerbs::create_cq(struct ibv_context * /*context*/, int cqe, void * /*cq_context*/,
-                     struct ibv_comp_channel * /*channel*/, int /*comp_vector*/) const
+ibv_cq *
+FakeVerbs::create_cq(ibv_context * /*context*/, int cqe, void * /*cq_context*/,
+                     ibv_comp_channel * /*channel*/, int /*comp_vector*/) const
 {
     if (device_->fail.createCq) {
         return nullptr;
     }
     /* Released by destroy_cq() */
-    auto cq = std::make_unique<struct ibv_cq>();
+    auto cq = std::make_unique<ibv_cq>();
     ++device_->log.createCq;
     cq->cqe = cqe;
     return cq.release();
 }
 
 int
-FakeVerbs::destroy_cq(struct ibv_cq *cq) const
+FakeVerbs::destroy_cq(ibv_cq *cq) const
 {
     ++device_->log.destroyCq;
-    const std::unique_ptr<struct ibv_cq> owned(cq);
+    const std::unique_ptr<ibv_cq> owned(cq);
     return 0;
 }
 
-struct ibv_qp *
-FakeVerbs::create_qp(struct ibv_pd * /*pd*/, struct ibv_qp_init_attr * /*qp_init_attr*/) const
+ibv_qp *
+FakeVerbs::create_qp(ibv_pd * /*pd*/, ibv_qp_init_attr * /*qp_init_attr*/) const
 {
     if (device_->fail.createQp ||
         (device_->fail.qpLimit >= 0 && device_->log.createQp >= device_->fail.qpLimit)) {
         return nullptr;
     }
     /* Zeroed, so its state is IBV_QPS_RESET. Released by destroy_qp(). */
-    auto qp = std::make_unique<struct ibv_qp>();
+    auto qp = std::make_unique<ibv_qp>();
     ++device_->log.createQp;
     qp->qp_num = device_->nextQpNum++;
     return qp.release();
 }
 
 int
-FakeVerbs::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int mask) const
+FakeVerbs::modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int mask) const
 {
     /* Each call records into its own element */
     const size_t call = device_->modifyQpCount++;
@@ -304,15 +302,15 @@ FakeVerbs::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int mask) cons
 }
 
 int
-FakeVerbs::destroy_qp(struct ibv_qp *qp) const
+FakeVerbs::destroy_qp(ibv_qp *qp) const
 {
     ++device_->log.destroyQp;
-    const std::unique_ptr<struct ibv_qp> owned(qp);
+    const std::unique_ptr<ibv_qp> owned(qp);
     return 0;
 }
 
 int
-FakeVerbs::poll_cq(struct ibv_cq * /*cq*/, int /*num_entries*/, struct ibv_wc *wc) const
+FakeVerbs::poll_cq(ibv_cq * /*cq*/, int /*num_entries*/, ibv_wc *wc) const
 {
     ++device_->log.pollCq;
     if (device_->pollResult <= 0) {
@@ -325,8 +323,7 @@ FakeVerbs::poll_cq(struct ibv_cq * /*cq*/, int /*num_entries*/, struct ibv_wc *w
 }
 
 int
-FakeVerbs::post_send(struct ibv_qp * /*qp*/, struct ibv_send_wr * /*wr*/,
-                     struct ibv_send_wr ** /*bad_wr*/) const
+FakeVerbs::post_send(ibv_qp * /*qp*/, ibv_send_wr * /*wr*/, ibv_send_wr ** /*bad_wr*/) const
 {
     ++device_->log.postSend;
     return 0;

@@ -39,7 +39,7 @@ openRdmaDevice(const Verbs &verbs, const NicTopology &topology, int nicIndex)
     if (!devList || numDevs <= 0 || nicIndex < 0 || nicIndex >= numDevs) {
         return std::nullopt;
     }
-    struct ibv_device *dev = deviceSpan(devList, numDevs)[static_cast<size_t>(nicIndex)];
+    ibv_device *dev = deviceSpan(devList, numDevs)[static_cast<size_t>(nicIndex)];
     if (dev == nullptr) {
         return std::nullopt;
     }
@@ -84,8 +84,8 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, std::strin
     if (!devList || numDevs <= 0) {
         return std::nullopt;
     }
-    const std::span<struct ibv_device *> devices  = deviceSpan(devList, numDevs);
-    int                                  nicIndex = -1;
+    const std::span<ibv_device *> devices  = deviceSpan(devList, numDevs);
+    int                           nicIndex = -1;
     for (size_t i = 0; i < devices.size(); ++i) {
         const char *name = verbs.get_device_name(devices[i]);
         if (name != nullptr && std::string_view(name) == devName) {
@@ -120,7 +120,7 @@ namespace {
         return conn.device().verbs().modify_qp(conn.qp(), &attr, mask) == 0;
     }
 
-    void applyVendorQpAttrs(const RdmaDevice &device, struct ibv_qp_attr &attr)
+    void applyVendorQpAttrs(const RdmaDevice &device, ibv_qp_attr &attr)
     {
         const std::optional<uint32_t> vendorId = device.vendorId();
         if (!vendorId) {
@@ -170,7 +170,7 @@ createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uin
 }
 
 bool
-transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, union ibv_gid destGid)
+transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, ibv_gid destGid)
 {
     // The address handle stores the GID index in a uint8_t, so an index
     // outside [0, 255] can't be used and must not be truncated into a

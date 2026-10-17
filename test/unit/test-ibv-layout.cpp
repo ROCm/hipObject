@@ -35,12 +35,13 @@ struct LayoutEntry {
     int64_t          value;
 };
 
-#define HIPOBJ_IBV_TYPE(type)                                                                                \
-    {"size of " #type, static_cast<int64_t>(sizeof(type))},                                                  \
-        {"alignment of " #type, static_cast<int64_t>(alignof(type))},
-#define HIPOBJ_IBV_MEMBER(type, member)                                                                      \
-    {"offset of " #type "." #member, static_cast<int64_t>(offsetof(type, member))},                          \
-        {"size of " #type "." #member, static_cast<int64_t>(sizeof(std::declval<type>().member))},
+/* C++ doesn't need the struct or union keyword (key) before a type's name */
+#define HIPOBJ_IBV_TYPE(key, type)                                                                           \
+    {"size of " #key " " #type, static_cast<int64_t>(sizeof(type))},                                         \
+        {"alignment of " #key " " #type, static_cast<int64_t>(alignof(type))},
+#define HIPOBJ_IBV_MEMBER(key, type, member)                                                                 \
+    {"offset of " #key " " #type "." #member, static_cast<int64_t>(offsetof(type, member))},                 \
+        {"size of " #key " " #type "." #member, static_cast<int64_t>(sizeof(std::declval<type>().member))},
 #define HIPOBJ_IBV_VALUE(name) {"value of " #name, static_cast<int64_t>(name)},
 
 /* The entries in ibv-layout-list.h, from ibv-core.h */

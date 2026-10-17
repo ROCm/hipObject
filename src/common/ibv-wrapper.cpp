@@ -125,68 +125,68 @@ LoadedVerbs::LoadedVerbs(const Funcs &funcs, DlHandle library) : library_(std::m
 {
 }
 
-struct ibv_device **
+ibv_device **
 LoadedVerbs::get_device_list(int *num_devices) const
 {
     return funcs_.get_device_list(num_devices);
 }
 
 void
-LoadedVerbs::free_device_list(struct ibv_device **list) const
+LoadedVerbs::free_device_list(ibv_device **list) const
 {
     funcs_.free_device_list(list);
 }
 
-struct ibv_context *
-LoadedVerbs::open_device(struct ibv_device *device) const
+ibv_context *
+LoadedVerbs::open_device(ibv_device *device) const
 {
     return funcs_.open_device(device);
 }
 
 int
-LoadedVerbs::close_device(struct ibv_context *context) const
+LoadedVerbs::close_device(ibv_context *context) const
 {
     return funcs_.close_device(context);
 }
 
 const char *
-LoadedVerbs::get_device_name(struct ibv_device *device) const
+LoadedVerbs::get_device_name(ibv_device *device) const
 {
     return funcs_.get_device_name(device);
 }
 
 int
-LoadedVerbs::query_device(struct ibv_context *context, struct ibv_device_attr *device_attr) const
+LoadedVerbs::query_device(ibv_context *context, ibv_device_attr *device_attr) const
 {
     return funcs_.query_device(context, device_attr);
 }
 
 int
-LoadedVerbs::query_port(struct ibv_context *context, uint8_t port_num, struct ibv_port_attr *port_attr) const
+LoadedVerbs::query_port(ibv_context *context, uint8_t port_num, ibv_port_attr *port_attr) const
 {
     return funcs_.query_port(context, port_num, port_attr);
 }
 
 int
-LoadedVerbs::query_gid(struct ibv_context *context, uint8_t port_num, int index, union ibv_gid *gid) const
+LoadedVerbs::query_gid(ibv_context *context, uint8_t port_num, int index, ibv_gid *gid) const
 {
     return funcs_.query_gid(context, port_num, index, gid);
 }
 
-struct ibv_pd *
-LoadedVerbs::alloc_pd(struct ibv_context *context) const
+ibv_pd *
+LoadedVerbs::alloc_pd(ibv_context *context) const
 {
     return funcs_.alloc_pd(context);
 }
 
 int
-LoadedVerbs::dealloc_pd(struct ibv_pd *pd) const
+LoadedVerbs::dealloc_pd(ibv_pd *pd) const
 {
     return funcs_.dealloc_pd(pd);
 }
 
-struct ibv_mr *
-LoadedVerbs::reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const
+ibv_mr *
+LoadedVerbs::reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const
 {
     /* What the ibv_reg_mr() macro in verbs.h does with an access value that
      * isn't a compile-time constant. ibv_reg_mr_iova2() with the address as
@@ -201,8 +201,8 @@ LoadedVerbs::supportsDmabuf() const
     return funcs_.reg_dmabuf_mr != nullptr;
 }
 
-struct ibv_mr *
-LoadedVerbs::reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+ibv_mr *
+LoadedVerbs::reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
                            int access) const
 {
     if (funcs_.reg_dmabuf_mr == nullptr) {
@@ -213,44 +213,44 @@ LoadedVerbs::reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, ui
 }
 
 int
-LoadedVerbs::dereg_mr(struct ibv_mr *mr) const
+LoadedVerbs::dereg_mr(ibv_mr *mr) const
 {
     return funcs_.dereg_mr(mr);
 }
 
-struct ibv_cq *
-LoadedVerbs::create_cq(struct ibv_context *context, int cqe, void *cq_context,
-                       struct ibv_comp_channel *channel, int comp_vector) const
+ibv_cq *
+LoadedVerbs::create_cq(ibv_context *context, int cqe, void *cq_context, ibv_comp_channel *channel,
+                       int comp_vector) const
 {
     return funcs_.create_cq(context, cqe, cq_context, channel, comp_vector);
 }
 
 int
-LoadedVerbs::destroy_cq(struct ibv_cq *cq) const
+LoadedVerbs::destroy_cq(ibv_cq *cq) const
 {
     return funcs_.destroy_cq(cq);
 }
 
-struct ibv_qp *
-LoadedVerbs::create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const
+ibv_qp *
+LoadedVerbs::create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const
 {
     return funcs_.create_qp(pd, qp_init_attr);
 }
 
 int
-LoadedVerbs::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const
+LoadedVerbs::modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const
 {
     return funcs_.modify_qp(qp, attr, attr_mask);
 }
 
 int
-LoadedVerbs::destroy_qp(struct ibv_qp *qp) const
+LoadedVerbs::destroy_qp(ibv_qp *qp) const
 {
     return funcs_.destroy_qp(qp);
 }
 
 int
-LoadedVerbs::poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const
+LoadedVerbs::poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const
 {
     if (funcs_.poll_cq != nullptr) {
         return funcs_.poll_cq(cq, num_entries, wc);
@@ -260,7 +260,7 @@ LoadedVerbs::poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) cons
 }
 
 int
-LoadedVerbs::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const
+LoadedVerbs::post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const
 {
     if (funcs_.post_send != nullptr) {
         return funcs_.post_send(qp, wr, bad_wr);
@@ -271,37 +271,37 @@ LoadedVerbs::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_sen
 // ---- Smart pointer deleters (ibv-ptr.h) -----------------------------
 
 void
-IbvContextDeleter::operator()(struct ibv_context *ctx) const noexcept
+IbvContextDeleter::operator()(ibv_context *ctx) const noexcept
 {
     (void)verbs_->close_device(ctx);
 }
 
 void
-IbvPdDeleter::operator()(struct ibv_pd *pd) const noexcept
+IbvPdDeleter::operator()(ibv_pd *pd) const noexcept
 {
     (void)verbs_->dealloc_pd(pd);
 }
 
 void
-IbvCqDeleter::operator()(struct ibv_cq *cq) const noexcept
+IbvCqDeleter::operator()(ibv_cq *cq) const noexcept
 {
     (void)verbs_->destroy_cq(cq);
 }
 
 void
-IbvQpDeleter::operator()(struct ibv_qp *qp) const noexcept
+IbvQpDeleter::operator()(ibv_qp *qp) const noexcept
 {
     (void)verbs_->destroy_qp(qp);
 }
 
 void
-IbvMrDeleter::operator()(struct ibv_mr *mr) const noexcept
+IbvMrDeleter::operator()(ibv_mr *mr) const noexcept
 {
     (void)verbs_->dereg_mr(mr);
 }
 
 void
-IbvDeviceListDeleter::operator()(struct ibv_device **list) const noexcept
+IbvDeviceListDeleter::operator()(ibv_device **list) const noexcept
 {
     verbs_->free_device_list(list);
 }

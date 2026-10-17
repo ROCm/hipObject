@@ -137,7 +137,7 @@ protected:
         EXPECT_EQ(log.createQp, log.destroyQp);
     }
 
-    static void expectPeerGid(const struct ibv_qp_attr &attr)
+    static void expectPeerGid(const ibv_qp_attr &attr)
     {
         const hipObj::RdmaToken token = peerToken();
         EXPECT_EQ(hipObj::toGid(attr.ah_attr.grh.dgid), token.gid);
@@ -266,7 +266,7 @@ TEST_F(TransportTest, CreateReleasesQpAndCqWhenInitTransitionFails)
 TEST_F(TransportTest, MovingKeepsTheQpAndDevice)
 {
     ASSERT_NO_FATAL_FAILURE(open());
-    struct ibv_qp *const                qp = conn_->qp();
+    ibv_qp *const                       qp = conn_->qp();
     std::optional<hipObj::RcConnection> moved;
     moved.emplace(std::move(*conn_));
     conn_.reset();
@@ -320,7 +320,7 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
     ASSERT_EQ(calls.size(), 2U);
 
-    const struct ibv_qp_attr &rtr = calls[0].attr;
+    const ibv_qp_attr &rtr = calls[0].attr;
     EXPECT_EQ(calls[0].mask, kRtrMask);
     EXPECT_EQ(rtr.qp_state, IBV_QPS_RTR);
     EXPECT_EQ(rtr.path_mtu, IBV_MTU_4096);
@@ -335,7 +335,7 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
     EXPECT_EQ(rtr.ah_attr.grh.hop_limit, 64);
     expectPeerGid(rtr);
 
-    const struct ibv_qp_attr &rts = calls[1].attr;
+    const ibv_qp_attr &rts = calls[1].attr;
     EXPECT_EQ(calls[1].mask, kRtsMask);
     EXPECT_EQ(rts.qp_state, IBV_QPS_RTS);
     EXPECT_EQ(rts.timeout, 14);
@@ -486,7 +486,7 @@ TEST_P(VendorQpTest, RtrHasVendorAttributes)
     ASSERT_NO_FATAL_FAILURE(open());
     ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
 
-    const struct ibv_qp_attr rtr = modifyQpCalls().at(0).attr;
+    const ibv_qp_attr rtr = modifyQpCalls().at(0).attr;
     if (GetParam().configured) {
         EXPECT_EQ(rtr.path_mtu, IBV_MTU_4096);
         EXPECT_EQ(rtr.timeout, 14);

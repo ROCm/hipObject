@@ -87,8 +87,7 @@ class ThrowingCreateQpVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    struct ibv_qp *create_qp(struct ibv_pd * /*pd*/,
-                             struct ibv_qp_init_attr * /*qp_init_attr*/) const override
+    ibv_qp *create_qp(ibv_pd * /*pd*/, ibv_qp_init_attr * /*qp_init_attr*/) const override
     {
         throwIt();
     }
@@ -99,8 +98,7 @@ class ThrowingRegMrVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    struct ibv_mr *reg_mr(struct ibv_pd * /*pd*/, void * /*addr*/, size_t /*length*/,
-                          int /*access*/) const override
+    ibv_mr *reg_mr(ibv_pd * /*pd*/, void * /*addr*/, size_t /*length*/, int /*access*/) const override
     {
         throwIt();
     }

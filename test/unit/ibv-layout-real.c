@@ -20,9 +20,9 @@
 
 #include "ibv-layout.h"
 
-#define HIPOBJ_IBV_TYPE(type) (int64_t)sizeof(type), (int64_t) _Alignof(type),
-#define HIPOBJ_IBV_MEMBER(type, member)                                                                      \
-    (int64_t) offsetof(type, member), (int64_t)sizeof(((type *)0)->member),
+#define HIPOBJ_IBV_TYPE(key, type) (int64_t)sizeof(key type), (int64_t) _Alignof(key type),
+#define HIPOBJ_IBV_MEMBER(key, type, member)                                                                 \
+    (int64_t) offsetof(key type, member), (int64_t)sizeof(((key type *)0)->member),
 #define HIPOBJ_IBV_VALUE(name) (int64_t)(name),
 
 static const int64_t real_layout[] = {

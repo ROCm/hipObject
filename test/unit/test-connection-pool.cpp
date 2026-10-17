@@ -75,7 +75,7 @@ class ThrowingCreateQpVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    struct ibv_qp *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const override
+    ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override
     {
         if (throws) {
             throw std::runtime_error("thrown by a fake");
@@ -211,7 +211,7 @@ TEST_F(ConnectionPoolTest, MovingALeaseHandsOverTheConnection)
     const auto           pool  = makePool(1);
     std::optional<Lease> first = leaseFrom(*pool);
     ASSERT_TRUE(first);
-    struct ibv_qp *const qp = first->connection().qp();
+    ibv_qp *const qp = first->connection().qp();
 
     std::optional<Lease> second;
     second.emplace(std::move(*first));

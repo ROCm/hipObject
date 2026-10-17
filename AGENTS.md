@@ -554,10 +554,14 @@ configuration files.
   libstdc++ implements those comparisons with `operator<=>`, but `<chrono>`
   already includes `<compare>`, as the standard requires. Other wrong
   suggestions IWYU makes here:
-  - Removing `ibv-core.h` from a header that names the verbs types only as
-    `struct ibv_pd *` and the like. Without a prior declaration, that
-    declares a new `struct` in the enclosing namespace (`hipObj::ibv_pd`,
-    not libibverbs' `::ibv_pd`), so keep the include.
+  - Replacing `ibv-core.h` with forward declarations of the verbs types
+    (`struct ibv_pd;` and the like) in a header that uses them only through
+    pointers, such as [`src/buffer.h`](src/buffer.h) and
+    [`src/common/ibv-wrapper.h`](src/common/ibv-wrapper.h). `ibv-core.h`
+    declares them in the global namespace, as libibverbs does. A copy of
+    the declaration only repeats it, and one inside `namespace hipObj`
+    declares a different type (`hipObj::ibv_pd`, not `::ibv_pd`), so keep
+    the include.
   - Removing `<cstdint>` from `src/hipobj.cpp` because the public header
     includes `<stdint.h>`. C++ code includes `<cstdint>` (see
     [C++ code](#c-code)).
