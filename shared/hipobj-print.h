@@ -40,4 +40,19 @@ printTo(std::FILE *stream, std::format_string<Args...> fmt, Args &&...args) noex
     }
 }
 
+/* printTo() for a format string with no arguments. Overload resolution
+ * prefers it to the template, so the template is never instantiated with
+ * an empty args, which CodeQL reports as an unused variable. */
+inline void
+printTo(std::FILE *stream, std::format_string<> fmt) noexcept
+{
+    try {
+        const std::string text = std::format(fmt);
+        (void)writeChars(stream, text);
+    }
+    catch (...) {
+        /* There's nowhere left to report the failure */
+    }
+}
+
 } // namespace hipObj

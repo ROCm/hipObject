@@ -108,24 +108,27 @@ zeroObject(T &obj) noexcept
  * auto attr = zeroedObject<ibv_qp_attr>(), rather than declaring it
  * uninitialized and zeroing it with zeroObject().
  *
- * T() and T{} are different. For a C struct, T() is value-initialization,
- * which zero-initializes it, and the standard defines zero-initialization
- * to set the padding bits to zero too. T{} is aggregate initialization,
- * which initializes each member and leaves the padding unspecified.
- * clang-tidy's bugprone-invalid-enum-default-initialization also reports
- * T{} for setting a member whose enum has no zero enumerator (such as
- * ibv_mtu) to zero, but not T().
+ * Neither T() nor T{} is enough on its own. The standard says T()
+ * zero-initializes a C struct, padding included, but GCC 13 sets only the
+ * members, and T{} doesn't have to zero the padding at all. So this
+ * zeroes every byte with zeroObject().
  *
- * T() is a prvalue, so C++17's guaranteed copy elision initializes the
- * object being declared with it directly, without a copy. Assigning the
- * result to an existing object is a copy, though, and a copy needn't keep
- * the padding, so use zeroObject() for that. */
+ * The object is returned by name, and every supported compiler constructs
+ * it in place of the object being declared with the result (the named
+ * return value optimization), so the padding isn't lost to a copy. The
+ * standard doesn't require that, but -Wnrvo (GCC 14 and later) reports a
+ * function where it doesn't happen, and the tests check the padding with
+ * every compiler. Assigning the result to an existing object is a copy,
+ * though, and a copy needn't keep the padding, so use zeroObject() for
+ * that. */
 template <typename T>
     requires std::is_trivially_copyable_v<T> && std::is_trivially_default_constructible_v<T>
 [[nodiscard]] T
 zeroedObject() noexcept
 {
-    return T();
+    T obj{};
+    zeroObject(obj);
+    return obj;
 }
 
 } // namespace hipObj
