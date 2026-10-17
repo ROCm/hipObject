@@ -708,8 +708,13 @@ uses more bits than ThreadSanitizer supports. Reduce it with
 <code class="docutils literal notranslate"><span class="pre">sudo</span> <span class="pre">sysctl</span> <span class="pre">vm.mmap_rnd_bits=28</span></code>.</p>
 <p><code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_CLANG_TIDY</span></code> runs clang-tidy (19 or later) on
 hipObject’s own code as it compiles. It needs Clang as the C++
-compiler. <code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_IWYU</span></code> runs include-what-you-use the same
-way; its suggestions don’t fail the build.</p>
+compiler. Configuring looks on <code class="docutils literal notranslate"><span class="pre">PATH</span></code> for <code class="docutils literal notranslate"><span class="pre">clang-tidy</span></code>, then for
+versioned names such as <code class="docutils literal notranslate"><span class="pre">clang-tidy-23</span></code>, newest first, and then in
+<code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code>/llvm/bin, and passes over any older than 19. ROCm’s
+clang-tidy comes last because it’s built without the
+<code class="docutils literal notranslate"><span class="pre">clang-analyzer-*</span></code> checks. Set <code class="docutils literal notranslate"><span class="pre">HIPOBJ_CLANG_TIDY_EXE</span></code> to the
+path of the one to use. <code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_IWYU</span></code> runs include-what-you-use
+the same way; its suggestions don’t fail the build.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> and <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> can also be set in the
 environment. If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> isn’t set but <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is,
 <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>. If
