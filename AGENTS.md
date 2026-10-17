@@ -82,11 +82,12 @@ Notes:
 - CI ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) builds this
   configuration in the `rocm/dev-ubuntu-24.04:10.0.0-full` image, along with
   variants that add `-DBUILD_SHARED_LIBS=OFF`, `-DHIPOBJ_USE_SANITIZERS=ON`
-  (AddressSanitizer), or `-DHIPOBJ_USE_CODE_COVERAGE=ON` (built with ROCm's
-  amdclang, reported on the run's summary page, and failed below the
-  [coverage target](#tests); on `develop`, a job then publishes the result to
-  the `badges` branch for the README's Coverage badge). It is the only
-  workflow that builds these variants.
+  (every sanitizer except ThreadSanitizer), `-DHIPOBJ_USE_THREAD_SANITIZER=ON`,
+  or `-DHIPOBJ_USE_CODE_COVERAGE=ON`. The sanitizer and coverage variants are
+  built with ROCm's amdclang. Coverage is reported on the run's summary page,
+  and the job fails below the [coverage target](#tests); on `develop`, a job
+  then publishes the result to the `badges` branch for the README's Coverage
+  badge. It is the only workflow that builds these variants.
 - Optional MinIO C++ bridge: `-DHIPOBJ_MINIO_CLIENT=ON`, plus the system
   packages listed in [docs/building.rst](docs/building.rst); see
   [integrations/minio-cpp/TESTING.md](integrations/minio-cpp/TESTING.md).
@@ -569,14 +570,20 @@ configuration files.
   CI ([hipobject-iwyu.yml](.github/workflows/hipobject-iwyu.yml)) runs IWYU
   but only fails if IWYU itself stops working. It lists the suggestions in
   the job summary without failing.
-- **Sanitizer-clean**: the tests must run without a report from
-  AddressSanitizer, UndefinedBehaviorSanitizer, or ThreadSanitizer. Use one
-  build directory per sanitizer, configured with `-DHIPOBJ_USE_SANITIZERS=ON`
-  and `-DHIPOBJ_SANITIZER_TYPE=address`, `undefined`, or `thread`, then run
-  `ctest`. UBSan reports an error and carries on by default, so a test can
-  pass with a report in its output; run the UBSan build's tests with
-  `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1` so they fail instead. CI
-  only runs AddressSanitizer.
+- **Sanitizer-clean**: the tests must run without a report from any
+  sanitizer. Build in two build directories, one configured with
+  `-DHIPOBJ_USE_SANITIZERS=ON` (AddressSanitizer, LeakSanitizer,
+  UndefinedBehaviorSanitizer, and the compiler's other checks that can be
+  combined with them; see
+  [`HIPOBJSanitizers.cmake`](cmake/HIPOBJSanitizers.cmake)) and one with
+  `-DHIPOBJ_USE_THREAD_SANITIZER=ON`, then run `ctest` in each. Do this with
+  Clang (`clang`/`clang++`, or ROCm's `amdclang`/`amdclang++`), which has the
+  most checks, and with GCC when a change could behave differently with it.
+  Every report is fatal, so a test with one fails. A sanitizer build always
+  fetches and instruments GoogleTest, so it needs network access the first
+  time it's configured. Don't add sanitizer flags or conditions anywhere but
+  `HIPOBJSanitizers.cmake`: it instruments every target itself, at the end
+  of the configuration. CI runs both builds with amdclang.
 - **Lifetime safety, when a change could leave something dangling.** Clang
   23's `-Wlifetime-safety` looks for use-after-free, use-after-scope, and
   dangling references, but it reports too many false positives to leave

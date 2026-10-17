@@ -74,6 +74,11 @@ if(HIPOBJ_CXX_STANDARD STREQUAL "26"
     "CMake ${CMAKE_VERSION}")
 endif()
 
+# This checks the sanitizer options, and tests the compilers with them,
+# before ROCm is looked for, so that a problem with them is reported
+# early
+include(HIPOBJSanitizers)
+
 # Put the compiler's implicit include directories in
 # compile_commands.json, so tools that read it, such as clangd and
 # clang-tidy, search the same system headers as the compiler instead
@@ -96,7 +101,6 @@ endif()
 set(HIPOBJ_INHERITED_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
 
 include(HIPOBJUseROCmCMake)
-include(HIPOBJSanitizers)
 include(HIPOBJCoverage)
 include(HIPOBJClangTidy)
 include(HIPOBJIWYU)

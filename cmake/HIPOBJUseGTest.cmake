@@ -12,10 +12,26 @@ include(FetchContent)
 include(HIPOBJAddExecutable)
 include(HIPOBJSanitizers)
 
-find_package(GTest QUIET)
-if(NOT GTest_FOUND)
+# GoogleTest runs in the same process as the tests, so a sanitizer
+# build has to instrument it too, which means building it from source.
+# An installed GoogleTest isn't instrumented.
+hipobj_get_sanitizer_flags(hipobj_sanitizer_compile_options
+  hipobj_sanitizer_link_options)
+set(hipobj_fetch_gtest TRUE)
+if(hipobj_sanitizer_compile_options)
   message(STATUS
-    "GTest not found, fetching from GitHub")
+    "Fetching GTest from GitHub, to build it with the sanitizers")
+else()
+  find_package(GTest QUIET)
+  if(GTest_FOUND)
+    set(hipobj_fetch_gtest FALSE)
+  else()
+    message(STATUS
+      "GTest not found, fetching from GitHub")
+  endif()
+endif()
+
+if(hipobj_fetch_gtest)
   FetchContent_Declare(
     googletest
     GIT_REPOSITORY
@@ -27,14 +43,6 @@ if(NOT GTest_FOUND)
   set(BUILD_GMOCK OFF
     CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
-
-  # GoogleTest runs in the same process as the tests, so
-  # instrument it when we build it from source.
-  if(HIPOBJ_USE_SANITIZERS)
-    foreach(gtest_target gtest gtest_main)
-      hipobj_add_sanitizers(${gtest_target})
-    endforeach()
-  endif()
 endif()
 
 function(hipobj_add_test TEST_NAME TEST_SOURCE)

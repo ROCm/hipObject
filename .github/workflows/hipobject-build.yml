@@ -53,7 +53,7 @@ defaults:
 jobs:
   build:
     name: >-
-      Build (${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizers == 'ON' && ', ASan' || '' }}${{ matrix.coverage == 'ON' && ', coverage' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
+      Build (${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizer == 'asan' && ', ASan and UBSan' || matrix.sanitizer == 'tsan' && ', TSan' || '' }}${{ matrix.coverage == 'ON' && ', coverage' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
     runs-on: ubuntu-latest
     strategy:
       # Every other workflow builds the default configuration (shared
@@ -64,25 +64,36 @@ jobs:
       fail-fast: false
       matrix:
         shared_libs: [ON, OFF]
-        sanitizers: [OFF]
+        # asan is HIPOBJ_USE_SANITIZERS, tsan is HIPOBJ_USE_THREAD_SANITIZER,
+        # and empty is neither
+        sanitizer: ['']
         coverage: [OFF]
         # Empty means the CMakeLists.txt default (RelWithDebInfo)
         build_type: ['']
         include:
-          # One AddressSanitizer job (HIPOBJ_SANITIZER_TYPE defaults to
-          # address) with the default configuration. It builds Debug, so
-          # it's also the one place the library's assert()s are checked,
-          # and sanitizer reports aren't muddied by optimization.
+          # Two sanitizer jobs with the default configuration: one with
+          # every sanitizer except ThreadSanitizer, and one with
+          # ThreadSanitizer. They build with ROCm's Clang, which has more
+          # checks than GCC. They build Debug, so they're also where the
+          # library's assert()s are checked, and sanitizer reports aren't
+          # muddied by optimization.
           - shared_libs: ON
-            sanitizers: ON
+            sanitizer: asan
             coverage: OFF
             build_type: Debug
-          # One code coverage job with the default configuration. Coverage
-          # needs Clang, so it builds with ROCm's, which makes it the one
-          # job that doesn't use GCC. It builds Debug, so the report's
-          # lines match the source.
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
           - shared_libs: ON
-            sanitizers: OFF
+            sanitizer: tsan
+            coverage: OFF
+            build_type: Debug
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
+          # One code coverage job with the default configuration. Coverage
+          # needs Clang, so it builds with ROCm's, too. It builds Debug, so
+          # the report's lines match the source.
+          - shared_libs: ON
+            sanitizer: ''
             coverage: ON
             build_type: Debug
             cc: /opt/rocm/llvm/bin/amdclang
@@ -145,7 +156,8 @@ jobs:
             -DHIPOBJ_IONIC=ON \
             -DHIPOBJ_MINIO_CLIENT=${{ matrix.coverage == 'ON' && 'OFF' || 'ON' }} \
             -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }} \
-            -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizers }} \
+            -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizer == 'asan' && 'ON' || 'OFF' }} \
+            -DHIPOBJ_USE_THREAD_SANITIZER=${{ matrix.sanitizer == 'tsan' && 'ON' || 'OFF' }} \
             -DHIPOBJ_USE_CODE_COVERAGE=${{ matrix.coverage }} \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 

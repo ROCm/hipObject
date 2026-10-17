@@ -1,0 +1,28 @@
+# Sanitizer ignore list for HIPOBJ_USE_SANITIZERS builds with Clang (see
+# HIPOBJSanitizers.cmake). Each section turns off the named checks for
+# the matching source files. The format is described in:
+#
+# https://clang.llvm.org/docs/SanitizerSpecialCaseList.html
+
+# The C++ standard library headers contain implicit integer conversions
+# that change the value on purpose. For example, libstdc++ 16 and later
+# decrement a shared_ptr's reference count by converting -1 to unsigned
+# and adding it, so that the arithmetic can't overflow. These
+# conversions are defined behavior, but -fsanitize=integer and
+# -fsanitize=implicit-conversion report them.
+[implicit-conversion]
+src:*/include/c++/*
+
+# std::less and the other comparison function objects have to compare
+# any two pointers, including pointers into different objects, which the
+# built-in operators can't. libstdc++ does this by converting the
+# pointers to integers and comparing those, but Clang's pointer-compare
+# check treats a pointer converted to an integer as a pointer, and
+# reports the comparison. std::string uses std::less this way to check
+# whether a string it's given points into itself. The pointer-compare
+# check is part of AddressSanitizer, so this section turns
+# AddressSanitizer off in the headers that define the function objects.
+# They don't access memory, so nothing else is lost.
+[address]
+src:*/include/c++/*/bits/stl_function.h
+src:*/include/c++/*/bits/ranges_cmp.h
