@@ -20,7 +20,7 @@ find_package(hipobj CONFIG REQUIRED)
 # Without libcurl, the examples only have their stub mode
 find_package(CURL)
 
-foreach(example IN ITEMS get-object put-object)
+foreach(example IN ITEMS get-version get-object put-object)
   add_executable(${example} ${example}.cpp)
   # The examples are written to C++11
   set_target_properties(${example} PROPERTIES
@@ -29,7 +29,8 @@ foreach(example IN ITEMS get-object put-object)
     CXX_EXTENSIONS OFF)
   target_compile_options(${example} PRIVATE -Wall -Wextra)
   target_link_libraries(${example} PRIVATE hipobj::hipobj hip::host)
-  if(CURL_FOUND)
+  # get-version doesn't use S3
+  if(CURL_FOUND AND NOT example STREQUAL "get-version")
     target_sources(${example} PRIVATE s3_curl_ops.cpp)
     target_compile_definitions(${example} PRIVATE HIPOBJ_HAVE_CURL)
     target_link_libraries(${example} PRIVATE CURL::libcurl)

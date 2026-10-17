@@ -1,10 +1,12 @@
 # hipObject examples
 
 These programs show how to use the hipObject API to move an S3 object
-between an RDMA-capable S3 server and GPU memory.
+between an RDMA-capable S3 server and GPU memory, and to check which
+hipObject a program is running with.
 
 | Program | What it does |
 | --- | --- |
+| `get-version` | Prints the hipObject version the program was compiled with and the one it's running with (`hipObjGetVersion()`), and checks that they're compatible |
 | `get-object` | Downloads an object into GPU memory (`hipObjGet()`) |
 | `put-object` | Uploads GPU memory to an object (`hipObjPut()`) |
 
@@ -38,9 +40,19 @@ with only the stub mode.
 
 ## Running
 
-The examples need an AMD GPU and an RDMA NIC. Set `HIPOBJ_NIC_HINT` to the
-NIC's RDMA device name (as `ibv_devices` lists it) to choose the NIC
-yourself.
+`get-version` needs no GPU, NIC, or server. It exits with status 1 if
+the hipObject library it's running with can't be used with the header it
+was compiled with: the major versions differ, or the library's minor
+version is older than the header's. While the major version is 0, the
+minor versions must match.
+
+```bash
+build/get-version
+```
+
+`get-object` and `put-object` need an AMD GPU and an RDMA NIC. Set
+`HIPOBJ_NIC_HINT` to the NIC's RDMA device name (as `ibv_devices` lists
+it) to choose the NIC yourself.
 
 ```bash
 build/get-object <size-bytes> [--live URL [bucket] [object]]

@@ -674,4 +674,23 @@ catch (...) {
     return "0.0.0";
 }
 
+hipObjError_t
+hipObjGetVersion(unsigned *major, unsigned *minor, unsigned *patch)
+try {
+    /* NULL skips that part */
+    if (major != nullptr) {
+        *major = HIPOBJ_VERSION_MAJOR;
+    }
+    if (minor != nullptr) {
+        *minor = HIPOBJ_VERSION_MINOR;
+    }
+    if (patch != nullptr) {
+        *patch = HIPOBJ_VERSION_PATCH;
+    }
+    return hipObj::makeError(hipObjSuccess);
+}
+catch (...) {
+    return hipObj::kExceptionError;
+}
+
 } // extern "C"

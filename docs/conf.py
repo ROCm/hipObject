@@ -13,7 +13,9 @@ author = "Advanced Micro Devices, Inc."
 copyright = "2025-2026 Advanced Micro Devices, Inc. All rights reserved."
 # pylint: enable=redefined-builtin
 
-version = "0.1.0"
+# The project's version, from CMakeLists.txt, which configure_file() fills
+# in (see cmake/HIPOBJDocumentation.cmake)
+version = "@PROJECT_VERSION@"
 release = version
 
 # -- Extensions ----------------------------------------------

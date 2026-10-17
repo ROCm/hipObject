@@ -17,8 +17,9 @@
 #      against that prefix
 #   3. If the examples' sources were installed (EXAMPLES_DIR), configure
 #      and build them against that prefix with the CMakeLists.txt
-#      installed with them, which builds them as C++11. They need a GPU
-#      and an RDMA NIC, so they aren't run.
+#      installed with them, which builds them as C++11. They aren't run:
+#      get-object and put-object need a GPU and an RDMA NIC, and step 4
+#      checks the installed library's version, as get-version would.
 #   4. If the tools were installed (TOOLS), run hipobj-test-install
 #      --version from that prefix, which checks that its run path finds
 #      the installed libhipobj, and that it reports EXPECTED_VERSION

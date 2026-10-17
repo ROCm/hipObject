@@ -14,6 +14,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <initializer_list>
 #include <limits>
 #include <memory>
@@ -93,6 +94,89 @@ TEST(ApiArgsErrorString, UnknownCode)
     const int  raw  = 15;
     const auto code = std::bit_cast<hipObjOpError_t>(raw);
     EXPECT_STREQ(hipObjGetErrorString(code), "Unknown error");
+}
+
+// ---- hipObjGetVersion --------------------------------------------
+
+/* The header's version, as the unsigned values hipObjGetVersion() writes.
+ * Braces make a negative macro, which wouldn't fit, fail to compile. */
+constexpr unsigned kMajor{HIPOBJ_VERSION_MAJOR};
+constexpr unsigned kMinor{HIPOBJ_VERSION_MINOR};
+constexpr unsigned kPatch{HIPOBJ_VERSION_PATCH};
+
+/* Not a version part, so a variable that still holds it wasn't written */
+constexpr unsigned kNotWritten = std::numeric_limits<unsigned>::max();
+
+/* Gets every part of the version, and checks it against the header */
+void
+expectHeaderVersion()
+{
+    unsigned major = kNotWritten;
+    unsigned minor = kNotWritten;
+    unsigned patch = kNotWritten;
+
+    const hipObjError_t err = hipObjGetVersion(&major, &minor, &patch);
+    EXPECT_EQ(err.opError, hipObjSuccess);
+    EXPECT_EQ(err.hipError, 0);
+    EXPECT_EQ(major, kMajor);
+    EXPECT_EQ(minor, kMinor);
+    EXPECT_EQ(patch, kPatch);
+}
+
+TEST(ApiArgsVersion, MatchesTheHeader)
+{
+    expectHeaderVersion();
+}
+
+TEST(ApiArgsVersion, NullSkipsThatPart)
+{
+    /* Every combination of NULL and non-NULL pointers. Bit 0 of present
+     * passes major, bit 1 minor, and bit 2 patch. */
+    for (unsigned present = 0; present < 8; ++present) {
+        SCOPED_TRACE(std::format("present = {:03b} (patch, minor, major)", present));
+        const bool hasMajor = (present & 1U) != 0;
+        const bool hasMinor = (present & 2U) != 0;
+        const bool hasPatch = (present & 4U) != 0;
+
+        unsigned major = kNotWritten;
+        unsigned minor = kNotWritten;
+        unsigned patch = kNotWritten;
+
+        const hipObjError_t err = hipObjGetVersion(hasMajor ? &major : nullptr, hasMinor ? &minor : nullptr,
+                                                   hasPatch ? &patch : nullptr);
+        EXPECT_EQ(err.opError, hipObjSuccess);
+        EXPECT_EQ(err.hipError, 0);
+        EXPECT_EQ(major, hasMajor ? kMajor : kNotWritten);
+        EXPECT_EQ(minor, hasMinor ? kMinor : kNotWritten);
+        EXPECT_EQ(patch, hasPatch ? kPatch : kNotWritten);
+    }
+}
+
+TEST(ApiArgsVersion, MatchesTheVersionString)
+{
+    unsigned major = kNotWritten;
+    unsigned minor = kNotWritten;
+    unsigned patch = kNotWritten;
+    ASSERT_EQ(hipObjGetVersion(&major, &minor, &patch).opError, hipObjSuccess);
+    EXPECT_EQ(std::format("{}.{}.{}", major, minor, patch), hipObjGetVersionString());
+}
+
+TEST_F(ApiArgsTest, VersionDoesNotNeedInit)
+{
+    {
+        SCOPED_TRACE("before hipObjInit()");
+        expectHeaderVersion();
+    }
+    ASSERT_NO_FATAL_FAILURE(init());
+    {
+        SCOPED_TRACE("while initialized");
+        expectHeaderVersion();
+    }
+    ASSERT_EQ(hipObjShutdown().opError, hipObjSuccess);
+    {
+        SCOPED_TRACE("after hipObjShutdown()");
+        expectHeaderVersion();
+    }
 }
 
 // ---- Calls before hipObjInit() -----------------------------------

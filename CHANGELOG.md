@@ -73,6 +73,16 @@
   fails with `hipObjRdmaError` if it can't create them all.
   `hipObjGetRdmaToken()` still advertises a queue pair of its own, which
   no transfer uses.
+- `hipObjGetVersion()` gets the major, minor, and patch version of the
+  hipObject library that a program is running with, as numbers, like
+  hipFile's `hipFileGetVersion()`. Comparing them with the
+  `HIPOBJ_VERSION_MAJOR`, `HIPOBJ_VERSION_MINOR`, and
+  `HIPOBJ_VERSION_PATCH` macros checks that the library can be used with
+  the header the program was compiled with, without parsing
+  `hipObjGetVersionString()`'s text. A NULL pointer skips that part of
+  the version. Like `hipObjGetVersionString()`, it doesn't need
+  `hipObjInit()`. The new `get-version` example, installed with the
+  others, shows how to use it.
 
 ### Changed
 

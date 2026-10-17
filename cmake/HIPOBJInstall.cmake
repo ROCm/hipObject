@@ -273,6 +273,7 @@ if(HIPOBJ_INSTALL_EXAMPLES)
   install(
     FILES
       ${PROJECT_SOURCE_DIR}/examples/README.md
+      ${PROJECT_SOURCE_DIR}/examples/get-version.cpp
       ${PROJECT_SOURCE_DIR}/examples/get-object.cpp
       ${PROJECT_SOURCE_DIR}/examples/put-object.cpp
       ${PROJECT_SOURCE_DIR}/examples/s3_curl_ops.cpp
