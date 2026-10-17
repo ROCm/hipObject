@@ -37,13 +37,14 @@ namespace {
 
     /* Monotonic, process-wide, and deliberately not per-Client: a caller that
      * wants to know whether the RDMA path was taken does not want to thread a
-     * Client reference through its assertions. */
-    std::atomic<uint64_t> g_rdmaPuts{0};
-    std::atomic<uint64_t> g_rdmaGets{0};
-    std::atomic<uint64_t> g_httpPuts{0};
-    std::atomic<uint64_t> g_httpGets{0};
-    std::atomic<uint64_t> g_rdmaBytes{0};
-    std::atomic<uint64_t> g_httpBytes{0};
+     * Client reference through its assertions. constinit makes sure they're
+     * initialized at compile time, before anything can count. */
+    constinit std::atomic<uint64_t> g_rdmaPuts{0};
+    constinit std::atomic<uint64_t> g_rdmaGets{0};
+    constinit std::atomic<uint64_t> g_httpPuts{0};
+    constinit std::atomic<uint64_t> g_httpGets{0};
+    constinit std::atomic<uint64_t> g_rdmaBytes{0};
+    constinit std::atomic<uint64_t> g_httpBytes{0};
 
     void CountRdmaPut(size_t n)
     {
@@ -118,7 +119,7 @@ namespace {
             cfg.gpuDevice     = -1;
             // Without a GPU there is no topology to walk, so hipObjInit can only find
             // a NIC if it is named explicitly. Same variable the examples read.
-            if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && hint[0] != '\0') {
+            if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && *hint != '\0') {
                 nic_hint_storage_ = hint;
                 cfg.nicHint       = nic_hint_storage_.c_str();
             }
@@ -267,7 +268,9 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
 
     const size_t size = *args.size;
     // minio-cpp's object_size is a long, which the HTTP paths below set, and
-    // long is only 32 bits on some platforms
+    // long is only 32 bits on some platforms. The NOLINTs here and below
+    // are for that long.
+    // NOLINTNEXTLINE(google-runtime-int)
     if (!std::in_range<long>(size)) {
         return ::minio::s3::PutObjectResponse(::minio::error::Error("object size is too large"));
     }
@@ -283,7 +286,7 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
         http_args.stream                     = &ss;
         http_args.buf                        = nullptr;
         http_args.size                       = std::nullopt;
-        http_args.object_size                = static_cast<long>(size);
+        http_args.object_size                = static_cast<long>(size); // NOLINT(google-runtime-int)
         http_args.part_size                  = 0;
         CountHttpPut(size);
         return s3_client_.PutObject(http_args);
@@ -335,7 +338,7 @@ Client::PutObject(::minio::s3::PutObjectArgs args)
     http_args.stream      = &ss;
     http_args.buf         = nullptr;
     http_args.size        = std::nullopt;
-    http_args.object_size = static_cast<long>(size);
+    http_args.object_size = static_cast<long>(size); // NOLINT(google-runtime-int)
     // Validate() clamped part_size down to the object size on the way in, and
     // anything under 5MiB fails the next Validate. Let it be recomputed.
     http_args.part_size = 0;

@@ -193,6 +193,10 @@ fakeEvent()
 constexpr int      kFakeDmabufFd     = 1234;
 constexpr uint64_t kFakeDmabufOffset = 0x200;
 
+/* Frees memory from FakeHip::hostMalloc(), as hostFree() does, without
+ * recording a call. A test can free what the library leaks with it. */
+void freeFakeHostMemory(void *ptr);
+
 /* A HIP runtime that answers from a FakeDevice and records its calls there.
  * hostMalloc() and hostFree() allocate and free real memory. A test can
  * derive from it to change one method. */
@@ -290,7 +294,7 @@ hipObjOps_t makeOps();
 constexpr uintptr_t kFakeDevBufAddr = 0x10000;
 
 inline void *
-fakeDevBuf()
+fakeDevBuf() noexcept
 {
     return hipObj::addressToPointer<void *>(kFakeDevBufAddr);
 }
@@ -299,9 +303,20 @@ fakeDevBuf()
  * since there's no object at the fake address to do pointer arithmetic
  * in. */
 inline void *
-fakeDevBufPlusOne()
+fakeDevBufPlusOne() noexcept
 {
     return hipObj::addressToPointer<void *>(kFakeDevBufAddr + 1);
+}
+
+/* Another fake device address, for a buffer that's registered through a
+ * staging buffer. Tests make reg_mr fail for it, by setting
+ * fake().fail.registerAddr to it. */
+constexpr uintptr_t kFakeStagedBufAddr = 0x30000;
+
+inline void *
+fakeStagedBuf() noexcept
+{
+    return hipObj::addressToPointer<void *>(kFakeStagedBufAddr);
 }
 
 constexpr size_t kFakeBufSize = 64;

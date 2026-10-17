@@ -13,12 +13,12 @@
 #include <cerrno>
 #include <cstdio>
 #include <memory>
-#include <string>
 #include <utility>
 
 #include <dlfcn.h>
 
 #include "hipobj-address.h"
+#include "hipobj-print.h"
 #include "ibv-core.h"
 #include "ibv-ptr.h"
 
@@ -44,10 +44,9 @@ namespace {
         dlsym_load_optional(out, handle, name);
         if (!out) {
             /* dlerror() returns NULL when the symbol's value is NULL */
-            const char       *err      = dlerror();
-            const std::string symbol   = name;
-            const std::string errorStr = err ? err : "symbol is NULL";
-            fprintf(stderr, "hipObj: dlsym failed for %s: %s\n", symbol.c_str(), errorStr.c_str());
+            const char *err = dlerror();
+            printTo(stderr, "hipObj: dlsym failed for {}: {}\n", name,
+                    err != nullptr ? err : "symbol is NULL");
             return false;
         }
         return true;
@@ -108,15 +107,14 @@ loadLibibverbs()
     DlHandle library = open_libibverbs();
     if (!library) {
         /* dlerror()'s message names the library and says why it didn't load */
-        const char       *err      = dlerror();
-        const std::string errorStr = err != nullptr ? err : "unknown error";
-        fprintf(stderr, "hipObj: Could not load libibverbs: %s\n", errorStr.c_str());
+        const char *err = dlerror();
+        printTo(stderr, "hipObj: Could not load libibverbs: {}\n", err != nullptr ? err : "unknown error");
         return nullptr;
     }
 
     LoadedVerbs::Funcs funcs{};
     if (!load_functions(funcs, library.get())) {
-        fprintf(stderr, "hipObj: Could not init IBV function table.\n");
+        printTo(stderr, "hipObj: Could not init IBV function table.\n");
         return nullptr;
     }
 
@@ -275,37 +273,37 @@ LoadedVerbs::post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_sen
 void
 IbvContextDeleter::operator()(struct ibv_context *ctx) const noexcept
 {
-    (void)verbs->close_device(ctx);
+    (void)verbs_->close_device(ctx);
 }
 
 void
 IbvPdDeleter::operator()(struct ibv_pd *pd) const noexcept
 {
-    (void)verbs->dealloc_pd(pd);
+    (void)verbs_->dealloc_pd(pd);
 }
 
 void
 IbvCqDeleter::operator()(struct ibv_cq *cq) const noexcept
 {
-    (void)verbs->destroy_cq(cq);
+    (void)verbs_->destroy_cq(cq);
 }
 
 void
 IbvQpDeleter::operator()(struct ibv_qp *qp) const noexcept
 {
-    (void)verbs->destroy_qp(qp);
+    (void)verbs_->destroy_qp(qp);
 }
 
 void
 IbvMrDeleter::operator()(struct ibv_mr *mr) const noexcept
 {
-    (void)verbs->dereg_mr(mr);
+    (void)verbs_->dereg_mr(mr);
 }
 
 void
 IbvDeviceListDeleter::operator()(struct ibv_device **list) const noexcept
 {
-    verbs->free_device_list(list);
+    verbs_->free_device_list(list);
 }
 
 } // namespace hipObj

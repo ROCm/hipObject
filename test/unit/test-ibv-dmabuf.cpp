@@ -9,8 +9,8 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <memory>
 
 #include <gtest/gtest.h>
@@ -82,7 +82,8 @@ public:
             errno = EINVAL;
             return nullptr;
         }
-        return static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
+        /* Released by FakeVerbs::dereg_mr() */
+        return std::make_unique<struct ibv_mr>().release();
     }
 };
 

@@ -6,7 +6,7 @@
 #include "transport.h"
 
 #include <chrono>
-#include <cinttypes>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -16,6 +16,7 @@
 #include <thread>
 #include <utility>
 
+#include "hipobj-print.h"
 #include "hipobj-span.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
@@ -100,10 +101,17 @@ openRdmaDeviceByName(const Verbs &verbs, const NicTopology &topology, std::strin
 
 namespace {
 
+    /* How long a sender waits before it retries, when this QP reports that
+     * no receive was posted for its request: 12 is 0.64 ms */
+    constexpr uint8_t kMinRnrTimer = 12;
+
+    /* The hop limit of the IPv6 header that RoCEv2 packets carry, which is
+     * how many routers a packet can pass through */
+    constexpr uint8_t kHopLimit = 64;
+
     [[nodiscard]] bool transitionQpToInit(RcConnection &conn)
     {
-        struct ibv_qp_attr attr;
-        zeroObject(attr);
+        auto attr            = zeroedObject<ibv_qp_attr>();
         attr.qp_state        = IBV_QPS_INIT;
         attr.pkey_index      = 0;
         attr.port_num        = conn.device().portNum();
@@ -140,8 +148,7 @@ createRcConnection(const RdmaDevice &device, int cqSize, uint32_t maxSendWr, uin
     if (!cq) {
         return std::nullopt;
     }
-    struct ibv_qp_init_attr initAttr;
-    zeroObject(initAttr);
+    auto initAttr             = zeroedObject<ibv_qp_init_attr>();
     initAttr.send_cq          = cq.get();
     initAttr.recv_cq          = cq.get();
     initAttr.cap.max_send_wr  = maxSendWr;
@@ -173,15 +180,14 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
         return false;
     }
 
-    struct ibv_qp_attr attr;
-    zeroObject(attr);
+    auto attr     = zeroedObject<ibv_qp_attr>();
     attr.qp_state = IBV_QPS_RTR;
     attr.path_mtu = IBV_MTU_4096;
     applyVendorQpAttrs(device, attr);
     attr.dest_qp_num               = destQpNum;
     attr.rq_psn                    = 0;
     attr.max_dest_rd_atomic        = 1;
-    attr.min_rnr_timer             = 12;
+    attr.min_rnr_timer             = kMinRnrTimer;
     attr.ah_attr.is_global         = 1;
     attr.ah_attr.dlid              = destLid;
     attr.ah_attr.sl                = 0;
@@ -189,7 +195,7 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
     attr.ah_attr.port_num          = device.portNum();
     attr.ah_attr.grh.dgid          = destGid;
     attr.ah_attr.grh.flow_label    = 0;
-    attr.ah_attr.grh.hop_limit     = 64;
+    attr.ah_attr.grh.hop_limit     = kHopLimit;
     attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(device.gidIndex());
     attr.ah_attr.grh.traffic_class = 0;
     const int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
@@ -200,13 +206,12 @@ transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid, unio
 bool
 transitionQpToRts(RcConnection &conn)
 {
-    struct ibv_qp_attr attr;
-    zeroObject(attr);
+    auto attr     = zeroedObject<ibv_qp_attr>();
     attr.qp_state = IBV_QPS_RTS;
     applyVendorQpAttrs(conn.device(), attr);
-    attr.timeout       = 14;
-    attr.retry_cnt     = 7;
-    attr.rnr_retry     = 7;
+    attr.timeout       = kQpTimeout;
+    attr.retry_cnt     = kQpRetryCount;
+    attr.rnr_retry     = kQpRnrRetry;
     attr.sq_psn        = 0;
     attr.max_rd_atomic = 1;
     const int mask     = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
@@ -230,8 +235,7 @@ namespace {
 
     [[nodiscard]] bool transitionQpToReset(RcConnection &conn)
     {
-        struct ibv_qp_attr attr;
-        zeroObject(attr);
+        auto attr     = zeroedObject<ibv_qp_attr>();
         attr.qp_state = IBV_QPS_RESET;
         return conn.device().verbs().modify_qp(conn.qp(), &attr, IBV_QP_STATE) == 0;
     }
@@ -284,9 +288,9 @@ pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
              * only place that number exists. Dropping it here is what turns a
              * specific fault -- a bad rkey, a protection violation, an unreachable
              * remote -- into an indistinguishable failure several layers up. */
-            fprintf(stderr,
-                    "hipObj: work completion failed: status=%d opcode=%d "
-                    "vendor_err=0x%" PRIx32 " wr_id=%" PRIu64 "\n",
+            printTo(stderr,
+                    "hipObj: work completion failed: status={} opcode={} "
+                    "vendor_err={:#x} wr_id={}\n",
                     static_cast<int>(wc.status), static_cast<int>(wc.opcode), wc.vendor_err, wc.wr_id);
             return false;
         }
@@ -297,13 +301,12 @@ pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
     // A timeout is a failure: no completion arrived for the awaited work
     // request, so the transfer outcome is unknown and must not be reported
     // as success.
-    const int64_t     timeoutMs = timeout.count();
     const std::string awaited =
         expectedOpcode ? "opcode " + std::to_string(static_cast<int>(*expectedOpcode)) : "any opcode";
-    fprintf(stderr,
-            "hipObj: no work completion within %" PRId64 " ms (awaiting %s); the "
+    printTo(stderr,
+            "hipObj: no work completion within {} ms (awaiting {}); the "
             "transfer outcome is unknown\n",
-            timeoutMs, awaited.c_str());
+            timeout.count(), awaited);
     return false;
 }
 

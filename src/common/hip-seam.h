@@ -85,15 +85,18 @@ public:
 
 /* Destroys a HIP event through the runtime that created it, which has to
  * outlive the pointer. Create the pointer with own() (ibv-ptr.h). */
-struct HipEventDeleter {
-    explicit HipEventDeleter(const HipRuntime &deleterRuntime) noexcept : runtime(&deleterRuntime)
+class HipEventDeleter {
+public:
+    explicit HipEventDeleter(const HipRuntime &deleterRuntime) noexcept : runtime_(&deleterRuntime)
     {
     }
-    const HipRuntime *runtime;
-    void              operator()(hipEvent_t event) const noexcept
+    void operator()(hipEvent_t event) const noexcept
     {
-        (void)runtime->eventDestroy(event);
+        (void)runtime_->eventDestroy(event);
     }
+
+private:
+    const HipRuntime *runtime_;
 };
 
 /* hipEvent_t is itself a pointer, to an opaque struct */

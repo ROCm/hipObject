@@ -17,6 +17,7 @@
 #include <utility>
 
 #include <hipobj.h>
+#include <netinet/in.h>
 #include <miniocpp/credentials.h>
 #include <miniocpp/error.h>
 #include <miniocpp/http.h>
@@ -26,11 +27,20 @@
 #include <miniocpp/utils.h>
 
 #include "bytes-transferred.h"
+#include "hipobj-print.h"
 #include "hipobj_minio/context.h"
 
 namespace hipobj::minio {
 
 namespace {
+
+    using namespace std::string_view_literals;
+
+    // The HTTP status of a successful PUT
+    constexpr int kHttpOk = 200;
+
+    // S3 numbers the parts of a multipart upload from 1 to 10,000
+    constexpr unsigned int kMaxPartNumber = 10000;
 
     // A failed transfer used to surface as a bare -1 with no indication of which
     // of the dozen failure points produced it. Set HIPOBJ_RDMA_DEBUG=1 to get one.
@@ -38,27 +48,27 @@ namespace {
     {
         static const bool on = [] {
             const char *v = std::getenv("HIPOBJ_RDMA_DEBUG");
-            return v != nullptr && v[0] != '\0' && v[0] != '0';
+            return v != nullptr && *v != '\0' && *v != '0';
         }();
         return on;
     }
 
     // Prints args, streamed one after another, as a line on stderr when
     // HIPOBJ_RDMA_DEBUG is set. The line is built first and written with one
-    // fprintf(), which POSIX makes atomic with respect to other stdio calls
-    // on the stream, so lines from concurrent transfers don't interleave. One
-    // std::cerr insertion has no such guarantee.
+    // call to hipObj::printTo(), so lines from concurrent transfers don't
+    // interleave. One std::cerr insertion has no such guarantee.
+    //
+    // Pass text as std::string_view literals ("..."sv), not plain string
+    // literals: a plain one arrives as a reference to a char array, which
+    // streaming it would decay to a pointer.
     template <typename... Args> void rdmaTrace(const Args &...args)
     {
         if (!rdmaDebugEnabled()) {
             return;
         }
         std::ostringstream line;
-        line << "hipobj: rdma: ";
         (line << ... << args);
-        line << '\n';
-        const std::string text = line.str();
-        (void)std::fprintf(stderr, "%s", text.c_str());
+        hipObj::printTo(stderr, "hipobj: rdma: {}\n", line.view());
     }
 
     // The HTTP status in an x-amz-rdma-reply value, or std::nullopt if it's
@@ -79,8 +89,8 @@ namespace {
 
     std::string clientNicFromToken(const char *token)
     {
-        std::array<char, 32> nicIp{};
-        const hipObjError_t  err = hipObjTokenClientNic(token, nicIp.data(), nicIp.size());
+        std::array<char, INET_ADDRSTRLEN> nicIp{};
+        const hipObjError_t               err = hipObjTokenClientNic(token, nicIp.data(), nicIp.size());
         if (err.opError != hipObjSuccess) {
             return {};
         }
@@ -129,7 +139,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
 
     if (!sctx->uploadId.empty()) {
         query_params.Add("uploadId", sctx->uploadId);
-        if (sctx->partNumber == 0 || sctx->partNumber > 10000) {
+        if (sctx->partNumber == 0 || sctx->partNumber > kMaxPartNumber) {
             return {.status = RdmaStatus::Failed};
         }
         query_params.Add("partNumber", std::to_string(sctx->partNumber));
@@ -175,12 +185,12 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
 
     const ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
-        rdmaTrace("put: http failed (status=", res.status_code, " error='", res.error, "')");
+        rdmaTrace("put: http failed (status="sv, res.status_code, " error='"sv, res.error, "')"sv);
         return {.status = RdmaStatus::Failed};
     }
 
     const std::string etag = res.headers.GetFront("etag");
-    if (res.status_code == 200 && !etag.empty()) {
+    if (res.status_code == kHttpOk && !etag.empty()) {
         sctx->etag = ::minio::utils::Trim(etag, '"');
         return {.status = RdmaStatus::Ok, .bytes = size};
     }
@@ -190,7 +200,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
         return {.status = RdmaStatus::NotSupported};
     }
     if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyNoContent) {
-        rdmaTrace("put: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
+        rdmaTrace("put: rdma reply "sv, reply_code.value_or(0), " (http status "sv, res.status_code, ")"sv);
         return {.status = RdmaStatus::Failed};
     }
 
@@ -250,7 +260,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
 
     const ::minio::http::Response res = req.Execute();
     if (!res.error.empty()) {
-        rdmaTrace("get: http failed (status=", res.status_code, " error='", res.error, "')");
+        rdmaTrace("get: http failed (status="sv, res.status_code, " error='"sv, res.error, "')"sv);
         return {.status = RdmaStatus::Failed};
     }
 
@@ -259,7 +269,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
         return {.status = RdmaStatus::NotSupported};
     }
     if (reply_code != kRdmaReplySuccess && reply_code != kRdmaReplyPartialContent) {
-        rdmaTrace("get: rdma reply ", reply_code.value_or(0), " (http status ", res.status_code, ")");
+        rdmaTrace("get: rdma reply "sv, reply_code.value_or(0), " (http status "sv, res.status_code, ")"sv);
         return {.status = RdmaStatus::Failed};
     }
 
@@ -267,7 +277,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     // have transferred more than that.
     const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), size);
     if (!bytes || *bytes > size) {
-        rdmaTrace("get: malformed or out-of-range ", kAmzRdmaBytesTransferred, " header");
+        rdmaTrace("get: malformed or out-of-range "sv, kAmzRdmaBytesTransferred, " header"sv);
         return {.status = RdmaStatus::Failed};
     }
     return {.status = RdmaStatus::Ok, .bytes = static_cast<size_t>(*bytes)};
@@ -282,7 +292,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("put: token: ", hipObjGetErrorString(terr.opError));
+            rdmaTrace("put: token: "sv, hipObjGetErrorString(terr.opError));
             return {.status = RdmaStatus::Failed};
         }
         // A buffer the NIC cannot reach directly is registered as a host
@@ -290,7 +300,7 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         // reads it.
         const hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
-            rdmaTrace("put: stage to host: ", hipObjGetErrorString(serr.opError));
+            rdmaTrace("put: stage to host: "sv, hipObjGetErrorString(serr.opError));
             return {.status = RdmaStatus::Failed};
         }
         ret = rdmaPut(ctx, token.get(), size);
@@ -310,14 +320,14 @@ rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
         const RdmaTokenPtr  token(rawToken);
         if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("get: token: ", hipObjGetErrorString(terr.opError));
+            rdmaTrace("get: token: "sv, hipObjGetErrorString(terr.opError));
             return {.status = RdmaStatus::Failed};
         }
         ret = rdmaGet(ctx, token.get(), size);
         if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
             const hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
             if (serr.opError != hipObjSuccess) {
-                rdmaTrace("get: stage to device: ", hipObjGetErrorString(serr.opError));
+                rdmaTrace("get: stage to device: "sv, hipObjGetErrorString(serr.opError));
                 return {.status = RdmaStatus::Failed};
             }
             return ret;

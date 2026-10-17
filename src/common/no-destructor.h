@@ -43,6 +43,9 @@ public:
     NoDestructor(NoDestructor &&)                 = delete;
     NoDestructor &operator=(NoDestructor &&)      = delete;
 
+    /* value_ is a union member, so that ~NoDestructor() doesn't destroy
+     * it, and reading it is the point of the class */
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
     T &operator*() noexcept
     {
         return value_;
@@ -52,6 +55,7 @@ public:
     {
         return &value_;
     }
+    // NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
 private:
     union {

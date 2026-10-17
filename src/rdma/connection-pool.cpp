@@ -12,6 +12,7 @@
 #include <utility>
 #include <variant>
 
+#include "hipobj-print.h"
 #include "thread-safety.h"
 #include "transport.h"
 
@@ -20,8 +21,10 @@ namespace hipObj {
 namespace {
 
     /* The number of leases the calling thread holds, from any pool. Each
-     * thread has its own, so it needs no lock. */
-    thread_local size_t t_leasesHeld = 0;
+     * thread has its own, so it needs no lock. constinit makes sure it's
+     * initialized at compile time, so no access has to check whether it's
+     * been initialized. */
+    constinit thread_local size_t t_leasesHeld = 0;
 
 } // namespace
 
@@ -56,10 +59,13 @@ ConnectionPool::Lease::~Lease()
     }
 }
 
+/* A slot is only emptied when release() drops it, and a dropped slot's
+ * index never goes back into free_, so no lease gets an empty one.
+ * clang-tidy can't follow that. */
 RcConnection &
 ConnectionPool::Lease::connection() noexcept
 {
-    return *pool_->slots_[index_];
+    return *pool_->slots_[index_]; // NOLINT(bugprone-unchecked-optional-access)
 }
 
 bool
@@ -119,7 +125,7 @@ bool
 ConnectionPool::restore(std::optional<RcConnection> &conn) const noexcept
 {
     try {
-        if (resetRcConnection(*conn)) {
+        if (conn && resetRcConnection(*conn)) {
             return true;
         }
         /* The old QP and CQ are destroyed before the new ones are created */
@@ -165,9 +171,9 @@ ConnectionPool::release(size_t index, bool connected) noexcept
     if (left == 0) {
         returned_.notify_all();
     }
-    fprintf(stderr,
+    printTo(stderr,
             "hipObj: could neither reset nor replace an RDMA connection after a transfer, so it's "
-            "dropped; %zu of %zu are left.\n",
+            "dropped; {} of {} are left.\n",
             left, slots_.size());
 }
 

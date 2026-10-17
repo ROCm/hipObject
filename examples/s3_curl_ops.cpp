@@ -102,7 +102,8 @@ buildUrl(const hipObjS3CurlCtx *cfg)
 }
 
 // Returns the HTTP status code of the last transfer, or -1 if libcurl
-// cannot report one.
+// cannot report one. libcurl reports it in a long.
+// NOLINTBEGIN(google-runtime-int)
 long
 responseCode(CURL *curl)
 {
@@ -112,6 +113,7 @@ responseCode(CURL *curl)
     }
     return code;
 }
+// NOLINTEND(google-runtime-int)
 
 } // namespace
 
@@ -146,8 +148,11 @@ hipObjS3CurlSendRequest(void *ctx, const char *token, size_t tokenLen)
     (curl_easy_setopt)(curl.get(), CURLOPT_HEADERFUNCTION, headerCallback);
     (curl_easy_setopt)(curl.get(), CURLOPT_HEADERDATA, &state);
 
+    // responseCode() returns libcurl's long
+    // NOLINTBEGIN(google-runtime-int)
     const CURLcode rc       = curl_easy_perform(curl.get());
     const long     httpCode = rc == CURLE_OK ? responseCode(curl.get()) : -1;
+    // NOLINTEND(google-runtime-int)
     if (rc != CURLE_OK) {
         return -1;
     }

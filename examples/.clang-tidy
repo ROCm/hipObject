@@ -6,8 +6,9 @@
 #
 # The examples are written to C++11 (see AGENTS.md), but the build
 # compiles them as C++20, so clang-tidy would suggest newer constructs.
-# This turns off the checks whose fixes need C++14 or later, and one
-# that older versions of clang-tidy get wrong (below). It also keeps
+# This turns off the checks whose fixes need C++14 or later, those whose
+# fixes would make the examples harder to follow, and one that older
+# versions of clang-tidy get wrong (below). It also keeps
 # misc-const-correctness off parameters, so the examples don't need
 # suppressions, and otherwise uses the top-level configuration.
 ---
@@ -33,6 +34,24 @@ Checks:
   - -modernize-use-transparent-functors
   - -modernize-use-uncaught-exceptions
   - -readability-container-contains
+  # The examples pass C arrays, such as hipObjS3CurlCtx's lastReply, to C
+  # functions, and spelling out each decay (&a[0]) would only make them
+  # harder to read
+  - -cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  # The examples read their arguments as argv[1] and the like, and check
+  # a C string's first character as s[0], as plain C++11 does
+  - -cppcoreguidelines-pro-bounds-pointer-arithmetic
+  # The examples print with printf() and fprintf(), since std::format is
+  # C++20
+  - -cppcoreguidelines-pro-type-vararg
+  # It reports every printf()-family call whose result is ignored, and
+  # checking or casting each one would only bury what the examples show
+  - -cert-err33-c
+  # Naming argv's positions, HTTP status codes, and buffer sizes would
+  # only make the examples harder to read, and s3_curl_ops.h, which C
+  # includes too, would need a macro for its array's size
+  - -readability-magic-numbers
+  - -cppcoreguidelines-avoid-magic-numbers
   # clang-tidy 20 and 21 report the typedef in s3_curl_ops.h, which C
   # includes too, so it can't be a using declaration. Later versions skip
   # typedefs inside extern "C".

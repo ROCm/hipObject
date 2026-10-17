@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -54,6 +55,11 @@ struct RdmaNic {
     int         index;
     std::string name;
 };
+
+/* The size of the buffer that GetClosestNicToGpu() has the HIP runtime
+ * write the GPU's PCIe bus id into. An id such as "0000:42:00.0" takes 13
+ * bytes with its NUL. */
+inline constexpr size_t kPciBusIdBufLen = 32;
 
 /* The NIC in topology with a known PCIe bus id closest to the bus id
  * runtime reports for GPU gpuIndex, picking the first of the closest,

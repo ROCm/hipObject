@@ -260,7 +260,7 @@ TEST_F(NicSeamTest, HcaFilterIsForwarded)
 /* A bus ID as long as the buffer GetClosestNicToGpu() reads it into, so
  * there's no room for a NUL after it */
 constexpr std::string_view kFullBufferBusId = "000000000000000000000000:42:00.0";
-static_assert(kFullBufferBusId.size() == 32);
+static_assert(kFullBufferBusId.size() == hipObj::kPciBusIdBufLen);
 
 /* A HIP runtime that fills the bus ID buffer with kFullBufferBusId, without
  * a NUL, and succeeds. FakeHip doesn't, since it always writes a NUL. */

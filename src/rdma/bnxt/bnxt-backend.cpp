@@ -20,9 +20,9 @@ void
 configureBnxtQp(struct ibv_qp_attr &attr)
 {
     attr.path_mtu  = IBV_MTU_4096;
-    attr.timeout   = 14;
-    attr.retry_cnt = 7;
-    attr.rnr_retry = 7;
+    attr.timeout   = kQpTimeout;
+    attr.retry_cnt = kQpRetryCount;
+    attr.rnr_retry = kQpRnrRetry;
 }
 
 } // namespace hipObj

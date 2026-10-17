@@ -12,6 +12,7 @@
 
 #include <fcntl.h>
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "hipobj-warnings.h"
@@ -27,13 +28,15 @@ using hipObj::UniqueFd;
 bool
 isOpen(int fd)
 {
-    return fcntl(fd, F_GETFD) != -1;
+    struct stat info {};
+    return fstat(fd, &info) == 0;
 }
 
 bool
 isClosed(int fd)
 {
-    return fcntl(fd, F_GETFD) == -1 && errno == EBADF;
+    struct stat info {};
+    return fstat(fd, &info) == -1 && errno == EBADF;
 }
 
 /* Returns the two ends of a new pipe, each owned by a UniqueFd */

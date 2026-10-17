@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 #include "hipobj-parse.h"
+#include "hipobj-print.h"
 #include "hipobj-sockaddr.h"
 #include "hipobj-span.h"
 
@@ -61,6 +62,12 @@ namespace {
         return s.substr(start, end - start);
     }
 
+    /* The most connections the kernel queues before accept() takes them */
+    constexpr int kListenBacklog = 64;
+
+    /* How much each recv() reads */
+    constexpr size_t kRecvChunk = size_t{64} * 1024;
+
     /* Receive caps: headers and declared body length. */
     constexpr size_t kMaxHeaderBytes = size_t{64} * 1024;
     constexpr size_t kMaxBodyBytes   = size_t{1024} * 1024;
@@ -68,25 +75,29 @@ namespace {
     const char *reasonPhrase(int status)
     {
         switch (status) {
-            case 200:
+            case kHttpOk:
                 return "OK";
-            case 204:
+            case kHttpNoContent:
                 return "No Content";
-            case 400:
+            case kHttpBadRequest:
                 return "Bad Request";
-            case 403:
+            case kHttpForbidden:
                 return "Forbidden";
-            case 408:
+            case kHttpNotFound:
+                return "Not Found";
+            case kHttpMethodNotAllowed:
+                return "Method Not Allowed";
+            case kHttpRequestTimeout:
                 return "Request Timeout";
-            case 409:
+            case kHttpConflict:
                 return "Conflict";
-            case 413:
+            case kHttpContentTooLarge:
                 return "Content Too Large";
-            case 500:
+            case kHttpInternalServerError:
                 return "Internal Server Error";
-            case 501:
+            case kHttpNotImplemented:
                 return "Not Implemented";
-            case 503:
+            case kHttpServiceUnavailable:
                 return "Service Unavailable";
             default:
                 return "Status";
@@ -161,11 +172,11 @@ HttpServer::HttpServer(int port) : listen_fd_(socket(AF_INET, SOCK_STREAM | SOCK
          * went on being constructed, and the abort arrived later from the
          * accept loop. Say which port and why, once, where it happened. */
         const std::string reason = std::generic_category().message(errno);
-        fprintf(stderr, "hipobj-rdma-test-server: cannot bind port %d: %s\n", port, reason.c_str());
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: cannot bind port {}: {}\n", port, reason);
         listen_fd_.reset();
         return;
     }
-    listen(listen_fd_.get(), 64);
+    listen(listen_fd_.get(), kListenBacklog);
 }
 
 HttpServer::~HttpServer()
@@ -328,11 +339,10 @@ void
 HttpServer::handleConnection(int client)
 {
     /* Absolute receive deadline (request bytes only). */
-    const auto  deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    std::string raw;
-    /* Each recv() reads up to this much */
-    std::array<char, 65536> buf{};
-    size_t                  headerEnd = std::string::npos;
+    const auto                   deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    std::string                  raw;
+    std::array<char, kRecvChunk> buf{};
+    size_t                       headerEnd = std::string::npos;
     while (headerEnd == std::string::npos) {
         if (!setTimeoutUntil(client, SO_RCVTIMEO, deadline)) {
             return;

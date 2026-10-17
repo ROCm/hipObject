@@ -38,52 +38,70 @@ class Verbs;
 
 /* The deleters are defined in ibv-wrapper.cpp so this header doesn't
  * pull in the verbs seam. */
-struct IbvContextDeleter {
-    explicit IbvContextDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+class IbvContextDeleter {
+public:
+    explicit IbvContextDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    const Verbs *verbs;
-    void         operator()(struct ibv_context *ctx) const noexcept;
+    void operator()(struct ibv_context *ctx) const noexcept;
+
+private:
+    const Verbs *verbs_;
 };
 
-struct IbvPdDeleter {
-    explicit IbvPdDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+class IbvPdDeleter {
+public:
+    explicit IbvPdDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    const Verbs *verbs;
-    void         operator()(struct ibv_pd *pd) const noexcept;
+    void operator()(struct ibv_pd *pd) const noexcept;
+
+private:
+    const Verbs *verbs_;
 };
 
-struct IbvCqDeleter {
-    explicit IbvCqDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+class IbvCqDeleter {
+public:
+    explicit IbvCqDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    const Verbs *verbs;
-    void         operator()(struct ibv_cq *cq) const noexcept;
+    void operator()(struct ibv_cq *cq) const noexcept;
+
+private:
+    const Verbs *verbs_;
 };
 
-struct IbvQpDeleter {
-    explicit IbvQpDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+class IbvQpDeleter {
+public:
+    explicit IbvQpDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    const Verbs *verbs;
-    void         operator()(struct ibv_qp *qp) const noexcept;
+    void operator()(struct ibv_qp *qp) const noexcept;
+
+private:
+    const Verbs *verbs_;
 };
 
-struct IbvMrDeleter {
-    explicit IbvMrDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+class IbvMrDeleter {
+public:
+    explicit IbvMrDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    const Verbs *verbs;
-    void         operator()(struct ibv_mr *mr) const noexcept;
+    void operator()(struct ibv_mr *mr) const noexcept;
+
+private:
+    const Verbs *verbs_;
 };
 
-struct IbvDeviceListDeleter {
-    explicit IbvDeviceListDeleter(const Verbs &deleterVerbs) noexcept : verbs(&deleterVerbs)
+class IbvDeviceListDeleter {
+public:
+    explicit IbvDeviceListDeleter(const Verbs &deleterVerbs) noexcept : verbs_(&deleterVerbs)
     {
     }
-    const Verbs *verbs;
-    void         operator()(struct ibv_device **list) const noexcept;
+    void operator()(struct ibv_device **list) const noexcept;
+
+private:
+    const Verbs *verbs_;
 };
 
 using IbvContextPtr = std::unique_ptr<struct ibv_context, IbvContextDeleter>;

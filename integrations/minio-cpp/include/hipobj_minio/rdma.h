@@ -25,9 +25,12 @@ inline constexpr int kRdmaReplyNoContent      = 204;
 inline constexpr int kRdmaReplyPartialContent = 206;
 inline constexpr int kRdmaReplyNotImplemented = 501;
 
+/* minio-cpp's http::Request takes its timeouts as longs */
+// NOLINTBEGIN(google-runtime-int)
 inline constexpr long kRdmaConnectTimeoutSecs = 5;
 inline constexpr long kRdmaTimeoutSecs        = 10;
-inline constexpr int  kRdmaMaxAttempts        = 2;
+// NOLINTEND(google-runtime-int)
+inline constexpr int kRdmaMaxAttempts = 2;
 
 /* How an RDMA transfer ended */
 enum class RdmaStatus {

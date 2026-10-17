@@ -495,7 +495,7 @@ TEST_P(TransferArgsTest, AcceptsRangeAtEndOfBuffer)
 TEST_P(TransferArgsTest, ChecksStagedBuffersBeforeCopying)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    void *staged             = hipObj::addressToPointer<void *>(0x30000);
+    void *staged             = hipObjTest::fakeStagedBuf();
     fake().fail.registerAddr = staged;
     ASSERT_EQ(hipObjBufRegister(staged, kBufSize).opError, hipObjSuccess);
 
@@ -571,7 +571,7 @@ TEST_F(ApiArgsTest, SyncRejectsRangeOutsideDirectBuffer)
 TEST_F(ApiArgsTest, SyncRejectsRangeOutsideStagedBuffer)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    void *staged             = hipObj::addressToPointer<void *>(0x30000);
+    void *staged             = hipObjTest::fakeStagedBuf();
     fake().fail.registerAddr = staged;
     ASSERT_EQ(hipObjBufRegister(staged, kBufSize).opError, hipObjSuccess);
 

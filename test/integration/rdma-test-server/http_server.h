@@ -20,6 +20,20 @@
 
 namespace hipobj::test {
 
+/* The HTTP statuses the server knows the reason phrases of */
+inline constexpr int kHttpOk                  = 200;
+inline constexpr int kHttpNoContent           = 204;
+inline constexpr int kHttpBadRequest          = 400;
+inline constexpr int kHttpForbidden           = 403;
+inline constexpr int kHttpNotFound            = 404;
+inline constexpr int kHttpMethodNotAllowed    = 405;
+inline constexpr int kHttpRequestTimeout      = 408;
+inline constexpr int kHttpConflict            = 409;
+inline constexpr int kHttpContentTooLarge     = 413;
+inline constexpr int kHttpInternalServerError = 500;
+inline constexpr int kHttpNotImplemented      = 501;
+inline constexpr int kHttpServiceUnavailable  = 503;
+
 struct HttpRequest {
     std::string                        method{};
     std::string                        path{};
@@ -29,7 +43,7 @@ struct HttpRequest {
 };
 
 struct HttpResponse {
-    int                                status = 500;
+    int                                status = kHttpInternalServerError;
     std::map<std::string, std::string> headers{};
     std::string                        body{};
 };

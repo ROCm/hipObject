@@ -152,10 +152,9 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            struct pollfd pfd;
+            pollfd pfd{};
             pfd.fd       = listenFd_.get();
             pfd.events   = POLLIN;
-            pfd.revents  = 0;
             const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
@@ -192,10 +191,9 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            struct pollfd pfd;
+            pollfd pfd{};
             pfd.fd       = fd.get();
             pfd.events   = POLLIN;
-            pfd.revents  = 0;
             const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
@@ -231,10 +229,9 @@ private:
                 result_.err = ETIMEDOUT;
                 return;
             }
-            struct pollfd pfd;
+            pollfd pfd{};
             pfd.fd       = fd.get();
             pfd.events   = POLLOUT;
-            pfd.revents  = 0;
             const int pr = poll(&pfd, 1, remainingMs(deadline));
             if (pr < 0) {
                 if (errno == EINTR) {
@@ -352,6 +349,10 @@ private:
     bool initialized_ = false;
 };
 
+/* Google Test takes ownership of the environment, as a raw pointer. The
+ * test uses Google Test's main(), so a static's initializer registers it,
+ * and if that threw, the program would end before any test ran. */
+// NOLINTNEXTLINE(cppcoreguidelines-owning-memory,bugprone-throwing-static-initialization,cert-err58-cpp)
 const ::testing::Environment *const kCurlEnv = ::testing::AddGlobalTestEnvironment(new CurlGlobalEnv);
 
 } // namespace

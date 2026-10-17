@@ -17,6 +17,7 @@
 
 #include "buffer.h"
 #include "hip-seam.h"
+#include "hipobj-print.h"
 #include "ibv-ptr.h"
 #include "thread-safety.h"
 
@@ -34,9 +35,9 @@ AbandonedCopies::~AbandonedCopies()
         }
     }
     if (leaked != 0) {
-        fprintf(stderr,
+        printTo(stderr,
                 "hipObj: leaking the staging buffers of the staging copies that timed "
-                "out and are still running: %zu.\n",
+                "out and are still running: {}.\n",
                 leaked);
     }
 }

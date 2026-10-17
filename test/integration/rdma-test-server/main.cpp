@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "hipobj-parse.h"
+#include "hipobj-print.h"
 #include "hipobj-span.h"
 #include "http_server.h"
 #include "ibv-wrapper.h"
@@ -31,6 +32,9 @@
 #include "token_header.h"
 
 namespace {
+
+/* The port the server listens on when the arguments don't give one */
+constexpr int kDefaultPort = 9000;
 
 std::string
 objectKey(const std::string &path)
@@ -44,7 +48,7 @@ objectKey(const std::string &path)
 void
 usage(const std::string &prog)
 {
-    fprintf(stderr, "usage: %s [port]\n", prog.c_str());
+    hipObj::printTo(stderr, "usage: {} [port]\n", prog);
 }
 
 } // namespace
@@ -55,17 +59,17 @@ main(int argc, char *argv[])
     const std::span<char *>        argvSpan = hipObj::argSpan(argc, argv);
     const std::vector<std::string> args(argvSpan.begin(), argvSpan.end());
     const std::string              prog = args.empty() ? "hipobj-rdma-test-server" : args[0];
-    int                            port = 9000;
+    int                            port = kDefaultPort;
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string &arg = args[i];
         if (arg[0] == '-') {
-            fprintf(stderr, "hipobj-rdma-test-server: unknown option %s\n", arg.c_str());
+            hipObj::printTo(stderr, "hipobj-rdma-test-server: unknown option {}\n", arg);
             usage(prog);
             return 2;
         }
         const std::optional<uint16_t> value = hipObj::parseNumber<uint16_t>(arg);
         if (!value || *value == 0) {
-            fprintf(stderr, "hipobj-rdma-test-server: invalid port %s\n", arg.c_str());
+            hipObj::printTo(stderr, "hipobj-rdma-test-server: invalid port {}\n", arg);
             usage(prog);
             return 2;
         }
@@ -77,8 +81,8 @@ main(int argc, char *argv[])
     const std::unique_ptr<hipObj::LoadedVerbs> verbs = hipObj::loadLibibverbs();
     hipobj::test::RdmaTestServer               rdma(verbs.get());
     if (!rdma.isReady()) {
-        fprintf(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
-                        "HTTP-only mode\n");
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: RDMA not available — running in "
+                                "HTTP-only mode\n");
     }
 
     std::map<std::string, std::vector<uint8_t>> objects;
@@ -88,7 +92,7 @@ main(int argc, char *argv[])
     server.setHandler([&](const hipobj::test::HttpRequest &req) -> hipobj::test::HttpResponse {
         hipobj::test::HttpResponse resp;
         if (req.method == "GET" && req.path == "/health") {
-            resp.status = 200;
+            resp.status = hipobj::test::kHttpOk;
             resp.body   = "ok";
             return resp;
         }
@@ -97,7 +101,7 @@ main(int argc, char *argv[])
         // to resolve the effective region.  Return a minimal XML body so the
         // bridge can proceed to the RDMA path without a real S3 stack.
         if (req.method == "GET" && req.path.find("?location") != std::string::npos) {
-            resp.status                  = 200;
+            resp.status                  = hipobj::test::kHttpOk;
             resp.headers["Content-Type"] = "application/xml";
             resp.body                    = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                                            "<LocationConstraint "
@@ -114,7 +118,7 @@ main(int argc, char *argv[])
             if (req.method == "PUT") {
                 std::scoped_lock<std::mutex> lk(objects_mu);
                 objects[key]         = std::vector<uint8_t>(req.body.begin(), req.body.end());
-                resp.status          = 200;
+                resp.status          = hipobj::test::kHttpOk;
                 resp.headers["etag"] = "\"test\"";
                 return resp;
             }
@@ -122,15 +126,15 @@ main(int argc, char *argv[])
                 std::scoped_lock<std::mutex> lk(objects_mu);
                 const auto                   it = objects.find(key);
                 if (it == objects.end()) {
-                    resp.status = 404;
+                    resp.status = hipobj::test::kHttpNotFound;
                     resp.body   = "not found";
                     return resp;
                 }
-                resp.status = 200;
+                resp.status = hipobj::test::kHttpOk;
                 resp.body   = std::string(it->second.begin(), it->second.end());
                 return resp;
             }
-            resp.status = 405;
+            resp.status = hipobj::test::kHttpMethodNotAllowed;
             resp.body   = "method not allowed";
             return resp;
         }
@@ -139,7 +143,7 @@ main(int argc, char *argv[])
         const std::optional<hipobj::test::TokenHeader> token =
             hipobj::test::parseTokenHeader(tokenIt->second);
         if (!token) {
-            resp.status = 400;
+            resp.status = hipobj::test::kHttpBadRequest;
             resp.body   = "malformed x-amz-rdma-token";
             return resp;
         }
@@ -147,7 +151,7 @@ main(int argc, char *argv[])
             std::optional<hipobj::test::RdmaTestServer::ReadResult> read =
                 rdma.rdmaReadFromClient(*token, req.contentLength);
             if (!read) {
-                resp.status = 500;
+                resp.status = hipobj::test::kHttpInternalServerError;
                 resp.body   = "RDMA PUT failed";
                 return resp;
             }
@@ -155,7 +159,7 @@ main(int argc, char *argv[])
                 std::scoped_lock<std::mutex> lk(objects_mu);
                 objects[key] = std::move(read->data);
             }
-            resp.status                      = 200;
+            resp.status                      = hipobj::test::kHttpOk;
             resp.headers["x-amz-rdma-reply"] = std::move(read->replyHeader);
             resp.headers["etag"]             = "\"test\"";
             return resp;
@@ -167,7 +171,7 @@ main(int argc, char *argv[])
                 std::scoped_lock<std::mutex> lk(objects_mu);
                 const auto                   it = objects.find(key);
                 if (it == objects.end()) {
-                    resp.status = 404;
+                    resp.status = hipobj::test::kHttpNotFound;
                     resp.body   = "not found";
                     return resp;
                 }
@@ -175,17 +179,17 @@ main(int argc, char *argv[])
             }
             std::optional<std::string> replyHeader = rdma.rdmaWriteToClient(*token, data);
             if (!replyHeader) {
-                resp.status = 500;
+                resp.status = hipobj::test::kHttpInternalServerError;
                 resp.body   = "RDMA GET failed";
                 return resp;
             }
-            resp.status                                  = 200;
+            resp.status                                  = hipobj::test::kHttpOk;
             resp.headers["x-amz-rdma-reply"]             = std::move(*replyHeader);
             resp.headers["x-amz-rdma-bytes-transferred"] = std::to_string(data.size());
             return resp;
         }
 
-        resp.status = 405;
+        resp.status = hipobj::test::kHttpMethodNotAllowed;
         resp.body   = "method not allowed";
         return resp;
     });
@@ -195,11 +199,11 @@ main(int argc, char *argv[])
     /* "listening on port N" is what every caller waits for before it starts
      * sending. Printing it without checking made a dead server look ready. */
     if (!server.startThreaded()) {
-        fprintf(stderr, "hipobj-rdma-test-server: not listening on port %d\n", port);
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: not listening on port {}\n", port);
         return 1;
     }
-    fprintf(stdout, "hipobj-rdma-test-server listening on port %d\n", port);
+    hipObj::printTo(stdout, "hipobj-rdma-test-server listening on port {}\n", port);
     for (;;) {
-        std::this_thread::sleep_for(std::chrono::seconds(3600));
+        std::this_thread::sleep_for(std::chrono::hours(1));
     }
 }

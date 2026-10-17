@@ -46,9 +46,10 @@ Checks:
   - readability-*
 
   # Not wanted: style-only checks that contradict hipObject's
-  # conventions or tooling. Turn them on now and then, such as before a
-  # release, and fix whatever they report that's easy to fix, without
-  # committing to fixing all of it
+  # conventions or tooling, and checks whose fixes would make the code
+  # worse than what the build already does. Turn them on now and then,
+  # such as before a release, and fix whatever they report that's easy to
+  # fix, without committing to fixing all of it
 
   # IWYU checks the includes, and its suggestions are advisory
   - -misc-include-cleaner
@@ -69,39 +70,45 @@ Checks:
   # the wire or kept in large arrays, and padding takes up most of what a
   # smaller type would save in a struct
   - -performance-enum-size
+  # They report operator[] on std::array, std::vector, std::span, and the
+  # like, and want at(). Every build defines _GLIBCXX_ASSERTIONS, so
+  # libstdc++ bounds-checks operator[] and aborts on a bad index, and C
+  # arrays are already reported by modernize-avoid-c-arrays and
+  # -Wunsafe-buffer-usage. An index that comes from the network has to be
+  # checked where it arrives, and rejected with an error, so a bad one
+  # that gets this far is a bug in hipObject. Stopping is safer than
+  # what at() would do: throw, have the C API turn the exception into
+  # hipObjInternalError, and carry on past the broken invariant. at() also
+  # adds an exception path to the hot path's loops
+  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+  - -cppcoreguidelines-pro-bounds-constant-array-index
+  # It reports every function with adjacent parameters of the same type,
+  # such as a pair of sizes or addresses. Telling them apart would take a
+  # separate type for each, which would make those functions harder to
+  # call without catching anything the names and the tests don't
+  - -bugprone-easily-swappable-parameters
+  # It reports a catch block that only holds a comment. hipObject's empty
+  # catch blocks are deliberate, such as printTo()'s, which has nowhere
+  # left to report a failure, and each says why it's empty
+  - -bugprone-empty-catch
+  # It reports zero-initializing an enum, or a struct holding one, whose
+  # enumerators don't include 0, such as libibverbs' ibv_mtu and
+  # ibv_qp_type. hipObject zeroes every libibverbs struct before filling it
+  # in (see AGENTS.md), and sets the fields it uses
+  - -bugprone-invalid-enum-default-initialization
+  # It reports the examples' memcpy() of an x-amz-rdma-reply value, which
+  # is length-delimited and needs no NUL
+  - -bugprone-not-null-terminated-result
+  # It reports bitwise operations on signed integers, and libibverbs'
+  # flags and attribute masks are int enumerators that its functions take
+  # as int, so every combination of them would need casts
+  - -bugprone-signed-bitwise
+  - -hicpp-signed-bitwise
 
   # TODO: These checks report problems in the current code. Fix the code
   # and delete the check's line here, or move it to "Not wanted" with a
   # reason. The count is the number of places clang-tidy 23 reports.
-  - -bugprone-easily-swappable-parameters  # TODO(10)
-  - -bugprone-empty-catch  # TODO(2)
-  - -bugprone-invalid-enum-default-initialization  # TODO(10): ibv_mtu{}, ibv_qp_type{}, ... are 0
-  - -bugprone-not-null-terminated-result  # TODO(2)
-  - -bugprone-signed-bitwise  # TODO(21): bitwise ops on int flags
-  - -hicpp-signed-bitwise  # TODO: the same check
-  - -bugprone-sizeof-expression  # TODO(24)
-  - -bugprone-throwing-static-initialization  # TODO(4)
-  - -cert-err58-cpp  # TODO: the same check
-  - -bugprone-unchecked-optional-access  # TODO(34)
-  - -cert-err33-c  # TODO(43): unchecked fprintf() and snprintf()
-  - -cppcoreguidelines-avoid-non-const-global-variables  # TODO(17)
-  - -cppcoreguidelines-macro-usage  # TODO(4)
-  - -cppcoreguidelines-no-malloc  # TODO(12)
-  - -cppcoreguidelines-owning-memory  # TODO(13)
-  - -cppcoreguidelines-pro-bounds-array-to-pointer-decay  # TODO(5)
-  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access  # TODO(144)
-  - -cppcoreguidelines-pro-bounds-constant-array-index  # TODO(16)
-  - -cppcoreguidelines-pro-bounds-pointer-arithmetic  # TODO(21)
-  - -cppcoreguidelines-pro-type-member-init  # TODO(7)
-  - -cppcoreguidelines-pro-type-union-access  # TODO(36)
-  - -cppcoreguidelines-pro-type-vararg  # TODO(53): fprintf(), snprintf(), fcntl()
-  - -cppcoreguidelines-special-member-functions  # TODO(6)
-  - -google-runtime-int  # TODO(11): long and long long in the examples and MinIO bridge
-  - -misc-non-private-member-variables-in-classes  # TODO(56)
-  - -cppcoreguidelines-non-private-member-variables-in-classes  # TODO: the same check
   - -readability-function-cognitive-complexity  # TODO(14)
-  - -readability-magic-numbers  # TODO(289)
-  - -cppcoreguidelines-avoid-magic-numbers  # TODO: the same check
 WarningsAsErrors: '*'
 
 CheckOptions:
@@ -114,9 +121,21 @@ CheckOptions:
   # changes to the environment, and its dlerror() keeps per-thread state.
   # Revisit this if hipObject is built with another C library.
   concurrency-mt-unsafe.FunctionSet: glibc
+  # A mutable global in an anonymous namespace (or declared static) can
+  # only be reached from its own file, so it doesn't couple distant code.
+  # Hiding one in a function that returns a reference to a static local
+  # would satisfy the check without changing that. Make such a variable
+  # thread-safe (atomic, thread_local, or guarded by a lock), and constinit
+  # where it's constant-initialized
+  cppcoreguidelines-avoid-non-const-global-variables.AllowInternalLinkage: true
   # A lock guard is only declared for what its constructor and destructor
   # do, so const would say nothing about it
   misc-const-correctness.AllowedTypes: '::std::scoped_lock'
+  # A class whose data members are all public is a struct, a set of values
+  # with no invariant to protect, even with a constructor, so only mixed
+  # and protected data are reported, as the cppcoreguidelines alias of
+  # this check does by default
+  misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: true
   # The default, Remove, mistakes the comma after an empty {} argument for
   # a trailing comma, as in {a, b, {}, c}, and its fix doesn't compile.
   # Multi-line lists still need a trailing comma, which also keeps

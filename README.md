@@ -73,7 +73,8 @@ token only describes your buffer.
   (`libibverbs1` and `ibverbs-providers` on Ubuntu, `libibverbs` on RHEL)
 - Linux kernel 6.18+ (for `ionic_rdma` driver)
 - CMake 3.25.2+
-- C++20 compiler (e.g., g++ or amdclang++)
+- C++20 compiler: GCC 13+, or Clang (e.g., amdclang++) with GCC 13+'s
+  libstdc++ (on RHEL 9, `gcc-toolset-13` or later)
 - Optional: libcurl's development files, for the examples' `--live` mode
 
 ### Hardware

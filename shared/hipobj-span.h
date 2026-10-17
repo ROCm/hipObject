@@ -17,18 +17,17 @@
  * functions here turn it into a view, and are the only places that
  * suppress the warning. The caller vouches that the pointer and length
  * describe valid memory, so convert once, where the pointer enters, and
- * use the view from then on.
+ * use the view from then on. writeChars() goes the other way, handing a
+ * view to fwrite() as a pointer and a length.
  *
- * The warning also flags a printf() "%s" argument unless it's a string
- * literal or std::string::c_str(), since it can't tell whether other
- * pointers point to a NUL-terminated string. Copy such a string into a
- * std::string to print it (this is only worth it on error paths, where
- * most printing is). */
+ * Print with hipObj::printTo() (hipobj-print.h), not printf() and its
+ * relatives: clang-tidy reports C-style variadic calls. */
 
 #pragma once
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <span>
@@ -67,7 +66,24 @@ asStringView(std::span<const char> chars) noexcept
     return {chars.data(), chars.size()};
 }
 
+/* Writes chars to stream with one fwrite(). True if they were all
+ * written. */
+inline bool
+writeChars(std::FILE *stream, std::span<const char> chars) noexcept
+{
+    return std::fwrite(chars.data(), 1, chars.size(), stream) == chars.size();
+}
+
 HIPOBJ_WARN_UNSAFE_BUFFER_ON
+
+/* Views the NUL-terminated string in chars, without its NUL, or all of
+ * chars if it has no NUL. Pass it a char array, such as ibv_device's
+ * name, without decaying the array to a pointer. */
+inline std::string_view
+cStringView(std::span<const char> chars) noexcept
+{
+    return cStringView(chars.data(), chars.size());
+}
 
 /* Views main()'s arguments */
 inline std::span<char *>
@@ -85,6 +101,34 @@ void
 zeroObject(T &obj) noexcept
 {
     std::ranges::fill(std::as_writable_bytes(std::span<T, 1>{std::addressof(obj), 1}), std::byte{0});
+}
+
+/* Returns a T with every byte zero, padding included, as zeroObject()
+ * leaves one. Declare a C struct with it, as in
+ * auto attr = zeroedObject<ibv_qp_attr>(), rather than declaring it
+ * uninitialized and zeroing it with zeroObject().
+ *
+ * Neither T() nor T{} is enough on its own. The standard says T()
+ * zero-initializes a C struct, padding included, but GCC 13 sets only the
+ * members, and T{} doesn't have to zero the padding at all. So this
+ * zeroes every byte with zeroObject().
+ *
+ * The object is returned by name, and every supported compiler constructs
+ * it in place of the object being declared with the result (the named
+ * return value optimization), so the padding isn't lost to a copy. The
+ * standard doesn't require that, but -Wnrvo (GCC 14 and later) reports a
+ * function where it doesn't happen, and the tests check the padding with
+ * every compiler. Assigning the result to an existing object is a copy,
+ * though, and a copy needn't keep the padding, so use zeroObject() for
+ * that. */
+template <typename T>
+    requires std::is_trivially_copyable_v<T> && std::is_trivially_default_constructible_v<T>
+[[nodiscard]] T
+zeroedObject() noexcept
+{
+    T obj{};
+    zeroObject(obj);
+    return obj;
 }
 
 } // namespace hipObj

@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "hipobj-address.h"
+#include "hipobj-print.h"
+#include "http_server.h"
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
@@ -37,9 +39,18 @@ namespace {
      * all. Six different faults reported as one. Name which one it was. */
     std::nullopt_t rdmaFail(const std::string &op, const std::string &why)
     {
-        fprintf(stderr, "hipobj-rdma-test-server: %s failed: %s\n", op.c_str(), why.c_str());
+        hipObj::printTo(stderr, "hipobj-rdma-test-server: {} failed: {}\n", op, why);
         return std::nullopt;
     }
+
+    /* How long a transfer waits for its work completion */
+    constexpr std::chrono::seconds kCompletionTimeout{10};
+
+    /* The connection's CQ size, and how many work requests its QP can have
+     * posted */
+    constexpr int      kCqSize    = 256;
+    constexpr uint32_t kMaxSendWr = 128;
+    constexpr uint32_t kMaxRecvWr = 128;
 
     /* The size of the buffer each transfer is staged through */
     constexpr size_t kStagingSize = size_t{64} * 1024 * 1024;
@@ -66,6 +77,8 @@ namespace {
         sge.length = static_cast<uint32_t>(size);
         sge.lkey   = localMr->lkey;
 
+        /* libibverbs keeps each opcode's fields (wr.rdma here) in a union */
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
         ibv_send_wr wr{};
         wr.wr_id               = 1;
         wr.opcode              = IBV_WR_RDMA_WRITE;
@@ -74,12 +87,13 @@ namespace {
         wr.num_sge             = 1;
         wr.wr.rdma.remote_addr = clientToken.remoteAddr;
         wr.wr.rdma.rkey        = clientToken.rkey;
+        // NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
         ibv_send_wr *bad = nullptr;
         if (conn.device().verbs().post_send(conn.qp(), &wr, &bad) != 0) {
             return false;
         }
-        return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, std::chrono::seconds(10));
+        return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, kCompletionTimeout);
     }
 
     [[nodiscard]] bool postRdmaRead(hipObj::RcConnection &conn, const struct ibv_mr *localMr, size_t size,
@@ -90,6 +104,8 @@ namespace {
         sge.length = static_cast<uint32_t>(size);
         sge.lkey   = localMr->lkey;
 
+        /* libibverbs keeps each opcode's fields (wr.rdma here) in a union */
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
         ibv_send_wr wr{};
         wr.wr_id               = 2;
         wr.opcode              = IBV_WR_RDMA_READ;
@@ -98,12 +114,13 @@ namespace {
         wr.num_sge             = 1;
         wr.wr.rdma.remote_addr = clientToken.remoteAddr;
         wr.wr.rdma.rkey        = clientToken.rkey;
+        // NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
         ibv_send_wr *bad = nullptr;
         if (conn.device().verbs().post_send(conn.qp(), &wr, &bad) != 0) {
             return false;
         }
-        return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, std::chrono::seconds(10));
+        return hipObj::pollCompletion(conn, IBV_WC_RDMA_READ, kCompletionTimeout);
     }
 
 } // namespace
@@ -129,7 +146,7 @@ struct RdmaTestServer::Impl {
 
     static std::optional<hipObj::RcConnection> createConnection(const hipObj::RdmaDevice &rdmaDevice)
     {
-        return hipObj::createRcConnection(rdmaDevice, 256, 128, 128);
+        return hipObj::createRcConnection(rdmaDevice, kCqSize, kMaxSendWr, kMaxRecvWr);
     }
 
     /* One QP serves every request in turn, so it has to come back to INIT
@@ -148,8 +165,8 @@ struct RdmaTestServer::Impl {
         conn.reset();
         std::optional<hipObj::RcConnection> fresh = createConnection(device);
         if (!fresh) {
-            fprintf(stderr, "hipobj-rdma-test-server: could not rebuild the RC QP; "
-                            "the server can no longer serve RDMA\n");
+            hipObj::printTo(stderr, "hipobj-rdma-test-server: could not rebuild the RC QP; "
+                                    "the server can no longer serve RDMA\n");
             return;
         }
         conn.emplace(std::move(*fresh));
@@ -197,41 +214,47 @@ RdmaTestServer::isReady() const
 std::optional<std::string>
 RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vector<uint8_t> &data)
 {
-    if (!isReady()) {
+    /* Checked here rather than with isReady(), so clang-tidy sees that conn
+     * holds a connection */
+    if (!impl_ || !impl_->conn) {
         return rdmaFail("GET", "server RDMA not initialised");
     }
+    hipObj::RcConnection    &conn        = *impl_->conn;
     const hipObj::RdmaToken &clientToken = tokenHeader.token;
     size_t                   xferSize    = tokenHeader.length;
     if (xferSize == 0) {
         xferSize = data.size();
     }
     if (data.size() < xferSize || xferSize > kStagingSize) {
-        fprintf(stderr,
-                "hipobj-rdma-test-server: GET failed: %zu bytes requested of a %zu "
-                "byte object, %zu byte staging buffer\n",
-                xferSize, data.size(), kStagingSize);
+        hipObj::printTo(stderr,
+                        "hipobj-rdma-test-server: GET failed: {} bytes requested of a {} "
+                        "byte object, {} byte staging buffer\n",
+                        xferSize, data.size(), kStagingSize);
         return std::nullopt;
     }
 
     std::ranges::copy(std::span(data).first(xferSize), impl_->stagingBuf.begin());
     /* Connecting touches the QP, so every way out from here resets it */
     const hipObj::ScopeGuard resetQp([this] { impl_->resetQp(); });
-    if (!hipObj::connectRcPeer(*impl_->conn, clientToken)) {
+    if (!hipObj::connectRcPeer(conn, clientToken)) {
         return rdmaFail("GET", "could not connect the RC QP to the client");
     }
-    if (!postRdmaWrite(*impl_->conn, impl_->stagingMr.get(), xferSize, clientToken)) {
+    if (!postRdmaWrite(conn, impl_->stagingMr.get(), xferSize, clientToken)) {
         return rdmaFail("GET", "RDMA WRITE to the client buffer did not complete");
     }
-    const hipObj::RdmaToken serverToken = buildServerToken(*impl_->conn, impl_->stagingMr.get(), xferSize);
-    return hipObj::encodeReplyWithPeerToken(200, serverToken);
+    const hipObj::RdmaToken serverToken = buildServerToken(conn, impl_->stagingMr.get(), xferSize);
+    return hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken);
 }
 
 std::optional<RdmaTestServer::ReadResult>
 RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size)
 {
-    if (!isReady()) {
+    /* Checked here rather than with isReady(), so clang-tidy sees that conn
+     * holds a connection */
+    if (!impl_ || !impl_->conn) {
         return rdmaFail("PUT", "server RDMA not initialised");
     }
+    hipObj::RcConnection    &conn        = *impl_->conn;
     const hipObj::RdmaToken &clientToken = tokenHeader.token;
     size_t                   xferSize    = tokenHeader.length;
     if (size != 0) {
@@ -241,26 +264,26 @@ RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size)
         xferSize = clientToken.length;
     }
     if (xferSize > kStagingSize) {
-        fprintf(stderr,
-                "hipobj-rdma-test-server: PUT failed: %zu bytes exceeds the %zu "
-                "byte staging buffer\n",
-                xferSize, kStagingSize);
+        hipObj::printTo(stderr,
+                        "hipobj-rdma-test-server: PUT failed: {} bytes exceeds the {} "
+                        "byte staging buffer\n",
+                        xferSize, kStagingSize);
         return std::nullopt;
     }
 
     /* Connecting touches the QP, so every way out from here resets it */
     const hipObj::ScopeGuard resetQp([this] { impl_->resetQp(); });
-    if (!hipObj::connectRcPeer(*impl_->conn, clientToken)) {
+    if (!hipObj::connectRcPeer(conn, clientToken)) {
         return rdmaFail("PUT", "could not connect the RC QP to the client");
     }
-    if (!postRdmaRead(*impl_->conn, impl_->stagingMr.get(), xferSize, clientToken)) {
+    if (!postRdmaRead(conn, impl_->stagingMr.get(), xferSize, clientToken)) {
         return rdmaFail("PUT", "RDMA READ from the client buffer did not complete");
     }
-    const std::span<const uint8_t> received = std::span(impl_->stagingBuf).first(xferSize);
-    const hipObj::RdmaToken serverToken = buildServerToken(*impl_->conn, impl_->stagingMr.get(), xferSize);
+    const std::span<const uint8_t> received    = std::span(impl_->stagingBuf).first(xferSize);
+    const hipObj::RdmaToken        serverToken = buildServerToken(conn, impl_->stagingMr.get(), xferSize);
     return ReadResult{
         .data        = std::vector<uint8_t>(received.begin(), received.end()),
-        .replyHeader = hipObj::encodeReplyWithPeerToken(200, serverToken),
+        .replyHeader = hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken),
     };
 }
 

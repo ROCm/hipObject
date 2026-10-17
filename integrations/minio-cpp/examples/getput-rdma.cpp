@@ -6,12 +6,13 @@
 /* AMD port of minio-cpp GetPutRDMA: PUT + GET over hipObject RDMA */
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -32,6 +33,23 @@
 
 namespace {
 
+/* The positions of the optional arguments in argv */
+constexpr size_t kSizeArg = 4;
+constexpr size_t kGpuArg  = 5;
+
+/* The size of the object when the arguments don't give one: 10 MiB */
+constexpr size_t kDefaultBufSize = size_t{10} * 1024 * 1024;
+
+/* What the buffer is filled with between the PUT and the GET */
+constexpr char kClobberByte = 0x55;
+
+/* PatternByte()'s constants: Knuth's MMIX LCG multiplier, and the
+ * multiplier and shift of MurmurHash3's 64-bit finalizer, which mixes the
+ * LCG's bits so every bit of the offset reaches the low byte */
+constexpr uint64_t kLcgMultiplier = 6364136223846793005ULL;
+constexpr uint64_t kMixMultiplier = 0xff51afd7ed558ccdULL;
+constexpr unsigned kMixShift      = 33;
+
 /* A position-dependent pattern, not a constant fill.
  *
  * This used to memset the buffer to 'A' and check afterwards that every byte
@@ -44,11 +62,12 @@ namespace {
 uint8_t
 PatternByte(size_t offset, uint32_t seed)
 {
-    uint64_t x = ((offset + 1ULL) * 6364136223846793005ULL) + seed;
-    x ^= x >> 33;
-    x *= 0xff51afd7ed558ccdULL;
-    x ^= x >> 33;
-    return static_cast<uint8_t>(x & 0xff);
+    uint64_t x = ((offset + 1ULL) * kLcgMultiplier) + seed;
+    x ^= x >> kMixShift;
+    x *= kMixMultiplier;
+    x ^= x >> kMixShift;
+    /* The low byte */
+    return static_cast<uint8_t>(x);
 }
 
 void
@@ -72,9 +91,12 @@ FirstMismatch(std::span<const char> buf, uint32_t seed)
     return buf.size();
 }
 
-/* Frees the transfer buffer with the allocator that made it */
+/* Frees the transfer buffer with the allocator that made it: hipFree() on
+ * the GPU path, and on the host path, the aligned operator delete that
+ * matches the aligned operator new */
 struct BufferDeleter {
-    bool onGpu = false;
+    bool             onGpu     = false;
+    std::align_val_t alignment = {};
 
     void operator()(char *ptr) const noexcept
     {
@@ -82,7 +104,7 @@ struct BufferDeleter {
             (void)hipFree(ptr);
         }
         else {
-            std::free(ptr);
+            ::operator delete(ptr, alignment);
         }
     }
 };
@@ -103,21 +125,21 @@ main(int argc, char *argv[])
     const std::string &host        = args[1];
     const std::string &access_key  = args[2];
     const std::string &secret_key  = args[3];
-    size_t             bufsize     = size_t{10} * 1024 * 1024;
+    size_t             bufsize     = kDefaultBufSize;
     bool               gpu_enabled = true;
 
-    if (args.size() >= 5) {
+    if (args.size() > kSizeArg) {
         /* parseNumber() rejects signs, trailing junk, and values that don't
          * fit in size_t, all of which atol() would quietly accept. */
-        const std::optional<size_t> parsed = hipObj::parseNumber<size_t>(args[4]);
+        const std::optional<size_t> parsed = hipObj::parseNumber<size_t>(args[kSizeArg]);
         if (!parsed) {
-            std::cerr << "invalid size_bytes: " << args[4] << "\n";
+            std::cerr << "invalid size_bytes: " << args[kSizeArg] << "\n";
             return 1;
         }
         bufsize = *parsed;
     }
-    if (args.size() >= 6) {
-        gpu_enabled = args[5] == "gpu";
+    if (args.size() > kGpuArg) {
+        gpu_enabled = args[kGpuArg] == "gpu";
     }
 
     /* Seeded per run, and printed, so a stale object left in the store by an
@@ -137,7 +159,7 @@ main(int argc, char *argv[])
     /* bufptr's bytes, on the host path */
     std::span<char> host_buf;
     /* Owns bufptr (which is dev_ptr on the GPU path) */
-    std::unique_ptr<char, BufferDeleter> buffer(nullptr, BufferDeleter{gpu_enabled});
+    std::unique_ptr<char, BufferDeleter> buffer(nullptr, BufferDeleter{.onGpu = gpu_enabled});
 
     if (gpu_enabled) {
         hipError_t err = hipMalloc(&dev_ptr, bufsize);
@@ -156,20 +178,20 @@ main(int argc, char *argv[])
         std::cout << "GPU buffer " << bufsize << " bytes\n";
     }
     else {
+        /* sysconf() returns a long */
+        // NOLINTNEXTLINE(google-runtime-int)
         const long pagesize = sysconf(_SC_PAGESIZE);
         if (pagesize <= 0) {
             std::cerr << "sysconf(_SC_PAGESIZE) failed\n";
             return 1;
         }
-        /* posix_memalign() writes a void *, so it needs a void * object to
-         * write it to */
-        void     *raw = nullptr;
-        const int res = posix_memalign(&raw, static_cast<size_t>(pagesize), bufsize);
-        if (res != 0 || raw == nullptr) {
-            std::cerr << "posix_memalign failed\n";
+        const auto alignment = std::align_val_t{static_cast<size_t>(pagesize)};
+        bufptr               = static_cast<char *>(::operator new(bufsize, alignment, std::nothrow));
+        if (bufptr == nullptr) {
+            std::cerr << "allocating the host buffer failed\n";
             return 1;
         }
-        bufptr = static_cast<char *>(raw);
+        buffer.get_deleter().alignment = alignment;
         buffer.reset(bufptr);
         host_buf = hipObj::spanFromPointer(bufptr, bufsize);
         std::ranges::copy(expected, host_buf.begin());
@@ -195,11 +217,11 @@ main(int argc, char *argv[])
      * satisfied by whatever the PUT left behind, and a GET that transferred
      * nothing at all would still verify. */
     if (gpu_enabled) {
-        (void)hipMemset(dev_ptr, 0x55, bufsize);
+        (void)hipMemset(dev_ptr, kClobberByte, bufsize);
         (void)hipDeviceSynchronize();
     }
     else {
-        std::ranges::fill(host_buf, 0x55);
+        std::ranges::fill(host_buf, kClobberByte);
     }
 
     minio::s3::GetObjectArgs gargs;

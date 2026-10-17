@@ -8,8 +8,8 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
-#include <cstdlib>
 #include <memory>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -215,12 +215,11 @@ FakeVerbs::reg_mr(struct ibv_pd * /*pd*/, void *addr, size_t /*length*/, int acc
     if (device_->fail.registerAll || addr == device_->fail.registerAddr) {
         return nullptr;
     }
-    auto *mr = static_cast<struct ibv_mr *>(std::calloc(1, sizeof(struct ibv_mr)));
-    if (mr != nullptr) {
-        mr->addr = addr;
-        mr->rkey = 0x1234;
-    }
-    return mr;
+    /* Released by dereg_mr() */
+    auto mr  = std::make_unique<struct ibv_mr>();
+    mr->addr = addr;
+    mr->rkey = 0x1234;
+    return mr.release();
 }
 
 bool
@@ -241,7 +240,8 @@ int
 FakeVerbs::dereg_mr(struct ibv_mr *mr) const
 {
     ++device_->log.deregMr;
-    std::free(mr);
+    /* From reg_mr(), or a test's fake reg_dmabuf_mr() */
+    const std::unique_ptr<struct ibv_mr> owned(mr);
     return 0;
 }
 
@@ -252,19 +252,18 @@ FakeVerbs::create_cq(struct ibv_context * /*context*/, int cqe, void * /*cq_cont
     if (device_->fail.createCq) {
         return nullptr;
     }
-    auto *cq = static_cast<struct ibv_cq *>(std::calloc(1, sizeof(struct ibv_cq)));
-    if (cq != nullptr) {
-        ++device_->log.createCq;
-        cq->cqe = cqe;
-    }
-    return cq;
+    /* Released by destroy_cq() */
+    auto cq = std::make_unique<struct ibv_cq>();
+    ++device_->log.createCq;
+    cq->cqe = cqe;
+    return cq.release();
 }
 
 int
 FakeVerbs::destroy_cq(struct ibv_cq *cq) const
 {
     ++device_->log.destroyCq;
-    std::free(cq);
+    const std::unique_ptr<struct ibv_cq> owned(cq);
     return 0;
 }
 
@@ -275,13 +274,11 @@ FakeVerbs::create_qp(struct ibv_pd * /*pd*/, struct ibv_qp_init_attr * /*qp_init
         (device_->fail.qpLimit >= 0 && device_->log.createQp >= device_->fail.qpLimit)) {
         return nullptr;
     }
-    /* Zeroed, so its state is IBV_QPS_RESET */
-    auto *qp = static_cast<struct ibv_qp *>(std::calloc(1, sizeof(struct ibv_qp)));
-    if (qp != nullptr) {
-        ++device_->log.createQp;
-        qp->qp_num = device_->nextQpNum++;
-    }
-    return qp;
+    /* Zeroed, so its state is IBV_QPS_RESET. Released by destroy_qp(). */
+    auto qp = std::make_unique<struct ibv_qp>();
+    ++device_->log.createQp;
+    qp->qp_num = device_->nextQpNum++;
+    return qp.release();
 }
 
 int
@@ -310,7 +307,7 @@ int
 FakeVerbs::destroy_qp(struct ibv_qp *qp) const
 {
     ++device_->log.destroyQp;
-    std::free(qp);
+    const std::unique_ptr<struct ibv_qp> owned(qp);
     return 0;
 }
 
@@ -377,9 +374,17 @@ FakeHip::hostMalloc(void **ptr, size_t size, unsigned int /*flags*/) const
     if (device_->fail.hostMalloc) {
         return hipErrorOutOfMemory;
     }
-    *ptr                    = std::malloc(size);
+    /* Raw memory, as hipHostMalloc() returns, which hostFree() or
+     * freeFakeHostMemory() releases */
+    *ptr                    = ::operator new(size);
     device_->lastHostMalloc = *ptr;
-    return *ptr != nullptr ? hipSuccess : hipErrorOutOfMemory;
+    return hipSuccess;
+}
+
+void
+freeFakeHostMemory(void *ptr)
+{
+    ::operator delete(ptr);
 }
 
 hipError_t
@@ -387,7 +392,7 @@ FakeHip::hostFree(void *ptr) const
 {
     ++device_->log.hostFree;
     device_->lastHostFree = ptr;
-    std::free(ptr);
+    freeFakeHostMemory(ptr);
     return hipSuccess;
 }
 

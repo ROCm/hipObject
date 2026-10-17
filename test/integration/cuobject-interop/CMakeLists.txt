@@ -6,6 +6,9 @@ hipobj_add_test_executable(
   NAME hipobj-cuobject-probe
   SRCS main.cpp)
 
+target_include_directories(hipobj-cuobject-probe PRIVATE
+  ${PROJECT_SOURCE_DIR}/shared)
+
 target_link_libraries(hipobj-cuobject-probe PRIVATE
   cuobjserver::cuobjserver)
 

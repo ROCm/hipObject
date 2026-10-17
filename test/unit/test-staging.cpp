@@ -12,7 +12,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <cstdlib>
 #include <limits>
 #include <memory>
 
@@ -39,7 +38,7 @@ constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 
 /* reg_mr fails for this address, so it's registered through a staging
  * buffer */
-void *const kStagedBuf = hipObj::addressToPointer<void *>(0x30000);
+void *const kStagedBuf = hipObjTest::fakeStagedBuf();
 
 /* The HIP runtime reports every pointer as device memory in one allocation,
  * which holds every buffer these tests register */
@@ -314,9 +313,9 @@ TEST_F(StagingTest, ShutdownLeaksTheStagingBufferOfACopyThatsRunning)
     EXPECT_EQ(fake().log.destroyQp, fake().log.createQp);
     EXPECT_EQ(fake().log.closeDevice, 1);
 
-    /* Frees what the library leaked, which the fake allocated with
-     * malloc(), so the leak checker doesn't report it */
-    std::free(stagingBuf);
+    /* Frees what the library leaked, so the leak checker doesn't report
+     * it */
+    hipObjTest::freeFakeHostMemory(stagingBuf);
 }
 
 } // namespace

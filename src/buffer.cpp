@@ -18,6 +18,7 @@
 
 #include "hip-seam.h"
 #include "hipobj-address.h"
+#include "hipobj-print.h"
 #include "hipobj-private.h"
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
@@ -96,7 +97,7 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_p
              * answer for a host pointer, and the host-buffer paths register far
              * more often than the device ones. The plain path below handles it. */
             if (policy.debug) {
-                fprintf(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: %d\n", status);
+                printTo(stderr, "hipObj: hsa_amd_portable_export_dmabuf failed: {}\n", status);
             }
         }
         else {
@@ -107,7 +108,7 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_p
                 return mr;
             }
             const std::string reason = std::generic_category().message(errno);
-            fprintf(stderr, "hipObj: ibv_reg_dmabuf_mr failed: %s\n", reason.c_str());
+            printTo(stderr, "hipObj: ibv_reg_dmabuf_mr failed: {}\n", reason);
         }
         // Fall through to the plain path: it fails too for device memory, but
         // the caller distinguishes "no MR" from "wrong MR" and we must not
@@ -141,7 +142,7 @@ isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
 void
 HostBufDeleter::operator()(void *hostBuf) const noexcept
 {
-    (void)runtime->hostFree(hostBuf);
+    (void)runtime_->hostFree(hostBuf);
 }
 
 std::optional<BufferMap::RegisterResult>
@@ -202,15 +203,15 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
     const bool deviceMemory = isDevicePointer(runtime, devPtr);
     if (deviceMemory) {
         if (requireGpuDirect_) {
-            fprintf(stderr,
-                    "hipObj: GPU-direct registration of %zu bytes at %p failed and "
+            printTo(stderr,
+                    "hipObj: GPU-direct registration of {} bytes at {} failed and "
                     "HIPOBJ_REQUIRE_GPU_DIRECT is set; refusing to stage through "
                     "host memory.\n",
                     size, devPtr);
             return RegisterResult::Failed;
         }
-        fprintf(stderr,
-                "hipObj: GPU-direct registration of %zu bytes at %p failed; "
+        printTo(stderr,
+                "hipObj: GPU-direct registration of {} bytes at {} failed; "
                 "falling back to a host staging buffer. This transfer is no "
                 "longer GPU-direct.\n",
                 size, devPtr);

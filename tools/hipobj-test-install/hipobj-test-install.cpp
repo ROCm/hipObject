@@ -21,6 +21,7 @@
 
 #include <hipobj.h>
 
+#include "hipobj-print.h"
 #include "hipobj-span.h"
 
 namespace {
@@ -28,7 +29,7 @@ namespace {
 void
 usage(FILE *stream, const std::string &prog)
 {
-    fprintf(stream, "usage: %s [--version] [--help]\n", prog.c_str());
+    hipObj::printTo(stream, "usage: {} [--version] [--help]\n", prog);
 }
 
 } // namespace
@@ -70,7 +71,7 @@ main(int argc, char *argv[])
             version = true;
         }
         else {
-            fprintf(stderr, "hipobj-test-install: unknown argument %s\n", args[i].c_str());
+            hipObj::printTo(stderr, "hipobj-test-install: unknown argument {}\n", args[i]);
             usage(stderr, prog);
             return 2;
         }
@@ -80,8 +81,7 @@ main(int argc, char *argv[])
         return 0;
     }
     if (version) {
-        const std::string hipObjVersion = hipObjGetVersionString();
-        printf("hipobj-test-install (hipObject %s)\n", hipObjVersion.c_str());
+        hipObj::printTo(stdout, "hipobj-test-install (hipObject {})\n", hipObjGetVersionString());
         return 0;
     }
 
@@ -145,6 +145,6 @@ main(int argc, char *argv[])
      * that failed.
      */
 
-    fprintf(stderr, "hipobj-test-install: the checks aren't implemented yet\n");
+    hipObj::printTo(stderr, "hipobj-test-install: the checks aren't implemented yet\n");
     return 1;
 }

@@ -318,4 +318,25 @@ TEST(RdmaToken, ParseClientNicFromGid)
     EXPECT_FALSE(hipObj::parseClientNicFromTokenHex(encoded, {}));
 }
 
+/* Only an IPv4-mapped GID (::ffff:a.b.c.d) carries an IPv4 address, not
+ * any GID whose bytes 10 and 11 are 0xff, such as this link-local one */
+TEST(RdmaToken, NoClientNicFromOtherGids)
+{
+    hipObj::RdmaToken token;
+    token.transport = hipObj::TransportType::RC;
+    token.gid[0]    = 0xfe;
+    token.gid[1]    = 0x80;
+    token.gid[10]   = 0xff;
+    token.gid[11]   = 0xff;
+    token.gid[12]   = 192;
+    token.gid[13]   = 168;
+    token.gid[14]   = 1;
+    token.gid[15]   = 42;
+
+    const std::string    encoded = hipObj::encodeRdmaToken(token);
+    std::array<char, 32> nicIp   = {{"unchanged"}};
+    EXPECT_TRUE(hipObj::parseClientNicFromTokenHex(encoded, nicIp));
+    EXPECT_STREQ(nicIp.data(), "");
+}
+
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON

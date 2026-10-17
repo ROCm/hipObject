@@ -1,0 +1,23 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+# clang-tidy configuration for the unit tests
+#
+# This turns off two checks (below), and otherwise uses the top-level
+# configuration.
+---
+InheritParentConfig: true
+Checks:
+  # Google Test makes each TEST_F() body a subclass of its fixture, so a
+  # fixture shares its state with its tests through protected members, as
+  # Google Test's documentation does. Making them private would only add
+  # an accessor for each
+  - -misc-non-private-member-variables-in-classes
+  - -cppcoreguidelines-non-private-member-variables-in-classes
+  # A test's numbers are its data: fake rkeys and addresses, GID bytes,
+  # sizes, and the values it expects. They read best next to the code that
+  # uses them, and naming each one would move it away from the assertion
+  # that checks it
+  - -readability-magic-numbers
+  - -cppcoreguidelines-avoid-magic-numbers

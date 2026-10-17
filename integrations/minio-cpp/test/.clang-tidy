@@ -1,0 +1,15 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+# clang-tidy configuration for the MinIO bridge's unit tests
+#
+# This turns off one check (below), as test/unit/.clang-tidy does, and
+# otherwise uses the top-level configuration.
+---
+InheritParentConfig: true
+Checks:
+  # A test's numbers are its data: GID bytes, sizes, and the values it
+  # expects. They read best next to the code that uses them
+  - -readability-magic-numbers
+  - -cppcoreguidelines-avoid-magic-numbers
