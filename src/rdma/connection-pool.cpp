@@ -59,10 +59,13 @@ ConnectionPool::Lease::~Lease()
     }
 }
 
+/* A slot is only emptied when release() drops it, and a dropped slot's
+ * index never goes back into free_, so no lease gets an empty one.
+ * clang-tidy can't follow that. */
 RcConnection &
 ConnectionPool::Lease::connection() noexcept
 {
-    return *pool_->slots_[index_];
+    return *pool_->slots_[index_]; // NOLINT(bugprone-unchecked-optional-access)
 }
 
 bool
@@ -122,7 +125,7 @@ bool
 ConnectionPool::restore(std::optional<RcConnection> &conn) const noexcept
 {
     try {
-        if (resetRcConnection(*conn)) {
+        if (conn && resetRcConnection(*conn)) {
             return true;
         }
         /* The old QP and CQ are destroyed before the new ones are created */

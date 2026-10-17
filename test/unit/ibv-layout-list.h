@@ -31,6 +31,9 @@
  *   IBV_ACCESS_OPTIONAL_RANGE, which is checked.
  */
 
+/* HIPOBJ_IBV_MEMBER() takes the size of every member, so it takes the
+ * size of the pointers too */
+// NOLINTBEGIN(bugprone-sizeof-expression)
 HIPOBJ_IBV_VALUE(IB_UVERBS_ACCESS_LOCAL_WRITE)
 HIPOBJ_IBV_VALUE(IB_UVERBS_ACCESS_REMOTE_WRITE)
 HIPOBJ_IBV_VALUE(IB_UVERBS_ACCESS_REMOTE_READ)
@@ -534,3 +537,4 @@ HIPOBJ_IBV_MEMBER(struct ibv_context, async_fd)
 HIPOBJ_IBV_MEMBER(struct ibv_context, num_comp_vectors)
 HIPOBJ_IBV_MEMBER(struct ibv_context, mutex)
 HIPOBJ_IBV_MEMBER(struct ibv_context, abi_compat)
+// NOLINTEND(bugprone-sizeof-expression)

@@ -294,7 +294,7 @@ hipObjOps_t makeOps();
 constexpr uintptr_t kFakeDevBufAddr = 0x10000;
 
 inline void *
-fakeDevBuf()
+fakeDevBuf() noexcept
 {
     return hipObj::addressToPointer<void *>(kFakeDevBufAddr);
 }
@@ -303,7 +303,7 @@ fakeDevBuf()
  * since there's no object at the fake address to do pointer arithmetic
  * in. */
 inline void *
-fakeDevBufPlusOne()
+fakeDevBufPlusOne() noexcept
 {
     return hipObj::addressToPointer<void *>(kFakeDevBufAddr + 1);
 }
@@ -314,7 +314,7 @@ fakeDevBufPlusOne()
 constexpr uintptr_t kFakeStagedBufAddr = 0x30000;
 
 inline void *
-fakeStagedBuf()
+fakeStagedBuf() noexcept
 {
     return hipObj::addressToPointer<void *>(kFakeStagedBufAddr);
 }

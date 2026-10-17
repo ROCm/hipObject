@@ -214,9 +214,12 @@ RdmaTestServer::isReady() const
 std::optional<std::string>
 RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vector<uint8_t> &data)
 {
-    if (!isReady()) {
+    /* Checked here rather than with isReady(), so clang-tidy sees that conn
+     * holds a connection */
+    if (!impl_ || !impl_->conn) {
         return rdmaFail("GET", "server RDMA not initialised");
     }
+    hipObj::RcConnection    &conn        = *impl_->conn;
     const hipObj::RdmaToken &clientToken = tokenHeader.token;
     size_t                   xferSize    = tokenHeader.length;
     if (xferSize == 0) {
@@ -233,22 +236,25 @@ RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vec
     std::ranges::copy(std::span(data).first(xferSize), impl_->stagingBuf.begin());
     /* Connecting touches the QP, so every way out from here resets it */
     const hipObj::ScopeGuard resetQp([this] { impl_->resetQp(); });
-    if (!hipObj::connectRcPeer(*impl_->conn, clientToken)) {
+    if (!hipObj::connectRcPeer(conn, clientToken)) {
         return rdmaFail("GET", "could not connect the RC QP to the client");
     }
-    if (!postRdmaWrite(*impl_->conn, impl_->stagingMr.get(), xferSize, clientToken)) {
+    if (!postRdmaWrite(conn, impl_->stagingMr.get(), xferSize, clientToken)) {
         return rdmaFail("GET", "RDMA WRITE to the client buffer did not complete");
     }
-    const hipObj::RdmaToken serverToken = buildServerToken(*impl_->conn, impl_->stagingMr.get(), xferSize);
+    const hipObj::RdmaToken serverToken = buildServerToken(conn, impl_->stagingMr.get(), xferSize);
     return hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken);
 }
 
 std::optional<RdmaTestServer::ReadResult>
 RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size)
 {
-    if (!isReady()) {
+    /* Checked here rather than with isReady(), so clang-tidy sees that conn
+     * holds a connection */
+    if (!impl_ || !impl_->conn) {
         return rdmaFail("PUT", "server RDMA not initialised");
     }
+    hipObj::RcConnection    &conn        = *impl_->conn;
     const hipObj::RdmaToken &clientToken = tokenHeader.token;
     size_t                   xferSize    = tokenHeader.length;
     if (size != 0) {
@@ -267,14 +273,14 @@ RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size)
 
     /* Connecting touches the QP, so every way out from here resets it */
     const hipObj::ScopeGuard resetQp([this] { impl_->resetQp(); });
-    if (!hipObj::connectRcPeer(*impl_->conn, clientToken)) {
+    if (!hipObj::connectRcPeer(conn, clientToken)) {
         return rdmaFail("PUT", "could not connect the RC QP to the client");
     }
-    if (!postRdmaRead(*impl_->conn, impl_->stagingMr.get(), xferSize, clientToken)) {
+    if (!postRdmaRead(conn, impl_->stagingMr.get(), xferSize, clientToken)) {
         return rdmaFail("PUT", "RDMA READ from the client buffer did not complete");
     }
-    const std::span<const uint8_t> received = std::span(impl_->stagingBuf).first(xferSize);
-    const hipObj::RdmaToken serverToken = buildServerToken(*impl_->conn, impl_->stagingMr.get(), xferSize);
+    const std::span<const uint8_t> received    = std::span(impl_->stagingBuf).first(xferSize);
+    const hipObj::RdmaToken        serverToken = buildServerToken(conn, impl_->stagingMr.get(), xferSize);
     return ReadResult{
         .data        = std::vector<uint8_t>(received.begin(), received.end()),
         .replyHeader = hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken),

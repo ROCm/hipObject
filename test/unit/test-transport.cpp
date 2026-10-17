@@ -66,7 +66,7 @@ constexpr int kInitMask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_Q
 
 /* The QPs an instance creates with the default options: one for each
  * transfer, and the one hipObjGetRdmaToken() advertises */
-const int kDefaultQps = 1 + static_cast<int>(hipObj::Options{}.maxTransfers);
+constexpr int kDefaultQps = 1 + static_cast<int>(hipObj::Options::kDefaultMaxTransfers);
 
 /* The default options, with maxTransfers connections for transfers. A
  * test passes this rather than declaring options of its own: CodeQL reads

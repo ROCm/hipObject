@@ -108,11 +108,6 @@ Checks:
   # TODO: These checks report problems in the current code. Fix the code
   # and delete the check's line here, or move it to "Not wanted" with a
   # reason. The count is the number of places clang-tidy 23 reports.
-  - -bugprone-sizeof-expression  # TODO(24)
-  - -bugprone-throwing-static-initialization  # TODO(4)
-  - -cert-err58-cpp  # TODO: the same check
-  - -bugprone-unchecked-optional-access  # TODO(34)
-  - -cert-err33-c  # TODO(43): unchecked fprintf() and snprintf()
   - -readability-function-cognitive-complexity  # TODO(14)
 WarningsAsErrors: '*'
 
