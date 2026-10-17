@@ -56,80 +56,80 @@ makeFuncs()
     funcs.get_device_list = [](int *num) {
         g_call = {.name = "get_device_list", .object = num, .value = 0};
         *num   = 1;
-        return fakeObject<struct ibv_device *>(0x10);
+        return fakeObject<ibv_device *>(0x10);
     };
-    funcs.free_device_list = [](struct ibv_device **list) {
+    funcs.free_device_list = [](ibv_device **list) {
         g_call = {.name = "free_device_list", .object = static_cast<const void *>(list), .value = 0};
     };
-    funcs.open_device = [](struct ibv_device *device) {
+    funcs.open_device = [](ibv_device *device) {
         g_call = {.name = "open_device", .object = device, .value = 0};
-        return fakeObject<struct ibv_context>(0x20);
+        return fakeObject<ibv_context>(0x20);
     };
-    funcs.close_device = [](struct ibv_context *context) {
+    funcs.close_device = [](ibv_context *context) {
         g_call = {.name = "close_device", .object = context, .value = 0};
         return kResult;
     };
-    funcs.get_device_name = [](struct ibv_device *device) {
+    funcs.get_device_name = [](ibv_device *device) {
         g_call = {.name = "get_device_name", .object = device, .value = 0};
         return "fake0";
     };
-    funcs.query_device = [](struct ibv_context *context, struct ibv_device_attr *attr) {
+    funcs.query_device = [](ibv_context *context, ibv_device_attr *attr) {
         g_call = {.name = "query_device", .object = context, .value = hipObj::pointerToAddress(attr)};
         return kResult;
     };
-    funcs.query_port = [](struct ibv_context *context, uint8_t port, struct ibv_port_attr *) {
+    funcs.query_port = [](ibv_context *context, uint8_t port, ibv_port_attr *) {
         g_call = {.name = "query_port", .object = context, .value = port};
         return kResult;
     };
-    funcs.query_gid = [](struct ibv_context *context, uint8_t, int index, union ibv_gid *) {
+    funcs.query_gid = [](ibv_context *context, uint8_t, int index, ibv_gid *) {
         g_call = {.name = "query_gid", .object = context, .value = static_cast<uint64_t>(index)};
         return kResult;
     };
-    funcs.alloc_pd = [](struct ibv_context *context) {
+    funcs.alloc_pd = [](ibv_context *context) {
         g_call = {.name = "alloc_pd", .object = context, .value = 0};
-        return fakeObject<struct ibv_pd>(0x30);
+        return fakeObject<ibv_pd>(0x30);
     };
-    funcs.dealloc_pd = [](struct ibv_pd *pd) {
+    funcs.dealloc_pd = [](ibv_pd *pd) {
         g_call = {.name = "dealloc_pd", .object = pd, .value = 0};
         return kResult;
     };
-    funcs.reg_dmabuf_mr = [](struct ibv_pd *pd, uint64_t, size_t, uint64_t iova, int, int) {
+    funcs.reg_dmabuf_mr = [](ibv_pd *pd, uint64_t, size_t, uint64_t iova, int, int) {
         g_call = {.name = "reg_dmabuf_mr", .object = pd, .value = iova};
-        return fakeObject<struct ibv_mr>(0x40);
+        return fakeObject<ibv_mr>(0x40);
     };
-    funcs.reg_mr_iova2 = [](struct ibv_pd *pd, void *, size_t, uintptr_t iova, int) {
+    funcs.reg_mr_iova2 = [](ibv_pd *pd, void *, size_t, uintptr_t iova, int) {
         g_call = {.name = "reg_mr_iova2", .object = pd, .value = iova};
-        return fakeObject<struct ibv_mr>(0x50);
+        return fakeObject<ibv_mr>(0x50);
     };
-    funcs.dereg_mr = [](struct ibv_mr *mr) {
+    funcs.dereg_mr = [](ibv_mr *mr) {
         g_call = {.name = "dereg_mr", .object = mr, .value = 0};
         return kResult;
     };
-    funcs.create_cq = [](struct ibv_context *context, int cqe, void *, struct ibv_comp_channel *, int) {
+    funcs.create_cq = [](ibv_context *context, int cqe, void *, ibv_comp_channel *, int) {
         g_call = {.name = "create_cq", .object = context, .value = static_cast<uint64_t>(cqe)};
-        return fakeObject<struct ibv_cq>(0x60);
+        return fakeObject<ibv_cq>(0x60);
     };
-    funcs.destroy_cq = [](struct ibv_cq *cq) {
+    funcs.destroy_cq = [](ibv_cq *cq) {
         g_call = {.name = "destroy_cq", .object = cq, .value = 0};
         return kResult;
     };
-    funcs.create_qp = [](struct ibv_pd *pd, struct ibv_qp_init_attr *) {
+    funcs.create_qp = [](ibv_pd *pd, ibv_qp_init_attr *) {
         g_call = {.name = "create_qp", .object = pd, .value = 0};
-        return fakeObject<struct ibv_qp>(0x70);
+        return fakeObject<ibv_qp>(0x70);
     };
-    funcs.modify_qp = [](struct ibv_qp *qp, struct ibv_qp_attr *, int mask) {
+    funcs.modify_qp = [](ibv_qp *qp, ibv_qp_attr *, int mask) {
         g_call = {.name = "modify_qp", .object = qp, .value = static_cast<uint64_t>(mask)};
         return kResult;
     };
-    funcs.destroy_qp = [](struct ibv_qp *qp) {
+    funcs.destroy_qp = [](ibv_qp *qp) {
         g_call = {.name = "destroy_qp", .object = qp, .value = 0};
         return kResult;
     };
-    funcs.poll_cq = [](struct ibv_cq *cq, int count, struct ibv_wc *) {
+    funcs.poll_cq = [](ibv_cq *cq, int count, ibv_wc *) {
         g_call = {.name = "poll_cq", .object = cq, .value = static_cast<uint64_t>(count)};
         return kResult;
     };
-    funcs.post_send = [](struct ibv_qp *qp, struct ibv_send_wr *, struct ibv_send_wr **) {
+    funcs.post_send = [](ibv_qp *qp, ibv_send_wr *, ibv_send_wr **) {
         g_call = {.name = "post_send", .object = qp, .value = 0};
         return kResult;
     };
@@ -156,20 +156,20 @@ TEST_F(LoadedVerbsTest, ForwardsEachCall)
     const hipObj::LoadedVerbs verbs(makeFuncs());
 
     int num = 0;
-    EXPECT_EQ(verbs.get_device_list(&num), fakeObject<struct ibv_device *>(0x10));
+    EXPECT_EQ(verbs.get_device_list(&num), fakeObject<ibv_device *>(0x10));
     expectCall("get_device_list", &num);
     EXPECT_EQ(num, 1);
-    auto *const devices = fakeObject<struct ibv_device *>(0x11);
+    auto *const devices = fakeObject<ibv_device *>(0x11);
     verbs.free_device_list(devices);
     expectCall("free_device_list", static_cast<const void *>(devices));
 
-    auto *const device = fakeObject<struct ibv_device>(0x12);
-    EXPECT_EQ(verbs.open_device(device), fakeObject<struct ibv_context>(0x20));
+    auto *const device = fakeObject<ibv_device>(0x12);
+    EXPECT_EQ(verbs.open_device(device), fakeObject<ibv_context>(0x20));
     expectCall("open_device", device);
     EXPECT_EQ(std::string_view(verbs.get_device_name(device)), "fake0");
     expectCall("get_device_name", device);
 
-    auto *const     context = fakeObject<struct ibv_context>(0x21);
+    auto *const     context = fakeObject<ibv_context>(0x21);
     ibv_device_attr deviceAttr{};
     EXPECT_EQ(verbs.query_device(context, &deviceAttr), kResult);
     expectCall("query_device", context);
@@ -182,26 +182,26 @@ TEST_F(LoadedVerbsTest, ForwardsEachCall)
     EXPECT_EQ(verbs.query_gid(context, 1, 5, &gid), kResult);
     expectCall("query_gid", context);
     EXPECT_EQ(g_call.value, 5U);
-    EXPECT_EQ(verbs.alloc_pd(context), fakeObject<struct ibv_pd>(0x30));
+    EXPECT_EQ(verbs.alloc_pd(context), fakeObject<ibv_pd>(0x30));
     expectCall("alloc_pd", context);
-    EXPECT_EQ(verbs.create_cq(context, 16, nullptr, nullptr, 0), fakeObject<struct ibv_cq>(0x60));
+    EXPECT_EQ(verbs.create_cq(context, 16, nullptr, nullptr, 0), fakeObject<ibv_cq>(0x60));
     expectCall("create_cq", context);
     EXPECT_EQ(g_call.value, 16U);
     EXPECT_EQ(verbs.close_device(context), kResult);
     expectCall("close_device", context);
 
-    auto *const      pd = fakeObject<struct ibv_pd>(0x31);
+    auto *const      pd = fakeObject<ibv_pd>(0x31);
     ibv_qp_init_attr initAttr{};
-    EXPECT_EQ(verbs.create_qp(pd, &initAttr), fakeObject<struct ibv_qp>(0x70));
+    EXPECT_EQ(verbs.create_qp(pd, &initAttr), fakeObject<ibv_qp>(0x70));
     expectCall("create_qp", pd);
     EXPECT_EQ(verbs.dealloc_pd(pd), kResult);
     expectCall("dealloc_pd", pd);
 
-    auto *const mr = fakeObject<struct ibv_mr>(0x41);
+    auto *const mr = fakeObject<ibv_mr>(0x41);
     EXPECT_EQ(verbs.dereg_mr(mr), kResult);
     expectCall("dereg_mr", mr);
 
-    auto *const cq = fakeObject<struct ibv_cq>(0x61);
+    auto *const cq = fakeObject<ibv_cq>(0x61);
     ibv_wc      wc{};
     EXPECT_EQ(verbs.poll_cq(cq, 1, &wc), kResult);
     expectCall("poll_cq", cq);
@@ -209,7 +209,7 @@ TEST_F(LoadedVerbsTest, ForwardsEachCall)
     EXPECT_EQ(verbs.destroy_cq(cq), kResult);
     expectCall("destroy_cq", cq);
 
-    auto *const  qp = fakeObject<struct ibv_qp>(0x71);
+    auto *const  qp = fakeObject<ibv_qp>(0x71);
     ibv_qp_attr  qpAttr{};
     ibv_send_wr  sendWr{};
     ibv_send_wr *badSend = nullptr;
@@ -226,10 +226,10 @@ TEST_F(LoadedVerbsTest, ForwardsEachCall)
 TEST_F(LoadedVerbsTest, RegMrUsesAddressAsIova)
 {
     const hipObj::LoadedVerbs verbs(makeFuncs());
-    auto *const               pd   = fakeObject<struct ibv_pd>(0x31);
+    auto *const               pd   = fakeObject<ibv_pd>(0x31);
     void *const               addr = fakeObject<void>(0x1000);
 
-    EXPECT_EQ(verbs.reg_mr(pd, addr, 64, IBV_ACCESS_LOCAL_WRITE), fakeObject<struct ibv_mr>(0x50));
+    EXPECT_EQ(verbs.reg_mr(pd, addr, 64, IBV_ACCESS_LOCAL_WRITE), fakeObject<ibv_mr>(0x50));
     expectCall("reg_mr_iova2", pd);
     EXPECT_EQ(g_call.value, 0x1000U);
 }
@@ -237,11 +237,10 @@ TEST_F(LoadedVerbsTest, RegMrUsesAddressAsIova)
 TEST_F(LoadedVerbsTest, RegistersDmabufWhenLibibverbsCan)
 {
     const hipObj::LoadedVerbs verbs(makeFuncs());
-    auto *const               pd = fakeObject<struct ibv_pd>(0x31);
+    auto *const               pd = fakeObject<ibv_pd>(0x31);
 
     EXPECT_TRUE(verbs.supportsDmabuf());
-    EXPECT_EQ(verbs.reg_dmabuf_mr(pd, 0, 64, 0x2000, 7, IBV_ACCESS_LOCAL_WRITE),
-              fakeObject<struct ibv_mr>(0x40));
+    EXPECT_EQ(verbs.reg_dmabuf_mr(pd, 0, 64, 0x2000, 7, IBV_ACCESS_LOCAL_WRITE), fakeObject<ibv_mr>(0x40));
     expectCall("reg_dmabuf_mr", pd);
     EXPECT_EQ(g_call.value, 0x2000U);
 }
@@ -255,7 +254,7 @@ TEST_F(LoadedVerbsTest, NoDmabufWithoutTheSymbol)
 
     EXPECT_FALSE(verbs.supportsDmabuf());
     errno = 0;
-    EXPECT_EQ(verbs.reg_dmabuf_mr(fakeObject<struct ibv_pd>(0x31), 0, 64, 0x2000, 7, IBV_ACCESS_LOCAL_WRITE),
+    EXPECT_EQ(verbs.reg_dmabuf_mr(fakeObject<ibv_pd>(0x31), 0, 64, 0x2000, 7, IBV_ACCESS_LOCAL_WRITE),
               nullptr);
     EXPECT_EQ(errno, EOPNOTSUPP);
     EXPECT_EQ(g_call.name, "");
@@ -271,18 +270,18 @@ TEST_F(LoadedVerbsTest, FallsBackToContextOps)
     funcs.post_send                  = nullptr;
     const hipObj::LoadedVerbs verbs(funcs);
 
-    struct ibv_context context {};
-    context.ops.poll_cq = [](struct ibv_cq *cq, int count, struct ibv_wc *) {
+    ibv_context context{};
+    context.ops.poll_cq = [](ibv_cq *cq, int count, ibv_wc *) {
         g_call = {.name = "ops.poll_cq", .object = cq, .value = static_cast<uint64_t>(count)};
         return kResult;
     };
-    context.ops.post_send = [](struct ibv_qp *qp, struct ibv_send_wr *, struct ibv_send_wr **) {
+    context.ops.post_send = [](ibv_qp *qp, ibv_send_wr *, ibv_send_wr **) {
         g_call = {.name = "ops.post_send", .object = qp, .value = 0};
         return kResult;
     };
-    struct ibv_cq cq {};
+    ibv_cq cq{};
     cq.context = &context;
-    struct ibv_qp qp {};
+    ibv_qp qp{};
     qp.context = &context;
 
     ibv_wc wc{};
@@ -306,8 +305,8 @@ TEST(LoadLibibverbsTest, LoadsWhatTheLibraryNeeds)
         GTEST_SKIP() << "libibverbs couldn't be loaded";
     }
 
-    int                 num  = -1;
-    struct ibv_device **list = verbs->get_device_list(&num);
+    int          num  = -1;
+    ibv_device **list = verbs->get_device_list(&num);
     if (list != nullptr) {
         EXPECT_GE(num, 0);
         verbs->free_device_list(list);

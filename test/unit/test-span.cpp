@@ -126,7 +126,7 @@ TEST(Span, DeviceSpanViewsTheList)
 {
     /* Two devices and the NULL that ends the list, as from
      * ibv_get_device_list(). The devices' values don't matter here. */
-    std::array<struct ibv_device *, 3> devices{};
+    std::array<ibv_device *, 3> devices{};
 
     /* The list is borrowed, so it's released rather than freed with
      * verbs */

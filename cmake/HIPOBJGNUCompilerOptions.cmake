@@ -121,7 +121,7 @@ function(hipobj_get_gnu_warning_flags outvar compiler_version)
       # Misc warnings
       -Warith-conversion
       -Wmismatched-tags
-      #-Wredundant-tags # TODO: Fix issues
+      -Wredundant-tags
       ${flags}
     )
   endif()

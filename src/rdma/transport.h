@@ -47,12 +47,12 @@ public:
         return *verbs_;
     }
 
-    [[nodiscard]] struct ibv_context *context() const noexcept
+    [[nodiscard]] ibv_context *context() const noexcept
     {
         return ctx_.get();
     }
 
-    [[nodiscard]] struct ibv_pd *pd() const noexcept
+    [[nodiscard]] ibv_pd *pd() const noexcept
     {
         return pd_.get();
     }
@@ -122,22 +122,22 @@ public:
     /* Only a non-const connection hands out the CQ and QP that libibverbs
      * can change, so a function that changes them takes a non-const
      * connection */
-    [[nodiscard]] struct ibv_cq *cq() noexcept
+    [[nodiscard]] ibv_cq *cq() noexcept
     {
         return cq_.get();
     }
 
-    [[nodiscard]] const struct ibv_cq *cq() const noexcept
+    [[nodiscard]] const ibv_cq *cq() const noexcept
     {
         return cq_.get();
     }
 
-    [[nodiscard]] struct ibv_qp *qp() noexcept
+    [[nodiscard]] ibv_qp *qp() noexcept
     {
         return qp_.get();
     }
 
-    [[nodiscard]] const struct ibv_qp *qp() const noexcept
+    [[nodiscard]] const ibv_qp *qp() const noexcept
     {
         return qp_.get();
     }
@@ -168,7 +168,7 @@ std::optional<RcConnection> createRcConnection(const RdmaDevice &&, int, uint32_
 
 /* Each of these returns true on success and false on failure */
 [[nodiscard]] bool transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid,
-                                     union ibv_gid destGid);
+                                     ibv_gid destGid);
 [[nodiscard]] bool transitionQpToRts(RcConnection &conn);
 [[nodiscard]] bool connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);
 /* Moves conn's QP back to INIT, through RESET, so it can connect to

@@ -306,12 +306,12 @@ class TopologyVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    const char *get_device_name(struct ibv_device * /*device*/) const override
+    const char *get_device_name(ibv_device * /*device*/) const override
     {
         return kFakeDevName.data();
     }
 
-    int query_device(struct ibv_context *context, struct ibv_device_attr *attr) const override
+    int query_device(ibv_context *context, ibv_device_attr *attr) const override
     {
         const int result = FakeVerbs::query_device(context, attr);
         if (result == 0) {
@@ -320,7 +320,7 @@ public:
         return result;
     }
 
-    int query_port(struct ibv_context *context, uint8_t portNum, struct ibv_port_attr *attr) const override
+    int query_port(ibv_context *context, uint8_t portNum, ibv_port_attr *attr) const override
     {
         const int result = FakeVerbs::query_port(context, portNum, attr);
         if (result == 0) {
@@ -330,7 +330,7 @@ public:
         return result;
     }
 
-    int query_gid(struct ibv_context *context, uint8_t portNum, int index, union ibv_gid *gid) const override
+    int query_gid(ibv_context *context, uint8_t portNum, int index, ibv_gid *gid) const override
     {
         const int result = FakeVerbs::query_gid(context, portNum, index, gid);
         if (result != 0) {
@@ -358,7 +358,7 @@ public:
  * reads */
 class OpenableTopologyVerbs : public TopologyVerbs {
 public:
-    OpenableTopologyVerbs(hipObjTest::FakeDevice &device, struct ibv_context &context) noexcept
+    OpenableTopologyVerbs(hipObjTest::FakeDevice &device, ibv_context &context) noexcept
         : TopologyVerbs(device), context_(&context)
     {
     }
@@ -369,13 +369,13 @@ public:
     OpenableTopologyVerbs(OpenableTopologyVerbs &&)                 = delete;
     OpenableTopologyVerbs &operator=(OpenableTopologyVerbs &&)      = delete;
 
-    struct ibv_context *open_device(struct ibv_device *device) const override
+    ibv_context *open_device(ibv_device *device) const override
     {
         return TopologyVerbs::open_device(device) != nullptr ? context_ : nullptr;
     }
 
 private:
-    struct ibv_context *context_;
+    ibv_context *context_;
 };
 
 /* The fake verbs, and a context for the device they have, whose name
@@ -393,8 +393,8 @@ protected:
         return hipObj::SelectBestGid(verbs_, topology_, &context_, portNum);
     }
 
-    struct ibv_device      device_ {};
-    struct ibv_context     context_ {};
+    ibv_device             device_{};
+    ibv_context            context_{};
     TopologyState          state_{};
     FakeNicTopology        topology_{state_};
     hipObjTest::FakeDevice fakeDevice_{};
@@ -447,8 +447,7 @@ TEST_F(GidSeamTest, OpenedDeviceHasTheGidTheTopologyPrefers)
     EXPECT_EQ(state_.lastPortNum, 1);
     EXPECT_EQ(rdma->gidIndex(), 1);
 
-    union ibv_gid expected {
-    };
+    ibv_gid expected{};
     ASSERT_EQ(verbs_.query_gid(&context_, 1, 1, &expected), 0);
     EXPECT_EQ(hipObj::toGid(rdma->localGid()), hipObj::toGid(expected));
 }
@@ -607,9 +606,8 @@ protected:
     [[nodiscard]] hipObj::RdmaDevice makeDevice() const
     {
         return {verbs_,
-                hipObj::own<hipObj::IbvContextPtr>(verbs_,
-                                                   hipObj::addressToPointer<struct ibv_context *>(0x1234)),
-                hipObj::own<hipObj::IbvPdPtr>(verbs_, hipObj::addressToPointer<struct ibv_pd *>(0x5678)),
+                hipObj::own<hipObj::IbvContextPtr>(verbs_, hipObj::addressToPointer<ibv_context *>(0x1234)),
+                hipObj::own<hipObj::IbvPdPtr>(verbs_, hipObj::addressToPointer<ibv_pd *>(0x5678)),
                 1,
                 0,
                 {},

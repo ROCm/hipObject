@@ -55,7 +55,7 @@ namespace {
     /* The size of the buffer each transfer is staged through */
     constexpr size_t kStagingSize = size_t{64} * 1024 * 1024;
 
-    hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, const struct ibv_mr *mr, size_t size)
+    hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, const ibv_mr *mr, size_t size)
     {
         return hipObj::RdmaToken{
             .qpNum      = conn.qp()->qp_num,
@@ -69,7 +69,7 @@ namespace {
         };
     }
 
-    [[nodiscard]] bool postRdmaWrite(hipObj::RcConnection &conn, const struct ibv_mr *localMr, size_t size,
+    [[nodiscard]] bool postRdmaWrite(hipObj::RcConnection &conn, const ibv_mr *localMr, size_t size,
                                      const hipObj::RdmaToken &clientToken)
     {
         ibv_sge sge{};
@@ -96,7 +96,7 @@ namespace {
         return hipObj::pollCompletion(conn, IBV_WC_RDMA_WRITE, kCompletionTimeout);
     }
 
-    [[nodiscard]] bool postRdmaRead(hipObj::RcConnection &conn, const struct ibv_mr *localMr, size_t size,
+    [[nodiscard]] bool postRdmaRead(hipObj::RcConnection &conn, const ibv_mr *localMr, size_t size,
                                     const hipObj::RdmaToken &clientToken)
     {
         ibv_sge sge{};

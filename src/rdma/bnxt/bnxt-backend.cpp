@@ -17,7 +17,7 @@ isBnxtDevice(uint32_t vendorId)
 }
 
 void
-configureBnxtQp(struct ibv_qp_attr &attr)
+configureBnxtQp(ibv_qp_attr &attr)
 {
     attr.path_mtu  = IBV_MTU_4096;
     attr.timeout   = kQpTimeout;

@@ -155,8 +155,8 @@ struct FakeDevice {
      * nextQpNum value. */
     uint32_t                    vendorId   = 0;
     int                         pollResult = 1;
-    enum ibv_wc_status          pollStatus = IBV_WC_SUCCESS;
-    enum ibv_wc_opcode          pollOpcode = IBV_WC_SEND;
+    ibv_wc_status               pollStatus = IBV_WC_SUCCESS;
+    ibv_wc_opcode               pollOpcode = IBV_WC_SEND;
     std::array<ModifyQpCall, 8> modifyQp{};
     std::atomic<size_t>         modifyQpCount{0};
     std::atomic<uint32_t>       nextQpNum{0x55};
@@ -254,31 +254,29 @@ public:
     FakeVerbs(FakeVerbs &&)                 = delete;
     FakeVerbs &operator=(FakeVerbs &&)      = delete;
 
-    struct ibv_device **get_device_list(int *num_devices) const override;
-    void                free_device_list(struct ibv_device **list) const override;
-    struct ibv_context *open_device(struct ibv_device *device) const override;
-    int                 close_device(struct ibv_context *context) const override;
-    const char         *get_device_name(struct ibv_device *device) const override;
-    int query_device(struct ibv_context *context, struct ibv_device_attr *device_attr) const override;
-    int query_port(struct ibv_context *context, uint8_t port_num,
-                   struct ibv_port_attr *port_attr) const override;
-    int query_gid(struct ibv_context *context, uint8_t port_num, int index,
-                  union ibv_gid *gid) const override;
-    struct ibv_pd     *alloc_pd(struct ibv_context *context) const override;
-    int                dealloc_pd(struct ibv_pd *pd) const override;
-    struct ibv_mr     *reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access) const override;
+    ibv_device **get_device_list(int *num_devices) const override;
+    void         free_device_list(ibv_device **list) const override;
+    ibv_context *open_device(ibv_device *device) const override;
+    int          close_device(ibv_context *context) const override;
+    const char  *get_device_name(ibv_device *device) const override;
+    int          query_device(ibv_context *context, ibv_device_attr *device_attr) const override;
+    int          query_port(ibv_context *context, uint8_t port_num, ibv_port_attr *port_attr) const override;
+    int          query_gid(ibv_context *context, uint8_t port_num, int index, ibv_gid *gid) const override;
+    ibv_pd      *alloc_pd(ibv_context *context) const override;
+    int          dealloc_pd(ibv_pd *pd) const override;
+    ibv_mr      *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const override;
     [[nodiscard]] bool supportsDmabuf() const override;
-    struct ibv_mr     *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+    ibv_mr            *reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
                                      int access) const override;
-    int                dereg_mr(struct ibv_mr *mr) const override;
-    struct ibv_cq     *create_cq(struct ibv_context *context, int cqe, void *cq_context,
-                                 struct ibv_comp_channel *channel, int comp_vector) const override;
-    int                destroy_cq(struct ibv_cq *cq) const override;
-    struct ibv_qp     *create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) const override;
-    int                modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) const override;
-    int                destroy_qp(struct ibv_qp *qp) const override;
-    int                poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) const override;
-    int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr) const override;
+    int                dereg_mr(ibv_mr *mr) const override;
+    ibv_cq            *create_cq(ibv_context *context, int cqe, void *cq_context, ibv_comp_channel *channel,
+                                 int comp_vector) const override;
+    int                destroy_cq(ibv_cq *cq) const override;
+    ibv_qp            *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override;
+    int                modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const override;
+    int                destroy_qp(ibv_qp *qp) const override;
+    int                poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const override;
+    int                post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const override;
 
 private:
     /* A pointer, so the const methods can change what it points to */

@@ -75,8 +75,8 @@ namespace {
 } // namespace
 
 IbvMrPtr
-registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, struct ibv_pd *pd, void *addr,
-                     size_t length, int access, const DmabufPolicy &policy)
+registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, ibv_pd *pd, void *addr, size_t length,
+                     int access, const DmabufPolicy &policy)
 {
     /* Whether a given GPU can export a dma-buf and a given NIC can register
      * it is answered by trying: both calls report their own failure and
@@ -180,7 +180,7 @@ BufferMap::insert(uintptr_t key, std::shared_ptr<const BufEntry> entry)
 }
 
 BufferMap::RegisterResult
-BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
+BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
 {
     if (size > MAX_MR_SIZE) {
         return RegisterResult::Failed;
@@ -236,7 +236,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, struct ibv_pd *pd)
 }
 
 BufferMap::RegisterResult
-BufferMap::registerHostBuffer(void *hostPtr, size_t size, struct ibv_pd *pd)
+BufferMap::registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
 {
     if (size > MAX_MR_SIZE) {
         return RegisterResult::Failed;

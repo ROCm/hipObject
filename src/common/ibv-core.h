@@ -100,11 +100,11 @@ enum ibv_gid_type {
  * ------------------------------------------------------------------------- */
 
 struct ibv_gid_entry {
-    union ibv_gid gid;
-    uint32_t      gid_index;
-    uint32_t      port_num;
-    uint32_t      gid_type;
-    uint32_t      ndev_ifindex;
+    ibv_gid  gid;
+    uint32_t gid_index;
+    uint32_t port_num;
+    uint32_t gid_type;
+    uint32_t ndev_ifindex;
 };
 
 /* -------------------------------------------------------------------------
@@ -138,46 +138,46 @@ enum ibv_atomic_cap { IBV_ATOMIC_NONE, IBV_ATOMIC_HCA, IBV_ATOMIC_GLOB };
  * ------------------------------------------------------------------------- */
 
 struct ibv_device_attr {
-    char                fw_ver[64];
-    __be64              node_guid;
-    __be64              sys_image_guid;
-    uint64_t            max_mr_size;
-    uint64_t            page_size_cap;
-    uint32_t            vendor_id;
-    uint32_t            vendor_part_id;
-    uint32_t            hw_ver;
-    int                 max_qp;
-    int                 max_qp_wr;
-    unsigned int        device_cap_flags;
-    int                 max_sge;
-    int                 max_sge_rd;
-    int                 max_cq;
-    int                 max_cqe;
-    int                 max_mr;
-    int                 max_pd;
-    int                 max_qp_rd_atom;
-    int                 max_ee_rd_atom;
-    int                 max_res_rd_atom;
-    int                 max_qp_init_rd_atom;
-    int                 max_ee_init_rd_atom;
-    enum ibv_atomic_cap atomic_cap;
-    int                 max_ee;
-    int                 max_rdd;
-    int                 max_mw;
-    int                 max_raw_ipv6_qp;
-    int                 max_raw_ethy_qp;
-    int                 max_mcast_grp;
-    int                 max_mcast_qp_attach;
-    int                 max_total_mcast_qp_attach;
-    int                 max_ah;
-    int                 max_fmr;
-    int                 max_map_per_fmr;
-    int                 max_srq;
-    int                 max_srq_wr;
-    int                 max_srq_sge;
-    uint16_t            max_pkeys;
-    uint8_t             local_ca_ack_delay;
-    uint8_t             phys_port_cnt;
+    char           fw_ver[64];
+    __be64         node_guid;
+    __be64         sys_image_guid;
+    uint64_t       max_mr_size;
+    uint64_t       page_size_cap;
+    uint32_t       vendor_id;
+    uint32_t       vendor_part_id;
+    uint32_t       hw_ver;
+    int            max_qp;
+    int            max_qp_wr;
+    unsigned int   device_cap_flags;
+    int            max_sge;
+    int            max_sge_rd;
+    int            max_cq;
+    int            max_cqe;
+    int            max_mr;
+    int            max_pd;
+    int            max_qp_rd_atom;
+    int            max_ee_rd_atom;
+    int            max_res_rd_atom;
+    int            max_qp_init_rd_atom;
+    int            max_ee_init_rd_atom;
+    ibv_atomic_cap atomic_cap;
+    int            max_ee;
+    int            max_rdd;
+    int            max_mw;
+    int            max_raw_ipv6_qp;
+    int            max_raw_ethy_qp;
+    int            max_mcast_grp;
+    int            max_mcast_qp_attach;
+    int            max_total_mcast_qp_attach;
+    int            max_ah;
+    int            max_fmr;
+    int            max_map_per_fmr;
+    int            max_srq;
+    int            max_srq_wr;
+    int            max_srq_sge;
+    uint16_t       max_pkeys;
+    uint8_t        local_ca_ack_delay;
+    uint8_t        phys_port_cnt;
 };
 
 /* -------------------------------------------------------------------------
@@ -206,29 +206,29 @@ enum {
  * ------------------------------------------------------------------------- */
 
 struct ibv_port_attr {
-    enum ibv_port_state state;
-    enum ibv_mtu        max_mtu;
-    enum ibv_mtu        active_mtu;
-    int                 gid_tbl_len;
-    uint32_t            port_cap_flags;
-    uint32_t            max_msg_sz;
-    uint32_t            bad_pkey_cntr;
-    uint32_t            qkey_viol_cntr;
-    uint16_t            pkey_tbl_len;
-    uint16_t            lid;
-    uint16_t            sm_lid;
-    uint8_t             lmc;
-    uint8_t             max_vl_num;
-    uint8_t             sm_sl;
-    uint8_t             subnet_timeout;
-    uint8_t             init_type_reply;
-    uint8_t             active_width;
-    uint8_t             active_speed;
-    uint8_t             phys_state;
-    uint8_t             link_layer;
-    uint8_t             flags;
-    uint16_t            port_cap_flags2;
-    uint32_t            active_speed_ex;
+    ibv_port_state state;
+    ibv_mtu        max_mtu;
+    ibv_mtu        active_mtu;
+    int            gid_tbl_len;
+    uint32_t       port_cap_flags;
+    uint32_t       max_msg_sz;
+    uint32_t       bad_pkey_cntr;
+    uint32_t       qkey_viol_cntr;
+    uint16_t       pkey_tbl_len;
+    uint16_t       lid;
+    uint16_t       sm_lid;
+    uint8_t        lmc;
+    uint8_t        max_vl_num;
+    uint8_t        sm_sl;
+    uint8_t        subnet_timeout;
+    uint8_t        init_type_reply;
+    uint8_t        active_width;
+    uint8_t        active_speed;
+    uint8_t        phys_state;
+    uint8_t        link_layer;
+    uint8_t        flags;
+    uint16_t       port_cap_flags2;
+    uint32_t       active_speed_ex;
 };
 
 /* -------------------------------------------------------------------------
@@ -289,11 +289,11 @@ enum ibv_wc_status {
 };
 
 struct ibv_wc {
-    uint64_t           wr_id;
-    enum ibv_wc_status status;
-    enum ibv_wc_opcode opcode;
-    uint32_t           vendor_err;
-    uint32_t           byte_len;
+    uint64_t      wr_id;
+    ibv_wc_status status;
+    ibv_wc_opcode opcode;
+    uint32_t      vendor_err;
+    uint32_t      byte_len;
     union {
         __be32   imm_data;
         uint32_t invalidated_rkey;
@@ -332,18 +332,18 @@ enum ibv_access_flags {
 struct ibv_context;
 
 struct ibv_pd {
-    struct ibv_context *context;
-    uint32_t            handle;
+    ibv_context *context;
+    uint32_t     handle;
 };
 
 struct ibv_mr {
-    struct ibv_context *context;
-    struct ibv_pd      *pd;
-    void               *addr;
-    size_t              length;
-    uint32_t            handle;
-    uint32_t            lkey;
-    uint32_t            rkey;
+    ibv_context *context;
+    ibv_pd      *pd;
+    void        *addr;
+    size_t       length;
+    uint32_t     handle;
+    uint32_t     lkey;
+    uint32_t     rkey;
 };
 
 /* -------------------------------------------------------------------------
@@ -351,21 +351,21 @@ struct ibv_mr {
  * ------------------------------------------------------------------------- */
 
 struct ibv_global_route {
-    union ibv_gid dgid;
-    uint32_t      flow_label;
-    uint8_t       sgid_index;
-    uint8_t       hop_limit;
-    uint8_t       traffic_class;
+    ibv_gid  dgid;
+    uint32_t flow_label;
+    uint8_t  sgid_index;
+    uint8_t  hop_limit;
+    uint8_t  traffic_class;
 };
 
 struct ibv_ah_attr {
-    struct ibv_global_route grh;
-    uint16_t                dlid;
-    uint8_t                 sl;
-    uint8_t                 src_path_bits;
-    uint8_t                 static_rate;
-    uint8_t                 is_global;
-    uint8_t                 port_num;
+    ibv_global_route grh;
+    uint16_t         dlid;
+    uint8_t          sl;
+    uint8_t          src_path_bits;
+    uint8_t          static_rate;
+    uint8_t          is_global;
+    uint8_t          port_num;
 };
 
 /* -------------------------------------------------------------------------
@@ -400,13 +400,13 @@ struct ibv_comp_channel;
 struct ibv_srq;
 
 struct ibv_qp_init_attr {
-    void             *qp_context;
-    struct ibv_cq    *send_cq;
-    struct ibv_cq    *recv_cq;
-    struct ibv_srq   *srq;
-    struct ibv_qp_cap cap;
-    enum ibv_qp_type  qp_type;
-    int               sq_sig_all;
+    void       *qp_context;
+    ibv_cq     *send_cq;
+    ibv_cq     *recv_cq;
+    ibv_srq    *srq;
+    ibv_qp_cap  cap;
+    ibv_qp_type qp_type;
+    int         sq_sig_all;
 };
 
 /* -------------------------------------------------------------------------
@@ -460,32 +460,32 @@ enum ibv_mig_state { IBV_MIG_MIGRATED, IBV_MIG_REARM, IBV_MIG_ARMED };
  * ------------------------------------------------------------------------- */
 
 struct ibv_qp_attr {
-    enum ibv_qp_state  qp_state;
-    enum ibv_qp_state  cur_qp_state;
-    enum ibv_mtu       path_mtu;
-    enum ibv_mig_state path_mig_state;
-    uint32_t           qkey;
-    uint32_t           rq_psn;
-    uint32_t           sq_psn;
-    uint32_t           dest_qp_num;
-    unsigned int       qp_access_flags;
-    struct ibv_qp_cap  cap;
-    struct ibv_ah_attr ah_attr;
-    struct ibv_ah_attr alt_ah_attr;
-    uint16_t           pkey_index;
-    uint16_t           alt_pkey_index;
-    uint8_t            en_sqd_async_notify;
-    uint8_t            sq_draining;
-    uint8_t            max_rd_atomic;
-    uint8_t            max_dest_rd_atomic;
-    uint8_t            min_rnr_timer;
-    uint8_t            port_num;
-    uint8_t            timeout;
-    uint8_t            retry_cnt;
-    uint8_t            rnr_retry;
-    uint8_t            alt_port_num;
-    uint8_t            alt_timeout;
-    uint32_t           rate_limit;
+    ibv_qp_state  qp_state;
+    ibv_qp_state  cur_qp_state;
+    ibv_mtu       path_mtu;
+    ibv_mig_state path_mig_state;
+    uint32_t      qkey;
+    uint32_t      rq_psn;
+    uint32_t      sq_psn;
+    uint32_t      dest_qp_num;
+    unsigned int  qp_access_flags;
+    ibv_qp_cap    cap;
+    ibv_ah_attr   ah_attr;
+    ibv_ah_attr   alt_ah_attr;
+    uint16_t      pkey_index;
+    uint16_t      alt_pkey_index;
+    uint8_t       en_sqd_async_notify;
+    uint8_t       sq_draining;
+    uint8_t       max_rd_atomic;
+    uint8_t       max_dest_rd_atomic;
+    uint8_t       min_rnr_timer;
+    uint8_t       port_num;
+    uint8_t       timeout;
+    uint8_t       retry_cnt;
+    uint8_t       rnr_retry;
+    uint8_t       alt_port_num;
+    uint8_t       alt_timeout;
+    uint32_t      rate_limit;
 };
 
 /* -------------------------------------------------------------------------
@@ -493,19 +493,19 @@ struct ibv_qp_attr {
  * ------------------------------------------------------------------------- */
 
 struct ibv_qp {
-    struct ibv_context *context;
-    void               *qp_context;
-    struct ibv_pd      *pd;
-    struct ibv_cq      *send_cq;
-    struct ibv_cq      *recv_cq;
-    struct ibv_srq     *srq;
-    uint32_t            handle;
-    uint32_t            qp_num;
-    enum ibv_qp_state   state;
-    enum ibv_qp_type    qp_type;
-    pthread_mutex_t     mutex;
-    pthread_cond_t      cond;
-    uint32_t            events_completed;
+    ibv_context    *context;
+    void           *qp_context;
+    ibv_pd         *pd;
+    ibv_cq         *send_cq;
+    ibv_cq         *recv_cq;
+    ibv_srq        *srq;
+    uint32_t        handle;
+    uint32_t        qp_num;
+    ibv_qp_state    state;
+    ibv_qp_type     qp_type;
+    pthread_mutex_t mutex;
+    pthread_cond_t  cond;
+    uint32_t        events_completed;
 };
 
 /* -------------------------------------------------------------------------
@@ -559,10 +559,10 @@ struct ibv_ah;
 struct ibv_mw;
 
 struct ibv_mw_bind_info {
-    struct ibv_mr *mr;
-    uint64_t       addr;
-    uint64_t       length;
-    unsigned int   mw_access_flags;
+    ibv_mr      *mr;
+    uint64_t     addr;
+    uint64_t     length;
+    unsigned int mw_access_flags;
 };
 
 /* The types of ibv_send_wr's bind_mw and tso members. rdma-core leaves
@@ -570,9 +570,9 @@ struct ibv_mw_bind_info {
  * anonymous union that holds the members. The names aren't part of the
  * ABI, so the layout still matches. */
 struct ibv_send_wr_bind_mw {
-    struct ibv_mw          *mw;
-    uint32_t                rkey;
-    struct ibv_mw_bind_info bind_info;
+    ibv_mw          *mw;
+    uint32_t         rkey;
+    ibv_mw_bind_info bind_info;
 };
 
 struct ibv_send_wr_tso {
@@ -582,12 +582,12 @@ struct ibv_send_wr_tso {
 };
 
 struct ibv_send_wr {
-    uint64_t            wr_id;
-    struct ibv_send_wr *next;
-    struct ibv_sge     *sg_list;
-    int                 num_sge;
-    enum ibv_wr_opcode  opcode;
-    unsigned int        send_flags;
+    uint64_t      wr_id;
+    ibv_send_wr  *next;
+    ibv_sge      *sg_list;
+    int           num_sge;
+    ibv_wr_opcode opcode;
+    unsigned int  send_flags;
     union {
         __be32   imm_data;
         uint32_t invalidate_rkey;
@@ -604,9 +604,9 @@ struct ibv_send_wr {
             uint32_t rkey;
         } atomic;
         struct {
-            struct ibv_ah *ah;
-            uint32_t       remote_qpn;
-            uint32_t       remote_qkey;
+            ibv_ah  *ah;
+            uint32_t remote_qpn;
+            uint32_t remote_qkey;
         } ud;
     } wr;
     union {
@@ -615,8 +615,8 @@ struct ibv_send_wr {
         } xrc;
     } qp_type;
     union {
-        struct ibv_send_wr_bind_mw bind_mw;
-        struct ibv_send_wr_tso     tso;
+        ibv_send_wr_bind_mw bind_mw;
+        ibv_send_wr_tso     tso;
     };
 };
 
@@ -625,10 +625,10 @@ struct ibv_send_wr {
  * ------------------------------------------------------------------------- */
 
 struct ibv_recv_wr {
-    uint64_t            wr_id;
-    struct ibv_recv_wr *next;
-    struct ibv_sge     *sg_list;
-    int                 num_sge;
+    uint64_t     wr_id;
+    ibv_recv_wr *next;
+    ibv_sge     *sg_list;
+    int          num_sge;
 };
 
 /* -------------------------------------------------------------------------
@@ -646,18 +646,18 @@ struct ibv_recv_wr {
  * global scope (leading underscore). The tag name is not part of
  * the ABI, so the layout still matches. */
 struct ibv_device_ops {
-    struct ibv_context *(*_dummy1)(struct ibv_device *device, int cmd_fd);
-    void (*_dummy2)(struct ibv_context *context);
+    ibv_context *(*_dummy1)(struct ibv_device *device, int cmd_fd);
+    void (*_dummy2)(ibv_context *context);
 };
 
 struct ibv_device {
-    struct ibv_device_ops   _ops;
-    enum ibv_node_type      node_type;
-    enum ibv_transport_type transport_type;
-    char                    name[IBV_SYSFS_NAME_MAX];
-    char                    dev_name[IBV_SYSFS_NAME_MAX];
-    char                    dev_path[IBV_SYSFS_PATH_MAX];
-    char                    ibdev_path[IBV_SYSFS_PATH_MAX];
+    ibv_device_ops     _ops;
+    ibv_node_type      node_type;
+    ibv_transport_type transport_type;
+    char               name[IBV_SYSFS_NAME_MAX];
+    char               dev_name[IBV_SYSFS_NAME_MAX];
+    char               dev_path[IBV_SYSFS_PATH_MAX];
+    char               ibdev_path[IBV_SYSFS_PATH_MAX];
 };
 
 /* -------------------------------------------------------------------------
@@ -665,19 +665,19 @@ struct ibv_device {
  * ------------------------------------------------------------------------- */
 
 struct ibv_comp_channel {
-    struct ibv_context *context;
-    int                 fd;
-    int                 refcnt;
+    ibv_context *context;
+    int          fd;
+    int          refcnt;
 };
 
 struct ibv_srq {
-    struct ibv_context *context;
-    void               *srq_context;
-    struct ibv_pd      *pd;
-    uint32_t            handle;
-    pthread_mutex_t     mutex;
-    pthread_cond_t      cond;
-    uint32_t            events_completed;
+    ibv_context    *context;
+    void           *srq_context;
+    ibv_pd         *pd;
+    uint32_t        handle;
+    pthread_mutex_t mutex;
+    pthread_cond_t  cond;
+    uint32_t        events_completed;
 };
 
 /* -------------------------------------------------------------------------
@@ -685,15 +685,15 @@ struct ibv_srq {
  * ------------------------------------------------------------------------- */
 
 struct ibv_cq {
-    struct ibv_context      *context;
-    struct ibv_comp_channel *channel;
-    void                    *cq_context;
-    uint32_t                 handle;
-    int                      cqe;
-    pthread_mutex_t          mutex;
-    pthread_cond_t           cond;
-    uint32_t                 comp_events_completed;
-    uint32_t                 async_events_completed;
+    ibv_context      *context;
+    ibv_comp_channel *channel;
+    void             *cq_context;
+    uint32_t          handle;
+    int               cqe;
+    pthread_mutex_t   mutex;
+    pthread_cond_t    cond;
+    uint32_t          comp_events_completed;
+    uint32_t          async_events_completed;
 };
 
 /* -------------------------------------------------------------------------
@@ -716,7 +716,7 @@ struct ibv_context_ops {
     void *bind_mw;
     void *dealloc_mw;
     void *_compat_create_cq;
-    int (*poll_cq)(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc);
+    int (*poll_cq)(ibv_cq *cq, int num_entries, ibv_wc *wc);
     void *req_notify_cq;
     void *_compat_cq_event;
     void *_compat_resize_cq;
@@ -730,8 +730,8 @@ struct ibv_context_ops {
     void *_compat_query_qp;
     void *_compat_modify_qp;
     void *_compat_destroy_qp;
-    int (*post_send)(struct ibv_qp *qp, struct ibv_send_wr *wr, struct ibv_send_wr **bad_wr);
-    int (*post_recv)(struct ibv_qp *qp, struct ibv_recv_wr *wr, struct ibv_recv_wr **bad_wr);
+    int (*post_send)(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr);
+    int (*post_recv)(ibv_qp *qp, ibv_recv_wr *wr, ibv_recv_wr **bad_wr);
     void *_compat_create_ah;
     void *_compat_destroy_ah;
     void *_compat_attach_mcast;
@@ -743,11 +743,11 @@ struct ibv_context_ops {
  * ------------------------------------------------------------------------- */
 
 struct ibv_context {
-    struct ibv_device     *device;
-    struct ibv_context_ops ops;
-    int                    cmd_fd;
-    int                    async_fd;
-    int                    num_comp_vectors;
-    pthread_mutex_t        mutex;
-    void                  *abi_compat;
+    ibv_device     *device;
+    ibv_context_ops ops;
+    int             cmd_fd;
+    int             async_fd;
+    int             num_comp_vectors;
+    pthread_mutex_t mutex;
+    void           *abi_compat;
 };

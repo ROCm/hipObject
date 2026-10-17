@@ -29,7 +29,7 @@ constexpr uint8_t kQpRnrRetry = 7;
 bool isBnxtDevice(uint32_t vendorId);
 bool isIonicDevice(uint32_t vendorId);
 
-void configureBnxtQp(struct ibv_qp_attr &attr);
-void configureIonicQp(struct ibv_qp_attr &attr);
+void configureBnxtQp(ibv_qp_attr &attr);
+void configureIonicQp(ibv_qp_attr &attr);
 
 } // namespace hipObj

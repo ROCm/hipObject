@@ -28,14 +28,14 @@ struct CurlEasyDeleter {
 };
 
 struct CurlSlistDeleter {
-    void operator()(struct curl_slist *list) const noexcept
+    void operator()(curl_slist *list) const noexcept
     {
         curl_slist_free_all(list);
     }
 };
 
 using CurlEasyPtr  = std::unique_ptr<CURL, CurlEasyDeleter>;
-using CurlSlistPtr = std::unique_ptr<struct curl_slist, CurlSlistDeleter>;
+using CurlSlistPtr = std::unique_ptr<curl_slist, CurlSlistDeleter>;
 
 // curl_slist_append() returns the head of the list, which is a new node
 // only when the list was empty, or NULL on failure without freeing the
@@ -43,7 +43,7 @@ using CurlSlistPtr = std::unique_ptr<struct curl_slist, CurlSlistDeleter>;
 bool
 appendHeader(CurlSlistPtr &list, const char *header)
 {
-    struct curl_slist *head = curl_slist_append(list.get(), header);
+    curl_slist *head = curl_slist_append(list.get(), header);
     if (head == nullptr) {
         return false;
     }
