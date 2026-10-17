@@ -121,8 +121,9 @@ jobs:
             "clang-tidy-${LLVM_VERSION}"
           "clang-tidy-${LLVM_VERSION}" --version
 
-      # CLANG_TIDY_EXE is the variable HIPOBJClangTidy.cmake searches
-      # for clang-tidy with, so setting it skips the search.
+      # Setting HIPOBJ_CLANG_TIDY_EXE makes the build use the clang-tidy
+      # installed above, rather than whatever HIPOBJClangTidy.cmake's
+      # search finds first.
       #
       # This builds the MinIO bridge, which the Build workflow's Clang
       # job (code coverage) doesn't, so HIPOBJ_WERROR is on to make this
@@ -140,7 +141,7 @@ jobs:
             -DHIPOBJ_IONIC=ON \
             -DHIPOBJ_MINIO_CLIENT=ON \
             -DHIPOBJ_USE_CLANG_TIDY=ON \
-            -DCLANG_TIDY_EXE="/usr/bin/clang-tidy-${LLVM_VERSION}"
+            -DHIPOBJ_CLANG_TIDY_EXE="/usr/bin/clang-tidy-${LLVM_VERSION}"
 
       # -k 0 keeps building after a file fails, so one run reports every
       # finding, not just those in the first files to fail. pipefail

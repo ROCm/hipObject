@@ -97,6 +97,13 @@
 - The `HIPOBJ_USE_CLANG_TIDY` CMake option now requires Clang as the
   C++ compiler, and configuring fails with another one. clang-tidy
   rejected GCC's compiler flags, so it couldn't check a GCC build.
+- The `HIPOBJ_USE_CLANG_TIDY` CMake option now needs clang-tidy 19 or
+  later, and configuring fails if it doesn't find one, instead of
+  warning and building without clang-tidy. It looks on `PATH` for
+  `clang-tidy`, then for versioned names such as `clang-tidy-23`, newest
+  first, and then in ROCm's LLVM, and passes over any older than 19.
+  Set the new `HIPOBJ_CLANG_TIDY_EXE` CMake variable to choose one; it
+  replaces `CLANG_TIDY_EXE`.
 - hipObject now requires ROCm 7.14 or later, and configuring fails if
   `ROCM_VERSION` is earlier. The documentation used to list ROCm 6.x as
   the minimum.

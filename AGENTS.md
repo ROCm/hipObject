@@ -538,6 +538,8 @@ configuration files.
   does, `readability-magic-numbers`, since a unit test's numbers are its
   data. Other code names its constants, the test server included. ROCm's
   clang-tidy lacks the `clang-analyzer-*` checks, so prefer an upstream one.
+  Configuring finds one, and only falls back to ROCm's when there's no
+  other clang-tidy 19 or later; set `HIPOBJ_CLANG_TIDY_EXE` to choose.
   CI:
   [hipobject-clang-tidy.yml](.github/workflows/hipobject-clang-tidy.yml),
   with upstream clang-tidy 23.
