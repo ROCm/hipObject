@@ -258,9 +258,38 @@
   `hipObjGetVersionString()`, `hipObjParseRdmaReply()`,
   `hipObjTokenClientNic()`, and `hipObjPutRdmaToken()`. It used to say
   that it had to be called before any other function.
+- `HIPOBJ_USE_SANITIZERS` now builds with every sanitizer except
+  ThreadSanitizer that the compiler supports and that can be combined
+  with AddressSanitizer: AddressSanitizer (including LeakSanitizer),
+  UndefinedBehaviorSanitizer, and the `float-divide-by-zero` check,
+  plus `bounds-strict`, `float-cast-overflow`, `pointer-compare`, and
+  `pointer-subtract` with GCC, or `implicit-conversion`, `local-bounds`,
+  and `nullability` with Clang.
+  The new `HIPOBJ_USE_THREAD_SANITIZER` option builds with
+  ThreadSanitizer. Only one of them can be on. The C and C++ compilers
+  must both be GCC or both be Clang, and configuring fails if they can't
+  build a program with the sanitizers.
+- Every sanitizer report is now fatal, so `UBSAN_OPTIONS=halt_on_error=1`
+  is no longer needed. The programs that hipObject builds set some
+  sanitizer run-time options themselves, which the `ASAN_OPTIONS`,
+  `UBSAN_OPTIONS`, and `TSAN_OPTIONS` environment variables override.
+- A sanitizer build always downloads GoogleTest and builds it with the
+  same sanitizers, instead of using an installed copy, and also
+  instruments the other third-party code that it builds from source,
+  such as the MinIO bridge's dependencies.
+- The new `HIPOBJ_SANITIZER_SHARED_RUNTIME` option selects the shared or
+  the static sanitizer runtime. The shared runtime lets a program load
+  libraries from another sanitizer build, such as a sanitizer build of
+  ROCm. The option defaults to what the compiler does without it: `ON`
+  with GCC, and `OFF` with Clang, since Clang 18's shared runtimes ignore
+  the run-time options that hipObject's programs set.
 
 ### Removed
 
+- The `HIPOBJ_SANITIZER_TYPE` CMake cache variable. Use
+  `HIPOBJ_USE_SANITIZERS` or `HIPOBJ_USE_THREAD_SANITIZER` instead.
+  Configuring fails if it's set, so remove it from existing build
+  directories with `cmake -U HIPOBJ_SANITIZER_TYPE`.
 - The `OFFLOAD_ARCH` CMake cache variable and its `rocminfo`-based GPU
   architecture detection. It was never used to set the target architecture
   and is unnecessary now that nothing is compiled for the GPU.

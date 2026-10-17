@@ -15,7 +15,6 @@ include(CheckPIESupported)
 include(HIPOBJClangCompilerOptions)
 include(HIPOBJCoverage)
 include(HIPOBJGNUCompilerOptions)
-include(HIPOBJSanitizers)
 
 # Linker hardening, following the OpenSSF Compiler Options Hardening Guide
 # for C and C++. Some distributions' compilers pass some of these by
@@ -51,8 +50,11 @@ endif()
 option(HIPOBJ_WERROR
   "Treat compiler warnings as errors in hipObject targets" OFF)
 
-# Add the compiler-specific warning flags (and -Werror, sanitizer, and
-# code coverage flags, if enabled) to a target
+# Add the compiler-specific warning flags (and -Werror and code coverage
+# flags, if enabled) to a target
+#
+# NOTE: HIPOBJSanitizers.cmake adds the sanitizer flags to every target
+#       itself.
 #
 # NOTE: The warning flags are only applied to C++ sources since many
 #       of them are invalid for C.
@@ -68,10 +70,6 @@ function(hipobj_set_compiler_flags target)
 
   if(HIPOBJ_WERROR)
     target_compile_options(${target} PRIVATE -Werror)
-  endif()
-
-  if(HIPOBJ_USE_SANITIZERS)
-    hipobj_add_sanitizers(${target})
   endif()
 
   if(HIPOBJ_USE_CODE_COVERAGE)

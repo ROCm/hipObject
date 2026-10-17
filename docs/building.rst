@@ -93,32 +93,33 @@ that make their S3 requests with libcurl.
 CMake Options
 -------------
 
-================================ ============== =============================
-Option                           Default        Description
-================================ ============== =============================
-``CMAKE_BUILD_TYPE``             RelWithDebInfo Build type (see below)
-``HIPOBJ_CXX_STANDARD``          20             C++ standard (20, 23, 26)
-``HIPOBJ_BNXT``                  ON             Build Thor-2 RDMA backend
-``HIPOBJ_IONIC``                 ON             Build ionic RDMA backend
-``BUILD_SHARED_LIBS``            ON             Build shared library
-``BUILD_TESTING``                ON             Build and register tests
-``HIPOBJ_INSTALL_EXAMPLES``      ON             Build examples (see below)
-``HIPOBJ_INSTALL_TOOLS``         ON             Build tools (see below)
-``HIPOBJ_BUILD_DOCS``            OFF            Build documentation
-``HIPOBJ_DOCS_ONLY``             OFF            Docs targets only (no HIP)
-``HIPOBJ_MINIO_CLIENT``          OFF            Build minio-cpp RDMA bridge
-``HIPOBJ_INTEGRATION_TESTS``     ON             Build RC test server (tests)
-``HIPOBJ_FETCH_CUOBJECT_CLIENT`` OFF            Fetch libcuobjclient 1.2.0.59
-``HIPOBJ_FIND_CUOBJECT_SERVER``  OFF            Find libcuobjserver + probe
-``HIPOBJ_WERROR``                OFF            Treat warnings as errors
-``HIPOBJ_USE_CODE_COVERAGE``     OFF            Build with code coverage
-``HIPOBJ_USE_SANITIZERS``        OFF            Build with a sanitizer
-``HIPOBJ_SANITIZER_TYPE``        address        Sanitizer to build with
-``HIPOBJ_USE_CLANG_TIDY``        OFF            Run clang-tidy while building
-``HIPOBJ_USE_IWYU``              OFF            Run IWYU while building
-``ROCM_PATH``                    see below      Path to ROCm install
-``ROCM_VERSION``                 detected       ROCm version
-================================ ============== =============================
+=================================== ============== =============================
+Option                              Default        Description
+=================================== ============== =============================
+``CMAKE_BUILD_TYPE``                RelWithDebInfo Build type (see below)
+``HIPOBJ_CXX_STANDARD``             20             C++ standard (20, 23, 26)
+``HIPOBJ_BNXT``                     ON             Build Thor-2 RDMA backend
+``HIPOBJ_IONIC``                    ON             Build ionic RDMA backend
+``BUILD_SHARED_LIBS``               ON             Build shared library
+``BUILD_TESTING``                   ON             Build and register tests
+``HIPOBJ_INSTALL_EXAMPLES``         ON             Build examples (see below)
+``HIPOBJ_INSTALL_TOOLS``            ON             Build tools (see below)
+``HIPOBJ_BUILD_DOCS``               OFF            Build documentation
+``HIPOBJ_DOCS_ONLY``                OFF            Docs targets only (no HIP)
+``HIPOBJ_MINIO_CLIENT``             OFF            Build minio-cpp RDMA bridge
+``HIPOBJ_INTEGRATION_TESTS``        ON             Build RC test server (tests)
+``HIPOBJ_FETCH_CUOBJECT_CLIENT``    OFF            Fetch libcuobjclient 1.2.0.59
+``HIPOBJ_FIND_CUOBJECT_SERVER``     OFF            Find libcuobjserver + probe
+``HIPOBJ_WERROR``                   OFF            Treat warnings as errors
+``HIPOBJ_USE_CODE_COVERAGE``        OFF            Build with code coverage
+``HIPOBJ_USE_SANITIZERS``           OFF            ASan, LSan, UBSan, and more
+``HIPOBJ_USE_THREAD_SANITIZER``     OFF            ThreadSanitizer
+``HIPOBJ_SANITIZER_SHARED_RUNTIME`` see below      Shared sanitizer runtime
+``HIPOBJ_USE_CLANG_TIDY``           OFF            Run clang-tidy while building
+``HIPOBJ_USE_IWYU``                 OFF            Run IWYU while building
+``ROCM_PATH``                       see below      Path to ROCm install
+``ROCM_VERSION``                    detected       ROCm version
+=================================== ============== =============================
 
 ``CMAKE_BUILD_TYPE`` can be ``Debug``, ``Release``,
 ``RelWithDebInfo``, or ``None``. ``RelWithDebInfo`` and ``Release``
@@ -187,10 +188,77 @@ the profiles add up over runs, so delete ``coverage/profraw`` to start
 over. Since the programs write to the build directory, don't install
 or package a coverage build.
 
-``HIPOBJ_USE_SANITIZERS`` builds hipObject's own targets with the
-sanitizer that ``HIPOBJ_SANITIZER_TYPE`` names: ``address`` (the
-default), ``undefined``, or ``thread``. Use a separate build
-directory for each.
+``HIPOBJ_USE_SANITIZERS`` builds hipObject with every sanitizer
+except ThreadSanitizer that the compiler supports and that can be
+combined with AddressSanitizer:
+
+- With GCC and Clang: AddressSanitizer (including LeakSanitizer),
+  UndefinedBehaviorSanitizer, and the ``float-divide-by-zero`` check.
+- With GCC: the ``bounds-strict``, ``float-cast-overflow``,
+  ``pointer-compare``, and ``pointer-subtract`` checks.
+- With Clang: the ``implicit-conversion``, ``local-bounds``, and
+  ``nullability`` checks.
+
+Clang doesn't get ``pointer-compare`` and ``pointer-subtract``, since
+in an optimized build they report comparisons and subtractions that
+the optimizer made, not just the ones in the code. With Clang,
+``cmake/sanitizer-ignorelist.txt`` turns the ``implicit-conversion``
+checks off in the C++ standard library headers, whose conversions are
+deliberate.
+
+``HIPOBJ_USE_THREAD_SANITIZER`` builds hipObject with
+ThreadSanitizer. ThreadSanitizer can't be combined with
+AddressSanitizer, so only one of these two options can be on. Use a
+separate build directory for each.
+
+Both options need GCC or Clang (including ROCm's ``amdclang``), and
+the C and C++ compilers must be the same kind. Configuring checks that
+the compilers can build a program with the sanitizers, and fails if,
+for example, the sanitizer runtimes aren't installed:
+
+.. code-block:: bash
+
+   cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+     -DHIPOBJ_USE_SANITIZERS=ON
+   cmake --build build-asan
+   (cd build-asan && ctest)
+
+The sanitizers instrument everything that hipObject compiles: the
+library, the tests and other programs, and the third-party code that
+it builds from source. A sanitizer build always downloads and builds
+GoogleTest, rather than using an installed copy, so that GoogleTest is
+instrumented too. Libraries that come from the system or from ROCm,
+such as the HIP runtime, are not instrumented.
+
+Every sanitizer report is fatal, so a test with a report fails. Each
+program that hipObject builds sets some of the sanitizers' run-time
+options, such as the one that turns on GCC's ``pointer-compare`` and
+``pointer-subtract`` checks (see
+``cmake/sanitizer-default-options.c``). The ``ASAN_OPTIONS``,
+``UBSAN_OPTIONS``, and ``TSAN_OPTIONS`` environment variables override
+them.
+
+``HIPOBJ_SANITIZER_SHARED_RUNTIME`` links programs with the shared
+library version of the sanitizer runtime. Libraries from another build
+that also uses the shared runtime, such as a sanitizer build of ROCm,
+can then be used in the same program. If the runtime isn't in a
+directory that the dynamic linker searches, as with Clang's, the
+programs get an RPATH to it. When the option is ``OFF``, programs link
+the static runtime instead, and the shared ``libhipobj`` leaves the
+runtime's symbols for the program to provide.
+
+The option defaults to what the compiler does without it: ``ON`` with
+GCC, and ``OFF`` with Clang. Clang 18's shared runtimes (Ubuntu
+24.04's, at least) ignore the run-time options that hipObject's
+programs set, so with them, for example, ThreadSanitizer doesn't stop
+at the first report. Turn the option on with Clang 19 or later to test
+against a sanitizer build of ROCm, which uses Clang's shared runtime.
+
+If ThreadSanitizer stops a program at startup with an "unexpected
+memory mapping" error, the kernel's address space layout randomization
+uses more bits than ThreadSanitizer supports. Reduce it with
+``sudo sysctl vm.mmap_rnd_bits=28``.
 
 ``HIPOBJ_USE_CLANG_TIDY`` runs clang-tidy (19 or later) on
 hipObject's own code as it compiles. It needs Clang as the C++

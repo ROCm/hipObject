@@ -1,0 +1,14 @@
+# Sanitizer ignore list for HIPOBJ_USE_SANITIZERS builds with Clang (see
+# HIPOBJSanitizers.cmake). Each section turns off the named checks for
+# the matching source files. The format is described in:
+#
+# https://clang.llvm.org/docs/SanitizerSpecialCaseList.html
+
+# The C++ standard library headers contain implicit integer conversions
+# that change the value on purpose. For example, libstdc++ 16 and later
+# decrement a shared_ptr's reference count by converting -1 to unsigned
+# and adding it, so that the arithmetic can't overflow. These
+# conversions are defined behavior, but -fsanitize=integer and
+# -fsanitize=implicit-conversion report them.
+[implicit-conversion]
+src:*/include/c++/*

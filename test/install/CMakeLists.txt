@@ -9,23 +9,15 @@
 # components, and run paths, none of which the in-tree tests use, and
 # builds the examples as the C++11 they have to be.
 
-# The consumer must use the same sanitizer as an instrumented libhipobj,
-# or it can't link against the sanitizer runtime the library needs.
-# Clang only links a sanitizer's C++ runtime (e.g., UBSan's vptr checks)
-# when the C++ driver links, so the C consumer has to ask for it, along
-# with the libstdc++ that runtime depends on.
-set(HIPOBJ_INSTALL_TEST_CONSUMER_FLAGS "")
-set(HIPOBJ_INSTALL_TEST_CONSUMER_LINK_FLAGS "")
-if(HIPOBJ_USE_SANITIZERS)
-  set(HIPOBJ_INSTALL_TEST_CONSUMER_FLAGS
-    "-fsanitize=${HIPOBJ_SANITIZER_TYPE}")
-  set(HIPOBJ_INSTALL_TEST_CONSUMER_LINK_FLAGS
-    "${HIPOBJ_INSTALL_TEST_CONSUMER_FLAGS}")
-  if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-    string(APPEND HIPOBJ_INSTALL_TEST_CONSUMER_LINK_FLAGS
-      " -fsanitize-link-c++-runtime -lstdc++")
-  endif()
-endif()
+# The consumer and the examples must use the same sanitizers as an
+# instrumented libhipobj, or they can't link against the sanitizer
+# runtime the library needs. The flags are empty if no sanitizer is on.
+hipobj_get_sanitizer_consumer_flags(hipobj_install_test_compile_flags
+  hipobj_install_test_link_flags)
+list(JOIN hipobj_install_test_compile_flags " "
+  HIPOBJ_INSTALL_TEST_CONSUMER_FLAGS)
+list(JOIN hipobj_install_test_link_flags " "
+  HIPOBJ_INSTALL_TEST_CONSUMER_LINK_FLAGS)
 
 # An instrumented static library needs the code coverage profile runtime
 # (see HIPOBJCoverage.cmake). The shared library links it itself.
