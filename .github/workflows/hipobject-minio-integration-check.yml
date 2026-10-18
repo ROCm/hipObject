@@ -16,6 +16,7 @@ on:
       - "shared/**"
       - "src/**"
       - ".github/workflows/hipobject-minio-integration-check.yml"
+      - ".github/actions/install-rocm/**"
       - "!cmake/HIPOBJClangTidy.cmake"
       - "!**/.clang-tidy"
       - "!cmake/HIPOBJDocumentation.cmake"
@@ -65,30 +66,40 @@ jobs:
     name: MinIO Integration Check
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # A plain Ubuntu image, with only the ROCm that hipObject needs
+    # installed (see Install ROCm below)
     container:
-      image: rocm/dev-ubuntu-26.04:10.1.0-full
+      image: ubuntu:26.04
       options: --user root
     env:
-      ROCM_PATH: /opt/rocm
-      # The full ROCm image ships libamdhip64 in /opt/rocm/lib but leaves it out
-      # of the loader cache, so ctest binaries fail to start without this.
-      LD_LIBRARY_PATH: /opt/rocm/lib
+      # Packages such as tzdata ask questions when they're installed into a
+      # plain image; this takes their defaults instead.
+      DEBIAN_FRONTEND: noninteractive
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # build-essential is GCC, whose libstdc++ amdclang uses, and make
       - name: Install build dependencies
         run: |
           apt-get update
           apt-get install -y \
+            build-essential \
             cmake \
             curl \
             git \
             libcurl4-openssl-dev \
             libssl-dev \
             libibverbs-dev
+
+      # After the compilers, so the libstdc++ that ROCm's compiler
+      # packages need is the one already installed
+      - name: Install ROCm
+        uses: ./.github/actions/install-rocm
+        with:
+          version: '10.1'
 
       - name: Install mc (MinIO client)
         shell: bash
@@ -139,12 +150,11 @@ jobs:
 
       # CMake picks the compilers up from CC and CXX
       - name: Build hipObject with curl support
-        env:
-          CC: /opt/rocm/llvm/bin/amdclang
-          CXX: /opt/rocm/llvm/bin/amdclang++
         run: |
+          export CC="${ROCM_PATH}/llvm/bin/amdclang"
+          export CXX="${ROCM_PATH}/llvm/bin/amdclang++"
           cmake -B build \
-            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON
