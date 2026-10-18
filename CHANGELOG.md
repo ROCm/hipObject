@@ -29,8 +29,9 @@
   doesn't.
 - Nightly DEB packages of the `develop` branch, for Ubuntu 24.04 and
   26.04 with ROCm 10.1.0 and 7.14.1, are published as the `nightly`
-  prerelease on GitHub, which each new build replaces. They're for
-  testing, and aren't a supported release.
+  prerelease on GitHub, which each new build replaces. They're built
+  with the ROCm version's amdclang. They're for testing, and aren't a
+  supported release.
 - The `ROCM_VERSION` CMake and environment variable sets the ROCm
   version, which selects the package dependencies and the default
   `ROCM_PATH`. It defaults to the version of the ROCm in `ROCM_PATH`.
@@ -43,7 +44,11 @@
 - The `HIPOBJ_USE_IWYU` CMake option runs include-what-you-use on
   hipObject's own code while it compiles, which prints suggestions for
   `#include` lines to add or remove. The suggestions don't fail the
-  build. It defaults to `OFF`.
+  build. It defaults to `OFF`. When the compiler is a newer Clang than
+  the one include-what-you-use was built with, such as amdclang, the
+  build leaves out the compiler flags that include-what-you-use's clang
+  doesn't have, including some hardening flags, so use a separate build
+  directory for it.
 - The `HIPOBJ_USE_CODE_COVERAGE` CMake option builds hipObject with
   LLVM code coverage instrumentation, and adds a `hipobj-coverage`
   target that reports the library's coverage after the tests run. It

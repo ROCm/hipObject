@@ -120,7 +120,8 @@ namespace {
         return conn.device().verbs().modify_qp(conn.qp(), &attr, mask) == 0;
     }
 
-    void applyVendorQpAttrs(const RdmaDevice &device, ibv_qp_attr &attr)
+    // attr is unused when neither HIPOBJ_BNXT nor HIPOBJ_IONIC is on
+    void applyVendorQpAttrs(const RdmaDevice &device, [[maybe_unused]] ibv_qp_attr &attr)
     {
         const std::optional<uint32_t> vendorId = device.vendorId();
         if (!vendorId) {

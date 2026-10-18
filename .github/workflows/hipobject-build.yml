@@ -52,54 +52,125 @@ defaults:
 
 jobs:
   build:
-    name: >-
-      Build (${{ matrix.shared_libs == 'ON' && 'shared' || 'static' }}${{ matrix.sanitizer == 'asan' && ', ASan and UBSan' || matrix.sanitizer == 'tsan' && ', TSan' || '' }}${{ matrix.coverage == 'ON' && ', coverage' || '' }}${{ matrix.build_type && format(', {0}', matrix.build_type) || '' }})
+    name: Build (${{ matrix.label }})
     runs-on: ubuntu-latest
     strategy:
-      # Every other workflow builds the default configuration (shared
-      # library, no sanitizers), so this is the only place the static,
-      # sanitizer, and code coverage configurations get compiled and tested.
       # Let every job finish so a failure in one doesn't hide the state of
       # the others.
       fail-fast: false
+      # The jobs are listed one by one rather than made by crossing axes,
+      # since most of them change one thing from the first job, and
+      # crossing would build combinations nobody needs. Every job sets
+      # label, ubuntu, cc, cxx, and build_type. A job that leaves out one
+      # of the other keys gets its default:
+      #
+      #   shared_libs   ON. TheRock only builds shared libraries.
+      #   sanitizer     None. asan is HIPOBJ_USE_SANITIZERS (ASan, UBSan,
+      #                 and the compiler's other checks), and tsan is
+      #                 HIPOBJ_USE_THREAD_SANITIZER.
+      #   coverage      OFF
+      #   cxx_standard  20
+      #   backends      ON, which turns on both HIPOBJ_BNXT and
+      #                 HIPOBJ_IONIC
+      #   packages      None. Extra apt packages, such as a compiler.
+      #
+      # Every job uses ROCm 10.1.0, the latest ROCm (see the image below).
       matrix:
-        shared_libs: [ON, OFF]
-        # asan is HIPOBJ_USE_SANITIZERS, tsan is HIPOBJ_USE_THREAD_SANITIZER,
-        # and empty is neither
-        sanitizer: ['']
-        coverage: [OFF]
-        # Empty means the CMakeLists.txt default (RelWithDebInfo)
-        build_type: ['']
         include:
-          # Two sanitizer jobs with the default configuration: one with
-          # every sanitizer except ThreadSanitizer, and one with
-          # ThreadSanitizer. They build with ROCm's Clang, which has more
-          # checks than GCC. They build Debug, so they're also where the
-          # library's assert()s are checked, and sanitizer reports aren't
-          # muddied by optimization.
-          - shared_libs: ON
+          # The core jobs build with ROCm's amdclang on the newest Ubuntu
+          # release, as TheRock will build hipObject.
+          - label: amdclang, RelWithDebInfo
+            ubuntu: '26.04'
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
+            build_type: RelWithDebInfo
+          # Debug, so the library's assert()s are checked with the
+          # sanitizers on, and the reports aren't muddied by optimization
+          - label: amdclang, Debug, ASan and UBSan
+            ubuntu: '26.04'
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
+            build_type: Debug
             sanitizer: asan
-            coverage: OFF
-            build_type: Debug
+          # RelWithDebInfo, as TheRock's ThreadSanitizer builds are, so the
+          # threads' timing is closer to a normal build's
+          - label: amdclang, RelWithDebInfo, TSan
+            ubuntu: '26.04'
             cc: /opt/rocm/llvm/bin/amdclang
             cxx: /opt/rocm/llvm/bin/amdclang++
-          - shared_libs: ON
+            build_type: RelWithDebInfo
             sanitizer: tsan
-            coverage: OFF
-            build_type: Debug
+          # Debug, so the report's lines match the source. Coverage needs
+          # Clang.
+          - label: amdclang, Debug, coverage
+            ubuntu: '26.04'
             cc: /opt/rocm/llvm/bin/amdclang
             cxx: /opt/rocm/llvm/bin/amdclang++
-          # One code coverage job with the default configuration. Coverage
-          # needs Clang, so it builds with ROCm's, too. It builds Debug, so
-          # the report's lines match the source.
-          - shared_libs: ON
-            sanitizer: ''
+            build_type: Debug
             coverage: ON
-            build_type: Debug
+          # Smoke tests of what the core jobs don't build. Release is
+          # TheRock's default build type.
+          - label: amdclang, Release, static
+            ubuntu: '26.04'
             cc: /opt/rocm/llvm/bin/amdclang
             cxx: /opt/rocm/llvm/bin/amdclang++
+            build_type: Release
+            shared_libs: OFF
+          - label: amdclang, no NIC backends
+            ubuntu: '26.04'
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
+            build_type: RelWithDebInfo
+            backends: OFF
+          - label: amdclang, C++23
+            ubuntu: '26.04'
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
+            build_type: RelWithDebInfo
+            cxx_standard: 23
+          # C++26 needs CMake 3.30 or later, which Ubuntu 24.04 doesn't have
+          - label: amdclang, C++26
+            ubuntu: '26.04'
+            cc: /opt/rocm/llvm/bin/amdclang
+            cxx: /opt/rocm/llvm/bin/amdclang++
+            build_type: RelWithDebInfo
+            cxx_standard: 26
+          # Upstream Clang, the version Ubuntu installs as clang
+          - label: Clang 21
+            ubuntu: '26.04'
+            cc: clang-21
+            cxx: clang++-21
+            build_type: RelWithDebInfo
+            packages: clang-21
+          # GCC is a second set of eyes: its warnings and sanitizers find
+          # problems that Clang's don't. The sanitizer job builds
+          # RelWithDebInfo, since the amdclang one builds Debug.
+          - label: GCC 15
+            ubuntu: '26.04'
+            cc: gcc-15
+            cxx: g++-15
+            build_type: RelWithDebInfo
+          - label: GCC 15, ASan and UBSan
+            ubuntu: '26.04'
+            cc: gcc-15
+            cxx: g++-15
+            build_type: RelWithDebInfo
+            sanitizer: asan
+          # The oldest supported Ubuntu release, with older compilers and
+          # an older CMake (3.28)
+          - label: Ubuntu 24.04, GCC 13
+            ubuntu: '24.04'
+            cc: gcc-13
+            cxx: g++-13
+            build_type: RelWithDebInfo
+          - label: Ubuntu 24.04, Clang 18
+            ubuntu: '24.04'
+            cc: clang-18
+            cxx: clang++-18
+            build_type: RelWithDebInfo
+            packages: clang-18
     container:
-      image: rocm/dev-ubuntu-24.04:10.0.0-full
+      image: rocm/dev-ubuntu-${{ matrix.ubuntu }}:10.1.0-full
       options: --user root
     env:
       ROCM_PATH: /opt/rocm
@@ -119,8 +190,14 @@ jobs:
       #
       # The MinIO bridge needs nlohmann-json3-dev and libpugixml-dev.
       # libcurlpp-dev saves downloading and building curlpp.
+      #
+      # A job's packages (EXTRA_PACKAGES) are separated by spaces, so read
+      # splits them into an array with one package in each element.
       - name: Install dependencies
+        env:
+          EXTRA_PACKAGES: ${{ matrix.packages }}
         run: |
+          read -ra extra_packages <<< "${EXTRA_PACKAGES}"
           apt-get update
           apt-get install -y \
             cmake \
@@ -131,18 +208,18 @@ jobs:
             libpugixml-dev \
             libssl-dev \
             nlohmann-json3-dev \
-            rpm
+            rpm \
+            "${extra_packages[@]}"
 
       # HIPOBJ_WERROR makes a new warning fail the build. It only
       # covers hipObject's own targets, not the code FetchContent pulls in.
       #
       # Every job but the coverage job builds the MinIO bridge, so it's
-      # compiled with GCC's warnings in each configuration and ctest's
-      # install and package tests include it. The coverage report only
-      # measures src/, so the bridge would only slow that job down.
+      # compiled with each compiler's warnings and ctest's install and
+      # package tests include it. The coverage report only measures src/,
+      # so the bridge would only slow that job down.
       #
-      # CMake picks the compilers up from CC and CXX, and ignores them when
-      # they're empty, as they are for the jobs that don't set cc and cxx.
+      # CMake picks the compilers up from CC and CXX.
       - name: Configure
         env:
           CC: ${{ matrix.cc }}
@@ -152,13 +229,14 @@ jobs:
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_WERROR=ON \
-            -DHIPOBJ_BNXT=ON \
-            -DHIPOBJ_IONIC=ON \
+            -DHIPOBJ_BNXT=${{ matrix.backends || 'ON' }} \
+            -DHIPOBJ_IONIC=${{ matrix.backends || 'ON' }} \
             -DHIPOBJ_MINIO_CLIENT=${{ matrix.coverage == 'ON' && 'OFF' || 'ON' }} \
-            -DBUILD_SHARED_LIBS=${{ matrix.shared_libs }} \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared_libs || 'ON' }} \
+            -DHIPOBJ_CXX_STANDARD=${{ matrix.cxx_standard || '20' }} \
             -DHIPOBJ_USE_SANITIZERS=${{ matrix.sanitizer == 'asan' && 'ON' || 'OFF' }} \
             -DHIPOBJ_USE_THREAD_SANITIZER=${{ matrix.sanitizer == 'tsan' && 'ON' || 'OFF' }} \
-            -DHIPOBJ_USE_CODE_COVERAGE=${{ matrix.coverage }} \
+            -DHIPOBJ_USE_CODE_COVERAGE=${{ matrix.coverage || 'OFF' }} \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build

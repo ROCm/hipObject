@@ -268,7 +268,12 @@ versioned names such as ``clang-tidy-23``, newest first, and then in
 clang-tidy comes last because it's built without the
 ``clang-analyzer-*`` checks. Set ``HIPOBJ_CLANG_TIDY_EXE`` to the
 path of the one to use. ``HIPOBJ_USE_IWYU`` runs include-what-you-use
-the same way; its suggestions don't fail the build.
+the same way; its suggestions don't fail the build. Use a separate
+build directory for it, with Clang as the compiler: when the
+compiler is a newer Clang than the one include-what-you-use was
+built with (such as ``amdclang``), the build leaves out the flags
+that include-what-you-use's clang doesn't have, including some
+hardening flags.
 
 ``ROCM_PATH`` and ``ROCM_VERSION`` can also be set in the
 environment. If ``ROCM_PATH`` isn't set but ``ROCM_VERSION`` is,
@@ -434,9 +439,10 @@ DEB packages of the ``develop`` branch are built every night
 that it changes, and published as the `nightly prerelease
 <https://github.com/ROCm/hipObject/releases/tag/nightly>`_,
 which each new build replaces. There are packages for Ubuntu
-24.04 and 26.04, built for ROCm 10.1.0 and 7.14.1. They
-install into ``/opt/rocm/core-<major>.<minor>``, so the
-packages for both ROCm versions can be installed together, and
+24.04 and 26.04, built for ROCm 10.1.0 and 7.14.1 with that
+version's ``amdclang``. They install into
+``/opt/rocm/core-<major>.<minor>``, so the packages for both
+ROCm versions can be installed together, and
 their release is
 ``0.<commit time>.g<commit>~<Ubuntu release>``, so a newer
 nightly upgrades an older one. The nightly packages are for

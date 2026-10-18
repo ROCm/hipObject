@@ -24,11 +24,20 @@
 #
 # HIPOBJ_IWYU_WRAPPED_EXE selects the IWYU to run. It defaults to the
 # include-what-you-use on PATH.
+#
+# "--version" alone isn't a run, so it goes straight to IWYU, without
+# being recorded or needing HIPOBJ_IWYU_LOG_DIR. HIPOBJIWYU.cmake runs it
+# when hipObject is configured, to get the version of IWYU's clang.
 
 set -u
 
-log_dir=${HIPOBJ_IWYU_LOG_DIR:?HIPOBJ_IWYU_LOG_DIR must be set}
 iwyu=${HIPOBJ_IWYU_WRAPPED_EXE:-include-what-you-use}
+
+if [[ $# -eq 1 && $1 == --version ]]; then
+  exec "${iwyu}" --version
+fi
+
+log_dir=${HIPOBJ_IWYU_LOG_DIR:?HIPOBJ_IWYU_LOG_DIR must be set}
 
 # The run's exit status goes in this file. Its name is the base for the
 # run's other files.

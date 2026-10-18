@@ -8,8 +8,11 @@ name: hipObject - clang-tidy
 # This uses upstream clang-tidy rather than ROCm's, which is built
 # without the clang-analyzer-* checks, as hipFile's clang-tidy workflow
 # does. The compiler is still ROCm's amdclang++. Keep LLVM_VERSION at
-# the LLVM major version of the image's ROCm (ROCm 10.0 is LLVM 23), so
-# clang-tidy understands the compiler's flags.
+# the LLVM major version of the image's ROCm where apt.llvm.org has a
+# release of it, so clang-tidy understands the compiler's flags. ROCm
+# 10.1 is LLVM 24, which only has snapshot builds, so this uses LLVM 23,
+# the newest release. That works while the build uses no warning flag
+# newer than Clang 23 (see HIPOBJClangCompilerOptions.cmake).
 
 on:
   # The same triggers and paths as the Build workflow, since anything that
@@ -58,13 +61,13 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-latest
     container:
-      image: rocm/dev-ubuntu-24.04:10.0.0-full
+      image: rocm/dev-ubuntu-26.04:10.1.0-full
       options: --user root
     env:
       ROCM_PATH: /opt/rocm
       LLVM_VERSION: 23
       # The Ubuntu release of the image, for apt.llvm.org
-      UBUNTU_CODENAME: noble
+      UBUNTU_CODENAME: resolute
       # The fingerprint of apt.llvm.org's signing key, which is public
       LLVM_SIGNER_FINGERPRINT: 6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
     steps:
@@ -125,9 +128,8 @@ jobs:
       # installed above, rather than whatever HIPOBJClangTidy.cmake's
       # search finds first.
       #
-      # This builds the MinIO bridge, which the Build workflow's Clang
-      # job (code coverage) doesn't, so HIPOBJ_WERROR is on to make this
-      # the job that fails on Clang's warnings in the bridge.
+      # HIPOBJ_WERROR is on, so a compiler warning fails this job too, as
+      # it does the Build workflow's jobs.
       - name: Configure
         env:
           CC: /opt/rocm/llvm/bin/amdclang

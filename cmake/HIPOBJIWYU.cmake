@@ -6,6 +6,13 @@
 #
 # When this option is enabled, compilation will emit IWYU suggestions.
 # They are advisory: IWYU doesn't fail the build.
+#
+# A build with this option is for checking includes, not for building
+# hipObject to use. IWYU gets the same flags as the compiler, and it
+# parses with the clang it was built with, which rejects flags that are
+# newer than that clang. So when the compiler is a newer Clang (such as
+# amdclang), the build leaves out the flags that IWYU's clang doesn't
+# have, including some hardening flags (see hipobj_set_compiler_flags()).
 
 include_guard(GLOBAL)
 
@@ -15,6 +22,25 @@ option(HIPOBJ_USE_IWYU
 if(HIPOBJ_USE_IWYU)
   find_program(HIPOBJ_IWYU_EXE NAMES include-what-you-use REQUIRED)
   message(STATUS "include-what-you-use enabled: ${HIPOBJ_IWYU_EXE}")
+
+  # The version of IWYU's clang, from a line like "include-what-you-use
+  # 0.23 based on Ubuntu clang version 19.1.7 (20ubuntu4)". Without it,
+  # the build keeps every flag, and IWYU may reject some of them.
+  set(HIPOBJ_IWYU_CLANG_VERSION "")
+  execute_process(
+    COMMAND "${HIPOBJ_IWYU_EXE}" --version
+    RESULT_VARIABLE iwyu_version_result
+    OUTPUT_VARIABLE iwyu_version_output
+    ERROR_VARIABLE iwyu_version_output)
+  if(iwyu_version_result EQUAL 0
+      AND iwyu_version_output MATCHES "clang version ([0-9]+(\\.[0-9]+)*)")
+    set(HIPOBJ_IWYU_CLANG_VERSION "${CMAKE_MATCH_1}")
+    message(STATUS "include-what-you-use's clang: ${HIPOBJ_IWYU_CLANG_VERSION}")
+  else()
+    message(WARNING
+      "Can't get the version of include-what-you-use's clang, so the "
+      "build may use flags it rejects:\n${iwyu_version_output}")
+  endif()
 
   # GoogleTest exposes its public API through an umbrella header
   # (gtest/gtest.h) but defines symbols in private sub-headers. Without a
