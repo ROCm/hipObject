@@ -714,7 +714,12 @@ versioned names such as <code class="docutils literal notranslate"><span class="
 clang-tidy comes last because it’s built without the
 <code class="docutils literal notranslate"><span class="pre">clang-analyzer-*</span></code> checks. Set <code class="docutils literal notranslate"><span class="pre">HIPOBJ_CLANG_TIDY_EXE</span></code> to the
 path of the one to use. <code class="docutils literal notranslate"><span class="pre">HIPOBJ_USE_IWYU</span></code> runs include-what-you-use
-the same way; its suggestions don’t fail the build.</p>
+the same way; its suggestions don’t fail the build. Use a separate
+build directory for it, with Clang as the compiler: when the
+compiler is a newer Clang than the one include-what-you-use was
+built with (such as <code class="docutils literal notranslate"><span class="pre">amdclang</span></code>), the build leaves out the flags
+that include-what-you-use’s clang doesn’t have, including some
+hardening flags.</p>
 <p><code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> and <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> can also be set in the
 environment. If <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> isn’t set but <code class="docutils literal notranslate"><span class="pre">ROCM_VERSION</span></code> is,
 <code class="docutils literal notranslate"><span class="pre">ROCM_PATH</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>. If
@@ -908,9 +913,10 @@ with CMake 4.1 or later to get them all.</p>
 <p>DEB packages of the <code class="docutils literal notranslate"><span class="pre">develop</span></code> branch are built every night
 that it changes, and published as the <a class="reference external" href="https://github.com/ROCm/hipObject/releases/tag/nightly">nightly prerelease</a>,
 which each new build replaces. There are packages for Ubuntu
-24.04 and 26.04, built for ROCm 10.1.0 and 7.14.1. They
-install into <code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>, so the
-packages for both ROCm versions can be installed together, and
+24.04 and 26.04, built for ROCm 10.1.0 and 7.14.1 with that
+version’s <code class="docutils literal notranslate"><span class="pre">amdclang</span></code>. They install into
+<code class="docutils literal notranslate"><span class="pre">/opt/rocm/core-&lt;major&gt;.&lt;minor&gt;</span></code>, so the packages for both
+ROCm versions can be installed together, and
 their release is
 <code class="docutils literal notranslate"><span class="pre">0.&lt;commit</span> <span class="pre">time&gt;.g&lt;commit&gt;~&lt;Ubuntu</span> <span class="pre">release&gt;</span></code>, so a newer
 nightly upgrades an older one. The nightly packages are for
