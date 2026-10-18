@@ -75,6 +75,8 @@ jobs:
       #   backends      ON, which turns on both HIPOBJ_BNXT and
       #                 HIPOBJ_IONIC
       #   packages      None. Extra apt packages, such as a compiler.
+      #   valgrind      OFF. ON runs the tests again under valgrind's
+      #                 memcheck, which needs the valgrind package.
       #
       # Every job uses ROCm 10.1, the latest ROCm (see Install ROCm below).
       matrix:
@@ -131,11 +133,23 @@ jobs:
           # GCC is a second set of eyes: its warnings and sanitizers find
           # problems that Clang's don't. The sanitizer job builds
           # RelWithDebInfo, since the amdclang one builds Debug.
+          #
+          # The plain GCC job also runs the tests under valgrind, which
+          # finds reads of uninitialized memory that the sanitizers don't
+          # look for. It can't run in a Clang job: with
+          # -ftrivial-auto-var-init=pattern, which hipObject's Clang
+          # options add, optimized Clang code copies std::format()'s
+          # arguments with x87 instructions, which valgrind emulates with
+          # too few bits (see test/valgrind.supp). It can't run in a
+          # sanitizer job either, since valgrind can't run a program built
+          # with ASan or TSan.
           - label: GCC 15
             ubuntu: '26.04'
             cc: gcc-15
             cxx: g++-15
             build_type: RelWithDebInfo
+            packages: valgrind
+            valgrind: ON
           - label: GCC 15, ASan and UBSan
             ubuntu: '26.04'
             cc: gcc-15
@@ -247,6 +261,35 @@ jobs:
       - name: Test
         run: |
           cd build && ctest --output-on-failure -j"$(nproc)"
+
+      # Runs the test programs under valgrind's memcheck. Valgrind makes a
+      # test fail if it finds an error, such as a read of uninitialized
+      # memory or of memory that isn't allocated, or a leak that's
+      # definitely or possibly lost. It doesn't report memory that's still
+      # reachable at exit, such as the HIP runtime's, so this doesn't need
+      # test/valgrind.supp.
+      #
+      # The excluded tests run CMake scripts, so valgrind would only check
+      # CMake. Valgrind writes its reports to a log for each test, not to
+      # ctest's output, so the logs of the tests with a report are printed
+      # here.
+      - name: Test with valgrind
+        if: matrix.valgrind == 'ON'
+        run: |
+          status=0
+          ctest --test-dir build -T memcheck --output-on-failure --no-tests=error -j"$(nproc)" \
+            --overwrite "MemoryCheckCommand=$(command -v valgrind)" \
+            --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --num-callers=40 --error-exitcode=1" \
+            -E '^hipobj-(exports|subproject|install|package-deb|package-rpm)$' \
+            || status=$?
+          shopt -s nullglob
+          for log in build/Testing/Temporary/MemoryChecker.*.log; do
+            if ! grep -q 'ERROR SUMMARY: 0 errors' "${log}"; then
+              echo "::error::valgrind reported errors in ${log}"
+              cat "${log}"
+            fi
+          done
+          exit "${status}"
 
       # hipObject has to load libibverbs with only its runtime package
       # (libibverbs1) installed, not the development package that the

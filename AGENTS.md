@@ -93,7 +93,8 @@ Notes:
   `-DHIPOBJ_USE_CODE_COVERAGE=ON`. Single jobs smoke-test the rest: with
   amdclang, a static `Release` build (`-DBUILD_SHARED_LIBS=OFF`), one with
   both backends off, and C++23 and C++26 (`HIPOBJ_CXX_STANDARD`); upstream
-  Clang 21; GCC 15, with and without `-DHIPOBJ_USE_SANITIZERS=ON`; and GCC 13
+  Clang 21; GCC 15, with and without `-DHIPOBJ_USE_SANITIZERS=ON` (the job
+  without it also runs the tests under [valgrind](#c-and-c)); and GCC 13
   and Clang 18 on Ubuntu 24.04, which also has an older CMake (3.28).
   Coverage is reported on the run's summary page, and the job fails below the
   [coverage target](#tests); on `develop`, a job then publishes the result to
@@ -607,6 +608,34 @@ configuration files.
   `HIPOBJSanitizers.cmake`: it instruments every target itself, at the end
   of the configuration. CI runs both builds with amdclang, and
   `HIPOBJ_USE_SANITIZERS` with GCC too.
+- **Valgrind-clean**: the tests must also run without a report from
+  valgrind's memcheck, which finds reads of uninitialized memory that the
+  sanitizers don't look for. Run it in the GCC build you make for the
+  compiler warnings, without the sanitizers (valgrind can't run a program
+  built with them):
+
+  ```bash
+  ctest --test-dir build -T memcheck --output-on-failure \
+    --overwrite "MemoryCheckCommand=$(command -v valgrind)" \
+    --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --num-callers=40 --error-exitcode=1" \
+    -E '^hipobj-(exports|subproject|install|package-deb|package-rpm)$'
+  ```
+
+  The excluded tests run CMake scripts, so valgrind would only check CMake.
+  Valgrind writes its reports to `build/Testing/Temporary/MemoryChecker.*.log`,
+  one log for each test, not to ctest's output. It doesn't report memory
+  that's still reachable when the program exits, such as the HIP runtime's,
+  unless it's asked to with `--show-leak-kinds`. To look at that memory too,
+  add `--show-leak-kinds=all --errors-for-leak-kinds=all` to the options,
+  and `--overwrite "MemoryCheckSuppressionFile=$PWD/test/valgrind.supp"`,
+  which suppresses what ROCm, OpenSSL, and `systemPlatform()` keep until the
+  program exits; the path has to be absolute. Don't run valgrind on
+  an optimized Clang build: with `-ftrivial-auto-var-init=pattern`, which
+  hipObject's Clang options add, Clang at `-O1` and above copies
+  `std::format()`'s arguments with x87 instructions, which valgrind emulates
+  with too few bits, so formatted numbers come out wrong and formatting a
+  string can crash. A Clang Debug build works. CI runs this in its GCC 15
+  job.
 - **Lifetime safety, when a change could leave something dangling.** Clang
   23's `-Wlifetime-safety` looks for use-after-free, use-after-scope, and
   dangling references, but it reports too many false positives to leave
