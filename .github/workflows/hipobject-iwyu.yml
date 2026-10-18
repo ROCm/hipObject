@@ -11,7 +11,8 @@ name: hipObject - IWYU
 
 on:
   # The same triggers and paths as the Build workflow, since anything that
-  # it compiles can break IWYU, plus this workflow's own file and scripts.
+  # it compiles can break IWYU, plus this workflow's own file and scripts,
+  # and the action that installs ROCm.
   # The paths are a list with negations and not paths-ignore, so the last
   # entries can add paths back (see hipobject-build.yml).
   pull_request:
@@ -29,6 +30,7 @@ on:
       - '!.github/**'
       - 'ci/iwyu/**'
       - '.github/workflows/hipobject-iwyu.yml'
+      - '.github/actions/install-rocm/**'
   push:
     branches: [develop]
     paths: *paths
@@ -56,24 +58,30 @@ jobs:
   iwyu:
     name: include-what-you-use (advisory)
     runs-on: ubuntu-latest
+    # A plain Ubuntu image, with only the ROCm that hipObject needs
+    # installed (see Install ROCm below)
     container:
-      image: rocm/dev-ubuntu-26.04:10.1.0-full
+      image: ubuntu:26.04
       options: --user root
     env:
-      ROCM_PATH: /opt/rocm
+      # Packages such as tzdata ask questions when they're installed into a
+      # plain image; this takes their defaults instead.
+      DEBIAN_FRONTEND: noninteractive
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Ninja keeps each command's output together, so IWYU's output for
-      # one file isn't interleaved with another's in the build log. The
-      # MinIO bridge needs nlohmann-json3-dev and libpugixml-dev, and
+      # build-essential is GCC, whose libstdc++ amdclang uses. Ninja keeps
+      # each command's output together, so IWYU's output for one file isn't
+      # interleaved with another's in the build log. The MinIO bridge needs
+      # nlohmann-json3-dev, libpugixml-dev, and zlib1g-dev, and
       # libcurlpp-dev saves downloading and building curlpp.
       - name: Install dependencies
         run: |
           apt-get update
           apt-get install -y \
+            build-essential \
             cmake \
             git \
             iwyu \
@@ -83,7 +91,15 @@ jobs:
             libpugixml-dev \
             libssl-dev \
             ninja-build \
-            nlohmann-json3-dev
+            nlohmann-json3-dev \
+            zlib1g-dev
+
+      # After the compilers, so the libstdc++ that ROCm's compiler
+      # packages need is the one already installed
+      - name: Install ROCm
+        uses: ./.github/actions/install-rocm
+        with:
+          version: '10.1'
 
       # CMake hides IWYU's failures (see ci/iwyu/iwyu-wrapper.sh), so it
       # runs IWYU through a wrapper that records every run for the check
@@ -95,13 +111,14 @@ jobs:
       #
       # HIPOBJ_WERROR is off: the Build workflow checks for warnings, and
       # this job is only about IWYU.
+      #
+      # CMake picks the compilers up from CC and CXX.
       - name: Configure
-        env:
-          CC: /opt/rocm/llvm/bin/amdclang
-          CXX: /opt/rocm/llvm/bin/amdclang++
         run: |
+          export CC="${ROCM_PATH}/llvm/bin/amdclang"
+          export CXX="${ROCM_PATH}/llvm/bin/amdclang++"
           cmake -B build -G Ninja \
-            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_BNXT=ON \
             -DHIPOBJ_IONIC=ON \

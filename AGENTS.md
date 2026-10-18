@@ -52,9 +52,9 @@ one or edit the other project without asking.
   7.11+ layout) and to `/opt/rocm` otherwise; setting `ROCM_VERSION` changes
   this (see [docs/building.rst](docs/building.rst)). Put `/opt/rocm/bin` on
   `PATH` and include `/opt/rocm/lib` in `LD_LIBRARY_PATH` when running binaries
-  you build. The `rocm/dev-ubuntu` full images that CI uses leave
-  `libamdhip64` out of the loader cache, so test binaries won't start there
-  without it.
+  you build. ROCm's packages, and the `rocm/dev-ubuntu` images built from
+  them, leave `libamdhip64` out of the loader cache, so test binaries won't
+  start without it.
 - **Compiler**: hipObject is host-only C/C++ (no GPU kernels), so any C++20
   compiler works, though changes have to be checked with both GCC and Clang
   (see [C and C++](#c-and-c)). The HIP runtime headers and library come from
@@ -84,8 +84,10 @@ Notes:
   ([hipobject-build.yml](.github/workflows/hipobject-build.yml)) focuses on
   the latest ROCm and its amdclang, which is how TheRock will build hipObject.
   Every job uses ROCm 10.1.0, with `HIPOBJ_WERROR` on. Its core jobs build
-  this configuration with amdclang on Ubuntu 26.04 (the
-  `rocm/dev-ubuntu-26.04:10.1.0-full` image): `RelWithDebInfo`, then Debug
+  this configuration with amdclang on Ubuntu 26.04 (the `ubuntu:26.04`
+  image, with only ROCm's HIP runtime and amdclang packages installed, by
+  [`install-rocm`](.github/actions/install-rocm/action.yml)):
+  `RelWithDebInfo`, then Debug
   with `-DHIPOBJ_USE_SANITIZERS=ON` (every sanitizer except ThreadSanitizer),
   `RelWithDebInfo` with `-DHIPOBJ_USE_THREAD_SANITIZER=ON`, and Debug with
   `-DHIPOBJ_USE_CODE_COVERAGE=ON`. Single jobs smoke-test the rest: with

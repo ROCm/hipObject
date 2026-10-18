@@ -1,0 +1,108 @@
+---
+name: Install ROCm
+description: >-
+  Install the HIP runtime and amdclang, and nothing else of ROCm, from
+  AMD's package repository, in an Ubuntu container job. hipObject is
+  host-only, so it needs no more, and these packages are a ~330 MB
+  download, where the rocm/dev-ubuntu full images are ~9 GB.
+
+inputs:
+  version:
+    description: >-
+      ROCm's major and minor version, such as 10.1. Only ROCm 10.0 and
+      later, which come from stable.repo.amd.com.
+    required: true
+
+outputs:
+  rocm_path:
+    description: Directory ROCm is installed in, /opt/rocm/core-<version>
+    value: ${{ steps.install.outputs.rocm_path }}
+
+runs:
+  using: composite
+  steps:
+  # The packages install ROCm into /opt/rocm/core-<version>. They don't
+  # make the links in /opt/rocm that the full images have (ROCm's larger
+  # packages, such as amdrocm-core, make those), so everything uses the
+  # version's own directory, as hipobject-nightly.yml does.
+  #
+  # apt only trusts the key with the known fingerprint, and only for this
+  # repository. Exporting the key by its fingerprint from a scratch
+  # keyring leaves out any other key in the download, and exports nothing
+  # if the key isn't there.
+  #
+  # amdrocm-runtime-dev is HIP's headers and CMake package, and brings in
+  # the runtime. amdrocm-llvm is amdclang, which the runtime already
+  # needs; it's named because the builds use it. Their recommendations
+  # (gcc, g++, and their multilib packages) are left out: the job installs
+  # the compilers it wants. It should do that first, since the compiler
+  # packages need some release of libstdc++'s development package, and apt
+  # otherwise picks the oldest that the Ubuntu release has.
+  #
+  # The packages don't add ROCm's lib directory to the loader cache, so
+  # programs linked with libamdhip64, such as the tests, find it through
+  # LD_LIBRARY_PATH.
+  - id: install
+    shell: bash
+    env:
+      ROCM_MAJOR_MINOR: ${{ inputs.version }}
+      # apt takes the packages' defaults rather than asking questions
+      DEBIAN_FRONTEND: noninteractive
+      # The fingerprint of AMD's signing key for the repository, which is
+      # public
+      AMD_SIGNER_FINGERPRINT: D0F004A0025A1145C7807FCD0701EAC4D5E02107
+    run: |
+      set -euo pipefail
+
+      if [[ ! "${ROCM_MAJOR_MINOR}" =~ ^([0-9]+)\.[0-9]+$ ]] \
+        || (( BASH_REMATCH[1] < 10 )); then
+        echo "::error::version must be 10.0 or later, as major.minor, not '${ROCM_MAJOR_MINOR}'"
+        exit 1
+      fi
+
+      # The repository has a directory for each Ubuntu release, such as
+      # ubuntu2604
+      ubuntu_version=$(awk -F= '$1 == "VERSION_ID" { gsub(/"/, "", $2); print $2 }' \
+        /etc/os-release)
+      repo="https://stable.repo.amd.com/rocm/core/packages/ubuntu${ubuntu_version//./}"
+
+      # gpg imports the key without gpg-agent, but then exits with status 2
+      # because it can't start the agent, so the agent is installed too.
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        ca-certificates curl gpg gpg-agent
+
+      curl -fsSL https://stable.repo.amd.com/rocm/gpg/packages.gpg \
+        -o /tmp/amdrocm.asc
+      GNUPGHOME=$(mktemp -d)
+      export GNUPGHOME
+      gpg --batch --import /tmp/amdrocm.asc
+      install -d -m 0755 /etc/apt/keyrings
+      gpg --batch --export "${AMD_SIGNER_FINGERPRINT}" \
+        > /etc/apt/keyrings/amdrocm.gpg
+      if [[ ! -s /etc/apt/keyrings/amdrocm.gpg ]]; then
+        echo "::error::AMD's ROCm repository key isn't ${AMD_SIGNER_FINGERPRINT}"
+        exit 1
+      fi
+      echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg]" \
+        "${repo} stable main" > /etc/apt/sources.list.d/amdrocm.list
+
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        "amdrocm-runtime-dev${ROCM_MAJOR_MINOR}" \
+        "amdrocm-llvm${ROCM_MAJOR_MINOR}"
+
+      rocm_path="/opt/rocm/core-${ROCM_MAJOR_MINOR}"
+      for compiler in amdclang amdclang++; do
+        if [[ ! -x "${rocm_path}/llvm/bin/${compiler}" ]]; then
+          echo "::error::${compiler} isn't in ${rocm_path}/llvm/bin"
+          exit 1
+        fi
+      done
+      "${rocm_path}/llvm/bin/amdclang++" --version
+
+      {
+        echo "ROCM_PATH=${rocm_path}"
+        echo "LD_LIBRARY_PATH=${rocm_path}/lib"
+      } >> "${GITHUB_ENV}"
+      echo "rocm_path=${rocm_path}" >> "${GITHUB_OUTPUT}"

@@ -292,6 +292,16 @@ jobs:
           fi
           EOF
 
+      - name: Start pulling the ernic and rocjitsu images
+        run: |
+          # In the background, alongside the guest image fetch, so the steps
+          # that run them don't wait for the pull. "Wait for the images"
+          # joins it before the first of them.
+          bash ci/ernic/background-task.sh start images << 'EOF'
+          docker pull "$ERNIC_IMAGE"
+          docker pull "$ROCJITSU_IMAGE_GPU"
+          EOF
+
       - name: Fetch the ionic driver sources
         id: ionic_sources
         uses: $/.github/actions/fetch-ionic-sources
@@ -332,6 +342,9 @@ jobs:
 
       - name: Wait for deps
         run: bash ci/ernic/background-task.sh wait deps
+
+      - name: Wait for the images
+        run: bash ci/ernic/background-task.sh wait images
 
       - name: Extract rocm-ernic binary from ernic image
         run: |

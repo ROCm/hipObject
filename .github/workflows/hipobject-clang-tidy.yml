@@ -8,7 +8,7 @@ name: hipObject - clang-tidy
 # This uses upstream clang-tidy rather than ROCm's, which is built
 # without the clang-analyzer-* checks, as hipFile's clang-tidy workflow
 # does. The compiler is still ROCm's amdclang++. Keep LLVM_VERSION at
-# the LLVM major version of the image's ROCm where apt.llvm.org has a
+# the LLVM major version of the job's ROCm where apt.llvm.org has a
 # release of it, so clang-tidy understands the compiler's flags. ROCm
 # 10.1 is LLVM 24, which only has snapshot builds, so this uses LLVM 23,
 # the newest release. That works while the build uses no warning flag
@@ -16,7 +16,8 @@ name: hipObject - clang-tidy
 
 on:
   # The same triggers and paths as the Build workflow, since anything that
-  # it compiles can have findings, plus this workflow's own file. The
+  # it compiles can have findings, plus this workflow's own file and the
+  # action that installs ROCm. The
   # .clang-tidy files are matched by '**'. The paths are a list with
   # negations and not paths-ignore, so the last entry can add a path back
   # (see hipobject-build.yml).
@@ -33,6 +34,7 @@ on:
       - '!requirements.txt'
       - '!.github/**'
       - '.github/workflows/hipobject-clang-tidy.yml'
+      - '.github/actions/install-rocm/**'
   push:
     branches: [develop]
     paths: *paths
@@ -60,11 +62,15 @@ jobs:
   clang-tidy:
     name: clang-tidy
     runs-on: ubuntu-latest
+    # A plain Ubuntu image, with only the ROCm that hipObject needs
+    # installed (see Install ROCm below)
     container:
-      image: rocm/dev-ubuntu-26.04:10.1.0-full
+      image: ubuntu:26.04
       options: --user root
     env:
-      ROCM_PATH: /opt/rocm
+      # Packages such as tzdata ask questions when they're installed into a
+      # plain image; this takes their defaults instead.
+      DEBIAN_FRONTEND: noninteractive
       LLVM_VERSION: 23
       # The Ubuntu release of the image, for apt.llvm.org
       UBUNTU_CODENAME: resolute
@@ -75,15 +81,16 @@ jobs:
         with:
           persist-credentials: false
 
-      # Ninja keeps each command's output together, so clang-tidy's
-      # output for one file isn't interleaved with another's in the
-      # build log. The MinIO bridge needs nlohmann-json3-dev and
-      # libpugixml-dev, and libcurlpp-dev saves downloading and building
-      # curlpp.
+      # build-essential is GCC, whose libstdc++ amdclang uses. Ninja keeps
+      # each command's output together, so clang-tidy's output for one
+      # file isn't interleaved with another's in the build log. The MinIO
+      # bridge needs nlohmann-json3-dev, libpugixml-dev, and zlib1g-dev,
+      # and libcurlpp-dev saves downloading and building curlpp.
       - name: Install dependencies
         run: |
           apt-get update
           apt-get install -y \
+            build-essential \
             ca-certificates \
             cmake \
             curl \
@@ -95,7 +102,15 @@ jobs:
             libpugixml-dev \
             libssl-dev \
             ninja-build \
-            nlohmann-json3-dev
+            nlohmann-json3-dev \
+            zlib1g-dev
+
+      # After the compilers, so the libstdc++ that ROCm's compiler
+      # packages need is the one already installed
+      - name: Install ROCm
+        uses: ./.github/actions/install-rocm
+        with:
+          version: '10.1'
 
       # apt only trusts the key with the known fingerprint, and only for
       # this repository. Exporting the key by its fingerprint from a
@@ -130,13 +145,14 @@ jobs:
       #
       # HIPOBJ_WERROR is on, so a compiler warning fails this job too, as
       # it does the Build workflow's jobs.
+      #
+      # CMake picks the compilers up from CC and CXX.
       - name: Configure
-        env:
-          CC: /opt/rocm/llvm/bin/amdclang
-          CXX: /opt/rocm/llvm/bin/amdclang++
         run: |
+          export CC="${ROCM_PATH}/llvm/bin/amdclang"
+          export CXX="${ROCM_PATH}/llvm/bin/amdclang++"
           cmake -B build -G Ninja \
-            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_WERROR=ON \
             -DHIPOBJ_BNXT=ON \

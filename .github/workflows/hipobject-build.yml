@@ -9,10 +9,10 @@ on:
   # used with HIPOBJ_BUILD_DOCS, which is OFF here (the Documentation
   # Check lane configures and builds those), the .clang-tidy files only
   # configure the clang-tidy lane, and .github/ holds the other
-  # workflows and their configuration. This workflow's own file is added
-  # back last; a later pattern overrides an earlier one, which is why
-  # this is a paths list with negations and not paths-ignore, which
-  # can't add a path back.
+  # workflows and their configuration. This workflow's own file, and the
+  # action that installs ROCm, are added back last; a later pattern
+  # overrides an earlier one, which is why this is a paths list with
+  # negations and not paths-ignore, which can't add a path back.
   pull_request:
     branches: [develop]
     paths: &paths
@@ -27,6 +27,7 @@ on:
       - '!requirements.txt'
       - '!.github/**'
       - '.github/workflows/hipobject-build.yml'
+      - '.github/actions/install-rocm/**'
   push:
     branches: [develop]
     paths: *paths
@@ -61,9 +62,10 @@ jobs:
       # The jobs are listed one by one rather than made by crossing axes,
       # since most of them change one thing from the first job, and
       # crossing would build combinations nobody needs. Every job sets
-      # label, ubuntu, cc, cxx, and build_type. A job that leaves out one
-      # of the other keys gets its default:
+      # label, ubuntu, and build_type. A job that leaves out one of the
+      # other keys gets its default:
       #
+      #   cc, cxx       ROCm's amdclang and amdclang++
       #   shared_libs   ON. TheRock only builds shared libraries.
       #   sanitizer     None. asan is HIPOBJ_USE_SANITIZERS (ASan, UBSan,
       #                 and the compiler's other checks), and tsan is
@@ -74,65 +76,49 @@ jobs:
       #                 HIPOBJ_IONIC
       #   packages      None. Extra apt packages, such as a compiler.
       #
-      # Every job uses ROCm 10.1.0, the latest ROCm (see the image below).
+      # Every job uses ROCm 10.1, the latest ROCm (see Install ROCm below).
       matrix:
         include:
           # The core jobs build with ROCm's amdclang on the newest Ubuntu
           # release, as TheRock will build hipObject.
           - label: amdclang, RelWithDebInfo
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: RelWithDebInfo
           # Debug, so the library's assert()s are checked with the
           # sanitizers on, and the reports aren't muddied by optimization
           - label: amdclang, Debug, ASan and UBSan
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: Debug
             sanitizer: asan
           # RelWithDebInfo, as TheRock's ThreadSanitizer builds are, so the
           # threads' timing is closer to a normal build's
           - label: amdclang, RelWithDebInfo, TSan
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: RelWithDebInfo
             sanitizer: tsan
           # Debug, so the report's lines match the source. Coverage needs
           # Clang.
           - label: amdclang, Debug, coverage
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: Debug
             coverage: ON
           # Smoke tests of what the core jobs don't build. Release is
           # TheRock's default build type.
           - label: amdclang, Release, static
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: Release
             shared_libs: OFF
           - label: amdclang, no NIC backends
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: RelWithDebInfo
             backends: OFF
           - label: amdclang, C++23
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: RelWithDebInfo
             cxx_standard: 23
           # C++26 needs CMake 3.30 or later, which Ubuntu 24.04 doesn't have
           - label: amdclang, C++26
             ubuntu: '26.04'
-            cc: /opt/rocm/llvm/bin/amdclang
-            cxx: /opt/rocm/llvm/bin/amdclang++
             build_type: RelWithDebInfo
             cxx_standard: 26
           # Upstream Clang, the version Ubuntu installs as clang
@@ -169,14 +155,15 @@ jobs:
             cxx: clang++-18
             build_type: RelWithDebInfo
             packages: clang-18
+    # A plain Ubuntu image, with only the ROCm that hipObject needs
+    # installed (see Install ROCm below)
     container:
-      image: rocm/dev-ubuntu-${{ matrix.ubuntu }}:10.1.0-full
+      image: ubuntu:${{ matrix.ubuntu }}
       options: --user root
     env:
-      ROCM_PATH: /opt/rocm
-      # The full ROCm image ships libamdhip64 in /opt/rocm/lib but leaves it out
-      # of the loader cache, so ctest binaries fail to start without this.
-      LD_LIBRARY_PATH: /opt/rocm/lib
+      # Packages such as tzdata ask questions when they're installed into a
+      # plain image; this takes their defaults instead.
+      DEBIAN_FRONTEND: noninteractive
       # The tests that load the system's libibverbs fail, rather than skip,
       # if it doesn't load (see test/unit/require-libibverbs.h)
       HIPOBJ_TEST_REQUIRE_LIBIBVERBS: '1'
@@ -185,11 +172,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # build-essential is the release's GCC (GCC 15 on 26.04, GCC 13 on
+      # 24.04) and make. amdclang uses GCC's libstdc++ too.
+      #
       # rpm provides rpmbuild, so hipObject can build RPM packages here
       # as well as DEB packages, and the RPM package test runs.
       #
-      # The MinIO bridge needs nlohmann-json3-dev and libpugixml-dev.
-      # libcurlpp-dev saves downloading and building curlpp.
+      # The MinIO bridge needs nlohmann-json3-dev, libpugixml-dev, and
+      # zlib1g-dev. libcurlpp-dev saves downloading and building curlpp.
       #
       # A job's packages (EXTRA_PACKAGES) are separated by spaces, so read
       # splits them into an array with one package in each element.
@@ -200,6 +190,7 @@ jobs:
           read -ra extra_packages <<< "${EXTRA_PACKAGES}"
           apt-get update
           apt-get install -y \
+            build-essential \
             cmake \
             git \
             libcurl4-openssl-dev \
@@ -209,7 +200,15 @@ jobs:
             libssl-dev \
             nlohmann-json3-dev \
             rpm \
+            zlib1g-dev \
             "${extra_packages[@]}"
+
+      # After the compilers, so the libstdc++ that ROCm's compiler
+      # packages need is the one already installed
+      - name: Install ROCm
+        uses: ./.github/actions/install-rocm
+        with:
+          version: '10.1'
 
       # HIPOBJ_WERROR makes a new warning fail the build. It only
       # covers hipObject's own targets, not the code FetchContent pulls in.
@@ -219,14 +218,17 @@ jobs:
       # package tests include it. The coverage report only measures src/,
       # so the bridge would only slow that job down.
       #
-      # CMake picks the compilers up from CC and CXX.
+      # CMake picks the compilers up from CC and CXX. A job that doesn't
+      # set them gets amdclang, which is in ROCm's directory.
       - name: Configure
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
         run: |
+          export CC="${CC:-${ROCM_PATH}/llvm/bin/amdclang}"
+          export CXX="${CXX:-${ROCM_PATH}/llvm/bin/amdclang++}"
           cmake -B build \
-            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
             -DBUILD_TESTING=ON \
             -DHIPOBJ_WERROR=ON \
             -DHIPOBJ_BNXT=${{ matrix.backends || 'ON' }} \
