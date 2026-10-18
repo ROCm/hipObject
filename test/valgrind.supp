@@ -1,0 +1,96 @@
+# Valgrind suppressions for hipObject's tests.
+#
+# Use this file with valgrind's --suppressions option. With CTest, configure
+# with -DMEMORYCHECK_SUPPRESSIONS_FILE=<path to this file> and then run
+# "ctest -T memcheck".
+#
+# Every entry here suppresses only "still reachable" blocks. Valgrind doesn't
+# report those unless it's run with --show-leak-kinds=reachable or
+# --show-leak-kinds=all. Leaks that are definitely, indirectly, or possibly
+# lost are never suppressed.
+#
+# Each entry covers memory that a library allocates once and keeps until the
+# process exits. Most entries match only allocations made under the function
+# that does that one-time setup, so the same allocations made anywhere else
+# are still reported. Those stacks can be deeper than valgrind's default of 12
+# frames, and a stack that's cut off before the function doesn't match, so
+# run valgrind with --num-callers=40 or more.
+#
+# Valgrind can't run optimized Clang builds of hipObject correctly, so use a
+# GCC build or a Clang Debug build. hipObject builds with
+# -ftrivial-auto-var-init=pattern when it's compiled with Clang. With that
+# flag, Clang at -O1 and above copies std::format()'s arguments with the x87
+# instructions fldt and fstpt. Valgrind emulates the x87 registers with 64
+# bits instead of 80, so the copy loses bits: formatted numbers come out
+# wrong, and formatting a string can crash. No suppression can fix that.
+
+# The HIP runtime loads ROCm's LLVM and clang libraries. When those libraries
+# load, their static constructors allocate memory that they never free.
+# hipObject never calls LLVM directly; LLVM is loaded only as part of the HIP
+# runtime. So any reachable block that LLVM allocated belongs to ROCm.
+{
+   rocm-libLLVM-reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*/libLLVM.so*
+}
+
+{
+   rocm-libclang-cpp-reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*/libclang-cpp.so*
+}
+
+# hipObject does call the HIP runtime, so the next two entries only cover
+# the runtime's one-time setup. A reachable block that HIP allocates at any
+# other time, during a call from hipObject, could mean that hipObject didn't
+# release something, so it is still reported.
+
+# Memory the HIP runtime allocates while the dynamic loader (ld.so) is
+# loading it
+{
+   rocm-libamdhip64-load-time-reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*/libamdhip64.so*
+   ...
+   obj:*/ld-linux*.so*
+}
+
+# The first HIP call initializes the runtime once, with pthread_once(). This
+# includes the HSA runtime's setup, in hsa_init().
+{
+   rocm-libamdhip64-first-call-reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*/libamdhip64.so*
+   fun:*pthread_once*
+}
+
+# systemPlatform() builds the platform that hipObjInit() uses the first time
+# it's called, and deliberately never destroys it (see src/state.cpp). The
+# platform keeps libibverbs loaded with dlopen(), so the platform's objects
+# and the dynamic loader's records of libibverbs and its dependencies stay
+# allocated until the process exits.
+{
+   hipobj-system-platform-reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*systemPlatform*
+}
+
+# OpenSSL, which libcurl uses, keeps some of its global state after
+# curl_global_cleanup(), until the process exits.
+{
+   openssl-global-init-reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:OPENSSL_init_crypto
+}
