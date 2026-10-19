@@ -23,6 +23,15 @@ outputs:
   output_dir:
     description: Directory holding the qcow2, keys and vm-info.json
     value: ${{ steps.fetch.outputs.output_dir }}
+  vm_user:
+    description: User to log in to the guest as
+    value: ${{ steps.fetch.outputs.vm_user }}
+  vm_disk:
+    description: Path of the guest's qcow2 disk
+    value: ${{ steps.fetch.outputs.vm_disk }}
+  ssh_key:
+    description: Path of the private key for logging in to the guest
+    value: ${{ steps.fetch.outputs.ssh_key }}
 
 runs:
   using: composite
@@ -88,7 +97,7 @@ runs:
       retry oras pull "$REF"
 
       # Take the disk name from what actually landed rather than pinning
-      # it, so a renamed guest fails here instead of in Read VM info.
+      # it, so a renamed guest fails here instead of when QEMU starts.
       shopt -s nullglob
       ZST=(*.qcow2.zst)
       if [ ${#ZST[@]} -ne 1 ]; then
@@ -103,5 +112,22 @@ runs:
       # comfortably hold both alongside a build tree.
       zstd -d --long=27 --rm -q "${ZST[0]}"
 
+      # Boot the disk that was just unpacked, never another qcow2 that may
+      # be left in the directory. The metadata names the disk too, so a
+      # name that doesn't match means the two came from different builds.
+      DISK="${ZST[0]%.zst}"
+      INFO_DISK=$(jq -r '.image_path // ""' vm-info.json)
+      if [ -n "$INFO_DISK" ] && [ "$(basename -- "$INFO_DISK")" != "$DISK" ]; then
+        echo "✗ vm-info.json names disk ${INFO_DISK}, but ${DISK} landed"
+        ls -la
+        exit 1
+      fi
+      VM_USER=$(jq -r '.username // "ci"' vm-info.json)
+
       ls -la "${DEST}/output"
-      echo "output_dir=${DEST}/output" >> "$GITHUB_OUTPUT"
+      {
+        echo "output_dir=${DEST}/output"
+        echo "vm_user=${VM_USER}"
+        echo "vm_disk=${DEST}/output/${DISK}"
+        echo "ssh_key=${DEST}/output/${KEY}"
+      } >> "$GITHUB_OUTPUT"

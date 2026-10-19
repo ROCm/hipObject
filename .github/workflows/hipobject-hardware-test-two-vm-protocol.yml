@@ -259,34 +259,6 @@ jobs:
           repo: ${{ env.GUEST_ARTIFACT_REPO }}
           tag: ${{ env.GUEST_ARTIFACT_TAG }}
 
-      - name: Read VM info
-        id: vm_info
-        env:
-          GUEST_OUTPUT_DIR: ${{ steps.guest_image.outputs.output_dir }}
-        run: |
-          OUT="${GUEST_OUTPUT_DIR}"
-          eval "$(python3 - "$OUT" <<'PYEOF'
-          import json, os, shlex, sys
-
-          out = sys.argv[1]
-          d = json.load(open(os.path.join(out, "vm-info.json")))
-          here = lambda p: os.path.join(out, os.path.basename(p)) if p else ""
-          keys = {
-              "VM_USER": d.get("username", "ci"),
-              "VM_DISK": here(d.get("image_path", "")),
-              "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
-          }
-          for k, v in keys.items():
-              print(f"{k}={shlex.quote(str(v))}")
-          PYEOF
-          )"
-          chmod 600 "$SSH_KEY_PRIVATE"
-          {
-            echo "vm_user=$VM_USER"
-            echo "vm_disk=$VM_DISK"
-            echo "ssh_key=$SSH_KEY_PRIVATE"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Wait for deps
         run: bash ci/ernic/background-task.sh wait deps
 
@@ -326,7 +298,7 @@ jobs:
       - name: Create the per-VM disk overlays
         id: overlays
         env:
-          VM_DISK: ${{ steps.vm_info.outputs.vm_disk }}
+          VM_DISK: ${{ steps.guest_image.outputs.vm_disk }}
         run: |
           # Overlays, not copies. Both VMs get one including the first: with
           # VM 1 writing to the base directly, VM 2's backing file would
@@ -446,8 +418,8 @@ jobs:
 
       - name: Wait for both VMs over SSH
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             for _ in $(seq 1 60); do
@@ -463,8 +435,8 @@ jobs:
 
       - name: Disable the guest's amdgpu driver apt sources
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           # The guest image's build added repo.radeon.com/amdgpu/31.60 as an
           # apt source to install amdgpu-dkms, and that tree has since
@@ -507,8 +479,8 @@ jobs:
 
       - name: Install kernel headers and build tools in both VMs
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -534,8 +506,8 @@ jobs:
 
       - name: Stage the ionic driver sources in both VMs
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
           IONIC_SRC: ${{ steps.ionic_sources.outputs.source_dir }}
           IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
         run: |
@@ -557,8 +529,8 @@ jobs:
 
       - name: Provision both VMs with the ernic Ansible collection
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
           IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
         run: |
           ERNIC_RUN_DIR=/tmp/ernic-ci
@@ -592,8 +564,8 @@ jobs:
 
       - name: Verify the RDMA device in both VMs
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           vm_ssh() {
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
@@ -621,8 +593,8 @@ jobs:
 
       - name: Copy hipObject binaries into both VMs
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           BUILD="${GITHUB_WORKSPACE}/ernic-build"
           vm_scp() {
@@ -648,8 +620,8 @@ jobs:
 
       - name: Start hipobj-rdma-test-server in VM 1
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           vm_ssh() {
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
@@ -695,8 +667,8 @@ jobs:
       - name: Run the client in VM 2
         timeout-minutes: 10
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           # Bounded at three layers: guest-side timeout, ssh keepalive, step
           # timeout. This lane passes today, but its twin in the Two-VM GPU
@@ -713,8 +685,8 @@ jobs:
       - name: Collect logs
         if: always()
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           for n in 1 2; do
             echo "=== server${n}.log ===";         tail -100 "/tmp/server${n}.log"        || true
