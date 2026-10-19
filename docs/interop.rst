@@ -84,6 +84,23 @@ read ``x-amz-rdma-reply`` from the HTTP response.
   prefer numeric status codes, and RC peer handshakes should use the
   ``200:<server-token-hex>`` form.
 
+  The peer token has the same layout as the client's token, but only names
+  the server's QP, which the client connects its own QP to. The client uses
+  these fields:
+
+  * transport, which must be RC (``0x01``); a reply with a DC peer token
+    fails the transfer
+  * QP number
+  * GID
+  * LID
+
+  The rkey, remote address, length, and port number are reserved: servers
+  must set them to zero, and clients ignore them. The client never reads or
+  writes the server's memory, since the server performs the transfer in both
+  directions, with an RDMA WRITE for a GET and an RDMA READ for a PUT, so a
+  reply doesn't advertise any server memory. The client connects its QP on
+  its own port, not the one in the peer token.
+
 Data plane
 ~~~~~~~~~~
 

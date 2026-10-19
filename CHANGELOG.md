@@ -165,6 +165,14 @@
     malformed tokens, and tokens after other statuses used to be accepted.
     A token whose transport byte is neither DC (`00`) nor RC (`01`) is
     rejected.
+- `docs/interop.rst` now says which fields of the peer token in a
+  `200:<server-token-hex>` reply mean anything. The client uses only the
+  transport (which must be RC), the QP number, the GID, and the LID. The
+  rkey, remote address, length, and port number are reserved: servers
+  must set them to zero, and clients ignore them. A server that sends
+  other values still works, but should send zeros, since a later version
+  may give these fields a meaning. `hipobj-rdma-test-server` now sends
+  zeros; it used to send its staging buffer's rkey and address.
 - The `hipobj.h` documentation of `hipObjGet()` and `hipObjPut()` now
   says that `offset` is a byte offset into the registered buffer. It
   used to describe it as an offset into the S3 object, but it has always
