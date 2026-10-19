@@ -30,6 +30,10 @@ hipobj_add_library(
   NAME hipobj
   SRCS ${HIPOBJ_SOURCES})
 
+# The name the installed package gives the library, so a project that
+# adds hipObject with add_subdirectory() or FetchContent can use it too
+add_library(hipobj::hipobj ALIAS hipobj)
+
 # Only the functions marked HIPOBJ_API in include/hipobj.h are exported
 # from the shared library. VISIBILITY_INLINES_HIDDEN also hides inline
 # member functions. Neither hides C++ standard library template

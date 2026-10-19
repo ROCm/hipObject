@@ -88,6 +88,9 @@
   the version. Like `hipObjGetVersionString()`, it doesn't need
   `hipObjInit()`. The new `get-version` example, installed with the
   others, shows how to use it.
+- A project that adds hipObject with `add_subdirectory()` or
+  `FetchContent` can link the library as `hipobj::hipobj`, the name the
+  installed package gives it, as well as `hipobj`.
 
 ### Changed
 
@@ -312,6 +315,9 @@
   ROCm. The option defaults to what the compiler does without it: `ON`
   with GCC, and `OFF` with Clang, since Clang 18's shared runtimes ignore
   the run-time options that hipObject's programs set.
+- Building the MinIO bridge (`HIPOBJ_MINIO_CLIENT=ON`) requires OpenSSL 3
+  or later, which every supported platform has. Configuring fails with an
+  older OpenSSL.
 
 ### Removed
 
@@ -441,6 +447,10 @@
   can't find them otherwise. It now also lists the CMake options for
   sanitizers, clang-tidy, and include-what-you-use, and the environment
   variables that hipObject reads when it runs.
+- When the tests were built with a GoogleTest that the build downloaded,
+  `cmake --install` installed GoogleTest's headers, libraries, and CMake
+  and pkg-config files in hipObject's prefix too. The packages weren't
+  affected.
 
 ### Known issues
 

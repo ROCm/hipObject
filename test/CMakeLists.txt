@@ -12,6 +12,4 @@ if(NOT CMAKE_SKIP_INSTALL_RULES)
   add_subdirectory(install)
 endif()
 
-if(BUILD_TESTING)
-  add_subdirectory(integration)
-endif()
+add_subdirectory(integration)

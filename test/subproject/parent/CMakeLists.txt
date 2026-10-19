@@ -27,6 +27,11 @@ list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_BINARY_DIR}/parent-prefix")
 
 add_subdirectory(${HIPOBJ_SUBPROJECT_SOURCE_DIR} hipobject)
 
+# A superproject links the library by the installed package's name
+if(NOT TARGET hipobj::hipobj)
+  message(FATAL_ERROR "hipObject doesn't define the hipobj::hipobj target")
+endif()
+
 # hipObject's subproject test has to pass on CMAKE_PREFIX_PATH as
 # hipObject received it: with the prefix above, and without the ROCm
 # prefixes hipObject adds itself
