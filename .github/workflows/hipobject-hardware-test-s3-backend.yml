@@ -232,33 +232,6 @@ jobs:
           repo: ${{ env.GUEST_ARTIFACT_REPO }}
           tag: ${{ env.GUEST_ARTIFACT_TAG }}
 
-      - name: Read VM info
-        id: vm_info
-        env:
-          GUEST_OUTPUT_DIR: ${{ steps.guest_image.outputs.output_dir }}
-        run: |
-          OUT="${GUEST_OUTPUT_DIR}"
-          eval "$(python3 - "$OUT" <<'PYEOF'
-          import json, os, shlex, sys
-
-          out = sys.argv[1]
-          d = json.load(open(os.path.join(out, "vm-info.json")))
-          here = lambda p: os.path.join(out, os.path.basename(p)) if p else ""
-          keys = {
-              "VM_USER": d.get("username", "ci"),
-              "VM_DISK": here(d.get("image_path", "")),
-              "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
-          }
-          for k, v in keys.items():
-              print(f"{k}={shlex.quote(str(v))}")
-          PYEOF
-          )"
-          {
-            echo "vm_user=$VM_USER"
-            echo "vm_disk=$VM_DISK"
-            echo "ssh_key=$SSH_KEY_PRIVATE"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Wait for deps
         run: bash ci/ernic/background-task.sh wait deps
 
@@ -310,7 +283,7 @@ jobs:
 
       - name: Start QEMU VM
         env:
-          VM_DISK: ${{ steps.vm_info.outputs.vm_disk }}
+          VM_DISK: ${{ steps.guest_image.outputs.vm_disk }}
         run: |
           "${QEMU_PATH:-}qemu-system-x86_64" \
             -machine "q35,accel=${QEMU_ACCEL},memory-backend=mem0" \
@@ -330,8 +303,8 @@ jobs:
 
       - name: Wait for VM SSH
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           chmod 600 "$SSH_KEY"
           vm_ssh() {
@@ -352,8 +325,8 @@ jobs:
 
       - name: Disable the guest's amdgpu driver apt source
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           # The guest image's build added repo.radeon.com/amdgpu/31.60 as an
           # apt source to install amdgpu-dkms, and that tree has since
@@ -394,8 +367,8 @@ jobs:
 
       - name: Install kernel headers and build tools in VM
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -p "$SSH_PORT" "${VM_USER}@localhost" bash -s << 'EOFVM'
@@ -426,8 +399,8 @@ jobs:
 
       - name: Stage the ionic driver sources in the VM
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
           IONIC_SRC: ${{ steps.ionic_sources.outputs.source_dir }}
           IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
         run: |
@@ -447,8 +420,8 @@ jobs:
 
       - name: Provision the VM with the ernic Ansible collection
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
           IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
         run: |
           # The guest image bakes the kernel and the rdma-core userspace but
@@ -494,8 +467,8 @@ jobs:
 
       - name: Verify the RDMA device and the object store
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           vm_ssh() {
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
@@ -538,8 +511,8 @@ jobs:
 
       - name: Copy minio binary to VM
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           # In a container job, ${{ github.workspace }} resolves to the runner
           # host path but inside the container it is mounted at /__w/.
@@ -565,8 +538,8 @@ jobs:
 
       - name: Run S3 PUT+GET test in VM
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -p "$SSH_PORT" "${VM_USER}@localhost" \

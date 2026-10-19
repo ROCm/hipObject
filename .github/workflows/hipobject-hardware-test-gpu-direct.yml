@@ -313,33 +313,6 @@ jobs:
           repo: ${{ env.GUEST_ARTIFACT_REPO }}
           tag: ${{ env.GUEST_ARTIFACT_TAG }}
 
-      - name: Read VM info
-        id: vm_info
-        env:
-          GUEST_OUTPUT_DIR: ${{ steps.guest_image.outputs.output_dir }}
-        run: |
-          OUT="${GUEST_OUTPUT_DIR}"
-          eval "$(python3 - "$OUT" <<'PYEOF'
-          import json, os, shlex, sys
-
-          out = sys.argv[1]
-          d = json.load(open(os.path.join(out, "vm-info.json")))
-          here = lambda p: os.path.join(out, os.path.basename(p)) if p else ""
-          keys = {
-              "VM_USER": d.get("username", "ci"),
-              "VM_DISK": here(d.get("image_path", "")),
-              "SSH_KEY_PRIVATE": here(d.get("ssh_keys", {}).get("private_key_path", "")),
-          }
-          for k, v in keys.items():
-              print(f"{k}={shlex.quote(str(v))}")
-          PYEOF
-          )"
-          {
-            echo "vm_user=$VM_USER"
-            echo "vm_disk=$VM_DISK"
-            echo "ssh_key=$SSH_KEY_PRIVATE"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Wait for deps
         run: bash ci/ernic/background-task.sh wait deps
 
@@ -429,7 +402,7 @@ jobs:
 
       - name: Start QEMU VM with both vfio-user devices
         env:
-          VM_DISK: ${{ steps.vm_info.outputs.vm_disk }}
+          VM_DISK: ${{ steps.guest_image.outputs.vm_disk }}
         run: |
           "${QEMU_PATH:-}qemu-system-x86_64" \
             -machine "q35,accel=${QEMU_ACCEL},memory-backend=mem0" \
@@ -450,8 +423,8 @@ jobs:
 
       - name: Wait for VM SSH
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           chmod 600 "$SSH_KEY"
           for _ in $(seq 1 60); do
@@ -467,8 +440,8 @@ jobs:
 
       - name: Disable the guest's amdgpu driver apt source
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           # The guest image's build added repo.radeon.com/amdgpu/31.60 as an
           # apt source to install amdgpu-dkms, and that tree has since
@@ -509,8 +482,8 @@ jobs:
 
       - name: Verify both emulated functions are present
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           vm_ssh() {
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
@@ -534,8 +507,8 @@ jobs:
 
       - name: Stage the ionic driver sources in the VM
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
           IONIC_SRC: ${{ steps.ionic_sources.outputs.source_dir }}
           IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
         run: |
@@ -555,8 +528,8 @@ jobs:
 
       - name: Provision the VM with the ernic Ansible collection
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
           IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
         run: |
           ERNIC_RUN_DIR=/tmp/ernic-ci
@@ -594,8 +567,8 @@ jobs:
 
       - name: Verify the RDMA device and the object store
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           vm_ssh() {
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
@@ -623,8 +596,8 @@ jobs:
 
       - name: Stage ip_discovery.bin into the guest
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
             -P "$SSH_PORT" "${GITHUB_WORKSPACE}/rj-fw/ip_discovery.bin" \
@@ -640,8 +613,8 @@ jobs:
       - name: Load amdgpu via amdgpu-probe
         timeout-minutes: 8
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           # qemu-minimal parks its lane on this step hanging with no output.
           # Bounded at three layers so a recurrence reports instead of eating
@@ -654,8 +627,8 @@ jobs:
 
       - name: Verify amdgpu loaded and a GPU KFD node is present
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           vm_ssh() {
             ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no "$@"
@@ -681,8 +654,8 @@ jobs:
 
       - name: Copy minio binary to VM
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           scp -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -P "$SSH_PORT" \
             "${GITHUB_WORKSPACE}/ernic-build-gpu/integrations/minio-cpp/minio-getput-rdma" \
@@ -716,8 +689,8 @@ jobs:
         # moment the transfer works.
         continue-on-error: ${{ matrix.allow_failure }}
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           GPU_MODE="${{ matrix.gpu_mode }}"
           BUFFER_LABEL="${{ matrix.buffer_label }}"
@@ -805,8 +778,8 @@ jobs:
       - name: Collect logs
         if: always()
         env:
-          SSH_KEY: ${{ steps.vm_info.outputs.ssh_key }}
-          VM_USER: ${{ steps.vm_info.outputs.vm_user }}
+          SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
+          VM_USER: ${{ steps.guest_image.outputs.vm_user }}
         run: |
           echo "=== ernic-s3.log ===";  cat /tmp/ernic-s3.log     || true
           echo "=== rocjitsu ===";      docker logs rocjitsu-gpu   || true
