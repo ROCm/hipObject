@@ -28,8 +28,13 @@ rocm_setup_install_metrics_exporter: false
 rdma_setup_motd: false
 rdma_setup_install_rdma_exporter: false
 
-# MinIO Client binary (dl.min.io), not the Ubuntu "mc" APT package (Midnight
-# Commander). Override URL for mirrors or pin with hipobj_minio_mc_checksum.
-hipobj_minio_mc_download_url: https://dl.min.io/client/mc/release/linux-amd64/mc
+# MinIO Client binary, not the Ubuntu "mc" APT package (Midnight Commander).
+# dl.min.io returns HTTP 410 for its binaries, so this is the GitHub release
+# asset that hipobject-minio-integration-check.yml uses. MinIO stopped
+# attaching assets to releases after this one. If you override the URL, for
+# a mirror, override the checksum too, or set it to "" to skip the check.
+hipobj_minio_mc_release: RELEASE.2025-08-13T08-35-41Z
+hipobj_minio_mc_download_url: "https://github.com/minio/mc/releases/download/\
+  {{ hipobj_minio_mc_release }}/mc.linux-amd64.{{ hipobj_minio_mc_release }}"
 hipobj_minio_mc_install_path: /usr/local/bin/mc
-hipobj_minio_mc_checksum: ""
+hipobj_minio_mc_checksum: "sha256:01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891"

@@ -56,7 +56,9 @@ Keep private files untracked (see [.gitignore](.gitignore)).
   includes RDMA userspace libraries.
 - `hipobj_minio_mc_download_url` / `hipobj_minio_mc_install_path` /
   `hipobj_minio_mc_checksum`: MinIO Client (`mc`) install for smoke tests
-  (defaults to linux-amd64 from dl.min.io; not the distro `mc` package).
+  (defaults to the linux-amd64 GitHub release asset named by
+  `hipobj_minio_mc_release`, checked against its SHA256; not the distro `mc`
+  package). Override the checksum along with the URL.
 
 ## Licensing
 
