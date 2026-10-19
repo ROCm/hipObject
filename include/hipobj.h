@@ -49,7 +49,9 @@ extern "C" {
  * while the other changes something that both use, such as the list of
  * registered buffers, with two exceptions: a transfer can wait for an
  * RDMA connection (see below), and calls to hipObjInit() and
- * hipObjShutdown() run one at a time.
+ * hipObjShutdown() run one at a time. hipObjInit() reads hipObject's
+ * environment variables, so it mustn't run while another thread changes
+ * the environment, for example with setenv(), putenv(), or unsetenv().
  *
  * **Transfers.** hipObjGet() and hipObjPut() calls run at the same time
  * as each other, and as every other call. Each transfer uses an RDMA
@@ -65,7 +67,10 @@ extern "C" {
  * connection, since the one it would wait for could be the one the
  * callback's own transfer holds: if none is free, it returns hipObjBusy.
  * A callback that waits for another thread's transfer can wait forever
- * for the same reason, and hipObject can't detect it.
+ * for the same reason, and hipObject can't detect it. hipObject tells
+ * which transfers a callback starts by the thread it runs on, so a
+ * callback must return on the thread that called it. This matters if it
+ * runs in a fiber or coroutine that can move to another thread.
  *
  * **Buffers.** hipObjBufDeregister() returns hipObjBusy, and leaves the
  * buffer registered, while another call is using the buffer: a transfer,
@@ -272,6 +277,10 @@ typedef struct {
  * functions return hipObjNotInitialized until it has
  * succeeded.
  *
+ * It reads hipObject's environment variables, so
+ * don't change the environment on another thread
+ * while it runs (see @ref threads).
+ *
  * Returns hipObjInvalidValue if config is NULL, flags
  * isn't 0, or gpuDevice is below -1 or names a GPU that
  * doesn't exist; hipObjAlreadyInitialized if hipObject
@@ -390,8 +399,9 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * HIPOBJ_STAGE_TIMEOUT_MS environment variable), this
  * returns hipObjInternalError and leaves the copy
  * running. It can still write the buffer after this
- * returns, and until it finishes, the buffer can't be
- * used or deregistered (see hipObjBufSync()).
+ * returns, and until it finishes, calls that start
+ * after this returns can't use or deregister the
+ * buffer (see hipObjBufSync()).
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
@@ -432,8 +442,9 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * HIPOBJ_STAGE_TIMEOUT_MS environment variable), this
  * returns hipObjInternalError and leaves the copy
  * running. It can still read the buffer after this
- * returns, and until it finishes, the buffer can't be
- * used or deregistered (see hipObjBufSync()).
+ * returns, and until it finishes, calls that start
+ * after this returns can't use or deregister the
+ * buffer (see hipObjBufSync()).
  *
  * @param handle  S3 object handle (from application)
  * @param devPtr  Registered GPU or host buffer
@@ -468,10 +479,12 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
  * doesn't finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS
  * environment variable), this returns hipObjInternalError and leaves the
  * copy running. It can still read or write the buffer after this returns.
- * Until it finishes, hipObject keeps the staging buffer it uses, and the
- * buffer can't be used: hipObjGet(), hipObjPut(), hipObjBufSync(), and
- * hipObjGetRdmaToken() return hipObjBusy for it, and
- * hipObjBufDeregister() returns hipObjBusy and leaves it registered.
+ * Until it finishes, hipObject keeps the staging buffer it uses, and
+ * calls that start after the copy times out can't use the buffer:
+ * hipObjGet(), hipObjPut(), hipObjBufSync(), and hipObjGetRdmaToken()
+ * return hipObjBusy for it, and hipObjBufDeregister() returns hipObjBusy
+ * and leaves it registered. Calls that had already started aren't
+ * stopped.
  * Once the copy has finished, the buffer can be used and deregistered
  * again. If it never finishes, the staging buffer is never freed.
  *

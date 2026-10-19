@@ -266,10 +266,13 @@ BufferMap::deregisterBuffer(void *devPtr)
         if (it == entries_.end()) {
             return DeregisterResult::NotRegistered;
         }
-        /* Other copies are only made by find(), under the lock this holds
-         * exclusively, so none can appear while it's held. One that's
-         * released while this checks can only make the entry look busy
-         * when it's not, never the reverse. */
+        /* A copy can only be made from one that's already held. find()
+         * copies the map's own under the lock this holds exclusively,
+         * and the other copies, such as the one AbandonedCopies::add()
+         * keeps, are made from one that find() returned. So while this
+         * holds the lock, a count of 1, the map's own copy, can't go
+         * up. A copy that's released while this checks can only make
+         * the entry look busy when it's not, never the reverse. */
         if (it->second.use_count() > 1) {
             return DeregisterResult::Busy;
         }

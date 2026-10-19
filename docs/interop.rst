@@ -97,6 +97,14 @@ cuObject-equipped storage gateways in production deployments.
 
 .. _adapter: https://github.com/versity/versitygw/tree/main/cuwrapper
 
+The client and the server don't negotiate a path MTU, and the token
+doesn't carry one, so both ends' MTUs must match. hipObject sets its
+connections' path MTU to 4096 bytes, so configure the client's and the
+server's ports, and the network between them, for 4096-byte RDMA
+packets. With RoCE, that takes jumbo frames, usually an Ethernet MTU of
+9000. If the MTUs don't match, transfers hang until the server times
+out, without an error on either end.
+
 Testing paths
 -------------
 
