@@ -7,14 +7,29 @@
 # value, which breaks the download.
 cmake_minimum_required(VERSION 3.25.2)
 
-# The version is here and in the HIPOBJ_VERSION_* macros in
-# include/hipobj.h, and they must match. The hipobj-install test fails if
-# they don't: the installed library reports the header's version, and
-# the test expects this one. It isn't a cache variable, so changing it
-# here takes effect when an existing build directory is reconfigured.
-set(HIPOBJ_VERSION_MAJOR 0)
-set(HIPOBJ_VERSION_MINOR 1)
-set(HIPOBJ_VERSION_PATCH 0)
+# The version is set only in include/hipobj.h, by the HIPOBJ_VERSION_*
+# macros, and read from there. The installed library reports the
+# header's version too, and the hipobj-install test checks that it's
+# this one. docs/conf.py reads the same lines.
+set(HIPOBJ_VERSION_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/hipobj.h")
+file(STRINGS "${HIPOBJ_VERSION_HEADER}" HIPOBJ_VERSION_LINES
+  REGEX "^#define[ \t]+HIPOBJ_VERSION_(MAJOR|MINOR|PATCH)[ \t]")
+foreach(part IN ITEMS MAJOR MINOR PATCH)
+  string(REGEX MATCH
+    "#define[ \t]+HIPOBJ_VERSION_${part}[ \t]+([0-9]+)[ \t]*(;|$)"
+    match "${HIPOBJ_VERSION_LINES}")
+  # Not if(NOT CMAKE_MATCH_1): CMake treats a version number of 0 as false
+  if(match STREQUAL "")
+    message(FATAL_ERROR
+      "HIPOBJ_VERSION_${part} isn't defined as a number in "
+      "${HIPOBJ_VERSION_HEADER}")
+  endif()
+  set(HIPOBJ_VERSION_${part} "${CMAKE_MATCH_1}")
+endforeach()
+# Reconfigure when the header changes, so that a new version takes
+# effect without anyone having to rerun CMake
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${HIPOBJ_VERSION_HEADER}")
 set(HIPOBJ_LIBRARY_VERSION
   "${HIPOBJ_VERSION_MAJOR}.${HIPOBJ_VERSION_MINOR}.${HIPOBJ_VERSION_PATCH}")
 
