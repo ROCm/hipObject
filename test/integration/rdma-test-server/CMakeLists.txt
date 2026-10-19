@@ -32,6 +32,7 @@ target_include_directories(hipobj-rdma-test-server PRIVATE
   ${PROJECT_SOURCE_DIR}/src/common
   ${PROJECT_SOURCE_DIR}/src/rdma
   ${PROJECT_SOURCE_DIR}/src/s3
+  ${PROJECT_SOURCE_DIR}/test/common
   ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(hipobj-rdma-test-server PRIVATE

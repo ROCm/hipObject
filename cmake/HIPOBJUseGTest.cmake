@@ -74,6 +74,7 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
     ${PROJECT_SOURCE_DIR}/src/common
     ${PROJECT_SOURCE_DIR}/src/rdma
     ${PROJECT_SOURCE_DIR}/src/s3
+    ${PROJECT_SOURCE_DIR}/test/common
     ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server
   )
   add_test(NAME ${TEST_NAME}
