@@ -38,35 +38,37 @@ public:
     Verbs(Verbs &&)                 = delete;
     Verbs &operator=(Verbs &&)      = delete;
 
-    virtual ibv_device **get_device_list(int *num_devices) const                                       = 0;
-    virtual void         free_device_list(ibv_device **list) const                                     = 0;
-    virtual ibv_context *open_device(ibv_device *device) const                                         = 0;
-    virtual int          close_device(ibv_context *context) const                                      = 0;
-    virtual const char  *get_device_name(ibv_device *device) const                                     = 0;
-    virtual int          query_device(ibv_context *context, ibv_device_attr *device_attr) const        = 0;
-    virtual int     query_port(ibv_context *context, uint8_t port_num, ibv_port_attr *port_attr) const = 0;
-    virtual int     query_gid(ibv_context *context, uint8_t port_num, int index, ibv_gid *gid) const   = 0;
-    virtual ibv_pd *alloc_pd(ibv_context *context) const                                               = 0;
-    virtual int     dealloc_pd(ibv_pd *pd) const                                                       = 0;
+    [[nodiscard]] virtual ibv_device **get_device_list(int *num_devices) const                           = 0;
+    virtual void                       free_device_list(ibv_device **list) const                         = 0;
+    [[nodiscard]] virtual ibv_context *open_device(ibv_device *device) const                             = 0;
+    [[nodiscard]] virtual int          close_device(ibv_context *context) const                          = 0;
+    [[nodiscard]] virtual const char  *get_device_name(ibv_device *device) const                         = 0;
+    [[nodiscard]] virtual int     query_device(ibv_context *context, ibv_device_attr *device_attr) const = 0;
+    [[nodiscard]] virtual int     query_port(ibv_context *context, uint8_t port_num,
+                                             ibv_port_attr *port_attr) const                             = 0;
+    [[nodiscard]] virtual int     query_gid(ibv_context *context, uint8_t port_num, int index,
+                                            ibv_gid *gid) const                                          = 0;
+    [[nodiscard]] virtual ibv_pd *alloc_pd(ibv_context *context) const                                   = 0;
+    [[nodiscard]] virtual int     dealloc_pd(ibv_pd *pd) const                                           = 0;
 
     /* Registers memory the NIC reaches through the CPU's page tables, with
      * its address as the IOVA */
-    virtual ibv_mr *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const = 0;
+    [[nodiscard]] virtual ibv_mr *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const = 0;
 
     /* True when libibverbs has ibv_reg_dmabuf_mr(), which rdma-core 34
      * added. Without it, reg_dmabuf_mr() fails with EOPNOTSUPP. */
-    [[nodiscard]] virtual bool supportsDmabuf() const                                  = 0;
-    virtual ibv_mr *reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
-                                  int access) const                                    = 0;
-    virtual int     dereg_mr(ibv_mr *mr) const                                         = 0;
-    virtual ibv_cq *create_cq(ibv_context *context, int cqe, void *cq_context, ibv_comp_channel *channel,
-                              int comp_vector) const                                   = 0;
-    virtual int     destroy_cq(ibv_cq *cq) const                                       = 0;
-    virtual ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const        = 0;
-    virtual int     modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const      = 0;
-    virtual int     destroy_qp(ibv_qp *qp) const                                       = 0;
-    virtual int     poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const             = 0;
-    virtual int     post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const = 0;
+    [[nodiscard]] virtual bool    supportsDmabuf() const                                             = 0;
+    [[nodiscard]] virtual ibv_mr *reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova,
+                                                int fd, int access) const                            = 0;
+    [[nodiscard]] virtual int     dereg_mr(ibv_mr *mr) const                                         = 0;
+    [[nodiscard]] virtual ibv_cq *create_cq(ibv_context *context, int cqe, void *cq_context,
+                                            ibv_comp_channel *channel, int comp_vector) const        = 0;
+    [[nodiscard]] virtual int     destroy_cq(ibv_cq *cq) const                                       = 0;
+    [[nodiscard]] virtual ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const        = 0;
+    [[nodiscard]] virtual int     modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const      = 0;
+    [[nodiscard]] virtual int     destroy_qp(ibv_qp *qp) const                                       = 0;
+    [[nodiscard]] virtual int     poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const             = 0;
+    [[nodiscard]] virtual int     post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const = 0;
 };
 
 /* libibverbs, through the functions loadLibibverbs() loads from it */
@@ -103,29 +105,31 @@ public:
      * <infiniband/verbs.h> do. */
     explicit LoadedVerbs(const Funcs &funcs, DlHandle library = DlHandle{});
 
-    ibv_device **get_device_list(int *num_devices) const override;
-    void         free_device_list(ibv_device **list) const override;
-    ibv_context *open_device(ibv_device *device) const override;
-    int          close_device(ibv_context *context) const override;
-    const char  *get_device_name(ibv_device *device) const override;
-    int          query_device(ibv_context *context, ibv_device_attr *device_attr) const override;
-    int          query_port(ibv_context *context, uint8_t port_num, ibv_port_attr *port_attr) const override;
-    int          query_gid(ibv_context *context, uint8_t port_num, int index, ibv_gid *gid) const override;
-    ibv_pd      *alloc_pd(ibv_context *context) const override;
-    int          dealloc_pd(ibv_pd *pd) const override;
-    ibv_mr      *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const override;
-    [[nodiscard]] bool supportsDmabuf() const override;
-    ibv_mr            *reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
-                                     int access) const override;
-    int                dereg_mr(ibv_mr *mr) const override;
-    ibv_cq            *create_cq(ibv_context *context, int cqe, void *cq_context, ibv_comp_channel *channel,
-                                 int comp_vector) const override;
-    int                destroy_cq(ibv_cq *cq) const override;
-    ibv_qp            *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override;
-    int                modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const override;
-    int                destroy_qp(ibv_qp *qp) const override;
-    int                poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const override;
-    int                post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const override;
+    [[nodiscard]] ibv_device **get_device_list(int *num_devices) const override;
+    void                       free_device_list(ibv_device **list) const override;
+    [[nodiscard]] ibv_context *open_device(ibv_device *device) const override;
+    [[nodiscard]] int          close_device(ibv_context *context) const override;
+    [[nodiscard]] const char  *get_device_name(ibv_device *device) const override;
+    [[nodiscard]] int     query_device(ibv_context *context, ibv_device_attr *device_attr) const override;
+    [[nodiscard]] int     query_port(ibv_context *context, uint8_t port_num,
+                                     ibv_port_attr *port_attr) const override;
+    [[nodiscard]] int     query_gid(ibv_context *context, uint8_t port_num, int index,
+                                    ibv_gid *gid) const override;
+    [[nodiscard]] ibv_pd *alloc_pd(ibv_context *context) const override;
+    [[nodiscard]] int     dealloc_pd(ibv_pd *pd) const override;
+    [[nodiscard]] ibv_mr *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const override;
+    [[nodiscard]] bool    supportsDmabuf() const override;
+    [[nodiscard]] ibv_mr *reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                                        int access) const override;
+    [[nodiscard]] int     dereg_mr(ibv_mr *mr) const override;
+    [[nodiscard]] ibv_cq *create_cq(ibv_context *context, int cqe, void *cq_context,
+                                    ibv_comp_channel *channel, int comp_vector) const override;
+    [[nodiscard]] int     destroy_cq(ibv_cq *cq) const override;
+    [[nodiscard]] ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override;
+    [[nodiscard]] int     modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const override;
+    [[nodiscard]] int     destroy_qp(ibv_qp *qp) const override;
+    [[nodiscard]] int     poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const override;
+    [[nodiscard]] int     post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const override;
 
 private:
     DlHandle library_;

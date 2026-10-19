@@ -70,8 +70,8 @@ public:
 
     /* Leaves the MR's addr NULL, as the real ibv_reg_dmabuf_mr() does,
      * which also tells the tests which path registered it */
-    ibv_mr *reg_dmabuf_mr(ibv_pd * /*pd*/, uint64_t offset, size_t /*length*/, uint64_t iova, int fd,
-                          int /*access*/) const override
+    [[nodiscard]] ibv_mr *reg_dmabuf_mr(ibv_pd * /*pd*/, uint64_t offset, size_t /*length*/, uint64_t iova,
+                                        int fd, int /*access*/) const override
     {
         ++g_log.dmabufRegisterCalls;
         g_log.registeredFd             = fd;

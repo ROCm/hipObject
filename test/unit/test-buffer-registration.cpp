@@ -75,7 +75,7 @@ class RacingVerbs final : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    ibv_mr *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const override
+    [[nodiscard]] ibv_mr *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const override
     {
         if (onRegister_) {
             /* Cleared first, so registering from the hook doesn't call it

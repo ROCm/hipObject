@@ -64,7 +64,7 @@ class ThrowingGetDeviceHip : public hipObjTest::FakeHip {
 public:
     using FakeHip::FakeHip;
 
-    hipError_t getDevice(int * /*device*/) const override
+    [[nodiscard]] hipError_t getDevice(int * /*device*/) const override
     {
         throwIt();
     }
@@ -75,8 +75,8 @@ class ThrowingMemcpyHip : public hipObjTest::FakeHip {
 public:
     using FakeHip::FakeHip;
 
-    hipError_t memcpyAsync(void * /*dst*/, const void * /*src*/, size_t /*size*/, hipMemcpyKind /*kind*/,
-                           hipStream_t /*stream*/) const override
+    [[nodiscard]] hipError_t memcpyAsync(void * /*dst*/, const void * /*src*/, size_t /*size*/,
+                                         hipMemcpyKind /*kind*/, hipStream_t /*stream*/) const override
     {
         throwIt();
     }
@@ -87,7 +87,7 @@ class ThrowingCreateQpVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    ibv_qp *create_qp(ibv_pd * /*pd*/, ibv_qp_init_attr * /*qp_init_attr*/) const override
+    [[nodiscard]] ibv_qp *create_qp(ibv_pd * /*pd*/, ibv_qp_init_attr * /*qp_init_attr*/) const override
     {
         throwIt();
     }
@@ -98,7 +98,8 @@ class ThrowingRegMrVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    ibv_mr *reg_mr(ibv_pd * /*pd*/, void * /*addr*/, size_t /*length*/, int /*access*/) const override
+    [[nodiscard]] ibv_mr *reg_mr(ibv_pd * /*pd*/, void * /*addr*/, size_t /*length*/,
+                                 int /*access*/) const override
     {
         throwIt();
     }

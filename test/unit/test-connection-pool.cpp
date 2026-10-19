@@ -75,7 +75,7 @@ class ThrowingCreateQpVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override
+    [[nodiscard]] ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override
     {
         if (throws) {
             throw std::runtime_error("thrown by a fake");
