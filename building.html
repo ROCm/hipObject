@@ -977,6 +977,18 @@ toolchain:</p>
 cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>hipobj-sphinx-html
 </pre></div>
 </div>
+<p>The build installs Sphinx and the other Python packages
+that <code class="docutils literal notranslate"><span class="pre">docs/sphinx/requirements.txt</span></code> lists into a virtual
+environment in the build directory, which needs network
+access the first time.</p>
+<p>The documentation also builds without CMake, with Doxygen
+and the packages in <code class="docutils literal notranslate"><span class="pre">docs/sphinx/requirements.txt</span></code>
+installed. Run Doxygen in <code class="docutils literal notranslate"><span class="pre">docs/doxygen</span></code>, which writes its
+XML to <code class="docutils literal notranslate"><span class="pre">docs/doxygen/xml/</span></code>, and then Sphinx:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="o">(</span><span class="nb">cd</span><span class="w"> </span>docs/doxygen<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>doxygen<span class="w"> </span>Doxyfile<span class="o">)</span>
+sphinx-build<span class="w"> </span>-b<span class="w"> </span>html<span class="w"> </span>docs<span class="w"> </span>build/docs/html
+</pre></div>
+</div>
 </section>
 <section id="environment-variables">
 <h2>Environment Variables<a class="headerlink" href="#environment-variables" title="Link to this heading">#</a></h2>
