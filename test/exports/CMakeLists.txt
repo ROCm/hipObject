@@ -2,8 +2,9 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Check that the shared library exports only the public C API. A static
-# library has no dynamic symbol table, so there's nothing to check.
+# Check that the shared library exports the public C API, and nothing
+# else. A static library has no dynamic symbol table, so there's nothing
+# to check.
 
 get_target_property(HIPOBJ_LIBRARY_TYPE hipobj TYPE)
 if(HIPOBJ_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")
@@ -16,5 +17,6 @@ if(HIPOBJ_LIBRARY_TYPE STREQUAL "SHARED_LIBRARY")
     COMMAND ${CMAKE_COMMAND}
       -DNM=${CMAKE_NM}
       -DLIBRARY=$<TARGET_FILE:hipobj>
+      -DHEADER=${PROJECT_SOURCE_DIR}/include/hipobj.h
       -P ${CMAKE_CURRENT_SOURCE_DIR}/check-exports.cmake)
 endif()
