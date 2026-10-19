@@ -5,6 +5,7 @@
 
 #include "connection-pool.h"
 
+#include <cassert>
 #include <cstddef>
 #include <cstdio>
 #include <memory>
@@ -50,11 +51,14 @@ ConnectionPool::Lease::Lease(ConnectionPool &pool, size_t index) noexcept : pool
 }
 
 /* A lease that's been moved from was never counted by the move, so it
- * isn't uncounted either */
+ * isn't uncounted either. The count can only be 0 here if the lease is
+ * destroyed on a thread that didn't acquire it, which the header forbids
+ * by requiring callbacks to return on the thread that called them. */
 ConnectionPool::Lease::~Lease()
 {
     if (pool_ != nullptr) {
         pool_->release(index_, connected_);
+        assert(t_leasesHeld > 0);
         --t_leasesHeld;
     }
 }

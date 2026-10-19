@@ -915,6 +915,10 @@ jobs:
           `IBV_WC_REM_ACCESS_ERR` (`status=10 vendor_err=0x9`) at 1 MiB, well
           under the 16 MiB `IONIC_MESH_MAX_MSG` cap.
 
+          In about 1 run in 5, it fails differently: the PUT succeeds
+          (`PUT ok`), then the GET hangs until the client's timeout ends it
+          (exit status 124), with nothing in the server's journal.
+
           Ruled out by measurement on a two-guest lab that passes 8/8 with the
           same binaries: rocjitsu build, QEMU build, guest memory, vCPU count,
           accelerator, `ip_discovery.bin`, the message-size cap and BAR

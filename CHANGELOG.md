@@ -213,6 +213,13 @@
     which finish normally. hipObject releases the RDMA resources and
     buffer registrations when the last of them returns, and
     `hipObjInit()` can initialize it again before then.
+  - `hipObjInit()` reads hipObject's environment variables, so it
+    mustn't run while another thread changes the environment, for
+    example with `setenv()`, `putenv()`, or `unsetenv()`.
+  - A callback must return on the thread that called it, since hipObject
+    tells which transfers a callback starts by the thread it runs on.
+    This matters for a callback that runs in a fiber or coroutine that
+    can move to another thread.
 - `hipObjGetVersionString()` no longer writes to a shared buffer on every
   call, which was a data race when two threads called it at once.
 - The library links CMake's `Threads::Threads`, which adds `-pthread`
@@ -353,12 +360,13 @@
   `hipObjBufDeregister()` and `hipObjShutdown()` freed the staging buffer
   while the copy could still use it, and later transfers could use the
   staging buffer at the same time as the copy. hipObject now keeps the
-  staging buffer until the copy finishes. Until then, `hipObjGet()`,
+  staging buffer until the copy finishes. Until then, calls that start
+  after the copy times out can't use the buffer: `hipObjGet()`,
   `hipObjPut()`, `hipObjBufSync()`, and `hipObjGetRdmaToken()` return
-  the new `hipObjBusy` error for the buffer, and `hipObjBufDeregister()`
+  the new `hipObjBusy` error for it, and `hipObjBufDeregister()`
   returns `hipObjBusy` and leaves it registered; call it again once the
-  copy has finished. If the copy never finishes, the staging
-  buffer is never freed.
+  copy has finished. Calls that had already started aren't stopped. If
+  the copy never finishes, the staging buffer is never freed.
 - The queue pair `hipObjInit()` creates didn't allow remote reads, which
   the server needs to read a `hipObjPut()` buffer. hipObject used the wrong
   values for the libibverbs access flags, so the queue pair allowed remote
@@ -453,4 +461,11 @@
   affected.
 
 ### Known issues
+
+- The client and the server don't negotiate a path MTU. hipObject sets
+  its connections' path MTU to 4096 bytes, so both ends' ports, and the
+  network between them, must carry 4096-byte RDMA packets, which with
+  RoCE takes jumbo frames. If the MTUs don't match, transfers hang until
+  the server times out. `docs/interop.rst` now describes the
+  requirement.
 
