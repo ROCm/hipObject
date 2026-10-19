@@ -103,6 +103,10 @@ extern "C" {
  *  LIBRARY VERSION NUMBERS
  * ------------------------------------------------------- */
 
+/* This is the only place the version is set. CMakeLists.txt and
+ * docs/conf.py read it from these lines, so keep each one in the form
+ * #define HIPOBJ_VERSION_<part> <number>. */
+
 /*! @brief hipObject major version number @ingroup core */
 #define HIPOBJ_VERSION_MAJOR 0
 /*! @brief hipObject minor version number @ingroup core */

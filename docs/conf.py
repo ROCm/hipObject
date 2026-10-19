@@ -21,22 +21,29 @@ copyright = "2025-2026 Advanced Micro Devices, Inc. All rights reserved."
 # pylint: enable=redefined-builtin
 
 
-def _cmake_version():
-    """Return the version that the top-level CMakeLists.txt sets."""
-    cmake = (Path(__file__).resolve().parent.parent / "CMakeLists.txt").read_text(
-        encoding="utf-8"
-    )
+def _header_version():
+    """Return the version that the HIPOBJ_VERSION_* macros in hipobj.h set."""
+    header = (
+        Path(__file__).resolve().parent.parent / "include" / "hipobj.h"
+    ).read_text(encoding="utf-8")
     parts = []
     for part in ("MAJOR", "MINOR", "PATCH"):
-        match = re.search(rf"^set\(HIPOBJ_VERSION_{part} (\d+)\)$", cmake, re.MULTILINE)
+        match = re.search(
+            rf"^#define[ \t]+HIPOBJ_VERSION_{part}[ \t]+(\d+)[ \t]*$",
+            header,
+            re.MULTILINE,
+        )
         if not match:
-            raise ValueError(f"HIPOBJ_VERSION_{part} not found in CMakeLists.txt")
+            raise ValueError(
+                f"HIPOBJ_VERSION_{part} isn't defined as a number in hipobj.h"
+            )
         parts.append(match.group(1))
     return ".".join(parts)
 
 
-# The project's version, from CMakeLists.txt
-version = _cmake_version()
+# The project's version, from the public header, which is the only
+# place it's set
+version = _header_version()
 release = version
 
 # -- Extensions ----------------------------------------------

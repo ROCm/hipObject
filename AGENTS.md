@@ -159,6 +159,10 @@ Notes:
   change what callers can rely on or have to do**, so both need a
   [changelog](#changelog) entry. Fixing a typo or rewording without changing
   the meaning doesn't.
+- **The version is set only in the public header**, by the
+  `HIPOBJ_VERSION_MAJOR`, `HIPOBJ_VERSION_MINOR`, and `HIPOBJ_VERSION_PATCH`
+  macros. The top-level `CMakeLists.txt` and `docs/conf.py` read it from
+  those lines, so keep each one a plain `#define` of a number.
 - **The public header is C**, and C11 and C++11 consumers both have to be able
   to include it. Keep it free of C++-isms and of anything newer than C11 or
   C++11. Every build with `BUILD_TESTING=ON`, including CI's, compiles it as
@@ -758,9 +762,8 @@ Python code must run on **Python 3.10**. Don't use anything newer, such as
   CI:
   [hipobject-documentation-check.yml](.github/workflows/hipobject-documentation-check.yml),
   when the documentation (including `docs/sphinx/requirements.txt`), the
-  public header, `README.md`, the top-level `CMakeLists.txt` (which
-  `docs/conf.py` reads the version from), the documentation's build files,
-  or the workflow file change.
+  public header (which `docs/conf.py` reads the version from), `README.md`,
+  the documentation's build files, or the workflow file change.
 - **The documentation has to build without CMake too.** After the move to
   rocm-systems, Read the Docs will run doxygen in `docs/doxygen` and Sphinx
   on `docs/conf.py` directly, so keep CMake's `@VARIABLE@` substitutions
