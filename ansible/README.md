@@ -74,10 +74,15 @@ them, they:
 - Add AMD's ROCm package repository for ROCm 10 and later
   (stable.repo.amd.com), install ROCm and `amdgpu-dkms`, write
   `/etc/profile.d/rocm.sh`, and add ROCm's libraries to the loader cache.
-- Remove any ROCm installed from repo.radeon.com, ROCm's older package
-  repository: the packages named `rocm` followed by a digit, `hsa-rocr*`,
-  `amdgpu-install`, and `rock-dkms`. `rocm_setup` does this unless
-  `rocm_setup_purge_other_stream` is false.
+- Purge every installed package whose name starts with `rocm` followed by
+  a digit, `hsa-rocr`, `amdgpu-install`, or `rock-dkms`, along with the
+  packages that depend on them, and then autoremove the packages that
+  nothing needs anymore. `rocm_setup` does this unless
+  `rocm_setup_purge_other_stream` is false. The names are meant to catch
+  ROCm from repo.radeon.com, ROCm's older package repository, but the role
+  goes by name, not by where a package came from. A matching package from
+  anywhere else is purged too, and an older ROCm's packages that don't
+  match, such as `rocm-core`, can stay behind.
 
 Neither role reboots the host with these settings. Reboot it yourself if
 the run installed or upgraded `amdgpu-dkms` or the kernel. The group
