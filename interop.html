@@ -516,6 +516,22 @@ RDMA token</p></li>
 remain accepted for cuObject compatibility but new implementations should
 prefer numeric status codes, and RC peer handshakes should use the
 <code class="docutils literal notranslate"><span class="pre">200:&lt;server-token-hex&gt;</span></code> form.</p>
+<p>The peer token has the same layout as the client’s token, but only names
+the server’s QP, which the client connects its own QP to. The client uses
+these fields:</p>
+<ul class="simple">
+<li><p>transport, which must be RC (<code class="docutils literal notranslate"><span class="pre">0x01</span></code>); a reply with a DC peer token
+fails the transfer</p></li>
+<li><p>QP number</p></li>
+<li><p>GID</p></li>
+<li><p>LID</p></li>
+</ul>
+<p>The rkey, remote address, length, and port number are reserved: servers
+must set them to zero, and clients ignore them. The client never reads or
+writes the server’s memory, since the server performs the transfer in both
+directions, with an RDMA WRITE for a GET and an RDMA READ for a PUT, so a
+reply doesn’t advertise any server memory. The client connects its QP on
+its own port, not the one in the peer token.</p>
 </dd>
 </dl>
 </section>

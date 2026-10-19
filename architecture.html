@@ -923,7 +923,9 @@ Anything but a success reply (<code class="docutils literal notranslate"><span c
 <code class="docutils literal notranslate"><span class="pre">hipObjS3Error</span></code>. Falling back to plain HTTP is the
 application’s job; it has the reply.</p></li>
 <li><p><strong>Connect</strong>, if the reply has the form <code class="docutils literal notranslate"><span class="pre">200:&lt;88</span> <span class="pre">hex</span> <span class="pre">digits&gt;</span></code>, to
-the peer QP that token names.</p></li>
+the peer QP that token names. <code class="docutils literal notranslate"><span class="pre">connectRcPeer()</span></code> uses only the
+token’s transport (which must be RC), QP number, GID, and LID; the
+other fields are reserved in a reply (see <a class="reference internal" href="interop.html"><span class="doc">hipObject cuObject Interoperability</span></a>).</p></li>
 <li><p><strong>Wait for a completion</strong> on the lease’s CQ, for up to 5 seconds.</p></li>
 <li><p><strong>Synchronize the device</strong>, for a directly registered GPU buffer.</p></li>
 <li><p><strong>End the lease</strong>, which resets the QP if it was connected and
