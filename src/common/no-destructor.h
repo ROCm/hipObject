@@ -10,10 +10,18 @@
  * those deleters from static destructors, which is unsafe in general:
  * they could run after a static that they depend on is destroyed.
  * hipObjShutdown() is the teardown path; at exit the resources are simply
- * left to the kernel. */
+ * left to the kernel.
+ *
+ * The value is built in a byte array, and nothing destroys it. The array
+ * and the pointer to the value are all the class holds, so its destructor
+ * is trivial, and Clang doesn't warn about a static NoDestructor with
+ * -Wexit-time-destructors. */
 
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -21,46 +29,40 @@ namespace hipObj {
 
 template <typename T> class NoDestructor {
 public:
-    NoDestructor() noexcept(std::is_nothrow_default_constructible_v<T>) : value_()
+    NoDestructor() noexcept(std::is_nothrow_default_constructible_v<T>) : value_(::new(storage_.data()) T())
     {
     }
 
     /* Holds value, for a T that's built by a function call */
     explicit NoDestructor(T value) noexcept(std::is_nothrow_move_constructible_v<T>)
-        : value_(std::move(value))
+        : value_(::new(storage_.data()) T(std::move(value)))
     {
     }
 
-    /* Deliberately does not destroy value_. A union member's destructor
-     * only runs if the union's owner calls it, and this one doesn't.
-     * (= default is not equivalent here: it would be deleted.) */
-    ~NoDestructor()
-    {
-    }
+    /* Trivial: it doesn't destroy the value */
+    ~NoDestructor() = default;
 
     NoDestructor(const NoDestructor &)            = delete;
     NoDestructor &operator=(const NoDestructor &) = delete;
     NoDestructor(NoDestructor &&)                 = delete;
     NoDestructor &operator=(NoDestructor &&)      = delete;
 
-    /* value_ is a union member, so that ~NoDestructor() doesn't destroy
-     * it, and reading it is the point of the class */
-    // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
     T &operator*() noexcept
     {
-        return value_;
+        return *value_;
     }
 
     T *operator->() noexcept
     {
-        return &value_;
+        return value_;
     }
-    // NOLINTEND(cppcoreguidelines-pro-type-union-access)
 
 private:
-    union {
-        T value_;
-    };
+    /* Declared before value_, so it exists when value_ is built in it */
+    alignas(T) std::array<std::byte, sizeof(T)> storage_{};
+    /* The pointer that placement new returned. Getting it back from
+     * storage_ instead would need a reinterpret_cast and std::launder. */
+    T *value_;
 };
 
 } // namespace hipObj

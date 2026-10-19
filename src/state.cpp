@@ -19,7 +19,6 @@
 #include "hip-seam.h"
 #include "hipobj-private.h"
 #include "hipobj-parse.h"
-#include "hipobj-warnings.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "no-destructor.h"
@@ -48,13 +47,10 @@ namespace {
     /* Never destroyed: destroying an instance releases verbs and HIP
      * resources, which isn't safe during static destruction, so
      * hipObjShutdown() is what releases it. SharedMutex has a
-     * destructor, so it's never destroyed either. Clang still warns, since
-     * NoDestructor's empty destructor isn't trivial. */
+     * destructor, so it's never destroyed either. */
     Current &current()
     {
-        HIPOBJ_WARN_NO_EXIT_DTOR_OFF
         static NoDestructor<Current> state;
-        HIPOBJ_WARN_NO_EXIT_DTOR_ON
         return *state;
     }
 
@@ -126,11 +122,8 @@ systemPlatform()
     /* Built on the first call, not when the library loads, so an
      * application that never initializes hipObject never loads
      * libibverbs. Never destroyed, so it outlives an instance that's never
-     * shut down. Clang still warns, since NoDestructor's empty destructor
-     * isn't trivial. */
-    HIPOBJ_WARN_NO_EXIT_DTOR_OFF
+     * shut down. */
     static NoDestructor<std::shared_ptr<const Platform>> platform(makeSystemPlatform());
-    HIPOBJ_WARN_NO_EXIT_DTOR_ON
     return *platform;
 }
 
