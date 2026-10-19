@@ -10,10 +10,11 @@ name: hipObject - Documentation Deploy
 on:
   push:
     branches: [develop]
+    # docs/conf.py reads the version from the top-level CMakeLists.txt.
     paths:
       - 'docs/**'
       - 'include/**/*.h'
-      - 'requirements.txt'
+      - 'CMakeLists.txt'
       - 'cmake/HIPOBJDocumentation.cmake'
       - '.github/workflows/hipobject-documentation-deploy.yml'
   workflow_dispatch:

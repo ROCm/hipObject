@@ -517,6 +517,21 @@ toolchain:
 
    cmake --build build --target hipobj-sphinx-html
 
+The build installs Sphinx and the other Python packages
+that ``docs/sphinx/requirements.txt`` lists into a virtual
+environment in the build directory, which needs network
+access the first time.
+
+The documentation also builds without CMake, with Doxygen
+and the packages in ``docs/sphinx/requirements.txt``
+installed. Run Doxygen in ``docs/doxygen``, which writes its
+XML to ``docs/doxygen/xml/``, and then Sphinx:
+
+.. code-block:: bash
+
+   (cd docs/doxygen && doxygen Doxyfile)
+   sphinx-build -b html docs build/docs/html
+
 Environment Variables
 ---------------------
 

@@ -1,18 +1,26 @@
 # Doxyfile for hipObject
-# Generated from docs/Doxyfile.in by CMake
 #
 # Doxygen generates XML consumed by Breathe; Sphinx
 # produces the final HTML output.
+#
+# Run doxygen in this directory, which the relative
+# paths below are from. That writes the XML into
+# xml/, where docs/conf.py looks for it. The CMake
+# build includes this file from one of its own that
+# sends the output to the build directory instead
+# (see cmake/HIPOBJDocumentation.cmake).
 
-PROJECT_NAME           = "@PROJECT_NAME@"
-PROJECT_NUMBER         = "@PROJECT_VERSION@"
+PROJECT_NAME           = "hipobj"
 PROJECT_BRIEF          = \
   "RDMA-accelerated S3 object storage for GPUs"
 
-OUTPUT_DIRECTORY       = "@HIPOBJ_DOC_PATH@"
-INPUT                  = "@HIPOBJ_DOXYFILE_INPUT@"
+OUTPUT_DIRECTORY       = .
+INPUT                  = ../../include
 RECURSIVE              = YES
 FILE_PATTERNS          = *.h
+# Name the files from the repository's root
+# (include/hipobj.h), not from here
+STRIP_FROM_PATH        = ../..
 
 EXTRACT_ALL            = YES
 EXTRACT_PRIVATE        = NO

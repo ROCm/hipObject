@@ -226,7 +226,14 @@
   dependency on a shared library they don't call, such as `libm`.
 - Building the documentation (`HIPOBJ_BUILD_DOCS`) requires Breathe 4.36
   or later, up from 4.35. The documentation build installs it from
-  `requirements.txt` into its own virtual environment.
+  `docs/sphinx/requirements.txt` into its own virtual environment.
+- The documentation's Python requirements moved from the top-level
+  `requirements.txt` to `docs/sphinx/requirements.txt`, and the Doxygen
+  configuration from `docs/Doxyfile.in` to `docs/doxygen/Doxyfile`. Both
+  `docs/doxygen/Doxyfile` and `docs/conf.py` now work without CMake, so
+  the documentation can be built by running Doxygen in `docs/doxygen` and
+  then Sphinx on `docs` (see "Building Documentation" in
+  `docs/building.rst`). The CMake build works as before.
 - The documentation build's targets are now `hipobj-sphinx-html`,
   `hipobj-doxygen`, and `hipobj-docs-venv`, rather than `sphinx-html`,
   `doxygen`, and `docs-venv`, so they can't collide with another
