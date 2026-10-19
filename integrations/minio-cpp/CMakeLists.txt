@@ -103,15 +103,9 @@ hipobj_add_runtime_library_dependency(
 hipobj_add_runtime_library_dependency(
   SONAMES libz.so.1
   DEB zlib1g)
-if(OPENSSL_VERSION VERSION_GREATER_EQUAL 3)
-  hipobj_add_runtime_library_dependency(
-    SONAMES libssl.so.3 libcrypto.so.3
-    DEB libssl3t64)
-else()
-  hipobj_add_runtime_library_dependency(
-    SONAMES libssl.so.1.1 libcrypto.so.1.1
-    DEB libssl1.1)
-endif()
+hipobj_add_runtime_library_dependency(
+  SONAMES libssl.so.3 libcrypto.so.3
+  DEB libssl3t64)
 # pugixml and curlpp are only shared libraries when they're the
 # system's. Otherwise they're built here as static libraries.
 if(pugixml_FOUND)

@@ -11,7 +11,8 @@
 
 include(FetchContent)
 
-find_package(OpenSSL REQUIRED)
+# The packages' dependencies name OpenSSL 3's libraries
+find_package(OpenSSL 3 REQUIRED)
 if(NOT OpenSSL_FOUND)
   message(FATAL_ERROR
     "HIPOBJ_MINIO_CLIENT requires OpenSSL development headers. "

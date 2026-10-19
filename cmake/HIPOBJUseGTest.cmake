@@ -42,6 +42,10 @@ if(hipobj_fetch_gtest)
     CACHE BOOL "" FORCE)
   set(BUILD_GMOCK OFF
     CACHE BOOL "" FORCE)
+  # GoogleTest's install rules have no component, so without this,
+  # cmake --install would put GoogleTest in hipObject's prefix
+  set(INSTALL_GTEST OFF
+    CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 endif()
 
@@ -50,7 +54,7 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
     NAME ${TEST_NAME}
     SRCS ${TEST_SOURCE})
   # Link the unit-test object build, not the shipped library, so tests
-  # can call internal functions, such as the ones that swap seams.
+  # can call the library's internal functions and classes.
   target_link_libraries(${TEST_NAME} PRIVATE
     hipobj_test_objects
     GTest::gtest
