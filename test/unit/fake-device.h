@@ -212,21 +212,23 @@ public:
     FakeHip(FakeHip &&)                 = delete;
     FakeHip &operator=(FakeHip &&)      = delete;
 
-    hipError_t               getDevice(int *device) const override;
-    hipError_t               getDeviceCount(int *count) const override;
-    hipError_t               deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
-    hipError_t               hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
-    hipError_t               hostFree(void *ptr) const override;
+    [[nodiscard]] hipError_t getDevice(int *device) const override;
+    [[nodiscard]] hipError_t getDeviceCount(int *count) const override;
+    [[nodiscard]] hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
+    [[nodiscard]] hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
+    [[nodiscard]] hipError_t hostFree(void *ptr) const override;
     [[nodiscard]] hipError_t deviceSynchronize() const override;
-    hipError_t               memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
+    [[nodiscard]] hipError_t memcpyAsync(void *dst, const void *src, size_t size, hipMemcpyKind kind,
                                          hipStream_t stream) const override;
-    hipError_t               eventCreate(hipEvent_t *event) const override;
-    hipError_t               eventRecord(hipEvent_t event, hipStream_t stream) const override;
-    hipError_t               eventQuery(hipEvent_t event) const override;
-    hipError_t               eventDestroy(hipEvent_t event) const override;
-    hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr) const override;
-    hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size, hipDeviceptr_t ptr) const override;
-    int        exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const override;
+    [[nodiscard]] hipError_t eventCreate(hipEvent_t *event) const override;
+    [[nodiscard]] hipError_t eventRecord(hipEvent_t event, hipStream_t stream) const override;
+    [[nodiscard]] hipError_t eventQuery(hipEvent_t event) const override;
+    [[nodiscard]] hipError_t eventDestroy(hipEvent_t event) const override;
+    [[nodiscard]] hipError_t pointerGetAttributes(hipPointerAttribute_t *attributes,
+                                                  const void            *ptr) const override;
+    [[nodiscard]] hipError_t memGetAddressRange(hipDeviceptr_t *base, size_t *size,
+                                                hipDeviceptr_t ptr) const override;
+    [[nodiscard]] int exportDmabuf(const void *ptr, size_t size, int *fd, uint64_t *offset) const override;
     [[nodiscard]] int closeDmabuf(int fd) const override;
 
 private:
@@ -254,29 +256,31 @@ public:
     FakeVerbs(FakeVerbs &&)                 = delete;
     FakeVerbs &operator=(FakeVerbs &&)      = delete;
 
-    ibv_device **get_device_list(int *num_devices) const override;
-    void         free_device_list(ibv_device **list) const override;
-    ibv_context *open_device(ibv_device *device) const override;
-    int          close_device(ibv_context *context) const override;
-    const char  *get_device_name(ibv_device *device) const override;
-    int          query_device(ibv_context *context, ibv_device_attr *device_attr) const override;
-    int          query_port(ibv_context *context, uint8_t port_num, ibv_port_attr *port_attr) const override;
-    int          query_gid(ibv_context *context, uint8_t port_num, int index, ibv_gid *gid) const override;
-    ibv_pd      *alloc_pd(ibv_context *context) const override;
-    int          dealloc_pd(ibv_pd *pd) const override;
-    ibv_mr      *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const override;
-    [[nodiscard]] bool supportsDmabuf() const override;
-    ibv_mr            *reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
-                                     int access) const override;
-    int                dereg_mr(ibv_mr *mr) const override;
-    ibv_cq            *create_cq(ibv_context *context, int cqe, void *cq_context, ibv_comp_channel *channel,
-                                 int comp_vector) const override;
-    int                destroy_cq(ibv_cq *cq) const override;
-    ibv_qp            *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override;
-    int                modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const override;
-    int                destroy_qp(ibv_qp *qp) const override;
-    int                poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const override;
-    int                post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const override;
+    [[nodiscard]] ibv_device **get_device_list(int *num_devices) const override;
+    void                       free_device_list(ibv_device **list) const override;
+    [[nodiscard]] ibv_context *open_device(ibv_device *device) const override;
+    [[nodiscard]] int          close_device(ibv_context *context) const override;
+    [[nodiscard]] const char  *get_device_name(ibv_device *device) const override;
+    [[nodiscard]] int     query_device(ibv_context *context, ibv_device_attr *device_attr) const override;
+    [[nodiscard]] int     query_port(ibv_context *context, uint8_t port_num,
+                                     ibv_port_attr *port_attr) const override;
+    [[nodiscard]] int     query_gid(ibv_context *context, uint8_t port_num, int index,
+                                    ibv_gid *gid) const override;
+    [[nodiscard]] ibv_pd *alloc_pd(ibv_context *context) const override;
+    [[nodiscard]] int     dealloc_pd(ibv_pd *pd) const override;
+    [[nodiscard]] ibv_mr *reg_mr(ibv_pd *pd, void *addr, size_t length, int access) const override;
+    [[nodiscard]] bool    supportsDmabuf() const override;
+    [[nodiscard]] ibv_mr *reg_dmabuf_mr(ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                                        int access) const override;
+    [[nodiscard]] int     dereg_mr(ibv_mr *mr) const override;
+    [[nodiscard]] ibv_cq *create_cq(ibv_context *context, int cqe, void *cq_context,
+                                    ibv_comp_channel *channel, int comp_vector) const override;
+    [[nodiscard]] int     destroy_cq(ibv_cq *cq) const override;
+    [[nodiscard]] ibv_qp *create_qp(ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override;
+    [[nodiscard]] int     modify_qp(ibv_qp *qp, ibv_qp_attr *attr, int attr_mask) const override;
+    [[nodiscard]] int     destroy_qp(ibv_qp *qp) const override;
+    [[nodiscard]] int     poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const override;
+    [[nodiscard]] int     post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const override;
 
 private:
     /* A pointer, so the const methods can change what it points to */

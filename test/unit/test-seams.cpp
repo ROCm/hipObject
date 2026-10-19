@@ -268,7 +268,7 @@ class FullBufferBusIdHip : public hipObjTest::FakeHip {
 public:
     using FakeHip::FakeHip;
 
-    hipError_t deviceGetPCIBusId(char *pciBusId, int len, int /*device*/) const override
+    [[nodiscard]] hipError_t deviceGetPCIBusId(char *pciBusId, int len, int /*device*/) const override
     {
         const std::span<char> out = hipObj::spanFromPointer(pciBusId, static_cast<size_t>(len));
         if (out.size() != kFullBufferBusId.size()) {
@@ -306,12 +306,12 @@ class TopologyVerbs : public hipObjTest::FakeVerbs {
 public:
     using FakeVerbs::FakeVerbs;
 
-    const char *get_device_name(ibv_device * /*device*/) const override
+    [[nodiscard]] const char *get_device_name(ibv_device * /*device*/) const override
     {
         return kFakeDevName.data();
     }
 
-    int query_device(ibv_context *context, ibv_device_attr *attr) const override
+    [[nodiscard]] int query_device(ibv_context *context, ibv_device_attr *attr) const override
     {
         const int result = FakeVerbs::query_device(context, attr);
         if (result == 0) {
@@ -320,7 +320,7 @@ public:
         return result;
     }
 
-    int query_port(ibv_context *context, uint8_t portNum, ibv_port_attr *attr) const override
+    [[nodiscard]] int query_port(ibv_context *context, uint8_t portNum, ibv_port_attr *attr) const override
     {
         const int result = FakeVerbs::query_port(context, portNum, attr);
         if (result == 0) {
@@ -330,7 +330,7 @@ public:
         return result;
     }
 
-    int query_gid(ibv_context *context, uint8_t portNum, int index, ibv_gid *gid) const override
+    [[nodiscard]] int query_gid(ibv_context *context, uint8_t portNum, int index, ibv_gid *gid) const override
     {
         const int result = FakeVerbs::query_gid(context, portNum, index, gid);
         if (result != 0) {
@@ -369,7 +369,7 @@ public:
     OpenableTopologyVerbs(OpenableTopologyVerbs &&)                 = delete;
     OpenableTopologyVerbs &operator=(OpenableTopologyVerbs &&)      = delete;
 
-    ibv_context *open_device(ibv_device *device) const override
+    [[nodiscard]] ibv_context *open_device(ibv_device *device) const override
     {
         return TopologyVerbs::open_device(device) != nullptr ? context_ : nullptr;
     }
