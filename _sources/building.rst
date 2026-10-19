@@ -466,7 +466,12 @@ Additional system packages (Ubuntu 24.04):
 
 .. code-block:: bash
 
-   sudo apt install libssl-dev zlib1g-dev libcurl4-openssl-dev
+   sudo apt install libssl-dev zlib1g-dev libcurl4-openssl-dev \
+     nlohmann-json3-dev libpugixml-dev libcurlpp-dev
+
+The build needs every package but ``libcurlpp-dev``. Without it,
+the build downloads curlpp from GitHub and builds it. The build
+always downloads minio-cpp and inih.
 
 See ``integrations/minio-cpp/TESTING.md`` for lab validation
 against MinIO AIStor over RDMA.

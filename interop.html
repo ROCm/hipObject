@@ -527,6 +527,13 @@ Thor-2 and AMD Pensando Pollara NICs.</p>
 <p>A stock <code class="docutils literal notranslate"><span class="pre">libcuobjserver</span></code> stack cannot serve RC clients directly.  An
 RC-to-DC <a class="reference external" href="https://github.com/versity/versitygw/tree/main/cuwrapper">adapter</a> bridges AMD RC clients to
 cuObject-equipped storage gateways in production deployments.</p>
+<p>The client and the server don’t negotiate a path MTU, and the token
+doesn’t carry one, so both ends’ MTUs must match. hipObject sets its
+connections’ path MTU to 4096 bytes, so configure the client’s and the
+server’s ports, and the network between them, for 4096-byte RDMA
+packets. With RoCE, that takes jumbo frames, usually an Ethernet MTU of
+9000. If the MTUs don’t match, transfers hang until the server times
+out, without an error on either end.</p>
 </section>
 </section>
 <section id="testing-paths">

@@ -935,9 +935,13 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build
 </pre></div>
 </div>
 <p>Additional system packages (Ubuntu 24.04):</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>libssl-dev<span class="w"> </span>zlib1g-dev<span class="w"> </span>libcurl4-openssl-dev
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>libssl-dev<span class="w"> </span>zlib1g-dev<span class="w"> </span>libcurl4-openssl-dev<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>nlohmann-json3-dev<span class="w"> </span>libpugixml-dev<span class="w"> </span>libcurlpp-dev
 </pre></div>
 </div>
+<p>The build needs every package but <code class="docutils literal notranslate"><span class="pre">libcurlpp-dev</span></code>. Without it,
+the build downloads curlpp from GitHub and builds it. The build
+always downloads minio-cpp and inih.</p>
 <p>See <code class="docutils literal notranslate"><span class="pre">integrations/minio-cpp/TESTING.md</span></code> for lab validation
 against MinIO AIStor over RDMA.</p>
 </section>
