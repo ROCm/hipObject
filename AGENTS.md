@@ -757,8 +757,16 @@ Python code must run on **Python 3.10**. Don't use anything newer, such as
 
   CI:
   [hipobject-documentation-check.yml](.github/workflows/hipobject-documentation-check.yml),
-  when the documentation, the public header, `README.md`, `requirements.txt`,
-  the documentation's build files, or the workflow file change.
+  when the documentation (including `docs/sphinx/requirements.txt`), the
+  public header, `README.md`, the top-level `CMakeLists.txt` (which
+  `docs/conf.py` reads the version from), the documentation's build files,
+  or the workflow file change.
+- **The documentation has to build without CMake too.** After the move to
+  rocm-systems, Read the Docs will run doxygen in `docs/doxygen` and Sphinx
+  on `docs/conf.py` directly, so keep CMake's `@VARIABLE@` substitutions
+  out of both files. The CMake build only redirects their output to the
+  build directory (see
+  [`HIPOBJDocumentation.cmake`](cmake/HIPOBJDocumentation.cmake)).
 
 ### Ansible
 

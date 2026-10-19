@@ -26,7 +26,6 @@ on:
       - '!ci/**'
       - '!cmake/HIPOBJDocumentation.cmake'
       - '!docs/**'
-      - '!requirements.txt'
       - '!.github/**'
       - 'ci/iwyu/**'
       - '.github/workflows/hipobject-iwyu.yml'

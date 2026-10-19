@@ -24,7 +24,6 @@ on:
       - '!ci/**'
       - '!cmake/HIPOBJDocumentation.cmake'
       - '!docs/**'
-      - '!requirements.txt'
       - '!.github/**'
       - '.github/workflows/hipobject-build.yml'
       - '.github/actions/install-rocm/**'

@@ -31,7 +31,6 @@ on:
       - '!ci/**'
       - '!cmake/HIPOBJDocumentation.cmake'
       - '!docs/**'
-      - '!requirements.txt'
       - '!.github/**'
       - '.github/workflows/hipobject-clang-tidy.yml'
       - '.github/actions/install-rocm/**'

@@ -6,7 +6,12 @@
 # (following ROCm best practices)
 #
 # A Python venv is created automatically in the build
-# tree and populated from requirements.txt.
+# tree and populated from docs/sphinx/requirements.txt.
+#
+# docs/doxygen/Doxyfile and docs/conf.py work without
+# CMake too, as Read the Docs uses them, so nothing here
+# configures them. The build only sends the output to the
+# build tree.
 
 option(HIPOBJ_BUILD_DOCS
   "Build documentation (Sphinx + Breathe + Doxygen)"
@@ -38,7 +43,7 @@ if(HIPOBJ_BUILD_DOCS)
   set(HIPOBJ_DOCS_VENV_STAMP
     "${HIPOBJ_DOCS_VENV}/stamp")
   set(HIPOBJ_DOCS_REQUIREMENTS
-    "${PROJECT_SOURCE_DIR}/requirements.txt")
+    "${PROJECT_SOURCE_DIR}/docs/sphinx/requirements.txt")
 
   if(WIN32)
     set(HIPOBJ_VENV_BIN
@@ -73,33 +78,27 @@ if(HIPOBJ_BUILD_DOCS)
   # ── Paths ────────────────────────────────────────────
   set(HIPOBJ_DOC_PATH
     "${PROJECT_BINARY_DIR}/docs")
-  set(BREATHE_DOC_XML_DIR
-    "${HIPOBJ_DOC_PATH}/xml")
+  set(HIPOBJ_DOXYGEN_DIR
+    "${PROJECT_SOURCE_DIR}/docs/doxygen")
 
-  set(HIPOBJ_DOXYFILE_INPUT
-    "${PROJECT_SOURCE_DIR}/include")
-
-  # Configure Doxyfile (substitutes @VARIABLES@)
-  configure_file(
-    ${PROJECT_SOURCE_DIR}/docs/Doxyfile.in
-    ${PROJECT_BINARY_DIR}/Doxyfile
+  # A Doxyfile that reads the committed one and changes
+  # only where the output goes. Doxygen still has to run
+  # in docs/doxygen, which the committed file's relative
+  # paths are from.
+  file(CONFIGURE
+    OUTPUT ${PROJECT_BINARY_DIR}/Doxyfile
+    CONTENT [[
+@INCLUDE               = "@HIPOBJ_DOXYGEN_DIR@/Doxyfile"
+OUTPUT_DIRECTORY       = "@HIPOBJ_DOC_PATH@"
+]]
     @ONLY
-    ESCAPE_QUOTES
-  )
-
-  # Configure conf.py (substitutes the version and Breathe XML path)
-  configure_file(
-    ${PROJECT_SOURCE_DIR}/docs/conf.py
-    ${PROJECT_BINARY_DIR}/docs-sphinx/conf.py
-    @ONLY
-    ESCAPE_QUOTES
   )
 
   # ── Doxygen target: source headers -> XML ────────────
   add_custom_target(hipobj-doxygen
     COMMAND ${DOXYGEN_EXECUTABLE}
       ${PROJECT_BINARY_DIR}/Doxyfile
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    WORKING_DIRECTORY ${HIPOBJ_DOXYGEN_DIR}
     COMMENT "Generating Doxygen XML"
     VERBATIM
   )
@@ -107,11 +106,12 @@ if(HIPOBJ_BUILD_DOCS)
   # ── Sphinx target: RST + Doxygen XML -> HTML ─────────
   # -d keeps Sphinx's doctree cache out of the HTML
   # directory, which is published to GitHub Pages as is.
+  # -D points Breathe at the XML in the build tree.
   add_custom_target(hipobj-sphinx-html
     COMMAND ${SPHINX_BUILD}
       -b html
       -d ${HIPOBJ_DOC_PATH}/doctrees
-      -c ${PROJECT_BINARY_DIR}/docs-sphinx
+      -D breathe_projects.hipobj=${HIPOBJ_DOC_PATH}/xml
       ${PROJECT_SOURCE_DIR}/docs
       ${HIPOBJ_DOC_PATH}/html
     DEPENDS hipobj-doxygen hipobj-docs-venv

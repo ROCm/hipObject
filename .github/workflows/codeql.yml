@@ -21,7 +21,6 @@ on:
       - '**/*.rst'
       - 'cmake/HIPOBJDocumentation.cmake'
       - 'docs/**'
-      - 'requirements.txt'
   push:
     branches: [ "develop" ]
     paths-ignore: *paths-ignore
