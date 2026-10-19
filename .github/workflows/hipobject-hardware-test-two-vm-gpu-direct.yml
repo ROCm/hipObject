@@ -61,6 +61,7 @@ on:
       - "shared/**"
       - "src/**"
       - "test/CMakeLists.txt"
+      - "test/common/**"
       - "test/integration/CMakeLists.txt"
       - "test/integration/rdma-test-server/**"
       - "ci/ernic/assert-transfer.sh"

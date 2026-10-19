@@ -100,10 +100,6 @@ Source Map
      - Helpers shared with tools and tests: span, address, parse,
        sockaddr, warnings
 
-``src/common/scope-guard.h`` and ``src/common/unique-fd.h`` live in
-the library's tree, but only the tests and the RDMA test server use
-them.
-
 Layers
 ------
 
