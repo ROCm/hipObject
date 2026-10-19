@@ -483,7 +483,9 @@ checked:
    ``hipObjS3Error``. Falling back to plain HTTP is the
    application's job; it has the reply.
 #. **Connect**, if the reply has the form ``200:<88 hex digits>``, to
-   the peer QP that token names.
+   the peer QP that token names. ``connectRcPeer()`` uses only the
+   token's transport (which must be RC), QP number, GID, and LID; the
+   other fields are reserved in a reply (see :doc:`interop`).
 #. **Wait for a completion** on the lease's CQ, for up to 5 seconds.
 #. **Synchronize the device**, for a directly registered GPU buffer.
 #. **End the lease**, which resets the QP if it was connected and

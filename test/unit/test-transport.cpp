@@ -714,6 +714,45 @@ TEST_P(TransportTransferTest, ConnectsToPeerInReply)
     EXPECT_EQ(calls[3].attr.qp_state, IBV_QPS_INIT);
 }
 
+/* docs/interop.rst reserves the peer token's rkey, address, length, and
+ * port number: servers send zero, and clients ignore them. The QP connects
+ * the same way whatever they hold, and on the local port, not the peer's. */
+TEST_P(TransportTransferTest, IgnoresReservedFieldsOfPeerToken)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
+    const uint8_t localPort = hipObj::currentInstance()->device->portNum();
+
+    hipObj::RdmaToken zeroed = peerToken();
+    zeroed.rkey              = 0;
+    zeroed.remoteAddr        = 0;
+    zeroed.length            = 0;
+    zeroed.portNum           = 0;
+
+    hipObj::RdmaToken nonzero = peerToken();
+    nonzero.rkey              = 0xfeedfaceU;
+    nonzero.remoteAddr        = 0xdead0000U;
+    nonzero.length            = kBufSize * 3;
+    nonzero.portNum           = static_cast<uint8_t>(localPort + 7);
+
+    for (const hipObj::RdmaToken &token : {zeroed, nonzero}) {
+        fake().modifyQpCount = 0;
+        setReplyWithPeerToken(token);
+        ASSERT_EQ(transfer().opError, hipObjSuccess);
+
+        const std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
+        ASSERT_EQ(calls.size(), 4U);
+        const ibv_qp_attr &rtr = calls[0].attr;
+        EXPECT_EQ(rtr.qp_state, IBV_QPS_RTR);
+        EXPECT_EQ(calls[0].mask, kRtrMask);
+        EXPECT_EQ(rtr.dest_qp_num, token.qpNum);
+        EXPECT_EQ(rtr.ah_attr.dlid, token.lid);
+        EXPECT_EQ(rtr.ah_attr.port_num, localPort);
+        expectPeerGid(rtr);
+        EXPECT_EQ(calls[1].attr.qp_state, IBV_QPS_RTS);
+        EXPECT_EQ(calls[1].mask, kRtsMask);
+    }
+}
+
 /* A QP that's connected can't connect again until it's reset, so this
  * fails if the transfer doesn't reset it */
 TEST_P(TransportTransferTest, PeerTokenTransfersBackToBack)

@@ -55,16 +55,20 @@ namespace {
     /* The size of the buffer each transfer is staged through */
     constexpr size_t kStagingSize = size_t{64} * 1024 * 1024;
 
-    hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn, const ibv_mr *mr, size_t size)
+    /* The peer token for a reply: what the client needs to connect its QP
+     * to conn's. The rkey, address, length, and port number are reserved
+     * in a reply (docs/interop.rst), so they're zero; the client never
+     * accesses the server's memory. */
+    hipObj::RdmaToken buildServerToken(const hipObj::RcConnection &conn)
     {
         return hipObj::RdmaToken{
             .qpNum      = conn.qp()->qp_num,
             .gid        = hipObj::toGid(conn.device().localGid()),
-            .rkey       = mr->rkey,
-            .remoteAddr = hipObj::pointerToAddress(mr->addr),
-            .length     = size,
+            .rkey       = 0,
+            .remoteAddr = 0,
+            .length     = 0,
             .transport  = hipObj::TransportType::RC,
-            .portNum    = conn.device().portNum(),
+            .portNum    = 0,
             .lid        = 0,
         };
     }
@@ -242,7 +246,7 @@ RdmaTestServer::rdmaWriteToClient(const TokenHeader &tokenHeader, const std::vec
     if (!postRdmaWrite(conn, impl_->stagingMr.get(), xferSize, clientToken)) {
         return rdmaFail("GET", "RDMA WRITE to the client buffer did not complete");
     }
-    const hipObj::RdmaToken serverToken = buildServerToken(conn, impl_->stagingMr.get(), xferSize);
+    const hipObj::RdmaToken serverToken = buildServerToken(conn);
     return hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken);
 }
 
@@ -280,7 +284,7 @@ RdmaTestServer::rdmaReadFromClient(const TokenHeader &tokenHeader, size_t size)
         return rdmaFail("PUT", "RDMA READ from the client buffer did not complete");
     }
     const std::span<const uint8_t> received    = std::span(impl_->stagingBuf).first(xferSize);
-    const hipObj::RdmaToken        serverToken = buildServerToken(conn, impl_->stagingMr.get(), xferSize);
+    const hipObj::RdmaToken        serverToken = buildServerToken(conn);
     return ReadResult{
         .data        = std::vector<uint8_t>(received.begin(), received.end()),
         .replyHeader = hipObj::encodeReplyWithPeerToken(kHttpOk, serverToken),
