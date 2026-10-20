@@ -59,6 +59,7 @@ namespace {
 
 constexpr uint32_t kDefaultTransferDeadlineMs = 60'000;
 constexpr uint32_t kDefaultCancelBudgetMs = 1'000;
+constexpr uint32_t kDefaultConnectDeadlineMs = 10'000;
 constexpr uint32_t kPutGraceMs = 100;
 
 uint64_t steadyNowMs() {
@@ -335,13 +336,53 @@ int acquireSession(void* devPtr, SessionResources& res) {
     if (destroyed.qpOk && destroyed.cqOk) {
       releaseDevice(*res.dh);
       res.deviceRefHeld = false;
-    } else {
-      hipObj::dropOwnership(res.conn.qp);
-      hipObj::dropOwnership(res.conn.cq);
+      bufferMap().releaseMrRef(devPtr);
+      reg.unreserveSlot();
+      return -1;
     }
-    bufferMap().releaseMrRef(devPtr);
-    reg.unreserveSlot();
-    return (destroyed.qpOk && destroyed.cqOk) ? -1 : -2;
+    /* A failed destroy still owns a QP or CQ. Park it before this
+     * function returns; dropping the pointer would abandon it. */
+    const uint64_t parkedRid = destroyed.qpOk ? 0 : retire.release();
+    ConnectionEntryV2 poisoned;
+    poisoned.conn = std::move(res.conn);
+    poisoned.device = res.dh;
+    poisoned.reservationId = parkedRid;
+    poisoned.pinnedBuffer = destroyed.qpOk ? nullptr : devPtr;
+    poisoned.poisoned = true;
+    poisoned.holdsDeviceRef = !destroyed.qpOk && res.deviceRefHeld;
+    bool initParkThrew = false;
+    try {
+      res.id = reg.insert(std::move(poisoned));
+    } catch (...) {
+      initParkThrew = true;
+    }
+    if (initParkThrew || res.id == 0) {
+      RcConnV2 leftover = std::move(poisoned.conn);
+      if (!leftover.qp && !leftover.cq) {
+        leftover = std::move(res.conn);
+      }
+      if (parkEmergency(hold.handle, leftover, parkedRid)) {
+        hold.parked = true;
+      }
+      if (destroyed.qpOk) {
+        bufferMap().releaseMrRef(devPtr);
+        if (res.deviceRefHeld && res.dh != nullptr) {
+          releaseDevice(*res.dh);
+          res.deviceRefHeld = false;
+        }
+      }
+      reg.unreserveSlot();
+      return -2;
+    }
+    res.inserted = true;
+    if (destroyed.qpOk) {
+      bufferMap().releaseMrRef(devPtr);
+      if (res.deviceRefHeld && res.dh != nullptr) {
+        releaseDevice(*res.dh);
+        res.deviceRefHeld = false;
+      }
+    }
+    return -2;
   }
   res.qp = res.conn.qp.get();
   res.cq = res.conn.cq.get();
@@ -442,8 +483,33 @@ ReleaseResult releaseSession(SessionResources& res) {
   } else if (res.conn.qp || res.conn.cq) {
     const DestroyResult destroyed = destroyRcConnV2(res.conn);
     if (!destroyed.qpOk || !destroyed.cqOk) {
-      hipObj::dropOwnership(res.conn.qp);
-      hipObj::dropOwnership(res.conn.cq);
+      const size_t handle = reserveEmergencySlot();
+      bool parked = handle != 0 && parkEmergency(handle, res.conn, 0);
+      if (!parked && handle != 0) {
+        releaseEmergencyReservation(handle);
+      }
+      if (!parked) {
+        ConnectionEntryV2 poisoned;
+        poisoned.conn = std::move(res.conn);
+        poisoned.device = v2State().device;
+        poisoned.poisoned = true;
+        poisoned.holdsDeviceRef = false;
+        try {
+          res.id = registry().insert(std::move(poisoned));
+        } catch (...) {
+          res.id = 0;
+        }
+        if (res.id != 0) {
+          res.inserted = true;
+          parked = true;
+        }
+      }
+      if (!parked) {
+        /* No durable owner accepted the survivors. Release the C++
+         * handles without a second destroy. */
+        hipObj::dropOwnership(res.conn.qp);
+        hipObj::dropOwnership(res.conn.cq);
+      }
       rc = ReleaseResult::Leftover;
     } else if (res.deviceRefHeld && v2State().device != nullptr) {
       releaseDevice(*v2State().device);
@@ -560,12 +626,15 @@ int v2Init(hipObjConfigV2_t* config) {
   st.selectedPort = static_cast<int>(raw.portNum);
   st.selectedGidIndex = static_cast<int>(raw.gidIndex);
   dh->localGid = raw.localGid;
-  st.device = dh;
-  st.controlEndpoint = controlEndpoint;
+  /* Commit the strings before publishing the device. A throw after
+   * st.device is set would leave an uninitialized state holding the
+   * only pointer to the opened context. */
+  st.controlEndpoint = std::move(controlEndpoint);
   st.connectDeadlineMs = config->connectDeadlineMs;
   st.transferDeadlineMs = config->transferDeadlineMs;
   st.cancelBudgetMs = config->cancelCleanupBudgetMs;
-  st.nicName = nicNameOut;
+  st.nicName = std::move(nicNameOut);
+  st.device = dh;
   ++st.initGeneration;
   st.initialized = true;
   return hipObjSuccess;
@@ -801,7 +870,7 @@ int v2Transfer(int isPut, const char* bucket, const char* key, void* devPtr,
     std::string target = buildTarget(bucket, key,
                                      query != nullptr ? query : "");
     const auto cookieOpt = nextCookie();
-    if (!cookieOpt || *cookieOpt == 0) {
+    if (!cookieOpt) {
       outcome = {hipObjInternalError, 0};
       break;
     }

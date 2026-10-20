@@ -154,14 +154,130 @@ int fakeModifyQp(struct ibv_qp*, struct ibv_qp_attr*, int) {
 
 /* ---- NIC seam ---------------------------------------------------------- */
 
-class FakeNics : public hipObj::NicEnumerator {
+class FakeNics : public hipObj::NicTopology {
 public:
-  std::vector<hipObj::NicInfo> Enumerate(const char*) override {
+  std::vector<hipObj::NicInfo> enumerate(const char*) const override {
     hipObj::NicInfo info;
     info.dev_name = "fake0";
     info.pcie_bus_id = "0000:42:00.0";
     info.port_num = 1;
     return {info};
+  }
+  int roceVersion(const char*, uint8_t, int) const override { return 2; }
+};
+
+class FakeHip : public hipObj::HipRuntime {
+public:
+  hipError_t getDevice(int* device) const override {
+    if (device != nullptr) {
+      *device = 7;
+    }
+    return hipSuccess;
+  }
+  hipError_t getDeviceCount(int* count) const override {
+    if (count != nullptr) {
+      *count = 1;
+    }
+    return hipSuccess;
+  }
+  hipError_t deviceGetPCIBusId(char* bus, int len, int) const override {
+    if (bus != nullptr && len > 0) {
+      snprintf(bus, static_cast<size_t>(len), "0000:42:00.0");
+    }
+    return hipSuccess;
+  }
+  hipError_t hostMalloc(void**, size_t, unsigned int) const override { return hipSuccess; }
+  hipError_t hostFree(void*) const override { return hipSuccess; }
+  hipError_t deviceSynchronize() const override { return hipSuccess; }
+  hipError_t memcpyAsync(void*, const void*, size_t, hipMemcpyKind, hipStream_t) const override {
+    return hipSuccess;
+  }
+  hipError_t eventCreate(hipEvent_t*) const override { return hipSuccess; }
+  hipError_t eventRecord(hipEvent_t, hipStream_t) const override { return hipSuccess; }
+  hipError_t eventQuery(hipEvent_t) const override { return hipSuccess; }
+  hipError_t eventDestroy(hipEvent_t) const override { return hipSuccess; }
+  hipError_t pointerGetAttributes(hipPointerAttribute_t*, const void*) const override {
+    return hipErrorInvalidValue;
+  }
+  hipError_t memGetAddressRange(hipDeviceptr_t*, size_t*, hipDeviceptr_t) const override {
+    return hipErrorInvalidValue;
+  }
+  int exportDmabuf(const void*, size_t, int*, uint64_t*) const override { return -1; }
+  int closeDmabuf(int) const override { return 0; }
+};
+
+class FakeVerbs : public hipObj::Verbs {
+public:
+  struct ibv_device** get_device_list(int* n) const override {
+    if (n != nullptr) {
+      *n = 1;
+    }
+    return g_fakeDevList;
+  }
+  void free_device_list(struct ibv_device**) const override {}
+  struct ibv_context* open_device(struct ibv_device*) const override { return &g_fakeCtx; }
+  int close_device(struct ibv_context*) const override { return 0; }
+  const char* get_device_name(struct ibv_device* dev) const override {
+    return dev != nullptr ? dev->name : nullptr;
+  }
+  int query_device(struct ibv_context*, struct ibv_device_attr* attr) const override {
+    if (attr != nullptr) {
+      std::memset(attr, 0, sizeof(*attr));
+      attr->max_mr_size = ~(0ULL);
+    }
+    return 0;
+  }
+  int query_port(struct ibv_context*, uint8_t, struct ibv_port_attr* attr) const override {
+    if (attr != nullptr) {
+      std::memset(attr, 0, sizeof(*attr));
+      attr->state = IBV_PORT_ACTIVE;
+      attr->gid_tbl_len = 1;
+      attr->link_layer = IBV_LINK_LAYER_ETHERNET;
+    }
+    return 0;
+  }
+  int query_gid(struct ibv_context*, uint8_t, int, union ibv_gid* gid) const override {
+    if (gid != nullptr) {
+      std::memset(gid, 0, sizeof(*gid));
+      gid->raw[0] = 0xfe;
+      gid->raw[1] = 0x80;
+      gid->raw[10] = 0xff;
+      gid->raw[11] = 0xff;
+      gid->raw[12] = 10;
+      gid->raw[15] = 1;
+    }
+    return 0;
+  }
+  struct ibv_pd* alloc_pd(struct ibv_context*) const override { return &g_fakePd; }
+  int dealloc_pd(struct ibv_pd*) const override { return 0; }
+  struct ibv_mr* reg_mr(struct ibv_pd* pd, void* addr, size_t len, int access) const override {
+    return fakeRegMr(pd, addr, len, access);
+  }
+  bool supportsDmabuf() const override { return false; }
+  struct ibv_mr* reg_dmabuf_mr(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int) const override {
+    return nullptr;
+  }
+  int dereg_mr(struct ibv_mr* mr) const override { return fakeDeregMr(mr); }
+  struct ibv_cq* create_cq(struct ibv_context* ctx, int cqe, void* cq_context,
+                           struct ibv_comp_channel* channel, int comp_vector) const override {
+    return fakeCreateCq(ctx, cqe, cq_context, channel, comp_vector);
+  }
+  int destroy_cq(struct ibv_cq* cq) const override { return fakeDestroyCq(cq); }
+  struct ibv_qp* create_qp(struct ibv_pd* pd, struct ibv_qp_init_attr* attr) const override {
+    return fakeCreateQp(pd, attr);
+  }
+  int modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int mask) const override {
+    return fakeModifyQp(qp, attr, mask);
+  }
+  int destroy_qp(struct ibv_qp* qp) const override { return fakeDestroyQp(qp); }
+  int poll_cq(struct ibv_cq* cq, int n, struct ibv_wc* wc) const override {
+    return fakePollCq(cq, n, wc);
+  }
+  int post_send(struct ibv_qp* qp, struct ibv_send_wr* wr, struct ibv_send_wr** bad) const override {
+    return fakePostSend(qp, wr, bad);
+  }
+  int post_recv(struct ibv_qp* qp, struct ibv_recv_wr* wr, struct ibv_recv_wr** bad) const override {
+    return fakePostRecv(qp, wr, bad);
   }
 };
 
@@ -189,7 +305,9 @@ struct CallRecord {
 class FrozenClock : public hipObj::v2::ClockSource {
 public:
   uint64_t now = 0;
-  uint64_t nowMs() override { return now; }
+  hipObj::v2::TimePoint now() const override {
+    return hipObj::v2::TimePoint(std::chrono::milliseconds(now));
+  }
 };
 
 /* Points at the FrozenClock a test uses to jump time from inside a
@@ -357,84 +475,13 @@ public:
 class V2ClientTransferTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    savedHipOps_ = hipObj::hipOps();
-    hipObj::HipOps hops;
-    hops.hipGetDevice = [](int* device) -> hipError_t {
-      *device = 7;
-      return hipSuccess;
-    };
-    hops.hipDeviceGetPCIBusId = [](char* bus, int len, int) -> hipError_t {
-      snprintf(bus, static_cast<size_t>(len), "0000:42:00.0");
-      return hipSuccess;
-    };
-    hipObj::hipOps() = hops;
-
-    savedFuncs_ = hipObj::ibv.funcsForTest();
-    auto& f = hipObj::ibv.funcsForTest();
+    savedHip_ = hipObj::setHipForTest(&hip_);
     delete g_fakeDevList[0];
     g_fakeDevList[0] = allocFakeDevice("fake0");
     std::memset(&g_fakeCtx, 0, sizeof(g_fakeCtx));
     g_fakeCtx.device = g_fakeDevList[0];
-    f.get_device_list = [](int* n) -> struct ibv_device** {
-      *n = 1;
-      return g_fakeDevList;
-    };
-    f.free_device_list = [](struct ibv_device**) {};
-    f.get_device_name = [](struct ibv_device* dev) -> const char* {
-      return dev ? dev->name : nullptr;
-    };
-    f.close_device = [](struct ibv_context*) -> int { return 0; };
-    f.query_port = [](struct ibv_context*, uint8_t,
-                      struct ibv_port_attr* attr) -> int {
-      std::memset(attr, 0, sizeof(*attr));
-      attr->state = IBV_PORT_ACTIVE;
-      attr->gid_tbl_len = 1;
-      attr->link_layer = IBV_LINK_LAYER_ETHERNET;
-      return 0;
-    };
-    f.query_gid = [](struct ibv_context*, uint8_t, int,
-                     union ibv_gid* gid) -> int {
-      /* RoCEv2 IPv4-mapped GID so AutoSelectGidIndex picks index 0. */
-      std::memset(gid, 0, sizeof(*gid));
-      gid->raw[0] = 0xfe;
-      gid->raw[1] = 0x80;
-      gid->raw[10] = 0xff;
-      gid->raw[11] = 0xff;
-      gid->raw[12] = 10;   /* 10.0.0.1 */
-      gid->raw[13] = 0;
-      gid->raw[14] = 0;
-      gid->raw[15] = 1;
-      return 0;
-    };
-    f.open_device = [](struct ibv_device*) -> struct ibv_context* {
-      return &g_fakeCtx;
-    };
-    f.alloc_pd = [](struct ibv_context*) -> struct ibv_pd* {
-      return &g_fakePd;
-    };
-    f.dealloc_pd = [](struct ibv_pd*) -> int { return 0; };
-    f.query_device = [](struct ibv_context*, struct ibv_device_attr* a) {
-      std::memset(a, 0, sizeof(*a));
-      a->max_mr_size = ~(0ULL);
-      return 0;
-    };
-    f.create_qp = fakeCreateQp;
-    f.destroy_qp = fakeDestroyQp;
-    f.create_cq = fakeCreateCq;
-    f.destroy_cq = fakeDestroyCq;
-    f.modify_qp = fakeModifyQp;
-    f.post_recv = fakePostRecv;
-    f.post_send = fakePostSend;
-    f.poll_cq = fakePollCq;
-    f.reg_mr = fakeRegMr;
-    f.reg_mr_iova2 = [](struct ibv_pd* pd, void* addr, size_t len,
-                        uintptr_t, int) -> struct ibv_mr* {
-      return fakeRegMr(pd, addr, len, 0);
-    };
-    f.dereg_mr = fakeDeregMr;
-    hipObj::ibv.is_initialized = true;
-
-    savedNics_ = hipObj::setNicEnumerator(&nics_);
+    savedVerbs_ = hipObj::setIbvForTest(&verbs_);
+    savedNics_ = hipObj::setNicTopologyForTest(&nics_);
 
     g_postRecvCalls = 0;
     g_postRecvObserver = nullptr;
@@ -450,8 +497,8 @@ protected:
     /* Valid server PREPARE reply: an RC token with a nonzero GID. */
     hipObj::RdmaToken tok{};
     tok.qpNum = 0x9999;
-    std::memset(tok.gid, 0xab, sizeof(tok.gid));
-    tok.transport = hipObj::TRANSPORT_RC;
+    tok.gid.fill(0xab);
+    tok.transport = hipObj::TransportType::RC;
     tok.portNum = 1;
     const std::string enc = hipObj::encodeRdmaToken(tok);
     std::memcpy(consumer_.prep.serverToken, enc.c_str(),
@@ -481,10 +528,9 @@ protected:
     g_postRecvObserver = nullptr;
     hipObj::v2::setClockSourceForTest(nullptr);
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
-    hipObj::hipOps() = savedHipOps_;
-    hipObj::ibv.funcsForTest() = savedFuncs_;
-    hipObj::setNicEnumerator(savedNics_);
-    hipObj::ibv.is_initialized = false;
+    hipObj::setHipForTest(savedHip_);
+    hipObj::setIbvForTest(savedVerbs_);
+    hipObj::setNicTopologyForTest(savedNics_);
   }
 
   hipObjOpError_t initV2(const char* endpoint, uint32_t transferMs) {
@@ -499,10 +545,12 @@ protected:
   alignas(4096) char buf_[kBufSize];
   hipObjOpsV2_t ops_{};
   MockConsumer consumer_;
+  FakeHip hip_;
+  FakeVerbs verbs_;
   FakeNics nics_;
-  hipObj::HipOps savedHipOps_;
-  hipObj::IbvFuncs savedFuncs_;
-  hipObj::NicEnumerator* savedNics_ = nullptr;
+  const hipObj::HipRuntime* savedHip_ = nullptr;
+  const hipObj::Verbs* savedVerbs_ = nullptr;
+  const hipObj::NicTopology* savedNics_ = nullptr;
 };
 
 const char* CbName(Cb cb) {
@@ -888,10 +936,7 @@ namespace {
  * so the second transfer draws the same PSN as the first. */
 struct FixedPsnSource : public hipObj::v2::RandomSource {
   uint32_t value = 0x51AB;
-  bool next32(uint32_t& out) override {
-    out = value;
-    return true;
-  }
+  std::optional<uint32_t> next32() const override { return value; }
 };
 } // namespace
 
@@ -908,13 +953,13 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   collisionClock.now = 0;
   hipObj::v2::setClockSourceForTest(&collisionClock);
   FixedPsnSource psnSource;
-  hipObj::v2::RandomSource* saved =
+  const hipObj::v2::RandomSource* saved =
       hipObj::v2::setRandomSourceForTest(&psnSource);
   /* Restore both overrides on every exit path, including fatal
    * assertion failures: the fixture teardown does not reset the
    * random override, and the source is stack-local. */
   struct OverrideGuard {
-    hipObj::v2::RandomSource* prev;
+    const hipObj::v2::RandomSource* prev;
     ~OverrideGuard() {
       hipObj::v2::setRandomSourceForTest(prev);
       hipObj::v2::setClockSourceForTest(nullptr);

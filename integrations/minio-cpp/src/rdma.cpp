@@ -697,15 +697,6 @@ namespace {
         return {};
     }
 
-    int statusCodeFromHead(const std::string &head)
-    {
-        const size_t sp = head.find(' ');
-        if (sp == std::string::npos) {
-            return 0;
-        }
-        return static_cast<int>(std::strtol(head.c_str() + sp + 1, nullptr, 10));
-    }
-
     std::string controlDialTarget(const hipObjTransferReqV2_t *req, S3RdmaContext *sctx)
     {
         if (req->endpoint != nullptr && req->endpoint->controlEndpoint != nullptr &&
