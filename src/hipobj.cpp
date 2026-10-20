@@ -415,7 +415,8 @@ checkTransferArgsV2(const char *bucket, const char *key, const void *devPtr, uin
         size == 0 || !isValidCanonicalQueryV2(query)) {
         return {hipObjInvalidValue, 0};
     }
-    if (!ops || !ops->sendPrepare || !ops->sendReady || !ops->sendCancel) {
+    if (!ops || !ops->sendPrepare || !ops->sendReadyRequest || !ops->finishReady ||
+        !ops->sendCancel) {
         return {hipObjInvalidValue, 0};
     }
     if (size > v2::kMaxTransferSize) {
@@ -633,6 +634,7 @@ try {
     if (state.initialized) {
         pd = hipObj::g_conn->pd.get();
     }
+#ifdef HIPOBJECT_V2_API
     else {
         /* A v2-only process registers against the shared v2 device. */
         pd = hipObj::v2::v2ProtectionDomain();
@@ -640,6 +642,11 @@ try {
             return {hipObjNotInitialized, 0};
         }
     }
+#else
+    else {
+        return {hipObjNotInitialized, 0};
+    }
+#endif
     hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
