@@ -26,6 +26,7 @@
 
 #include "v2-client.h"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -611,30 +612,29 @@ int v2Init(hipObjConfigV2_t* config) {
       return hipObjNicNotFound;
     }
   }
-  const std::string nicNameOut = nic->name;
-  const std::string controlEndpoint = config->control.controlEndpoint;
-  DeviceHandle* dh = new DeviceHandle();
+  std::string nicNameOut = nic->name;
+  std::string controlEndpoint = config->control.controlEndpoint;
+  std::unique_ptr<DeviceHandle> dh(new DeviceHandle());
   RcConnection raw;
   if (hipObj::openRdmaDeviceByName(nic->name.c_str(), raw) != 0) {
-    delete dh;
     return hipObjRdmaError;
   }
   dh->ctx = std::move(raw.ctx);
   dh->pd = std::move(raw.pd);
   dh->portNum = raw.portNum;
   dh->gidIndex = raw.gidIndex;
-  st.selectedPort = static_cast<int>(raw.portNum);
-  st.selectedGidIndex = static_cast<int>(raw.gidIndex);
   dh->localGid = raw.localGid;
-  /* Commit the strings before publishing the device. A throw after
-   * st.device is set would leave an uninitialized state holding the
-   * only pointer to the opened context. */
+  /* Move the strings before publishing the device. They are non-const
+   * so the assignment does not allocate. The unique_ptr deletes the
+   * opened device if an assignment still throws. */
   st.controlEndpoint = std::move(controlEndpoint);
   st.connectDeadlineMs = config->connectDeadlineMs;
   st.transferDeadlineMs = config->transferDeadlineMs;
   st.cancelBudgetMs = config->cancelCleanupBudgetMs;
   st.nicName = std::move(nicNameOut);
-  st.device = dh;
+  st.selectedPort = static_cast<int>(raw.portNum);
+  st.selectedGidIndex = static_cast<int>(raw.gidIndex);
+  st.device = dh.release();
   ++st.initGeneration;
   st.initialized = true;
   return hipObjSuccess;

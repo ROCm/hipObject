@@ -304,9 +304,9 @@ struct CallRecord {
 /* Scriptable clock for deterministic deadline tests. */
 class FrozenClock : public hipObj::v2::ClockSource {
 public:
-  uint64_t now = 0;
+  uint64_t millis = 0;
   hipObj::v2::TimePoint now() const override {
-    return hipObj::v2::TimePoint(std::chrono::milliseconds(now));
+    return hipObj::v2::TimePoint(std::chrono::milliseconds(millis));
   }
 };
 
@@ -826,7 +826,7 @@ TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
   /* Freeze time; every steadyNowMs() read (entry capture, guards,
    * registry expiry) now returns 0. */
   FrozenClock frozen;
-  frozen.now = 0;
+  frozen.millis = 0;
   hipObj::v2::setClockSourceForTest(&frozen);
 
   /* Advance the frozen clock inside the PREPARE callback: the entry
@@ -907,16 +907,16 @@ TEST_F(V2ClientTransferTest, FinalBudgetRefreshedBeforeFinishReady) {
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
 
   FrozenClock frozen;
-  frozen.now = 1000;
+  frozen.millis = 1000;
   hipObj::v2::setClockSourceForTest(&frozen);
   uint32_t seenReady = 0, seenFinal = 0;
   consumer_.armGetCompletion = true;
   consumer_.onPrepare = [&](hipObjPrepareReplyV2_t*) {
-    frozen.now += 5000;
+    frozen.millis += 5000;
   };
   consumer_.onReadyRequest = [&]() {
     seenReady = consumer_.lastSeenDeadlineMs;
-    frozen.now += 5000;
+    frozen.millis += 5000;
   };
   consumer_.onFinishReady = [&]() {
     seenFinal = consumer_.lastSeenDeadlineMs;
@@ -950,7 +950,7 @@ TEST_F(V2ClientTransferTest, RetiredPairActuallyRejected) {
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
   consumer_.armGetCompletion = true;
   FrozenClock collisionClock;
-  collisionClock.now = 0;
+  collisionClock.millis = 0;
   hipObj::v2::setClockSourceForTest(&collisionClock);
   FixedPsnSource psnSource;
   const hipObj::v2::RandomSource* saved =
@@ -1010,14 +1010,14 @@ TEST_F(V2ClientTransferTest, ExpiredInvalidFinalKeepsDeadlineMarker) {
     ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
 
     FrozenClock frozen;
-    frozen.now = 0;
+    frozen.millis = 0;
     hipObj::v2::setClockSourceForTest(&frozen);
     consumer_.armGetCompletion = true;
     tc.corrupt(consumer_);
     consumer_.onFinishReady = [&frozen]() {
       /* Consume the whole budget inside FINAL while the reply is
        * already corrupt. */
-      frozen.now = 100'000;
+      frozen.millis = 100'000;
     };
     const hipObjError_t err =
         hipObjGetV2("b", "k", buf_, 512, 0, nullptr, &ops_, &consumer_);
@@ -1042,7 +1042,7 @@ TEST_F(V2ClientTransferTest, ExpiredFinalKeepsDeadlineMarker) {
   ASSERT_EQ(hipObjBufRegister(buf_, kBufSize).opError, hipObjSuccess);
 
   FrozenClock frozen;
-  frozen.now = 0;
+  frozen.millis = 0;
   hipObj::v2::setClockSourceForTest(&frozen);
   consumer_.armGetCompletion = true;
   consumer_.onFinishReady = [&]() {
