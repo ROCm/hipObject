@@ -281,8 +281,7 @@ TEST_F(ThreadSafetyTest, ShutdownAndInitDuringBufferCalls)
 }
 
 #ifdef HIPOBJECT_V2_API
-/* hipObjGetV2() and hipObjPutV2() check that these are set, but don't
- * call them yet */
+/* hipObjGetV2() and hipObjPutV2() require these callbacks. */
 int
 unusedSendPrepare(void *, const hipObjTransferReqV2_t *, hipObjPrepareReplyV2_t *)
 {
@@ -290,7 +289,13 @@ unusedSendPrepare(void *, const hipObjTransferReqV2_t *, hipObjPrepareReplyV2_t 
 }
 
 int
-unusedSendReady(void *, const hipObjTransferReqV2_t *, hipObjFinalReplyV2_t *)
+unusedSendReadyRequest(void *, const hipObjTransferReqV2_t *)
+{
+    return -1;
+}
+
+int
+unusedFinishReady(void *, const hipObjTransferReqV2_t *, hipObjFinalReplyV2_t *)
 {
     return -1;
 }
@@ -314,7 +319,8 @@ struct ReentryProbe {
     void       *unregistered = nullptr;
     hipObjOps_t plainOps     = {&plainSendRequest, &plainRecvReply};
 #ifdef HIPOBJECT_V2_API
-    hipObjOpsV2_t v2Ops = {{}, &unusedSendPrepare, &unusedSendReady, &unusedSendCancel};
+    hipObjOpsV2_t v2Ops = {{}, &unusedSendPrepare, &unusedSendReadyRequest, &unusedFinishReady,
+                           &unusedSendCancel};
 #endif
 
     std::vector<std::pair<std::string_view, hipObjOpError_t>> locked{};
