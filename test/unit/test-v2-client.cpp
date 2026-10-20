@@ -839,7 +839,7 @@ TEST_F(V2ClientTransferTest, DeadlineExpirySurfacesAsBusy) {
     self->snapshot(Cb::Prepare, req);
     /* Jump past the deadline while inside the callback. */
     if (g_deadlineJumpClock != nullptr) {
-      g_deadlineJumpClock->now = 10;
+      g_deadlineJumpClock->millis = 10;
     }
     *out = self->prep;
     return 0;
@@ -1049,7 +1049,7 @@ TEST_F(V2ClientTransferTest, ExpiredFinalKeepsDeadlineMarker) {
     /* Consume the whole budget inside FINAL; the reply itself stays
      * valid so the expiry classification is exercised on its own. */
     if (g_deadlineJumpClock != nullptr) {
-      g_deadlineJumpClock->now = 100'000;
+      g_deadlineJumpClock->millis = 100'000;
     }
   };
   g_deadlineJumpClock = &frozen;
