@@ -1292,7 +1292,27 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 #ifdef HIPOBJECT_V2_API
     return rdmaPutV2(ctx, buf, size);
 #else
-    return {RdmaStatus::Failed};
+    constexpr int kRdmaMaxAttempts = 2;
+    RdmaResult ret{RdmaStatus::Failed};
+    for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
+        char               *rawToken = nullptr;
+        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
+        const RdmaTokenPtr  token(rawToken);
+        if (terr.opError != hipObjSuccess || !token) {
+            rdmaTrace("v1 put: token: ", hipObjGetErrorString(terr.opError));
+            return {RdmaStatus::Failed};
+        }
+        hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
+        if (serr.opError != hipObjSuccess) {
+            rdmaTrace("v1 put: stage to host: ", hipObjGetErrorString(serr.opError));
+            return {RdmaStatus::Failed};
+        }
+        ret = rdmaPut(ctx, token.get(), size);
+        if ((ret.status == RdmaStatus::Ok && ret.bytes > 0) || ret.status == RdmaStatus::NotSupported) {
+            return ret;
+        }
+    }
+    return ret;
 #endif /* HIPOBJECT_V2_API */
 }
 
@@ -1302,7 +1322,30 @@ rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 #ifdef HIPOBJECT_V2_API
     return rdmaGetV2(ctx, buf, size);
 #else
-    return {RdmaStatus::Failed};
+    constexpr int kRdmaMaxAttempts = 2;
+    RdmaResult ret{RdmaStatus::Failed};
+    for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
+        char               *rawToken = nullptr;
+        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
+        const RdmaTokenPtr  token(rawToken);
+        if (terr.opError != hipObjSuccess || !token) {
+            rdmaTrace("v1 get: token: ", hipObjGetErrorString(terr.opError));
+            return {RdmaStatus::Failed};
+        }
+        ret = rdmaGet(ctx, token.get(), size);
+        if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
+            hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_DEVICE);
+            if (serr.opError != hipObjSuccess) {
+                rdmaTrace("v1 get: stage to device: ", hipObjGetErrorString(serr.opError));
+                return {RdmaStatus::Failed};
+            }
+            return ret;
+        }
+        if (ret.status == RdmaStatus::NotSupported) {
+            return ret;
+        }
+    }
+    return ret;
 #endif /* HIPOBJECT_V2_API */
 }
 
