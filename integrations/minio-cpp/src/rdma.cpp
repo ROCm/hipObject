@@ -7,13 +7,34 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <cerrno>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <limits>
+#include <mutex>
+#include <thread>
 #include <list>
 #include <memory>
 #include <optional>
 #include <span>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <utility>
+
+#include <fcntl.h>
+#include <ifaddrs.h>
+#include <dirent.h>
+#include <net/if.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <strings.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <hipobj.h>
 #include <miniocpp/credentials.h>
@@ -30,6 +51,10 @@
 
 namespace hipobj::minio {
 
+/* The enclosing namespace name shadows the minio-cpp root namespace
+ * for qualified lookups; rebind it, and keep the using-directive for
+ * unqualified names the rest of this file already uses. */
+namespace minio = ::minio;
 using namespace ::minio;
 
 namespace {
@@ -111,8 +136,43 @@ namespace {
 
     using RdmaTokenPtr = std::unique_ptr<char, RdmaTokenDeleter>;
 
+    constexpr unsigned kMaxOutstandingResolvers = 4;
+    std::atomic<unsigned> g_outstandingResolvers{0};
+    int (*g_resolveHook)(const char *, const char *, const struct addrinfo *, struct addrinfo **) = nullptr;
+    bool g_forceResolverLaunchFail = false;
+
+    bool acquireResolverSlot()
+    {
+        unsigned cur = g_outstandingResolvers.load(std::memory_order_relaxed);
+        while (cur < kMaxOutstandingResolvers) {
+            if (g_outstandingResolvers.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel,
+                                                             std::memory_order_relaxed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void releaseResolverSlot()
+    {
+        g_outstandingResolvers.fetch_sub(1, std::memory_order_acq_rel);
+    }
+
+    minio::creds::Credentials fetchCreds(S3RdmaContext *sctx)
+    {
+        if (sctx->haveCachedCreds && static_cast<bool>(sctx->cachedCreds)) {
+            return sctx->cachedCreds;
+        }
+        minio::creds::Credentials creds = sctx->provider->Fetch();
+        if (static_cast<bool>(creds)) {
+            sctx->cachedCreds = creds;
+            sctx->haveCachedCreds = true;
+        }
+        return creds;
+    }
+
     // ---------------------------------------------------------------------------
-    // v2 callback context — carries the per-transfer minio credentials and
+    // v2 callback context: carries the per-transfer minio credentials and
     // endpoint so the three hipObjOpsV2_t callbacks can build signed requests.
     // ---------------------------------------------------------------------------
 
@@ -124,170 +184,829 @@ namespace {
         std::snprintf(dst.data(), dst.size(), "%s", src.c_str());
     }
 
-    struct V2CallbackCtx {
-        S3RdmaContext *sctx;
-        std::string    clientNic; // NIC hint derived from the client token
-    };
-
-    minio::http::Response executeV2Request(S3RdmaContext *sctx, minio::http::Method method,
-                                           const std::string &nic, minio::utils::Multimap &extra_headers,
-                                           const std::string &bucket, const std::string &key,
-                                           const std::string &query_str)
+    std::string hexFixed(uint64_t value, int width)
     {
-        minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-        minio::creds::Credentials creds = sctx->provider->Fetch();
-        minio::utils::Multimap    query_params;
-        minio::http::Url          url;
-        const std::string        &region = sctx->region;
-
-        if (minio::error::Error err = sctx->url.BuildUrl(url, method, region, query_params, bucket, key)) {
-            minio::http::Response bad;
-            bad.status_code = -1;
-            return bad;
-        }
-
-        if (!query_str.empty()) {
-            url.query_string = query_str;
-        }
-
-        std::string            host = url.HostHeaderValue();
-        minio::utils::Multimap sign_headers;
-        sign_headers.Add("Host", host);
-        sign_headers.Add("x-amz-date", date.ToAmzDate());
-        sign_headers.Add("x-amz-content-sha256", kUnsignedPayload);
-        sign_headers.Add("Content-Length", "0");
-
-        for (const auto &k : extra_headers.Keys()) {
-            sign_headers.Add(k, extra_headers.GetFront(k));
-        }
-
-        if (!creds.session_token.empty()) {
-            sign_headers.Add("X-Amz-Security-Token", creds.session_token);
-        }
-
-        minio::signer::SignV4S3(method, url.path, region, sign_headers, query_params, creds.access_key,
-                                creds.secret_key, kUnsignedPayload, date);
-
-        if (!query_str.empty()) {
-            url.query_string = query_str;
-        }
-        else {
-            url.query_string = query_params.ToQueryString();
-        }
-
-        minio::http::Request req(method, url);
-        req.headers              = std::move(sign_headers);
-        req.connect_timeout_secs = kRdmaConnectTimeoutSecs;
-        req.timeout_secs         = kRdmaTimeoutSecs;
-
-        if (!nic.empty()) {
-            req.nic_interface = nic;
-        }
-
-        return req.Execute();
+        char buf[24];
+        std::snprintf(buf, sizeof(buf), "%0*llx", width, static_cast<unsigned long long>(value));
+        return std::string(buf);
     }
 
-    // hipObjOpsV2_t callbacks -------------------------------------------------
+    struct ControlConn {
+        int         fd = -1;
+        std::string host;
+        std::string port;
+
+        bool connectTo(const std::string &hostPort, const std::string &nic,
+                       std::chrono::steady_clock::time_point deadlineAt, int selectedPort, int selectedGid);
+        void closeConn()
+        {
+            if (fd >= 0) {
+                ::close(fd);
+                fd = -1;
+            }
+        }
+        bool sendAll(const std::string &bytes, std::chrono::steady_clock::time_point deadlineAt);
+        /* One HTTP/1.1 response: status, headers, then Content-Length body. */
+        bool readResponse(std::string &head, std::string &body,
+                          std::chrono::steady_clock::time_point deadlineAt);
+        ~ControlConn()
+        {
+            closeConn();
+        }
+    };
+
+    bool connectControlForTestImpl(const std::string &hostPort, std::chrono::steady_clock::time_point deadlineAt)
+    {
+        ControlConn conn;
+        return conn.connectTo(hostPort, "", deadlineAt, 0, -1);
+    }
+
+    struct V2CallbackCtx {
+        S3RdmaContext *sctx;
+        std::string    clientNic; // NIC the v2 stack selected (hipObjNicV2)
+        /* READY writes the request and parks this socket until finishReady. */
+        ControlConn readyConn;
+        bool        readyPending = false;
+        /* The FINAL read shares the deadline READY computed before it
+         * wrote the request, instead of starting a new window. */
+        std::chrono::steady_clock::time_point readyDeadline{};
+        int selectedPort = 0;
+        int selectedGid = -1;
+    };
+
+    /* Netdev for the data plane's exact port and GID. An empty result
+     * means the selected interface cannot be named. */
+    std::string rdmaNetdevFor(const std::string &rdmaDev, int port, int gidIdx)
+    {
+        if (rdmaDev.empty() || port <= 0 || gidIdx < 0) {
+            return {};
+        }
+        const std::string path = "/sys/class/infiniband/" + rdmaDev + "/ports/" + std::to_string(port) +
+                                 "/gid_attrs/ndevs/" + std::to_string(gidIdx);
+        FILE *f = std::fopen(path.c_str(), "r");
+        if (f == nullptr) {
+            return {};
+        }
+        char buf[IFNAMSIZ + 1] = {0};
+        std::string found;
+        if (std::fgets(buf, sizeof(buf), f) != nullptr) {
+            char *nl = std::strchr(buf, '\n');
+            if (nl != nullptr) {
+                *nl = '\0';
+            }
+            if (buf[0] != '\0') {
+                found = buf;
+            }
+        }
+        std::fclose(f);
+        return found;
+    }
+
+    /* -1 means the budget is already gone. Callers must fail before
+     * poll: a negative timeout waits forever. */
+    int pollBudgetMs(std::chrono::steady_clock::time_point deadlineAt)
+    {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              deadlineAt - std::chrono::steady_clock::now())
+                              .count();
+        if (left <= 0) {
+            return -1;
+        }
+        if (left > static_cast<long long>(std::numeric_limits<int>::max())) {
+            return std::numeric_limits<int>::max();
+        }
+        return static_cast<int>(left);
+    }
+
+    bool ControlConn::connectTo(const std::string &hostPort, const std::string &nic,
+                                std::chrono::steady_clock::time_point deadlineAt, int selectedPort, int selectedGid)
+    {
+        closeConn();
+        std::string host      = hostPort;
+        std::string port      = "80";
+        bool        https     = false;
+        const size_t scheme   = hostPort.find("://");
+        if (scheme != std::string::npos) {
+            https = hostPort.compare(0, scheme, "https") == 0;
+            host  = hostPort.substr(scheme + 3);
+        }
+        const size_t slash = host.find('/');
+        if (slash != std::string::npos) {
+            host = host.substr(0, slash);
+        }
+        if (!host.empty() && host.front() == '[') {
+            /* Bracketed IPv6 literal: the port follows the closing bracket.
+             * rfind(':') would otherwise split inside the address. */
+            const size_t close = host.find(']');
+            if (close == std::string::npos) {
+                return false;
+            }
+            if (close + 1 < host.size()) {
+                if (host[close + 1] != ':' || close + 2 >= host.size()) {
+                    return false;
+                }
+                port = host.substr(close + 2);
+                if (port.find_first_not_of("0123456789") != std::string::npos) {
+                    return false;
+                }
+            }
+            host = host.substr(1, close - 1);
+        } else {
+            const size_t colon = host.rfind(':');
+            if (colon != std::string::npos) {
+                port = host.substr(colon + 1);
+                host = host.substr(0, colon);
+            }
+        }
+        if (https) {
+            /* The direct control path is plain HTTP. TLS is out of scope. */
+            return false;
+        }
+        if (pollBudgetMs(deadlineAt) < 0) {
+            return false;
+        }
+
+        struct addrinfo hints{};
+        hints.ai_family   = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        struct addrinfo *list = nullptr;
+        int gaiRc = 0;
+        {
+            struct ResolveState {
+                std::mutex mu;
+                std::condition_variable cv;
+                bool done = false;
+                int rc = 0;
+                struct addrinfo *result = nullptr;
+                ~ResolveState()
+                {
+                    if (result != nullptr) {
+                        freeaddrinfo(result);
+                    }
+                }
+                struct addrinfo *takeResult()
+                {
+                    struct addrinfo *out = result;
+                    result = nullptr;
+                    return out;
+                }
+            };
+            auto st = std::make_shared<ResolveState>();
+            const std::string hostCopy = host;
+            const std::string portCopy = port;
+            if (!acquireResolverSlot()) {
+                return false;
+            }
+            if (g_forceResolverLaunchFail) {
+                releaseResolverSlot();
+                return false;
+            }
+            std::thread resolver;
+            try {
+                resolver = std::thread([st, hostCopy, portCopy, hints]() {
+                    struct addrinfo *res = nullptr;
+                    const int rc = g_resolveHook != nullptr
+                                       ? g_resolveHook(hostCopy.c_str(), portCopy.c_str(), &hints, &res)
+                                       : getaddrinfo(hostCopy.c_str(), portCopy.c_str(), &hints, &res);
+                    {
+                        std::lock_guard<std::mutex> lk(st->mu);
+                        st->rc = rc;
+                        st->result = res;
+                        st->done = true;
+                        st->cv.notify_all();
+                    }
+                    releaseResolverSlot();
+                });
+            } catch (const std::system_error &) {
+                releaseResolverSlot();
+                return false;
+            }
+            std::unique_lock<std::mutex> lk(st->mu);
+            if (!st->cv.wait_until(lk, deadlineAt, [&]() { return st->done; })) {
+                resolver.detach();
+                return false;
+            }
+            struct addrinfo *taken = (st->rc == 0) ? st->takeResult() : nullptr;
+            lk.unlock();
+            resolver.join();
+            if (st->rc != 0 || taken == nullptr) {
+                return false;
+            }
+            list = taken;
+            gaiRc = st->rc;
+        }
+        if (gaiRc != 0 || list == nullptr) {
+            return false;
+        }
+        struct AddrInfoOwner {
+            struct addrinfo *p;
+            ~AddrInfoOwner()
+            {
+                if (p != nullptr) {
+                    freeaddrinfo(p);
+                }
+            }
+        } addrOwner{list};
+        int fd = -1;
+        for (struct addrinfo *ai = list; ai != nullptr; ai = ai->ai_next) {
+            fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+            if (fd < 0) {
+                continue;
+            }
+            int one = 1;
+            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+            if (!nic.empty()) {
+                const std::string netdev =
+                    rdmaNetdevFor(nic, selectedPort, selectedGid);
+                if (netdev.empty()) {
+                    ::close(fd);
+                    return false;
+                }
+                struct ifreq ifr{};
+                std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", netdev.c_str());
+                bool bound = setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) == 0;
+                if (!bound) {
+                    struct ifaddrs *ifs = nullptr;
+                    if (getifaddrs(&ifs) == 0) {
+                        for (struct ifaddrs *i = ifs; i != nullptr; i = i->ifa_next) {
+                            if (std::strcmp(i->ifa_name, netdev.c_str()) != 0 || i->ifa_addr == nullptr ||
+                                i->ifa_addr->sa_family != AF_INET) {
+                                continue;
+                            }
+                            auto *sa = reinterpret_cast<sockaddr_in *>(i->ifa_addr);
+                            if (bind(fd, reinterpret_cast<sockaddr *>(sa), sizeof(*sa)) == 0) {
+                                bound = true;
+                                break;
+                            }
+                        }
+                        freeifaddrs(ifs);
+                    }
+                }
+                if (!bound) {
+                    ::close(fd);
+                    return false;
+                }
+            }
+            const int flags = fcntl(fd, F_GETFL, 0);
+            if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+                ::close(fd);
+                fd = -1;
+                continue;
+            }
+            const int rc = ::connect(fd, ai->ai_addr, ai->ai_addrlen);
+            if (rc == 0) {
+                break;
+            }
+            if (errno == EINPROGRESS) {
+                struct pollfd pfd{fd, POLLOUT, 0};
+                int pr = 0;
+                int left = 0;
+                do {
+                    left = pollBudgetMs(deadlineAt);
+                    if (left < 0) {
+                        pr = 0;
+                        break;
+                    }
+                    pr = poll(&pfd, 1, left);
+                } while (pr < 0 && errno == EINTR);
+                if (pr <= 0) {
+                    ::close(fd);
+                    fd = -1;
+                    continue;
+                }
+                int       err  = 0;
+                socklen_t elen = sizeof(err);
+                getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &elen);
+                if (err == 0) {
+                    break;
+                }
+            }
+            ::close(fd);
+            fd = -1;
+        }
+        if (fd < 0) {
+            return false;
+        }
+        /* Stay nonblocking. sendAll and readResponse poll, and treat
+         * EAGAIN as "wait again" rather than a hard error. */
+        this->fd   = fd;
+        this->host = host;
+        this->port = port;
+        return true;
+    }
+
+    bool ControlConn::sendAll(const std::string &bytes, std::chrono::steady_clock::time_point deadlineAt)
+    {
+        if (fd < 0) {
+            return false;
+        }
+        size_t     off        = 0;
+        while (off < bytes.size()) {
+            struct pollfd pfd{fd, POLLOUT, 0};
+            int pr = 0;
+            int left = 0;
+            do {
+                left = pollBudgetMs(deadlineAt);
+                if (left < 0) {
+                    return false;
+                }
+                pr = poll(&pfd, 1, left);
+            } while (pr < 0 && errno == EINTR);
+            if (pr <= 0) {
+                return false;
+            }
+            const ssize_t n = ::send(fd, bytes.data() + off, bytes.size() - off, MSG_NOSIGNAL);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                continue;
+            }
+            if (n <= 0) {
+                return false;
+            }
+            off += static_cast<size_t>(n);
+        }
+        return true;
+    }
+
+    int statusCodeFromHead(const std::string &head)
+    {
+        const size_t sp = head.find(' ');
+        if (sp == std::string::npos) {
+            return 0;
+        }
+        return static_cast<int>(std::strtol(head.c_str() + sp + 1, nullptr, 10));
+    }
+
+    bool ControlConn::readResponse(std::string &head, std::string &body,
+                                   std::chrono::steady_clock::time_point deadlineAt)
+    {
+        if (fd < 0) {
+            return false;
+        }
+        std::string buf;
+        size_t      headEnd    = std::string::npos;
+        size_t      contentLen = std::string::npos;
+        while (true) {
+            if (headEnd == std::string::npos) {
+                headEnd = buf.find("\r\n\r\n");
+                if (headEnd != std::string::npos) {
+                    head = buf.substr(0, headEnd);
+                    buf  = buf.substr(headEnd + 4);
+                    int    lengthCount = 0;
+                    size_t pos         = 0;
+                    while (pos < head.size()) {
+                        size_t eol = head.find("\r\n", pos);
+                        if (eol == std::string::npos) {
+                            eol = head.size();
+                        }
+                        const std::string line = head.substr(pos, eol - pos);
+                        pos                    = (eol == head.size()) ? head.size() : eol + 2;
+                        const std::string cl = "content-length:";
+                        const std::string transferEncoding = "transfer-encoding:";
+                        if (line.size() >= transferEncoding.size() &&
+                            strncasecmp(line.c_str(), transferEncoding.c_str(), transferEncoding.size()) == 0) {
+                            return false;
+                        }
+                        if (line.size() >= cl.size() && strncasecmp(line.c_str(), cl.c_str(), cl.size()) == 0) {
+                            ++lengthCount;
+                            const char *val = line.c_str() + cl.size();
+                            while (*val == ' ' || *val == '\t') {
+                                ++val;
+                            }
+                            const std::string digits(val);
+                            if (digits.empty() || digits.size() > 20 ||
+                                digits.find_first_not_of("0123456789") != std::string::npos) {
+                                return false;
+                            }
+                            errno = 0;
+                            char                    *endp = nullptr;
+                            const unsigned long long n    = std::strtoull(digits.c_str(), &endp, 10);
+                            if (errno != 0 || endp == nullptr || *endp != '\0') {
+                                return false;
+                            }
+                            contentLen = static_cast<size_t>(n);
+                        }
+                    }
+                    if (lengthCount != 1) {
+                        /* RFC 9110 forbids Content-Length on a 204, so a
+                         * bodyless 204 is a zero-length body, not a framing
+                         * error. */
+                        if (lengthCount == 0 && statusCodeFromHead(head) == 204) {
+                            contentLen = 0;
+                        } else {
+                            return false;
+                        }
+                    }
+                }
+            }
+            if (headEnd != std::string::npos && contentLen != std::string::npos && buf.size() >= contentLen) {
+                body = buf.substr(0, contentLen);
+                return true;
+            }
+            struct pollfd pfd{fd, POLLIN, 0};
+            int pr = 0;
+            int left = 0;
+            do {
+                left = pollBudgetMs(deadlineAt);
+                if (left < 0) {
+                    return false;
+                }
+                pr = poll(&pfd, 1, left);
+            } while (pr < 0 && errno == EINTR);
+            if (pr <= 0) {
+                return false;
+            }
+            char          chunk[4096];
+            const ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                continue;
+            }
+            if (n <= 0) {
+                return false;
+            }
+            buf.append(chunk, static_cast<size_t>(n));
+            if (buf.size() > (1u << 20)) {
+                return false;
+            }
+        }
+    }
+
+    struct ControlExchange {
+        std::string bytes;
+    };
+
+    bool buildControlExchange(ControlExchange &out, S3RdmaContext *sctx, const std::string &controlPath,
+                              minio::utils::Multimap &extraHeaders, const std::string &hostHeaderValue,
+                              std::chrono::steady_clock::time_point deadlineAt)
+    {
+        if (std::chrono::steady_clock::now() >= deadlineAt) {
+            return false;
+        }
+        minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
+        minio::creds::Credentials creds = fetchCreds(sctx);
+        if (std::chrono::steady_clock::now() >= deadlineAt) {
+            return false;
+        }
+        minio::utils::Multimap    queryParams;
+        minio::utils::Multimap    signHeaders;
+        signHeaders.Add("Host", hostHeaderValue);
+        signHeaders.Add("x-amz-date", date.ToAmzDate());
+        signHeaders.Add("x-amz-content-sha256", kUnsignedPayload);
+        signHeaders.Add("Content-Length", "0");
+        signHeaders.AddAll(extraHeaders);
+        if (!creds.session_token.empty()) {
+            signHeaders.Add("X-Amz-Security-Token", creds.session_token);
+        }
+        minio::signer::SignV4S3(minio::http::Method::kPost, controlPath, sctx->region, signHeaders, queryParams,
+                                creds.access_key, creds.secret_key, kUnsignedPayload, date);
+        std::string req = "POST ";
+        req += controlPath;
+        req += " HTTP/1.1\r\n";
+        for (const std::string &h : signHeaders.ToHttpHeaders()) {
+            req += h;
+            req += "\r\n";
+        }
+        req += "Connection: keep-alive\r\n\r\n";
+        out.bytes = req;
+        return true;
+    }
+
+    std::string rawHeaderValue(const std::string &head, const std::string &name)
+    {
+        std::string lower;
+        lower.reserve(name.size());
+        for (char c : name) {
+            lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        size_t pos = 0;
+        while (pos < head.size()) {
+            size_t eol = head.find("\r\n", pos);
+            if (eol == std::string::npos) {
+                eol = head.size();
+            }
+            const std::string line = head.substr(pos, eol - pos);
+            pos                    = (eol == head.size()) ? head.size() : eol + 2;
+            if (line.size() > lower.size() + 1 && strncasecmp(line.c_str(), lower.c_str(), lower.size()) == 0 &&
+                line[lower.size()] == ':') {
+                size_t vs = lower.size() + 1;
+                while (vs < line.size() && line[vs] == ' ') {
+                    ++vs;
+                }
+                return line.substr(vs);
+            }
+        }
+        return {};
+    }
+
+    std::string controlDialTarget(const hipObjTransferReqV2_t *req, S3RdmaContext *sctx)
+    {
+        if (req->endpoint != nullptr && req->endpoint->controlEndpoint != nullptr &&
+            req->endpoint->controlEndpoint[0] != '\0') {
+            return req->endpoint->controlEndpoint;
+        }
+        const minio::s3::BaseUrl &base = sctx->url;
+        const std::string authority =
+            base.port != 0 ? base.host + ":" + std::to_string(base.port) : base.host;
+        return std::string(base.https ? "https" : "http") + "://" + authority;
+    }
+
+    std::string hostHeaderFromConn(const ControlConn &conn)
+    {
+        if (conn.port.empty() || conn.port == "80") {
+            return conn.host;
+        }
+        return conn.host + ":" + conn.port;
+    }
+
+    int controlDeadlineMs(const hipObjTransferReqV2_t *req)
+    {
+        /* Zero means earlier phases already spent the budget. Do not
+         * re-arm the default timeout. */
+        const uint64_t r = req->remainingMs;
+        if (r > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+            return std::numeric_limits<int>::max();
+        }
+        return static_cast<int>(r);
+    }
+
+    std::chrono::steady_clock::time_point controlDeadlineAt(const hipObjTransferReqV2_t *req)
+    {
+        return std::chrono::steady_clock::now() + std::chrono::milliseconds(controlDeadlineMs(req));
+    }
+
+    std::string replyTokenFromHeader(const std::string &value)
+    {
+        const std::string prefix = "200:";
+        if (value.size() > prefix.size() && value.compare(0, prefix.size(), prefix) == 0) {
+            return value.substr(prefix.size());
+        }
+        return {};
+    }
 
     int v2SendPrepare(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out)
     {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
 
         minio::utils::Multimap extra;
-        extra.Add(kAmzRdmaToken, req->token ? req->token : "");
         extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+        extra.Add(kAmzRdmaToken, req->token ? req->token : "");
+        extra.Add(kAmzRdmaPsn, hexFixed(req->clientPsn, 6));
+        extra.Add(kAmzRdmaCookie, hexFixed(req->cookie, 8));
+        extra.Add(kAmzRdmaOp, req->method ? req->method : "GET");
+        extra.Add(kAmzRdmaTarget, req->target ? req->target : "");
+        extra.Add(kAmzRdmaSize, std::to_string(req->size));
+        if (req->offset != 0) {
+            extra.Add(kAmzRdmaOffset, std::to_string(req->offset));
+        }
 
-        std::string           query = req->query ? req->query : "";
-        minio::http::Response res =
-            executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                             req->key ? req->key : "", query);
-
-        if (!res.error.empty() || res.status_code <= 0) {
-            rdmaTrace("v2 prepare: http failed (status=", res.status_code, " error='", res.error, "')");
+        ControlConn conn;
+        const auto  deadlineAt = controlDeadlineAt(req);
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt, c->selectedPort,
+                            c->selectedGid)) {
+            return -1;
+        }
+        ControlExchange ex;
+        const std::string hostHeader = hostHeaderFromConn(conn);
+        if (!buildControlExchange(ex, c->sctx, kControlPathPrepare, extra, hostHeader, deadlineAt) ||
+            !conn.sendAll(ex.bytes, deadlineAt)) {
+            return -1;
+        }
+        std::string head, body;
+        if (!conn.readResponse(head, body, deadlineAt)) {
+            return -1;
+        }
+        const int status = statusCodeFromHead(head);
+        if (status <= 0) {
             return -1;
         }
 
-        hipObj::zeroObject(*out);
-        out->httpStatus        = res.status_code;
-        out->protocolEcho      = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
-        out->unsupportedMarker = (res.status_code == kRdmaReplyNotImplemented) ? 1 : 0;
+        std::memset(out, 0, sizeof(*out));
+        out->httpStatus = status;
+        const std::string proto = rawHeaderValue(head, kAmzRdmaProtocol);
+        out->protocolEcho       = proto == kAmzRdmaProtocolV2 ? 1 : 0;
+        const std::string pstat = rawHeaderValue(head, "X-Amz-Rdma-Protocol-Status");
+        out->unsupportedMarker  = pstat == "unsupported" ? 1 : 0;
 
-        std::string srv_token = res.headers.GetFront(kAmzRdmaToken);
-        if (!srv_token.empty()) {
-            copyCString(out->serverToken, srv_token);
+        const std::string srvToken = replyTokenFromHeader(rawHeaderValue(head, kAmzRdmaReply));
+        if (!srvToken.empty()) {
+            copyCString(out->serverToken, srvToken);
         }
-        std::string session = res.headers.GetFront(kAmzRdmaSession);
+        const std::string session = rawHeaderValue(head, kAmzRdmaSession);
         if (!session.empty()) {
             copyCString(out->session, session);
+        }
+
+        auto strictUlong = [](const std::string &v, int base, unsigned long long max) -> unsigned long long {
+            if (v.empty()) {
+                return static_cast<unsigned long long>(-1);
+            }
+            char *endp = nullptr;
+            errno      = 0;
+            const unsigned long long n = std::strtoull(v.c_str(), &endp, base);
+            if (errno != 0 || endp == nullptr || *endp != '\0' || n > max) {
+                return static_cast<unsigned long long>(-1);
+            }
+            return n;
+        };
+        const std::string psn = rawHeaderValue(head, kAmzRdmaPsn);
+        if (!psn.empty()) {
+            const unsigned long long n = strictUlong(psn, 16, 0xffffffu);
+            if (n == static_cast<unsigned long long>(-1)) {
+                return -1;
+            }
+            out->serverPsn = static_cast<uint32_t>(n);
+        }
+        const std::string saddr = rawHeaderValue(head, kAmzRdmaMrAddr);
+        const std::string srkey = rawHeaderValue(head, kAmzRdmaMrRkey);
+        if (!saddr.empty() || !srkey.empty()) {
+            const unsigned long long a = strictUlong(saddr, 16, ~0ULL);
+            const unsigned long long r = strictUlong(srkey, 16, 0xffffffffu);
+            if (a == static_cast<unsigned long long>(-1) || r == static_cast<unsigned long long>(-1)) {
+                /* Malformed staging is reported as absent. The core
+                 * classifies a PUT without staging as InvalidValue
+                 * before READY. A GET does not need staging. */
+                out->stagingPresent = 0;
+                out->stagingAddr    = 0;
+                out->stagingRkey    = 0;
+                return 0;
+            }
+            out->stagingAddr    = a;
+            out->stagingRkey    = static_cast<uint32_t>(r);
+            out->stagingPresent = (a != 0 && r != 0) ? 1 : 0;
         }
         return 0;
     }
 
-    int v2SendReady(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out)
+    int v2SendReadyRequest(void *ctx, const hipObjTransferReqV2_t *req)
     {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
+        if (c->readyPending) {
+            return -1;
+        }
 
         minio::utils::Multimap extra;
-        extra.Add(kAmzRdmaSession, req->session ? req->session : "");
         extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
+        extra.Add(kAmzRdmaSession, req->session ? req->session : "");
+        extra.Add(kAmzRdmaCookie, hexFixed(req->cookie, 8));
+        extra.Add(kAmzRdmaQpn, hexFixed(req->clientQpn, 8));
+        extra.Add(kAmzRdmaMrAddr, hexFixed(req->clientMrAddr, 16));
+        extra.Add(kAmzRdmaMrRkey, hexFixed(req->clientMrRkey, 8));
 
-        std::string           query = req->query ? req->query : "";
-        minio::http::Response res =
-            executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                             req->key ? req->key : "", query);
-
-        if (!res.error.empty() || res.status_code <= 0) {
-            rdmaTrace("v2 ready: http failed (status=", res.status_code, " error='", res.error, "')");
+        const auto deadlineAt = controlDeadlineAt(req);
+        if (!c->readyConn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt, c->selectedPort,
+                                     c->selectedGid)) {
             return -1;
         }
-
-        hipObj::zeroObject(*out);
-        out->httpStatus   = res.status_code;
-        out->protocolEcho = !res.headers.GetFront(kAmzRdmaProtocol).empty() ? 1 : 0;
-
-        const auto bytes = parseBytesTransferred(headerValue(res.headers, kAmzRdmaBytesTransferred), 0);
-        if (!bytes) {
-            rdmaTrace("v2 ready: malformed ", kAmzRdmaBytesTransferred, " header");
+        ControlExchange ex;
+        if (!buildControlExchange(ex, c->sctx, kControlPathReady, extra, hostHeaderFromConn(c->readyConn), deadlineAt) ||
+            !c->readyConn.sendAll(ex.bytes, deadlineAt)) {
+            c->readyConn.closeConn();
             return -1;
         }
-        out->bytes = *bytes;
+        c->readyPending = true;
+        c->readyDeadline = deadlineAt;
+        return 0;
+    }
 
-        std::string etag = res.headers.GetFront("etag");
+    int v2FinishReady(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out)
+    {
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
+        if (!c->readyPending) {
+            return -1;
+        }
+        std::string head, body;
+        if (!c->readyConn.readResponse(head, body, c->readyDeadline)) {
+            c->readyConn.closeConn();
+            c->readyPending = false;
+            return -1;
+        }
+        c->readyConn.closeConn();
+        c->readyPending = false;
+
+        std::memset(out, 0, sizeof(*out));
+        out->httpStatus             = statusCodeFromHead(head);
+        const std::string proto     = rawHeaderValue(head, kAmzRdmaProtocol);
+        out->protocolEcho           = proto == kAmzRdmaProtocolV2 ? 1 : 0;
+
+        const std::string bytesHdr = rawHeaderValue(head, kAmzRdmaBytesTransferred);
+        if (!bytesHdr.empty()) {
+            if (bytesHdr.find_first_not_of("0123456789") != std::string::npos || bytesHdr.size() > 20) {
+                return -1;
+            }
+            errno = 0;
+            char                    *endp = nullptr;
+            const unsigned long long n    = std::strtoull(bytesHdr.c_str(), &endp, 10);
+            if (errno != 0 || endp == nullptr || *endp != '\0') {
+                return -1;
+            }
+            out->bytes = n;
+        }
+
+        const std::string echo = rawHeaderValue(head, kAmzRdmaCookie);
+        if (!echo.empty()) {
+            char                    *endp = nullptr;
+            const unsigned long      n    = std::strtoul(echo.c_str(), &endp, 16);
+            if (endp != nullptr && *endp == '\0' && n <= 0xffffffffUL) {
+                out->cookieEcho    = static_cast<uint32_t>(n);
+                out->cookiePresent = 1;
+            }
+        }
+
+        const std::string etag = rawHeaderValue(head, "X-Amz-Rdma-Etag");
         if (!etag.empty()) {
-            std::string trimmed = minio::utils::Trim(etag, '"');
+            const std::string trimmed = minio::utils::Trim(etag, '"');
             copyCString(out->etag, trimmed);
+            c->sctx->etag = trimmed;
         }
 
-        std::string csum = res.headers.GetFront("x-amz-checksum-crc64nvme");
+        const std::string csum = rawHeaderValue(head, "X-Amz-Rdma-Checksum");
         if (!csum.empty()) {
-            copyCString(out->checksumB64, csum);
-            c->sctx->checksum = csum;
+            /* Wire format is "CRC64NVME <base64>" exactly: 11 data
+             * characters and a trailing '='. Anything else is rejected
+             * rather than stored as a checksum. */
+            static const char kCsumPrefix[] = "CRC64NVME ";
+            const size_t      plen          = sizeof(kCsumPrefix) - 1;
+            bool              csumOk        = false;
+            std::string       payload;
+            if (csum.compare(0, plen, kCsumPrefix) == 0 && csum.size() == plen + 12) {
+                payload = csum.substr(plen);
+                csumOk  = payload.size() == 12 && payload[11] == '=';
+                for (size_t i = 0; csumOk && i < 11; ++i) {
+                    const char ch  = payload[i];
+                    const bool b64 = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                                     (ch >= '0' && ch <= '9') || ch == '+' || ch == '/';
+                    if (!b64) {
+                        csumOk = false;
+                    }
+                }
+                if (csumOk) {
+                    const auto b64v = [](char ch) -> int {
+                        if (ch >= 'A' && ch <= 'Z') {
+                            return ch - 'A';
+                        }
+                        if (ch >= 'a' && ch <= 'z') {
+                            return ch - 'a' + 26;
+                        }
+                        if (ch >= '0' && ch <= '9') {
+                            return ch - '0' + 52;
+                        }
+                        if (ch == '+') {
+                            return 62;
+                        }
+                        return 63;
+                    };
+                    if (b64v(payload[10]) & 0x3) {
+                        csumOk = false;
+                    }
+                }
+            }
+            if (!csumOk || payload.size() >= sizeof(out->checksumB64)) {
+                return -1;
+            }
+            copyCString(out->checksumB64, payload);
+            c->sctx->checksum = payload;
         }
-
-        if (!etag.empty()) {
-            c->sctx->etag = minio::utils::Trim(etag, '"');
-        }
-
         return 0;
     }
 
     int v2SendCancel(void *ctx, const hipObjTransferReqV2_t *req)
     {
-        auto               *c      = static_cast<V2CallbackCtx *>(ctx);
-        const bool          isPut  = (req->method && req->method[0] == 'P');
-        minio::http::Method method = isPut ? minio::http::Method::kPut : minio::http::Method::kGet;
+        auto *c = static_cast<V2CallbackCtx *>(ctx);
+        c->clientNic = req->nic != nullptr ? req->nic : "";
+        c->selectedPort = req->nicPort;
+        c->selectedGid = req->nicGidIndex;
 
         minio::utils::Multimap extra;
+        extra.Add(kAmzRdmaProtocol, kAmzRdmaProtocolV2);
         extra.Add(kAmzRdmaSession, req->session ? req->session : "");
         extra.Add(kAmzRdmaCancel, "1");
 
-        std::string query = req->query ? req->query : "";
-        executeV2Request(c->sctx, method, c->clientNic, extra, req->bucket ? req->bucket : "",
-                         req->key ? req->key : "", query);
+        if (c->readyPending) {
+            c->readyConn.closeConn();
+            c->readyPending = false;
+        }
+
+        ControlConn conn;
+        const auto  deadlineAt = controlDeadlineAt(req);
+        if (!conn.connectTo(controlDialTarget(req, c->sctx), c->clientNic, deadlineAt, c->selectedPort,
+                            c->selectedGid)) {
+            return 0;
+        }
+        ControlExchange ex;
+        if (!buildControlExchange(ex, c->sctx, kControlPathCancel, extra, hostHeaderFromConn(conn), deadlineAt) ||
+            !conn.sendAll(ex.bytes, deadlineAt)) {
+            return 0;
+        }
+        std::string head, body;
+        (void)conn.readResponse(head, body, deadlineAt);
         return 0;
     }
 
@@ -295,19 +1014,12 @@ namespace {
 
     RdmaResult rdmaPutV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        char               *rawToken = nullptr;
-        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_PUT, &rawToken);
-        const RdmaTokenPtr  token(rawToken);
-        if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v2 put: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
-        }
-
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
+        V2CallbackCtx cbctx{sctx, {}, {}, false, {}, 0, -1};
         hipObjOpsV2_t ops{};
-        ops.sendPrepare = v2SendPrepare;
-        ops.sendReady   = v2SendReady;
-        ops.sendCancel  = v2SendCancel;
+        ops.sendPrepare       = v2SendPrepare;
+        ops.sendReadyRequest  = v2SendReadyRequest;
+        ops.finishReady       = v2FinishReady;
+        ops.sendCancel        = v2SendCancel;
 
         std::string query;
         if (!sctx->uploadId.empty()) {
@@ -338,26 +1050,19 @@ namespace {
         }
         if (err.opError != hipObjSuccess) {
             rdmaTrace("v2 put: hipObjPutV2: ", hipObjGetErrorString(err.opError));
-            return {RdmaStatus::Failed};
+            return {RdmaStatus::V2Failed};
         }
         return {RdmaStatus::Ok, size};
     }
 
     RdmaResult rdmaGetV2(S3RdmaContext *sctx, void *buf, size_t size)
     {
-        char               *rawToken = nullptr;
-        const hipObjError_t terr     = hipObjGetRdmaToken(buf, size, HIPOBJ_RDMA_OP_GET, &rawToken);
-        const RdmaTokenPtr  token(rawToken);
-        if (terr.opError != hipObjSuccess || !token) {
-            rdmaTrace("v2 get: token: ", hipObjGetErrorString(terr.opError));
-            return {RdmaStatus::Failed};
-        }
-
-        V2CallbackCtx cbctx{sctx, clientNicFromToken(token.get())};
+        V2CallbackCtx cbctx{sctx, {}, {}, false, {}, 0, -1};
         hipObjOpsV2_t ops{};
-        ops.sendPrepare = v2SendPrepare;
-        ops.sendReady   = v2SendReady;
-        ops.sendCancel  = v2SendCancel;
+        ops.sendPrepare       = v2SendPrepare;
+        ops.sendReadyRequest  = v2SendReadyRequest;
+        ops.finishReady       = v2FinishReady;
+        ops.sendCancel        = v2SendCancel;
 
         hipObjError_t err =
             hipObjGetV2(sctx->bucket.c_str(), sctx->object.c_str(), buf, size, 0, nullptr, &ops, &cbctx);
@@ -373,7 +1078,7 @@ namespace {
         }
         if (err.opError != hipObjSuccess) {
             rdmaTrace("v2 get: hipObjGetV2: ", hipObjGetErrorString(err.opError));
-            return {RdmaStatus::Failed};
+            return {RdmaStatus::V2Failed};
         }
         return {RdmaStatus::Ok, size};
     }
@@ -381,6 +1086,44 @@ namespace {
 #endif /* HIPOBJECT_V2_API */
 
 } // namespace
+
+namespace test {
+unsigned outstandingResolverCount()
+{
+    return g_outstandingResolvers.load(std::memory_order_relaxed);
+}
+
+void resetOutstandingResolvers()
+{
+    g_outstandingResolvers.store(0, std::memory_order_relaxed);
+}
+
+void setResolveHook(int (*fn)(const char *, const char *, const struct addrinfo *, struct addrinfo **))
+{
+    g_resolveHook = fn;
+}
+
+void setForceResolverLaunchFail(bool fail)
+{
+    g_forceResolverLaunchFail = fail;
+}
+
+minio::creds::Credentials fetchCredsForTest(S3RdmaContext *sctx)
+{
+    return fetchCreds(sctx);
+}
+
+bool connectControlForTest(const std::string &hostPort, std::chrono::steady_clock::time_point deadline)
+{
+#ifdef HIPOBJECT_V2_API
+    return connectControlForTestImpl(hostPort, deadline);
+#else
+    (void)hostPort;
+    (void)deadline;
+    return false;
+#endif
+}
+} // namespace test
 
 RdmaResult
 rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
@@ -392,7 +1135,7 @@ rdmaPut(S3RdmaContext *sctx, const char *token, size_t size)
     const std::string rdma_token(token ? token : "");
 
     minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-    minio::creds::Credentials creds = sctx->provider->Fetch();
+    minio::creds::Credentials creds = fetchCreds(sctx);
     minio::utils::Multimap    query_params;
     minio::http::Url          url;
     const std::string        &region = sctx->region;
@@ -483,7 +1226,7 @@ rdmaGet(S3RdmaContext *sctx, const char *token, size_t size)
     const std::string rdma_token(token ? token : "");
 
     minio::utils::UtcTime     date  = minio::utils::UtcTime::Now();
-    minio::creds::Credentials creds = sctx->provider->Fetch();
+    minio::creds::Credentials creds = fetchCreds(sctx);
     minio::utils::Multimap    query_params;
     minio::http::Url          url;
     const std::string        &region = sctx->region;
@@ -547,13 +1290,9 @@ RdmaResult
 rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
 #ifdef HIPOBJECT_V2_API
-    // Try the v2 protocol first; fall back to v1 only when the server
-    // explicitly signals it does not support hipobj-rc-v2.
-    const RdmaResult v2 = rdmaPutV2(ctx, buf, size);
-    if (v2.status != RdmaStatus::NotSupported) {
-        return v2;
-    }
-#endif /* HIPOBJECT_V2_API */
+    return rdmaPutV2(ctx, buf, size);
+#else
+    constexpr int kRdmaMaxAttempts = 2;
     RdmaResult ret{RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
         char               *rawToken = nullptr;
@@ -563,9 +1302,6 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
             rdmaTrace("v1 put: token: ", hipObjGetErrorString(terr.opError));
             return {RdmaStatus::Failed};
         }
-        // A buffer the NIC cannot reach directly is registered as a host
-        // staging buffer, so the bytes have to be there before the server
-        // reads it.
         hipObjError_t serr = hipObjBufSync(buf, size, 0, HIPOBJ_SYNC_TO_HOST);
         if (serr.opError != hipObjSuccess) {
             rdmaTrace("v1 put: stage to host: ", hipObjGetErrorString(serr.opError));
@@ -577,17 +1313,16 @@ rdmaPutWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         }
     }
     return ret;
+#endif /* HIPOBJECT_V2_API */
 }
 
 RdmaResult
 rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
 {
 #ifdef HIPOBJECT_V2_API
-    const RdmaResult v2 = rdmaGetV2(ctx, buf, size);
-    if (v2.status != RdmaStatus::NotSupported) {
-        return v2;
-    }
-#endif /* HIPOBJECT_V2_API */
+    return rdmaGetV2(ctx, buf, size);
+#else
+    constexpr int kRdmaMaxAttempts = 2;
     RdmaResult ret{RdmaStatus::Failed};
     for (int attempt = 0; attempt < kRdmaMaxAttempts; ++attempt) {
         char               *rawToken = nullptr;
@@ -611,6 +1346,7 @@ rdmaGetWithRetry(S3RdmaContext *ctx, void *buf, size_t size)
         }
     }
     return ret;
+#endif /* HIPOBJECT_V2_API */
 }
 
 } // namespace hipobj::minio

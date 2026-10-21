@@ -4,6 +4,16 @@
 
 ### Added
 
+- `hipObjInitV2()`, `hipObjGetV2()`, and `hipObjPutV2()` transfer objects
+  over the hipobj-rc-v2 control protocol when `HIPOBJECT_V2_API` is
+  enabled. Call `hipObjInitV2()` with a `hipObjConfigV2_t` before get or
+  put. Get and put take a bucket, a key, a device pointer, a size, a
+  buffer offset, a canonical query or NULL, a `hipObjOpsV2_t`, and a
+  callback context. The ops must provide `sendPrepare`,
+  `sendReadyRequest`, `finishReady`, and `sendCancel`.
+  `sendReadyRequest` writes the READY request and returns. The data
+  phase runs while that exchange is pending. `finishReady` reads the
+  response.
 - hipObject is installed and packaged with rocm-cmake. `cpack` builds
   `hipobject` (runtime) and `hipobject-dev` (development) DEB packages
   or `hipobject` and `hipobject-devel` RPM packages, or a single
@@ -100,16 +110,15 @@
     malformed tokens, and tokens after other statuses used to be accepted.
     A token whose transport byte is neither DC (`00`) nor RC (`01`) is
     rejected.
-  - `hipObjGetV2()` and `hipObjPutV2()`, which aren't implemented yet,
-    check their arguments before returning `hipObjNotSupported`. They
-    reject a NULL or empty bucket or key, a bucket longer than 255
-    characters or a key longer than 1024 bytes, a NULL pointer, a size of
-    0, an offset and size whose sum wraps, a query string that isn't
-    canonical, and a `hipObjOpsV2_t` without all three callbacks. A
-    canonical query is a list of `key=value` parameters, sorted by key and
-    then by value, in which every character except the RFC 3986
-    unreserved ones is percent-encoded with uppercase hex digits. A size
-    above 2^31-1 bytes returns `hipObjSizeTooLarge`.
+  - `hipObjGetV2()` and `hipObjPutV2()` reject a NULL or empty bucket or
+    key, a bucket longer than 255 characters or a key longer than 1024
+    bytes, a NULL pointer, a size of 0, an offset and size whose sum
+    wraps, a query string that isn't canonical, and a `hipObjOpsV2_t`
+    missing `sendPrepare`, `sendReadyRequest`, `finishReady`, or
+    `sendCancel`. A canonical query is a list of `key=value` parameters,
+    sorted by key and then by value, in which every character except the
+    RFC 3986 unreserved ones is percent-encoded with uppercase hex
+    digits. A size above 2^31-1 bytes returns `hipObjSizeTooLarge`.
 - The `hipobj.h` documentation of `hipObjGet()` and `hipObjPut()` now
   says that `offset` is a byte offset into the registered buffer. It
   used to describe it as an offset into the S3 object, but it has always
@@ -173,9 +182,6 @@
 - The `OFFLOAD_ARCH` CMake cache variable and its `rocminfo`-based GPU
   architecture detection. It was never used to set the target architecture
   and is unnecessary now that nothing is compiled for the GPU.
-- The `hipObjInitV2()` declaration in `hipobj.h`. The function was never
-  implemented, so calls to it failed at link time. They now fail to
-  compile.
 - The `HIPOBJ_SUCCESS` macro from `hipobj.h`. It expanded to a compound
   literal, which isn't valid C++. Compare a `hipObjError_t`'s `opError`
   with `hipObjSuccess` instead.

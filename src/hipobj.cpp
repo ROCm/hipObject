@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -43,6 +44,7 @@
 #include "token.h"
 #include "transport.h"
 #ifdef HIPOBJECT_V2_API
+#include "v2-client.h"
 #include "v2-registry.h"
 #include "v2-transport.h"
 #include "v2-wire.h"
@@ -58,6 +60,14 @@ static NoDestructor<BufferMap>    g_bufferMap;
 static NoDestructor<RcConnection> g_conn;
 HIPOBJ_WARN_NO_EXIT_DTOR_ON
 HIPOBJ_WARN_NO_GLOBAL_CTOR_ON
+
+#ifdef HIPOBJECT_V2_API
+BufferMap &
+bufferMap()
+{
+    return *g_bufferMap;
+}
+#endif
 
 static hipObjError_t
 handleException()
@@ -405,7 +415,8 @@ checkTransferArgsV2(const char *bucket, const char *key, const void *devPtr, uin
         size == 0 || !isValidCanonicalQueryV2(query)) {
         return {hipObjInvalidValue, 0};
     }
-    if (!ops || !ops->sendPrepare || !ops->sendReady || !ops->sendCancel) {
+    if (!ops || !ops->sendPrepare || !ops->sendReadyRequest || !ops->finishReady ||
+        !ops->sendCancel) {
         return {hipObjInvalidValue, 0};
     }
     if (size > v2::kMaxTransferSize) {
@@ -482,6 +493,12 @@ try {
     if (state.initialized) {
         return {hipObjAlreadyInitialized, 0};
     }
+#ifdef HIPOBJECT_V2_API
+    /* v1 and v2 share the buffer map and must not mix protection domains. */
+    if (hipObj::v2::v2IsInitialized()) {
+        return {hipObjAlreadyInitialized, 0};
+    }
+#endif
     if (!hipObj::ibvAvailable()) {
         return {hipObjRdmaError, 0};
     }
@@ -565,7 +582,13 @@ try {
     }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
+#ifdef HIPOBJECT_V2_API
+        /* v1 was never initialized; a v2-only session still tears down. */
+        const int rc = hipObj::v2::v2Shutdown();
+        return {static_cast<hipObjOpError_t>(rc), 0};
+#else
         return {hipObjSuccess, 0};
+#endif
     }
 #ifdef HIPOBJECT_V2_API
     /* v2 first: release every connection (destroy retries included);
@@ -607,9 +630,23 @@ try {
         return hipObj::kReentryError;
     }
     hipObj::DriverState &state = hipObj::getState();
-    if (!state.initialized) {
+    struct ibv_pd       *pd    = nullptr;
+    if (state.initialized) {
+        pd = hipObj::g_conn->pd.get();
+    }
+#ifdef HIPOBJECT_V2_API
+    else {
+        /* A v2-only process registers against the shared v2 device. */
+        pd = hipObj::v2::v2ProtectionDomain();
+        if (pd == nullptr) {
+            return {hipObjNotInitialized, 0};
+        }
+    }
+#else
+    else {
         return {hipObjNotInitialized, 0};
     }
+#endif
     hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
@@ -620,7 +657,7 @@ try {
     if (hipObj::g_bufferMap->isRegistered(devPtr)) {
         return {hipObjBufAlreadyRegistered, 0};
     }
-    int ret = hipObj::g_bufferMap->registerBuffer(devPtr, size, hipObj::g_conn->pd.get());
+    int ret = hipObj::g_bufferMap->registerBuffer(devPtr, size, pd);
     if (ret != 0) {
         return {hipObjRdmaError, 0};
     }
@@ -667,7 +704,13 @@ try {
     }
     hipObj::DriverState &state = hipObj::getState();
     if (!state.initialized) {
+#ifdef HIPOBJECT_V2_API
+        if (hipObj::v2::v2ProtectionDomain() == nullptr) {
+            return {hipObjNotInitialized, 0};
+        }
+#else
         return {hipObjNotInitialized, 0};
+#endif
     }
     if (!devPtr) {
         return {hipObjInvalidValue, 0};
@@ -870,21 +913,136 @@ catch (...) {
 }
 
 #ifdef HIPOBJECT_V2_API
-// Not implemented yet. The arguments are checked, then callers are told
-// to fall back to the v1 RDMA path.
+char *
+hipObjNicV2(void)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return nullptr;
+    }
+    const char *nic = hipObj::v2::v2NicName();
+    if (nic == nullptr || nic[0] == '\0') {
+        return nullptr;
+    }
+    const size_t n    = std::strlen(nic) + 1;
+    char        *copy = static_cast<char *>(std::malloc(n));
+    if (copy == nullptr) {
+        return nullptr;
+    }
+    std::memcpy(copy, nic, n);
+    return copy;
+}
+catch (...) {
+    return nullptr;
+}
+
+void
+hipObjFreeNicV2(char *nic)
+{
+    std::free(nic);
+}
+
+int
+hipObjSelectedPortV2(void)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return 0;
+    }
+    return hipObj::v2::v2SelectedPort();
+}
+catch (...) {
+    return 0;
+}
+
+int
+hipObjSelectedGidIndexV2(void)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return -1;
+    }
+    return hipObj::v2::v2SelectedGidIndex();
+}
+catch (...) {
+    return -1;
+}
+
+int
+hipObjInterfaceSnapshotV2(char *nicOut, size_t nicLen, int *portOut, int *gidOut)
+try {
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return 0;
+    }
+    const hipObj::v2::InterfaceSnapshot snap = hipObj::v2::v2InterfaceSnapshot();
+    if (snap.nic.empty()) {
+        return 0;
+    }
+    if (nicOut != nullptr && nicLen > 0) {
+        std::snprintf(nicOut, nicLen, "%s", snap.nic.c_str());
+    }
+    if (portOut != nullptr) {
+        *portOut = snap.port;
+    }
+    if (gidOut != nullptr) {
+        *gidOut = snap.gidIndex;
+    }
+    return 1;
+}
+catch (...) {
+    return 0;
+}
+
 hipObjError_t
-hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
+hipObjInitV2(hipObjConfigV2_t *config)
 try {
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
+    if (!config || !config->control.controlEndpoint || config->control.controlEndpoint[0] == '\0') {
+        return {hipObjInvalidValue, 0};
+    }
+    /* Resolve GPU auto-selection here so v2Init stays seam-free. A NIC
+     * hint still allows a GPU-less process, matching hipObjInit. */
+    const bool haveNicHint = config->v1.nicHint && config->v1.nicHint[0] != '\0';
+    if (config->v1.gpuDevice < 0) {
+        int        gpuDevice = 0;
+        hipError_t err       = hipObj::hip().getDevice(&gpuDevice);
+        if (err != hipSuccess) {
+            if (err != hipErrorNoDevice || !haveNicHint) {
+                return {hipObjRdmaError, static_cast<int>(err)};
+            }
+            gpuDevice = -1;
+        }
+        config->v1.gpuDevice = gpuDevice;
+    }
+    const int rc = hipObj::v2::v2Init(config);
+    return {static_cast<hipObjOpError_t>(rc), 0};
+}
+catch (...) {
+    return hipObj::handleException();
+}
+
+hipObjError_t
+hipObjPutV2(const char *bucket, const char *key, const void *devPtr, uint64_t size, uint64_t offset,
+            const char *query, hipObjOpsV2_t *ops, void *ctx)
+try {
+    const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
+    hipObj::ApiGuard guard;
+    if (!guard.owns()) {
+        return hipObj::kReentryError;
+    }
+    const uint64_t generation = hipObj::v2::v2InitGeneration();
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return {hipObjNotSupported, 0};
+    int       diag = 0;
+    const int rc = hipObj::v2::v2Transfer(1, bucket, key, const_cast<void *>(devPtr), size, offset, query, ops,
+                                          ctx, entryMs, true, generation, true, &diag);
+    return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
     return hipObj::handleException();
@@ -892,17 +1050,22 @@ catch (...) {
 
 hipObjError_t
 hipObjGetV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint64_t offset,
-            const char *query, hipObjOpsV2_t *ops, [[maybe_unused]] void *ctx)
+            const char *query, hipObjOpsV2_t *ops, void *ctx)
 try {
+    const uint64_t entryMs = hipObj::v2::v2EntryNowMs();
     hipObj::ApiGuard guard;
     if (!guard.owns()) {
         return hipObj::kReentryError;
     }
+    const uint64_t generation = hipObj::v2::v2InitGeneration();
     hipObjError_t err = hipObj::checkTransferArgsV2(bucket, key, devPtr, size, offset, query, ops);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return {hipObjNotSupported, 0};
+    int       diag = 0;
+    const int rc   = hipObj::v2::v2Transfer(0, bucket, key, devPtr, size, offset, query, ops, ctx, entryMs, true,
+                                            generation, true, &diag);
+    return {static_cast<hipObjOpError_t>(rc), diag};
 }
 catch (...) {
     return hipObj::handleException();

@@ -181,6 +181,8 @@ if(HIPOBJECT_V2_API)
 
   hipobj_add_fake_device_test(test-v2-connref
     test-v2-connref.cpp)
+  hipobj_add_test(test-v2-client
+    test-v2-client.cpp)
 endif()
 
 hipobj_add_fake_device_test(test-seams

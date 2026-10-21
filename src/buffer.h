@@ -96,6 +96,10 @@ public:
      * the API lock. */
     const BufEntry *find(const void *devPtr) const;
     bool            isRegistered(const void *devPtr) const;
+    /* True when the entry's MR covers the device pointer itself, not a
+     * host bounce buffer. v2 admission requires this: advertising a
+     * device address with a host MR rkey fails the peer's checks. */
+    bool isDeviceBacked(const void *devPtr) const;
 
 #ifdef HIPOBJECT_V2_API
     /* v2: the shared device may close only when no MR and no

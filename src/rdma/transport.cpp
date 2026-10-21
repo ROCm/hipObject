@@ -49,10 +49,13 @@ openRdmaDevice(int nicIndex, RcConnection &conn)
     if (ibv().query_port(ctx.get(), conn.portNum, &portAttr) != 0) {
         return -1;
     }
-    conn.gidIndex = SelectBestGid(ctx.get(), conn.portNum);
-    if (conn.gidIndex < 0) {
-        conn.gidIndex = 0;
+    int gidSel = 0;
+    try {
+        gidSel = SelectBestGid(ctx.get(), conn.portNum);
+    } catch (...) {
+        gidSel = -1;
     }
+    conn.gidIndex = gidSel < 0 ? 0 : gidSel;
     if (ibv().query_gid(ctx.get(), conn.portNum, conn.gidIndex, &conn.localGid) != 0) {
         return -1;
     }

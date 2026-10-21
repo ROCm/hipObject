@@ -100,8 +100,7 @@ extern "C" {
  *
  * @if HIPOBJ_HEADER_ONLY
  * @warning The V2 API is experimental. It may change incompatibly or be
- * removed in any release. hipObjGetV2() and hipObjPutV2() are not
- * implemented yet and return hipObjNotSupported.
+ * removed in any release.
  * @endif
  *
  * The V2 API runs each transfer over the hipobj-rc-v2 control protocol:
@@ -164,6 +163,12 @@ typedef struct {
     hipObjOpError_t opError;
     int             hipError;
 } hipObjError_t;
+
+/*! @brief Diagnostic marker in hipObjError_t::hipError when a
+ * transfer failed hipObjBusy because its deadline expired.
+ * Distinguishes expiry from server-side backpressure.
+ * @ingroup error */
+#define HIPOBJ_DIAG_DEADLINE_EXPIRED 0x54494D45 /* "TIME" */
 
 /*!
  * @brief Return a human-readable string for an
@@ -400,6 +405,25 @@ typedef struct {
 typedef struct {
     hipObjConfig_t            v1;      /*!< All v1 fields */
     hipObjControlEndpointV2_t control; /*!< v2 control endpoint (required) */
+    uint32_t connectDeadlineMs;        /*!< 0 = default (10 s). Bounds the
+                                            local RTR/RTS transition phase.
+                                            This protocol has no separately
+                                            waitable RDMA-connect handshake:
+                                            the remote endpoint is learned
+                                            from PREPARE and the transitions
+                                            are local verbs calls, so the
+                                            budget bounds that phase and is
+                                            always capped by the transfer
+                                            deadline. */
+    uint32_t transferDeadlineMs;       /*!< 0 = default (60 s). Whole-transfer
+                                            budget from entry to hipObjGetV2/
+                                            PutV2, including lock/admission
+                                            wait, all control exchanges, and
+                                            the data phase. */
+    uint32_t cancelCleanupBudgetMs;    /*!< 0 = default (1 s). Budget for the
+                                            single post-expiry CANCEL attempt
+                                            and local teardown; never extends
+                                            the transfer result past TIMEOUT. */
 } hipObjConfigV2_t;
 
 /* Forward declaration of the phase-aware callback set (see below). */
@@ -419,15 +443,34 @@ typedef struct {
     const char                      *bucket;    /*!< Object bucket */
     const char                      *key;       /*!< Object key */
     const char                      *query;     /*!< Canonical query string or NULL */
-    const char                      *token;     /*!< 88-hex RDMA token */
+    const char                      *token;     /*!< 88-hex token[:addr:size] */
     const char                      *session;   /*!< READY/cancel: session id (library sets) */
     const char                      *target;    /*!< Canonical rdma-target value (library sets) */
     uint64_t                         size;      /*!< Transfer size in bytes */
     uint64_t                         offset;    /*!< Byte offset into the object */
     uint32_t                         cookie;    /*!< Client cookie (library generates) */
     uint32_t                         clientPsn; /*!< Client PSN, 1..0xffffff (library generates) */
+    uint32_t                         deadlineMs;  /*!< Whole-transfer budget remaining, set by the
+                                                       library before every callback. Zero means
+                                                       the budget is exhausted; callbacks should
+                                                       fail fast. */
+    uint32_t                         remainingMs; /*!< Budget relevant to the current callback:
+                                                       the transfer's remaining budget for in-
+                                                       flight phases, or the fresh cleanup budget
+                                                       for the post-expiry CANCEL. */
     const hipObjControlEndpointV2_t *endpoint;  /*!< Control endpoint (library sets
                                                    from init) */
+    const char                      *nic;       /*!< RDMA device the data plane selected.
+                                                    NULL before init. */
+    int                              nicPort;   /*!< Selected port, 0 when unknown */
+    int                              nicGidIndex; /*!< Selected GID index, -1 when unknown */
+    uint32_t                         clientQpn;    /*!< READY: this transfer's QP number.
+                                                        Zero before the endpoint exists. */
+    uint64_t                         clientMrAddr; /*!< READY: registered buffer address.
+                                                        For GET the server WRITEs the object into
+                                                        it; for PUT it is bookkeeping only. Zero
+                                                        before READY. */
+    uint32_t                         clientMrRkey; /*!< READY: registered buffer rkey */
 } hipObjTransferReqV2_t;
 
 /*! @brief Response to PREPARE @ingroup v2 */
@@ -438,11 +481,18 @@ typedef struct {
     char     serverToken[97];   /*!< 88-hex peer token + NUL */
     char     session[65];       /*!< 32-hex session id + NUL */
     uint32_t serverPsn;         /*!< Server PSN, 1..0xffffff (0 = invalid) */
+    uint64_t stagingAddr;       /*!< Server staging MR address (PUT), 0 when
+                                     absent; required for PUT data delivery */
+    uint32_t stagingRkey;       /*!< Server staging MR rkey (PUT), 0 when
+                                     absent */
+    int      stagingPresent;    /*!< 1 when both staging fields were present
+                                     and valid; a PUT without a valid staging
+                                     advertisement fails the transfer */
 } hipObjPrepareReplyV2_t;
 
 /*! @brief FINAL response (the reply to READY) @ingroup v2 */
 typedef struct {
-    int      httpStatus;      /*!< 200 (GET) / 204 (PUT) / 5xx / 409 / 408 */
+    int      httpStatus;      /*!< 200 (GET; PUT accepts 200 or 204) / 5xx / 409 / 408 */
     int      protocolEcho;    /*!< 1 when the protocol echo header was present */
     uint64_t bytes;           /*!< Bytes transferred per the server */
     uint32_t cookieEcho;      /*!< Must match the request cookie */
@@ -456,13 +506,23 @@ typedef struct {
  * @brief Phase-aware callbacks for the v2 control protocol
  * @ingroup v2
  *
- * Each send* callback performs one complete HTTP round trip on the
- * control endpoint and fills @p out from the response. All callbacks are
- * required for v2 transfers. The v1 member is unused by the v2 entry
+ * sendPrepare and sendCancel each perform one complete HTTP round trip
+ * on the control endpoint. The READY exchange is split: sendReadyRequest
+ * writes the request bytes and returns, the data phase runs while the
+ * exchange is pending, then finishReady reads the response. All callbacks
+ * are required for v2 transfers. The v1 member is unused by the v2 entry
  * points and is kept for structural forward compatibility.
  *
  * The callbacks run while hipObject holds its API lock, so they can't
  * call serialized functions; see @ref threads.
+ *
+ * Time budget: the transfer deadline covers everything a callback
+ * does, including credential acquisition and DNS resolution. The
+ * reference bridge caches signed exchanges and bounds its resolver
+ * by the deadline; integrations must supply a credential provider
+ * that is already cached or otherwise bounded, because the library
+ * cannot interrupt a synchronous provider fetch from inside the
+ * callback.
  */
 typedef struct hipObjOpsV2 {
     hipObjOps_t v1;
@@ -470,17 +530,23 @@ typedef struct hipObjOpsV2 {
     /*! Issue PREPARE; out is filled from the response headers. */
     int (*sendPrepare)(void *ctx, const hipObjTransferReqV2_t *req, hipObjPrepareReplyV2_t *out);
 
-    /*! Issue READY; the response is FINAL. out reflects it. */
-    int (*sendReady)(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out);
+    /*! Issue the READY request: write the request bytes and return once
+     * they are flushed. Does not read the response. Success means the
+     * complete request was handed to the transport; a partial write or I/O
+     * error is a failure, and finishReady is then never called for it. */
+    int (*sendReadyRequest)(void *ctx, const hipObjTransferReqV2_t *req);
+
+    /*! Read the READY response (FINAL) and fill out. Called at most once,
+     * and exactly once when sendReadyRequest succeeded and the exchange
+     * reaches a terminal disposition. On a data-phase failure or budget
+     * expiry the consumer aborts the connection instead; an aborted
+     * connection must never be reused or returned to a pool. */
+    int (*finishReady)(void *ctx, const hipObjTransferReqV2_t *req, hipObjFinalReplyV2_t *out);
 
     /*! Issue CANCEL (idempotent). Only the HTTP status matters. */
     int (*sendCancel)(void *ctx, const hipObjTransferReqV2_t *req);
 } hipObjOpsV2_t;
 
-/* hipObjInitV2() isn't implemented, so its declaration is disabled.
- * Callers get a compile error instead of an undefined symbol at link time.
- */
-#if 0
 /*!
  * @brief Initialize the library for hipobj-rc-v2 transfers
  * @ingroup v2
@@ -491,7 +557,55 @@ typedef struct hipObjOpsV2 {
  * @serialized
  */
 HIPOBJ_API hipObjError_t hipObjInitV2(hipObjConfigV2_t *config);
-#endif
+
+/*!
+ * @brief Query the RDMA NIC name selected by hipObjInitV2
+ * @ingroup init
+ *
+ * Returns an owned copy of the device name chosen at init (the config
+ * hint when one was given), or NULL before hipObjInitV2 has run and
+ * when another call already holds the API lock. The snapshot is taken
+ * under that lock, so hipObjShutdown cannot free it while it is read.
+ * Release with hipObjFreeNicV2. This is the supported way for v2
+ * consumers to learn the NIC; no v1 RDMA token is needed.
+ */
+HIPOBJ_API char* hipObjNicV2(void);
+
+/*! @brief Release a NIC name snapshot from hipObjNicV2 @ingroup init */
+HIPOBJ_API void hipObjFreeNicV2(char* nic);
+
+/*! @brief Port the v2 data plane selected at init @ingroup init
+ *
+ * 1-based RDMA port number; 0 before init or when unavailable. With
+ * hipObjSelectedGidIndexV2 this identifies the exact sysfs ndevs
+ * entry backing the data-plane address handle, so the control plane
+ * can bind the same interface (multi-port or VLAN-GID devices never
+ * silently bind an arbitrary sibling).
+ */
+HIPOBJ_API int hipObjSelectedPortV2(void);
+
+/*! @brief GID index the v2 data plane selected at init @ingroup init
+ *
+ * -1 before init or when unavailable. Pair with
+ * hipObjSelectedPortV2 and the NIC from hipObjNicV2 to read the sysfs
+ * ndevs entry of the selected GID:
+ * @c /sys/class/infiniband/@<dev@>/ports/@<port@>/gid_attrs/ndevs/@<gid@>.
+ */
+HIPOBJ_API int hipObjSelectedGidIndexV2(void);
+
+/*!
+ * @brief Coherent snapshot of the data plane's interface selection
+ * @ingroup init
+ *
+ * Copies the NIC name, port number, and GID index selected at init
+ * into the caller-provided storage in one library-internal step, so
+ * the triple cannot mix values from different initializations when
+ * read while a shutdown/reinit is in flight. The name is truncated
+ * to fit. Returns 1 when an initialized selection was copied, 0
+ * when the library is not initialized.
+ */
+HIPOBJ_API int hipObjInterfaceSnapshotV2(char* nicOut, size_t nicLen,
+                                         int* portOut, int* gidOut);
 
 /*!
  * @brief V2 GET: download an object into a registered buffer

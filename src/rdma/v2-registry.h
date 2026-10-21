@@ -1,5 +1,5 @@
 /* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) Gluesys Inc. and Jihyeon Gim. All rights reserved.
+ * Copyright (c) Gluesys and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -87,6 +87,12 @@ namespace v2 {
         DeviceHandle *device         = nullptr;
         uint64_t      reservationId  = 0; /* retired-ring slot for this QP */
         uint32_t      clientPsn      = 0; /* client PSN (recorded on destroy) */
+        /* Buffer pin owned by this entry. Released once, when the entry
+         * is fully reclaimed. Null when no pin was acquired. */
+        void         *pinnedBuffer   = nullptr;
+        /* False only for a CQ parked after create failed before the
+         * device reference was taken. */
+        bool          holdsDeviceRef = true;
         bool          poisoned       = false;
         bool          destroyClaimed = false;
         bool          destroying     = false;

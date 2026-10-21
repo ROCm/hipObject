@@ -33,6 +33,10 @@
 
 namespace hipobj::minio {
 
+/* The enclosing namespace name shadows the minio-cpp root namespace
+ * for qualified lookups; rebind it, and keep the using-directive for
+ * unqualified names the rest of this file already uses. */
+namespace minio = ::minio;
 using namespace ::minio;
 
 namespace {
@@ -85,7 +89,7 @@ namespace {
         if (result.status == RdmaStatus::NotSupported) {
             return "not supported";
         }
-        if (result.status == RdmaStatus::Failed) {
+        if (result.status == RdmaStatus::Failed || result.status == RdmaStatus::V2Failed) {
             return "error";
         }
         return "no bytes transferred";
@@ -105,7 +109,8 @@ namespace {
         hipObjError_t EnsureInit(const minio::s3::BaseUrl &base_url)
         {
             std::scoped_lock<std::mutex> lock(mutex_);
-            std::string                  key = base_url.host + ":" + base_url.region;
+            const std::string port = base_url.port == 0 ? std::string() : ":" + std::to_string(base_url.port);
+            std::string key = base_url.host + port + ":" + base_url.region + (base_url.https ? ":https" : ":http");
             if (initialized_ && key == active_key_) {
                 return {hipObjSuccess, 0};
             }
@@ -113,18 +118,31 @@ namespace {
                 hipObjShutdown();
                 initialized_ = false;
             }
-            hipObjConfig_t cfg{};
-            endpoint_storage_ = (base_url.https ? "https://" : "http://") + base_url.host;
-            cfg.endpoint      = endpoint_storage_.c_str();
-            cfg.region        = base_url.region.c_str();
-            cfg.gpuDevice     = -1;
-            // Without a GPU there is no topology to walk, so hipObjInit can only find
+            endpoint_storage_ = (base_url.https ? "https://" : "http://") + base_url.host + port;
+#ifdef HIPOBJECT_V2_API
+            hipObjConfigV2_t cfg{};
+            cfg.v1.endpoint             = endpoint_storage_.c_str();
+            cfg.v1.region               = base_url.region.c_str();
+            cfg.v1.gpuDevice            = -1;
+            cfg.control.controlEndpoint = endpoint_storage_.c_str();
+            // Without a GPU there is no topology to walk, so hipObjInitV2 can only find
             // a NIC if it is named explicitly. Same variable the examples read.
             if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && hint[0] != '\0') {
                 nic_hint_storage_ = hint;
-                cfg.nicHint       = nic_hint_storage_.c_str();
+                cfg.v1.nicHint    = nic_hint_storage_.c_str();
+            }
+            hipObjError_t err = hipObjInitV2(&cfg);
+#else
+            hipObjConfig_t cfg{};
+            cfg.endpoint  = endpoint_storage_.c_str();
+            cfg.region    = base_url.region.c_str();
+            cfg.gpuDevice = -1;
+            if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && hint[0] != '\0') {
+                nic_hint_storage_ = hint;
+                cfg.nicHint = nic_hint_storage_.c_str();
             }
             hipObjError_t err = hipObjInit(&cfg);
+#endif
             if (err.opError == hipObjSuccess) {
                 initialized_ = true;
                 active_key_  = key;
@@ -278,7 +296,7 @@ Client::PutObject(minio::s3::PutObjectArgs args)
 
     hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
-        // RDMA not available (no NIC or no GPU topology) — fall back to HTTP PUT.
+        // RDMA not available (no NIC or no GPU topology). Fall back to HTTP PUT.
         // Copy the buffer into a std::stringstream so minio-cpp can seek in it.
         const char              *src = static_cast<const char *>(args.buf);
         std::string              content(src, size);
@@ -318,12 +336,20 @@ Client::PutObject(minio::s3::PutObjectArgs args)
         .object   = args.object,
         .url      = base_url_,
         .region   = region,
+        .uploadId = {},
+        .partNumber = 0,
+        .checksum = {},
+        .etag     = {},
     };
 
     const RdmaResult ret = rdmaPutWithRetry(&put_ctx, args.buf, size);
     if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
         CountRdmaPut(ret.bytes);
         return RdmaResponse<minio::s3::PutObjectResponse>(std::move(put_ctx.etag));
+    }
+    if (ret.status == RdmaStatus::V2Failed) {
+        return minio::s3::PutObjectResponse(
+            minio::error::Error("RDMA v2 PUT failed; not retrying over HTTP"));
     }
 
     // The fallback below streams the buffer from the host, so it cannot be
@@ -365,7 +391,7 @@ Client::GetObject(minio::s3::GetObjectArgs args)
 
     hipObjError_t init_err = HipObjRuntime::Instance().EnsureInit(base_url_);
     if (init_err.opError != hipObjSuccess) {
-        // RDMA not available — fall back to HTTP GET.
+        // RDMA not available. Fall back to HTTP GET.
         return HttpGetIntoBuffer(s3_client_, args, size);
     }
 
@@ -394,12 +420,20 @@ Client::GetObject(minio::s3::GetObjectArgs args)
         .object   = args.object,
         .url      = base_url_,
         .region   = region,
+        .uploadId = {},
+        .partNumber = 0,
+        .checksum = {},
+        .etag     = {},
     };
 
     const RdmaResult ret = rdmaGetWithRetry(&get_ctx, args.buf, size);
     if (ret.status == RdmaStatus::Ok && ret.bytes > 0) {
         CountRdmaGet(ret.bytes);
         return RdmaResponse<minio::s3::GetObjectResponse>(std::move(get_ctx.etag));
+    }
+    if (ret.status == RdmaStatus::V2Failed) {
+        return minio::s3::GetObjectResponse(
+            minio::error::Error("RDMA v2 GET failed; not retrying over HTTP"));
     }
 
     // As in PutObject: the fallback memcpys into args.buf from the host.

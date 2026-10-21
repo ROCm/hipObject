@@ -771,7 +771,13 @@ fakeSendPrepare(void *, const hipObjTransferReqV2_t *, hipObjPrepareReplyV2_t *)
 }
 
 int
-fakeSendReady(void *, const hipObjTransferReqV2_t *, hipObjFinalReplyV2_t *)
+fakeSendReadyRequest(void *, const hipObjTransferReqV2_t *)
+{
+    return 0;
+}
+
+int
+fakeFinishReady(void *, const hipObjTransferReqV2_t *, hipObjFinalReplyV2_t *)
 {
     return 0;
 }
@@ -786,9 +792,10 @@ hipObjOpsV2_t
 makeOpsV2()
 {
     hipObjOpsV2_t ops{};
-    ops.sendPrepare = &fakeSendPrepare;
-    ops.sendReady   = &fakeSendReady;
-    ops.sendCancel  = &fakeSendCancel;
+    ops.sendPrepare      = &fakeSendPrepare;
+    ops.sendReadyRequest = &fakeSendReadyRequest;
+    ops.finishReady      = &fakeFinishReady;
+    ops.sendCancel       = &fakeSendCancel;
     return ops;
 }
 
@@ -811,8 +818,7 @@ callPutV2(const char *bucket, const char *key, void *devPtr, uint64_t size, uint
 
 constexpr uint64_t kMaxV2Size = 0x7fffffff;
 
-/* The V2 entry points aren't implemented, so valid arguments get
- * hipObjNotSupported */
+/* Valid arguments pass the checker and reach an uninitialized client. */
 class TransferV2ArgsTest : public ::testing::TestWithParam<TransferV2Fn> {
 protected:
     hipObjOpError_t call(const char *bucket, const char *key, uint64_t size = kBufSize, uint64_t offset = 0,
@@ -826,8 +832,8 @@ protected:
 
 TEST_P(TransferV2ArgsTest, AcceptsValidArguments)
 {
-    EXPECT_EQ(call("bucket", "key"), hipObjNotSupported);
-    EXPECT_EQ(call("b", "a/b/c.bin", 1, 0, ""), hipObjNotSupported);
+    EXPECT_EQ(call("bucket", "key"), hipObjNotInitialized);
+    EXPECT_EQ(call("b", "a/b/c.bin", 1, 0, ""), hipObjNotInitialized);
 }
 
 TEST_P(TransferV2ArgsTest, RejectsBadBucket)
@@ -835,7 +841,7 @@ TEST_P(TransferV2ArgsTest, RejectsBadBucket)
     EXPECT_EQ(call(nullptr, "key"), hipObjInvalidValue);
     EXPECT_EQ(call("", "key"), hipObjInvalidValue);
     EXPECT_EQ(call(std::string(256, 'b').c_str(), "key"), hipObjInvalidValue);
-    EXPECT_EQ(call(std::string(255, 'b').c_str(), "key"), hipObjNotSupported);
+    EXPECT_EQ(call(std::string(255, 'b').c_str(), "key"), hipObjNotInitialized);
 }
 
 TEST_P(TransferV2ArgsTest, RejectsBadKey)
@@ -843,7 +849,7 @@ TEST_P(TransferV2ArgsTest, RejectsBadKey)
     EXPECT_EQ(call("bucket", nullptr), hipObjInvalidValue);
     EXPECT_EQ(call("bucket", ""), hipObjInvalidValue);
     EXPECT_EQ(call("bucket", std::string(1025, 'k').c_str()), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", std::string(1024, 'k').c_str()), hipObjNotSupported);
+    EXPECT_EQ(call("bucket", std::string(1024, 'k').c_str()), hipObjNotInitialized);
 }
 
 TEST_P(TransferV2ArgsTest, RejectsNullPointer)
@@ -856,7 +862,7 @@ TEST_P(TransferV2ArgsTest, ChecksSize)
     EXPECT_EQ(call("bucket", "key", 0), hipObjInvalidValue);
     EXPECT_EQ(call("bucket", "key", kMaxV2Size + 1), hipObjSizeTooLarge);
     EXPECT_EQ(call("bucket", "key", std::numeric_limits<uint64_t>::max()), hipObjSizeTooLarge);
-    EXPECT_EQ(call("bucket", "key", kMaxV2Size), hipObjNotSupported);
+    EXPECT_EQ(call("bucket", "key", kMaxV2Size), hipObjNotInitialized);
 }
 
 TEST_P(TransferV2ArgsTest, RejectsRangeThatWraps)
@@ -864,7 +870,7 @@ TEST_P(TransferV2ArgsTest, RejectsRangeThatWraps)
     const uint64_t max = std::numeric_limits<uint64_t>::max();
     EXPECT_EQ(call("bucket", "key", 1, max), hipObjInvalidValue);
     EXPECT_EQ(call("bucket", "key", kBufSize, max - kBufSize + 1), hipObjInvalidValue);
-    EXPECT_EQ(call("bucket", "key", kBufSize, max - kBufSize), hipObjNotSupported);
+    EXPECT_EQ(call("bucket", "key", kBufSize, max - kBufSize), hipObjNotInitialized);
 }
 
 TEST_P(TransferV2ArgsTest, RejectsMissingCallbacks)
@@ -875,8 +881,12 @@ TEST_P(TransferV2ArgsTest, RejectsMissingCallbacks)
     ops_.sendPrepare = nullptr;
     EXPECT_EQ(call("bucket", "key"), hipObjInvalidValue);
 
-    ops_           = makeOpsV2();
-    ops_.sendReady = nullptr;
+    ops_                  = makeOpsV2();
+    ops_.sendReadyRequest = nullptr;
+    EXPECT_EQ(call("bucket", "key"), hipObjInvalidValue);
+
+    ops_             = makeOpsV2();
+    ops_.finishReady = nullptr;
     EXPECT_EQ(call("bucket", "key"), hipObjInvalidValue);
 
     ops_            = makeOpsV2();
@@ -889,7 +899,7 @@ TEST_P(TransferV2ArgsTest, AcceptsCanonicalQuery)
     for (const char *query :
          {"partNumber=10000&uploadId=abc-DEF_1.2~3", "uploadId=a%2Bb%2Fc%3D%3D", "a=%20%7F%80%FF",
           "a=", "a=&b=", "a=1&a=2", "a=1&a=1", "a=&a=1", "a=9&a-b=1", "A=1&a=1", "a%2F=1&a-=1"}) {
-        EXPECT_EQ(call("bucket", "key", kBufSize, 0, query), hipObjNotSupported)
+        EXPECT_EQ(call("bucket", "key", kBufSize, 0, query), hipObjNotInitialized)
             << "query \"" << query << "\"";
     }
 }
