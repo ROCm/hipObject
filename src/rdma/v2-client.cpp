@@ -1,5 +1,4 @@
-/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) Gluesys and Jihyeon Gim. All rights reserved.
+/* Copyright (c) Gluesys and Jihyeon Gim. All rights reserved.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -614,7 +613,7 @@ int v2Init(hipObjConfigV2_t* config) {
   }
   std::string nicNameOut = nic->name;
   std::string controlEndpoint = config->control.controlEndpoint;
-  std::unique_ptr<DeviceHandle> dh(new DeviceHandle());
+  std::unique_ptr<DeviceHandle> dh = std::make_unique<DeviceHandle>();
   RcConnection raw;
   if (hipObj::openRdmaDeviceByName(nic->name.c_str(), raw) != 0) {
     return hipObjRdmaError;
@@ -710,8 +709,9 @@ int v2Shutdown() {
     raw.gidIndex = st.device->gidIndex;
     raw.localGid = st.device->localGid;
     hipObj::closeRdmaDevice(raw);
-    delete st.device;
+    std::unique_ptr<DeviceHandle> owned(st.device);
     st.device = nullptr;
+    owned.reset();
   }
   st.initialized = false;
   st.controlEndpoint.clear();
