@@ -795,6 +795,76 @@ Add the entry to the topmost (unreleased) version, under the matching heading:
 existing entries: say what changed, and what users have to do differently, if
 anything.
 
+## Review your change before you finish
+
+**When you have modified the repository, step back and review the whole
+change as a reviewer would before you call it done.** Every PR gets a
+Copilot review, and most of what it asks for could have been caught
+first. Read all of `git diff`, and every new file `git status` lists, from
+start to finish, not just the lines you meant to change, and check it
+against the list below, which comes from what Copilot has asked for on past
+PRs. Fix what you find, then run the
+[checks](#linters-warnings-and-sanitizers-mandatory) again.
+
+- **Is there a changelog entry, and is it right?** The request Copilot
+  makes most often. See [Changelog](#changelog): a new compiler warning, a
+  change to how CMake finds a tool, a fix to a code path few callers use,
+  and a reworded error message all count. An entry must not claim a change
+  the diff doesn't make, or cover only part of one it does.
+- **Is every new file in the change?** Copilot has flagged PRs that
+  include a header, add a test source to CMake, or point to a notes file
+  that was never added. Name each new file when you hand the change back,
+  so it gets committed.
+- **Is the fix complete?** Search for every other place with the same
+  pattern or the same state, and fix them too or say why not. Copilot
+  regularly finds the bug left in a sibling: a shellcheck cleanup that
+  missed two of the hardware-test workflows, a warning suppression added
+  to every Google Test file but one, a stricter status-line parser in one
+  test client but not the other.
+- **Does each new test fail without the fix?** Revert the fix in a
+  scratch copy and check. Copilot reports tests that pass either way: a
+  move-assignment test that only moves into empty objects, an environment
+  variable set before the program starts for a fix about when it's read, a
+  fake that never returns the edge case (HIP filling the whole buffer with
+  no NUL), a test that skips when the library it needs won't load. Have
+  `FakePlatform` fail the call or return the edge case, and cover new error
+  paths too, for the [coverage floor](#tests).
+- **Is cleanup right on every path, exceptions included?** Follow each
+  failure branch, and ask what happens if an allocation or a container
+  insertion along the way throws. A class's members are destroyed after its
+  destructor's body runs, in the reverse of the order they're declared in,
+  so the declaration order is the teardown order: a queue pair has to go
+  before the memory region its work uses, and a memory region before the
+  memory it registers. Copilot has found buffers freed while still
+  registered with the NIC, a rollback dismissed before the last step that
+  could throw, and a pending GPU copy that lost its tracking when
+  `push_back()` threw.
+- **Is untrusted input parsed strictly?** See [Security](#security).
+  Copilot has found parsers that accepted a sign, a fourth digit in an
+  HTTP status, junk after the last field, an empty header that was
+  present, a value too wide for its 24-bit wire field, a reserved zero, and
+  a peer token after a non-200 status. Check each field's exact width,
+  characters, and range, and test the malformed forms.
+- **Does a failure make the script fail?** In scripts and workflow steps,
+  a retry loop whose last `sleep` succeeds, a pipeline without `pipefail`,
+  or a command whose exit code means both "absent" and "lookup failed"
+  turns an error into success. Exit nonzero, and tell the exit codes apart.
+- **Does it follow the rules above?** Copilot checks the code against
+  this file: `parseNumber()`, not `strtoull()`; no rkeys or remote
+  addresses in logs, even debug ones; doc8's 80-column limit; cache
+  variables named `HIPOBJ_…`, and never forced on a parent project;
+  targets made with the `hipobj_add_*()` helpers, which give them the
+  standard, warnings, hardening, and clang-tidy; `Threads::Threads` kept on
+  what uses threads.
+- **Do the words match the code?** Comments, documentation (the public
+  header's included), changelog entries, and the PR description must claim
+  only what the diff does. Copilot has found a guarantee that holds only on
+  success stated for every return (a staging copy that times out is still
+  running after `hipObjBufSync()` returns), a response header called a
+  request header, optional build dependencies listed as required, steps
+  described in the wrong order, and good advice given for the wrong reason.
+  Check each claim against the code.
+
 ## Lab provisioning
 
 For GPU hosts, ROCm, RDMA, and MinIO AIStor installs, use
