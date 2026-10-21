@@ -100,8 +100,7 @@ extern "C" {
  *
  * @if HIPOBJ_HEADER_ONLY
  * @warning The V2 API is experimental. It may change incompatibly or be
- * removed in any release. hipObjGetV2() and hipObjPutV2() are not
- * implemented yet and return hipObjNotSupported.
+ * removed in any release.
  * @endif
  *
  * The V2 API runs each transfer over the hipobj-rc-v2 control protocol:
