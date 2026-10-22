@@ -136,11 +136,15 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS)
   endforeach()
 endif()
 
+# CMAKE_PREFIX_PATH as hipObject received it, before HIPOBJUseROCmCMake
+# adds ROCm's prefixes. It includes any prefixes a project above
+# hipObject added as a normal variable, which $CACHE{CMAKE_PREFIX_PATH}
+# doesn't. The subproject test passes it on to its parent project.
+set(HIPOBJ_INHERITED_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
+
 if(NOT HIPOBJ_CPU_RDMA)
 include(HIPOBJUseROCmCMake)
 endif()
-include(HIPOBJCompilerOptions)
-include(HIPOBJSanitizers)
 include(HIPOBJCoverage)
 include(HIPOBJClangTidy)
 include(HIPOBJIWYU)
@@ -174,12 +178,20 @@ option(HIPOBJ_BNXT
 option(HIPOBJ_IONIC
   "Build IONIC (Pensando) RDMA provider" ON)
 
-# Selects hipobj's RDMA control-plane wire format at compile time: v3
-# (RC-CM dial-back, default) or v1 (QP/GID/LID exchanged directly), for
-# interop with peers that only understand the older format. hipobj is
-# built for one wire format or the other, not switchable at runtime.
-option(HIPOBJ_RDMA_WIRE_V1
-  "Build hipobj against the legacy v1 RDMA wire format instead of v3" OFF)
+# Selects hipobj's RDMA control-plane wire format at compile time: v1
+# (QP/GID/LID exchanged directly, default) or v3 (RC-CM dial-back).
+# hipobj is built for one wire format or the other, not switchable at
+# runtime.
+option(HIPOBJ_RDMA_WIRE_V3
+  "Build hipobj for the v3 (RC-CM) RDMA wire format instead of v1" OFF)
+
+# hipobj-aws-s3-demo sends the v3 headers, so it only works with a v3
+# library
+if(HIPOBJ_AWS_S3_CLIENT AND NOT HIPOBJ_RDMA_WIRE_V3)
+  message(FATAL_ERROR
+    "HIPOBJ_AWS_S3_CLIENT needs HIPOBJ_RDMA_WIRE_V3=ON: the demo speaks "
+    "the v3 headers (x-amz-rc-rdma-token)")
+endif()
 
 add_subdirectory(src)
 
@@ -212,6 +224,13 @@ endif()
 
 option(HIPOBJ_MINIO_CLIENT
   "Build minio-cpp RDMA bridge (integrations/minio-cpp)" OFF)
+# The bridge sends the v1 headers (x-amz-rdma-token), so it only works
+# with a v1 library
+if(HIPOBJ_MINIO_CLIENT AND HIPOBJ_RDMA_WIRE_V3)
+  message(FATAL_ERROR
+    "HIPOBJ_MINIO_CLIENT needs HIPOBJ_RDMA_WIRE_V3=OFF: the bridge speaks "
+    "the v1 headers (x-amz-rdma-token)")
+endif()
 if(HIPOBJ_MINIO_CLIENT)
   add_subdirectory(integrations/minio-cpp)
 endif()

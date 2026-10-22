@@ -44,6 +44,8 @@
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
 #include "rdma-topology.h"
+#include "rdmacm-core.h"
+#include "rdmacm-wrapper.h"
 #include "require-libibverbs.h"
 #include "state.h"
 #include "transport.h"
@@ -57,30 +59,6 @@ namespace {
 
 /* The GPU's bus ID in the NIC topology tests */
 constexpr std::string_view kGpuBusId = "0000:42:00.0";
-
-TEST(HipSeamTest, OverrideRedirectsHip)
-{
-    hipObjTest::FakeDevice    device{};
-    const hipObjTest::FakeHip fake(device);
-
-    const hipObj::HipRuntime *previous = hipObj::setHipForTest(&fake);
-    EXPECT_EQ(previous, nullptr);
-    EXPECT_EQ(&hipObj::hip(), &fake);
-
-    device.getDeviceErr = hipSuccess;
-    device.device       = 7;
-    int current         = -1;
-    EXPECT_EQ(hipObj::hip().getDevice(&current), hipSuccess);
-    EXPECT_EQ(current, 7);
-
-    device.gpuBusId = kGpuBusId;
-    std::array<char, 32> busId{};
-    EXPECT_EQ(hipObj::hip().deviceGetPCIBusId(busId.data(), static_cast<int>(busId.size()), 0), hipSuccess);
-    EXPECT_EQ(std::string_view(busId.data()), kGpuBusId);
-
-    EXPECT_EQ(hipObj::setHipForTest(previous), &fake);
-    EXPECT_NE(&hipObj::hip(), &fake);
-}
 
 #ifndef HIPOBJ_CPU_RDMA
 /* SystemHip passes each call straight to HIP or HSA, so it gets the same
@@ -158,6 +136,30 @@ TEST(HipSeamTest, SystemHipForwardsEachCall)
     EXPECT_EQ(system.closeDmabuf(fdViaSystem), static_cast<int>(hsa_amd_portable_close_dmabuf(fdDirect)));
 }
 #endif /* HIPOBJ_CPU_RDMA */
+
+#ifdef HIPOBJ_RDMA_WIRE_V3
+/* SystemRdmaCm calls librdmacm, in a v3 build. Its event names need no
+ * device; without an RDMA device, there's no event channel to create, and
+ * with one, the channel it creates is real. */
+TEST(RdmaCmSeamTest, SystemRdmaCmCallsLibrdmacm)
+{
+    const hipObj::SystemRdmaCm system;
+    EXPECT_EQ(std::string_view(system.event_str(RDMA_CM_EVENT_ESTABLISHED)), "RDMA_CM_EVENT_ESTABLISHED");
+    EXPECT_EQ(std::string_view(system.event_str(RDMA_CM_EVENT_CONNECT_REQUEST)),
+              "RDMA_CM_EVENT_CONNECT_REQUEST");
+
+    rdma_event_channel *channel = system.create_event_channel();
+    if (channel == nullptr) {
+        GTEST_SKIP() << "librdmacm has no RDMA device to create an event channel on";
+    }
+    EXPECT_GE(channel->fd, 0);
+    rdma_cm_id *id = nullptr;
+    ASSERT_EQ(system.create_id(channel, &id, nullptr, RDMA_PS_TCP), 0);
+    EXPECT_EQ(id->channel, channel);
+    EXPECT_EQ(system.destroy_id(id), 0);
+    system.destroy_event_channel(channel);
+}
+#endif /* HIPOBJ_RDMA_WIRE_V3 */
 
 // ---- NIC topology seam -------------------------------------------
 
@@ -577,11 +579,13 @@ TEST(PlatformTest, RefersToItsInterfaces)
     const hipObjTest::FakeHip          hip(device);
     const hipObjTest::FakeVerbs        verbs(device);
     const hipObjTest::EmptyNicTopology topology;
+    const hipObjTest::FakeRdmaCm       rdmaCm(device, verbs);
 
-    const hipObj::Platform platform(hip, verbs, topology);
+    const hipObj::Platform platform(hip, verbs, topology, &rdmaCm);
     EXPECT_EQ(&platform.hip(), &hip);
     EXPECT_EQ(&platform.verbs(), &verbs);
     EXPECT_EQ(&platform.topology(), &topology);
+    EXPECT_EQ(platform.rdmaCm(), &rdmaCm);
 }
 
 /* A FakePlatform's platform refers to its fakes, and keeps them alive */
@@ -595,6 +599,7 @@ TEST(PlatformTest, FakePlatformOutlivesItsLastPlatform)
     EXPECT_EQ(&platform->hip(), &fakes->hip());
     EXPECT_EQ(&platform->verbs(), &fakes->verbs());
     EXPECT_EQ(&platform->topology(), &fakes->topology());
+    EXPECT_EQ(platform->rdmaCm(), &fakes->rdmaCm());
 
     fakes.reset();
     EXPECT_FALSE(watch.expired());
@@ -602,8 +607,8 @@ TEST(PlatformTest, FakePlatformOutlivesItsLastPlatform)
     EXPECT_TRUE(watch.expired());
 }
 
-/* The system platform is built once, from the real HIP runtime and
- * libibverbs, and the topology sysfs reports */
+/* The system platform is built once, from the real HIP runtime,
+ * libibverbs, the topology sysfs reports, and, in a v3 build, librdmacm */
 TEST(PlatformTest, SystemPlatformIsTheSystem)
 {
     const std::shared_ptr<const hipObj::Platform> platform = hipObj::systemPlatform();
@@ -615,20 +620,18 @@ TEST(PlatformTest, SystemPlatformIsTheSystem)
     EXPECT_NE(dynamic_cast<const hipObj::SystemHip *>(&platform->hip()), nullptr);
     EXPECT_NE(dynamic_cast<const hipObj::LoadedVerbs *>(&platform->verbs()), nullptr);
     EXPECT_NE(dynamic_cast<const hipObj::SysfsTopology *>(&platform->topology()), nullptr);
+#ifdef HIPOBJ_RDMA_WIRE_V3
+    EXPECT_NE(dynamic_cast<const hipObj::SystemRdmaCm *>(platform->rdmaCm()), nullptr);
+#else
+    EXPECT_EQ(platform->rdmaCm(), nullptr);
+#endif
 }
 
-// ---- RC-CM listener seam -----------------------------------------
-
-/* Without a fake installed, startRcListener() is RdmaCmRcListener::Start(),
- * which needs an address before it touches librdmacm */
-TEST(RcListenerSeamTest, RdmaCmRcListenerNeedsAnAddress)
-{
-    EXPECT_EQ(hipObj::startRcListener("", 0), nullptr);
-}
-
-// ---- libibverbs seam --------------------------------------------
-
-TEST(IbvSeamTest, OverrideRedirectsIbv)
+/* hipObjInit() initializes with the system platform. No system has this
+ * NIC, so it fails the same way with or without a GPU or libibverbs: with
+ * a GPU, NIC selection finds nothing the hint allows, and either way, the
+ * hinted NIC can't be opened. */
+TEST(PlatformTest, InitUsesTheSystemPlatform)
 {
     hipObjConfig_t config{};
     config.gpuDevice = -1;
@@ -701,7 +704,7 @@ namespace {
 
     ApiTransferLog g_apiTransferLog;
 
-    int fakeSendRequest(void *, const char *token, size_t tokenLen)
+    int fakeSendRequest(void * /*ctx*/, const char *token, size_t tokenLen)
     {
         ++g_apiTransferLog.sendRequestCalls;
         hipObjTest::noteSentToken(token, tokenLen);
@@ -711,10 +714,10 @@ namespace {
     int fakeRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
     {
         ++g_apiTransferLog.recvReplyCalls;
-        // Mirrors state.h's useV1Wire(): HIPOBJ_RDMA_WIRE_V1 is a compile-time
+        // Mirrors state.h's useV1Wire(): HIPOBJ_RDMA_WIRE_V3 is a compile-time
         // choice (hipobj is built for v1 XOR v3), so this fake's reply format
         // must track whichever one hipobj_test_objects was built with here.
-#ifdef HIPOBJ_RDMA_WIRE_V1
+#ifndef HIPOBJ_RDMA_WIRE_V3
         // v1 wire format (see token.cpp's parseRdmaReplyHttpCode()): "ok" is
         // its own special-cased success reply, with no peer QP/GID/LID.
         static const std::string kReply = "ok";
@@ -723,7 +726,7 @@ namespace {
         // which reports the length the token named, as the real server does
         const std::string kReply = hipObjTest::successReply();
 #endif
-        if (!replyLen || *replyLen < kReply.size() + 1) {
+        if (replyLen == nullptr || *replyLen < kReply.size() + 1) {
             return -1;
         }
         /* The reply and its NUL, but its length is the reply's alone */
@@ -739,48 +742,10 @@ namespace {
     protected:
         void SetUp() override
         {
-            fakeTopology_.emplace(topology_);
-
-            hipDevice_.deviceSyncErr = hipErrorNoDevice;
-            fakeHip_.emplace(hip_);
-
-            fakeIbv_.emplace(verbs_);
-            fakeRcListener_.emplace(rcListener_);
-#ifndef HIPOBJ_RDMA_WIRE_V1
-            /* v3's listener binds to the NIC's address */
-            hipDevice_.gid = hipObjTest::kFakeNicGid;
-#endif
-
-            g_apiTransferLog = {};
+            FakeDeviceTest::SetUp();
+            hipObjTest::fake().deviceSyncErr = hipErrorNoDevice;
+            g_apiTransferLog                 = {};
         }
-
-        void TearDown() override
-        {
-            (void)hipObjShutdown();
-            fakeRcListener_.reset();
-            fakeIbv_.reset();
-            fakeHip_.reset();
-            fakeTopology_.reset();
-        }
-
-        hipObjConfig_t makeConfig()
-        {
-            hipObjConfig_t config{};
-            config.gpuDevice = -1;
-            config.nicHint   = "mlx5_0";
-            return config;
-        }
-
-        TopologyState                                   topologyState_{};
-        FakeNicTopology                                 topology_{topologyState_};
-        std::optional<hipObjTest::ScopedFakeTopology>   fakeTopology_{};
-        hipObjTest::FakeDevice                          hipDevice_{};
-        hipObjTest::FakeVerbs                           verbs_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeIbv>        fakeIbv_{};
-        hipObjTest::FakeHip                             hip_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeHip>        fakeHip_{};
-        hipObjTest::FakeRcListener                      rcListener_{hipDevice_};
-        std::optional<hipObjTest::ScopedFakeRcListener> fakeRcListener_{};
     };
 
     TEST_F(InitAndTransferTest, InitAllowsGpuLessHostModeWithNicHint)

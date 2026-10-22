@@ -86,7 +86,7 @@ public:
     }
 };
 
-#ifdef HIPOBJ_RDMA_WIRE_V1
+#ifndef HIPOBJ_RDMA_WIRE_V3
 /* The fake verbs, with creating a QP throwing */
 class ThrowingCreateQpVerbs : public hipObjTest::FakeVerbs {
 public:
@@ -97,7 +97,7 @@ public:
         throwIt();
     }
 };
-#endif /* HIPOBJ_RDMA_WIRE_V1 */
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 /* The fake verbs, with registering memory throwing */
 class ThrowingRegMrVerbs : public hipObjTest::FakeVerbs {
@@ -146,7 +146,7 @@ TEST_P(ApiExceptionTest, Init)
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
-#ifdef HIPOBJ_RDMA_WIRE_V1
+#ifndef HIPOBJ_RDMA_WIRE_V3
 /* Only v1's hipObjInit() creates a CQ and a QP */
 TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
 {
@@ -165,7 +165,7 @@ TEST_P(ApiExceptionTest, InitAfterOpeningDevice)
     /* The library still works */
     ASSERT_NO_FATAL_FAILURE(init());
 }
-#endif /* HIPOBJ_RDMA_WIRE_V1 */
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 TEST_P(ApiExceptionTest, BufRegister)
 {

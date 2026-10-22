@@ -40,6 +40,8 @@
 #include "hipobj-warnings.h"
 #include "hipobj.h"
 #include "state.h"
+#include "token.h"
+#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -54,8 +56,10 @@ constexpr size_t kBufSize    = 4096;
  * regression fails the test instead of hanging it */
 constexpr auto kTimeout = std::chrono::seconds(10);
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
 /* How long a test waits to see that a thread is still waiting */
 constexpr auto kStillWaiting = std::chrono::milliseconds(50);
+#endif
 
 /* Starts body(index) on count threads, released together so their calls
  * overlap as much as possible. Each std::jthread joins its thread when
@@ -85,8 +89,10 @@ runThreads(int count, const std::function<void(int)> &body)
 
 // ---- Transfer callbacks ------------------------------------------------
 
+/* Every sendRequest records the token's length (see noteSentToken()), so
+ * that the v3 reply reports it */
 int
-plainSendRequest(void *, const char *token, size_t tokenLen)
+plainSendRequest(void * /*ctx*/, const char *token, size_t tokenLen)
 {
     hipObjTest::noteSentToken(token, tokenLen);
     return 0;
@@ -95,14 +101,14 @@ plainSendRequest(void *, const char *token, size_t tokenLen)
 int
 plainRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 {
-#ifdef HIPOBJ_RDMA_WIRE_V1
+#ifndef HIPOBJ_RDMA_WIRE_V3
     static constexpr std::string_view kReply = "200";
 #else
     // v3 wire format (see v3-wire.h): the fake device's success reply, which
     // reports the length the token named, as the real server does
     const std::string kReply = hipObjTest::successReply();
 #endif
-    if (!reply || !replyLen || *replyLen < kReply.size()) {
+    if (reply == nullptr || replyLen == nullptr || *replyLen < kReply.size()) {
         return -1;
     }
     std::ranges::copy(kReply, hipObj::spanFromPointer(reply, *replyLen).begin());
@@ -112,8 +118,9 @@ plainRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 
 /* Counts transfers in an std::atomic<int>, their context */
 int
-countingSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
+countingSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
+    hipObjTest::noteSentToken(token, tokenLen);
     static_cast<std::atomic<int> *>(ctx)->fetch_add(1);
     return 0;
 }
@@ -166,6 +173,7 @@ public:
         return changed_.wait_for(lock, kTimeout, [&] { return repliedAtEntry_.size() >= count; });
     }
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
     [[nodiscard]] size_t entered() const
     {
         const std::scoped_lock<std::mutex> lock(mutex_);
@@ -186,6 +194,7 @@ public:
         const std::scoped_lock<std::mutex> lock(mutex_);
         return repliedAtEntry_;
     }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 private:
     mutable std::mutex      mutex_{};
@@ -197,18 +206,11 @@ private:
 };
 
 int
-probeSendRequest(void *ctx, const char *token, size_t tokenLen)
+gateSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
     hipObjTest::noteSentToken(token, tokenLen);
-    auto *probe = static_cast<TransferProbe *>(ctx);
-    if (probe->active.fetch_add(1) != 0) {
-        probe->overlaps.fetch_add(1);
-    }
-    ++probe->transfers;
-    /* Holds the transfer open long enough that, without the lock, other
-     * threads' transfers would start inside it */
-    std::this_thread::sleep_for(std::chrono::microseconds(100));
-    return 0;
+    return static_cast<TransferGate *>(ctx)->enter(
+        hipObj::asStringView(hipObj::spanFromPointer(token, tokenLen)));
 }
 
 int
@@ -227,6 +229,7 @@ makeConfig()
     return config;
 }
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
 /* Options with maxTransfers connections for transfers */
 hipObj::Options
 withMaxTransfers(size_t maxTransfers)
@@ -235,26 +238,24 @@ withMaxTransfers(size_t maxTransfers)
     options.maxTransfers = maxTransfers;
     return options;
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 /* Shuts the library down after each test, and checks that nothing but the
  * fixture still holds the fakes */
 class ThreadSafetyTest : public ::testing::Test {
 protected:
-    void TearDown() override
+    void SetUp() override
     {
-        /* The fake HIP runtime has no GPU, so with a NIC hint,
-         * hipObjInit() opens the hinted NIC directly */
-        fakeHip_.emplace(hip_);
-
-        fakeIbv_.emplace(verbs_);
-        fakeRcListener_.emplace(rcListener_);
-#ifndef HIPOBJ_RDMA_WIRE_V1
+#ifdef HIPOBJ_RDMA_WIRE_V3
         /* v3's listener binds to the NIC's address */
         hipDevice_.gid = hipObjTest::kFakeNicGid;
 #endif
+    }
 
-        probeOps_.sendRequest = &probeSendRequest;
-        probeOps_.recvReply   = &probeRecvReply;
+    void TearDown() override
+    {
+        (void)hipObjShutdown();
+        EXPECT_EQ(fakes_.use_count(), 1);
     }
 
     /* Initializes the library with the fakes. The fake HIP runtime has no
@@ -262,10 +263,7 @@ protected:
      * directly. */
     [[nodiscard]] hipObjOpError_t init(const hipObj::Options &options = {}) const
     {
-        (void)hipObjShutdown();
-        fakeRcListener_.reset();
-        fakeIbv_.reset();
-        fakeHip_.reset();
+        return hipObjTest::initWithPlatform(makeConfig(), fakes_->platform(), options).opError;
     }
 
     /* The buffer for thread index, kBufSize bytes, distinct from every
@@ -275,16 +273,21 @@ protected:
         return std::span(pool_).subspan(static_cast<size_t>(index) * kBufSize, kBufSize).data();
     }
 
-    hipObjTest::FakeDevice                          hipDevice_{};
-    hipObjTest::FakeVerbs                           verbs_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeIbv>        fakeIbv_{};
-    hipObjTest::FakeHip                             hip_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeHip>        fakeHip_{};
-    hipObjTest::FakeRcListener                      rcListener_{hipDevice_};
-    std::optional<hipObjTest::ScopedFakeRcListener> fakeRcListener_{};
-    std::vector<char>                               pool_ = std::vector<char>(kThreads * kBufSize);
-    TransferProbe                                   probe_{};
-    hipObjOps_t                                     probeOps_{};
+    /* Registers count buffers, from buffer(0) on */
+    void registerBuffers(int count)
+    {
+        for (int i = 0; i < count; ++i) {
+            ASSERT_EQ(hipObjBufRegisterHost(buffer(i), kBufSize).opError, hipObjSuccess);
+        }
+    }
+
+    hipObjTest::FakeDevice                      hipDevice_{};
+    std::shared_ptr<hipObjTest::FakePlatform<>> fakes_ =
+        std::make_shared<hipObjTest::FakePlatform<>>(hipDevice_);
+    std::vector<char> pool_        = std::vector<char>(kThreads * kBufSize);
+    hipObjOps_t       plainOps_    = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t       countingOps_ = {.sendRequest = &countingSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t       gateOps_     = {.sendRequest = &gateSendRequest, .recvReply = &gateRecvReply};
 };
 
 // ---- Transfers ---------------------------------------------------------
@@ -312,8 +315,15 @@ TEST_F(ThreadSafetyTest, TransfersRunConcurrently)
     for (const hipObjOpError_t err : results) {
         EXPECT_EQ(err, hipObjSuccess);
     }
+#ifndef HIPOBJ_RDMA_WIRE_V3
+    /* Only a v1 token names a QP */
     EXPECT_EQ(gate.qpNums().size(), static_cast<size_t>(kThreads));
+#endif
 }
+
+#ifndef HIPOBJ_RDMA_WIRE_V3
+/* Only a v1 transfer leases a connection: under v3 the peer connects to
+ * the RC-CM listener */
 
 /* With two connections, a third transfer waits until one of the first two
  * has finished */
@@ -357,8 +367,9 @@ struct NestedProbe {
 
 /* Starts a transfer from inside a transfer */
 int
-nestedSendRequest(void *ctx, const char * /*token*/, size_t /*tokenLen*/)
+nestedSendRequest(void *ctx, const char *token, size_t tokenLen)
 {
+    hipObjTest::noteSentToken(token, tokenLen);
     auto *probe   = static_cast<NestedProbe *>(ctx);
     probe->result = hipObjGet(nullptr, probe->buffer, kBufSize, 0, &probe->plainOps, nullptr).opError;
     return 0;
@@ -406,6 +417,7 @@ TEST_F(ThreadSafetyTest, ShutdownStopsATransferWaitingForAConnection)
     }
     EXPECT_EQ(holding, hipObjSuccess);
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 // ---- Buffers -----------------------------------------------------------
 
@@ -589,7 +601,7 @@ struct ReentrantCall {
 };
 
 /* The number of public functions. reentrantSendRequest() calls each one. */
-constexpr size_t kPublicFunctions = 15;
+constexpr size_t kPublicFunctions = 16;
 
 /* What reentrantSendRequest() needs, and what it found */
 struct ReentryProbe {
@@ -613,27 +625,49 @@ struct ReentryProbe {
  * ran on its own. registered is the transfer's buffer, and device and host
  * aren't registered. */
 int
-reentrantSendRequest(void *ctx, const char *token, size_t tokenLen)
+reentrantSendRequest(void *ctx, const char *sentToken, size_t sentTokenLen)
 {
-    auto          *probe  = static_cast<ReentryProbe *>(ctx);
-    hipObjConfig_t config = makeConfig();
-    hipObjTest::noteSentToken(token, tokenLen);
+    hipObjTest::noteSentToken(sentToken, sentTokenLen);
+    auto                 *probe  = static_cast<ReentryProbe *>(ctx);
+    hipObjConfig_t        config = makeConfig();
+    char                 *token  = nullptr;
+    std::array<char, 32>  nicIp{};
+    int                   code   = 0;
+    unsigned              major  = 0;
+    unsigned              minor  = 0;
+    unsigned              patch  = 0;
+    uint64_t              bytes  = 0;
+    static constexpr auto kReply = std::string_view("206");
+    const std::string     replyV3 =
+        hipObj::v3::encodeRdmaReplyV3({.httpStatus = 206, .bytesTransferred = kBufSize});
 
-    probe->locked = {
-        {"hipObjInit", hipObjInit(&config).opError},
-        {"hipObjShutdown", hipObjShutdown().opError},
-        {"hipObjBufRegister", hipObjBufRegister(probe->unregistered, kBufSize).opError},
-        {"hipObjBufRegisterHost", hipObjBufRegisterHost(probe->unregistered, kBufSize).opError},
-        {"hipObjBufDeregister", hipObjBufDeregister(probe->registered).opError},
-        {"hipObjGet", hipObjGet(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
-        {"hipObjPut", hipObjPut(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr).opError},
-        {"hipObjBufSync", hipObjBufSync(probe->registered, kBufSize, 0, HIPOBJ_SYNC_TO_HOST).opError},
-        {"hipObjGetRdmaToken",
-         hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &probe->token).opError},
-    };
+    probe->errorString = hipObjGetErrorString(hipObjBusy);
+    probe->version     = hipObjGetVersionString();
 
-    static constexpr std::string_view kReply = "200";
-    probe->parseResult = hipObjParseRdmaReply(kReply.data(), kReply.size(), &probe->parsedCode).opError;
+    probe->record("hipObjInit", hipObjInit(&config), hipObjAlreadyInitialized);
+    probe->record("hipObjBufRegister", hipObjBufRegister(probe->device, kBufSize), hipObjSuccess);
+    probe->record("hipObjBufRegisterHost", hipObjBufRegisterHost(probe->host, kBufSize), hipObjSuccess);
+    /* The transfer that's calling this holds it */
+    probe->record("hipObjBufDeregister", hipObjBufDeregister(probe->registered), hipObjBusy);
+    probe->record("hipObjGet", hipObjGet(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr),
+                  hipObjSuccess);
+    probe->record("hipObjPut", hipObjPut(nullptr, probe->registered, kBufSize, 0, &probe->plainOps, nullptr),
+                  hipObjSuccess);
+    probe->record("hipObjBufSync", hipObjBufSync(probe->registered, kBufSize, 0, HIPOBJ_SYNC_TO_HOST),
+                  hipObjSuccess);
+    probe->record("hipObjGetRdmaToken",
+                  hipObjGetRdmaToken(probe->registered, kBufSize, HIPOBJ_RDMA_OP_GET, &token), hipObjSuccess);
+    probe->record("hipObjTokenClientNic", hipObjTokenClientNic(token, nicIp.data(), nicIp.size()),
+                  hipObjSuccess);
+    probe->record("hipObjPutRdmaToken", hipObjPutRdmaToken(token), hipObjSuccess);
+    probe->record("hipObjParseRdmaReply", hipObjParseRdmaReply(kReply.data(), kReply.size(), &code),
+                  hipObjSuccess);
+    probe->record("hipObjGetVersion", hipObjGetVersion(&major, &minor, &patch), hipObjSuccess);
+    probe->record("hipObjParseRdmaReplyV3",
+                  hipObjParseRdmaReplyV3(replyV3.data(), replyV3.size(), &code, &bytes), hipObjSuccess);
+    probe->record("hipObjShutdown", hipObjShutdown(), hipObjSuccess);
+    probe->record("hipObjBufDeregister after hipObjShutdown", hipObjBufDeregister(probe->device),
+                  hipObjNotInitialized);
     return 0;
 }
 
@@ -692,11 +726,22 @@ TEST_F(ThreadSafetyTest, StatelessFunctionsFromManyThreads)
             EXPECT_EQ(hipObjParseRdmaReply(kReply.data(), kReply.size(), &code).opError, hipObjSuccess);
             EXPECT_EQ(code, 206);
 
-#ifdef HIPOBJ_RDMA_WIRE_V1
-            /* Only v1 tokens carry the client NIC */
+            const std::string replyV3 =
+                hipObj::v3::encodeRdmaReplyV3({.httpStatus = 206, .bytesTransferred = kBufSize});
+            uint64_t bytes = 0;
+            EXPECT_EQ(hipObjParseRdmaReplyV3(replyV3.data(), replyV3.size(), &code, &bytes).opError,
+                      hipObjSuccess);
+            EXPECT_EQ(code, 206);
+            EXPECT_EQ(bytes, kBufSize);
+
             std::array<char, 32> nicIp{};
             EXPECT_EQ(hipObjTokenClientNic(token, nicIp.data(), nicIp.size()).opError, hipObjSuccess);
-#endif
+
+            unsigned major = 0;
+            unsigned minor = 0;
+            unsigned patch = 0;
+            EXPECT_EQ(hipObjGetVersion(&major, &minor, &patch).opError, hipObjSuccess);
+            EXPECT_EQ(std::format("{}.{}.{}", major, minor, patch), expectedVersion);
         }
     });
 

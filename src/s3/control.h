@@ -36,6 +36,6 @@ std::optional<RdmaReply> receiveRdmaReplyRaw(const hipObjOps_t &ops, void *ctx, 
  * through recvReply and decodes it as a v3::RdmaReplyV3. Returns
  * std::nullopt when the callback fails or reports more than the buffer
  * holds, or the reply is malformed (see v3::decodeRdmaReplyV3()). */
-std::optional<v3::RdmaReplyV3> receiveRdmaReplyV3(hipObjOps_t* ops, void* ctx);
+std::optional<v3::RdmaReplyV3> receiveRdmaReplyV3(const hipObjOps_t &ops, void *ctx);
 
 } // namespace hipObj

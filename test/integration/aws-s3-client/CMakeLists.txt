@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: MIT
 
 include(HIPOBJFetchAwsSdkCpp)
-include(HIPOBJSanitizers)
 
-add_library(hipobj-aws-s3-client STATIC
-  hipobj_aws_s3_client.cpp)
-
-set_target_properties(hipobj-aws-s3-client PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-if(HIPOBJ_USE_SANITIZERS)
-  hipobj_add_sanitizers(hipobj-aws-s3-client)
-endif()
+# hipObject's helpers set the C++ standard, the warning, -Werror and
+# hardening flags, and the sanitizer, coverage, clang-tidy and IWYU hooks
+hipobj_add_library(
+  NAME hipobj-aws-s3-client
+  TYPE STATIC
+  SRCS hipobj_aws_s3_client.cpp)
 
 target_include_directories(hipobj-aws-s3-client PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR})
+# log.h prints with shared/hipobj-print.h
+target_include_directories(hipobj-aws-s3-client PRIVATE
+  ${PROJECT_SOURCE_DIR}/shared)
 
 target_link_libraries(hipobj-aws-s3-client PUBLIC
   hipobj
@@ -30,8 +31,9 @@ if(DEFINED aws-sdk-cpp_SOURCE_DIR)
   # rather than target_include_directories(), and their link to
   # aws-crt-cpp does not re-export it as PUBLIC either, so none of this
   # reaches a target outside the SDK's own subdirectory tree via
-  # target_link_libraries(). Add every header root by hand instead.
-  target_include_directories(hipobj-aws-s3-client PUBLIC
+  # target_link_libraries(). Add every header root by hand instead, as
+  # SYSTEM, so the warning flags don't apply to the SDK's headers.
+  target_include_directories(hipobj-aws-s3-client SYSTEM PUBLIC
     ${aws-sdk-cpp_SOURCE_DIR}/src/aws-cpp-sdk-core/include
     ${aws-sdk-cpp_SOURCE_DIR}/generated/src/aws-cpp-sdk-s3/include
     ${aws-sdk-cpp_SOURCE_DIR}/crt/aws-crt-cpp/include)
@@ -48,7 +50,7 @@ if(DEFINED aws-sdk-cpp_SOURCE_DIR)
       get_target_property(_hipobj_awssdk_crt_includes
         ${_hipobj_awssdk_crt_target} INTERFACE_INCLUDE_DIRECTORIES)
       if(_hipobj_awssdk_crt_includes)
-        target_include_directories(hipobj-aws-s3-client PUBLIC
+        target_include_directories(hipobj-aws-s3-client SYSTEM PUBLIC
           ${_hipobj_awssdk_crt_includes})
       endif()
     endif()
@@ -57,17 +59,16 @@ if(DEFINED aws-sdk-cpp_SOURCE_DIR)
   unset(_hipobj_awssdk_crt_includes)
 endif()
 
-add_executable(hipobj-aws-s3-demo aws_s3_demo.cpp)
-set_target_properties(hipobj-aws-s3-demo PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-if(HIPOBJ_USE_SANITIZERS)
-  hipobj_add_sanitizers(hipobj-aws-s3-demo)
-endif()
+hipobj_add_executable(
+  NAME hipobj-aws-s3-demo
+  SRCS aws_s3_demo.cpp)
 if(HIPOBJ_CPU_RDMA)
   target_compile_definitions(hipobj-aws-s3-demo PRIVATE HIPOBJ_CPU_RDMA)
 endif()
 target_link_libraries(hipobj-aws-s3-demo PRIVATE
   hipobj-aws-s3-client
-  aws-cpp-sdk-core)
+  aws-cpp-sdk-core
+  Threads::Threads)
 if(NOT HIPOBJ_CPU_RDMA)
   target_link_libraries(hipobj-aws-s3-demo PRIVATE hip::host)
 endif()

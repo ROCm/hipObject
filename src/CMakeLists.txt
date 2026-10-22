@@ -11,7 +11,6 @@ set(HIPOBJ_SOURCES
   abandoned-copies.cpp
   common/hip-seam.cpp
   common/ibv-wrapper.cpp
-  common/pd-lock.cpp
   common/rdma-topology.cpp
   rdma/connection-pool.cpp
   rdma/transport.cpp
@@ -20,6 +19,12 @@ set(HIPOBJ_SOURCES
   rdma/everpure/rc-listener.cpp
   s3/control.cpp)
 
+# SystemRdmaCm, which the v3 RC-CM listener calls librdmacm through. A v1
+# build has no listener, so it doesn't need librdmacm.
+if(HIPOBJ_RDMA_WIRE_V3)
+  list(APPEND HIPOBJ_SOURCES
+    common/rdmacm-wrapper.cpp)
+endif()
 if(HIPOBJ_BNXT)
   list(APPEND HIPOBJ_SOURCES
     rdma/bnxt/bnxt-backend.cpp)
@@ -90,7 +95,8 @@ target_link_libraries(hipobj
 else()
 target_link_libraries(hipobj
   PRIVATE
-    dl)
+    dl
+    Threads::Threads)
 endif()
 
 # A shared library records its own dependency on the C++ runtime. The
@@ -100,13 +106,13 @@ if(HIPOBJ_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
   target_link_libraries(hipobj INTERFACE stdc++)
 endif()
 
-# rc-listener.cpp needs librdmacm/libibverbs directly.
-find_library(HIPOBJ_IBVERBS_LIB ibverbs REQUIRED)
-find_library(HIPOBJ_RDMACM_LIB rdmacm REQUIRED)
-target_link_libraries(hipobj
-  PUBLIC
-    ${HIPOBJ_IBVERBS_LIB}
-    ${HIPOBJ_RDMACM_LIB})
+# common/rdmacm-wrapper.cpp calls librdmacm, in a v3 build
+if(HIPOBJ_RDMA_WIRE_V3)
+  find_library(HIPOBJ_RDMACM_LIB rdmacm REQUIRED)
+  target_link_libraries(hipobj
+    PUBLIC
+      ${HIPOBJ_RDMACM_LIB})
+endif()
 
 if(HIPOBJ_CPU_RDMA)
   target_compile_definitions(hipobj
@@ -120,9 +126,9 @@ if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_IONIC)
 endif()
-if(HIPOBJ_RDMA_WIRE_V1)
+if(HIPOBJ_RDMA_WIRE_V3)
   target_compile_definitions(hipobj
-    PRIVATE HIPOBJ_RDMA_WIRE_V1)
+    PRIVATE HIPOBJ_RDMA_WIRE_V3)
 endif()
 
 # The unit tests compile these same sources into a separate object

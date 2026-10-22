@@ -13,7 +13,11 @@
 #include <utility>
 #include <vector>
 
+/* A CPU-only build has no ROCm: hip-seam.h's shim declares what this file
+ * uses */
+#ifndef HIPOBJ_CPU_RDMA
 #include <hip/hip_runtime_api.h>
+#endif
 
 #include "buffer.h"
 #include "hip-seam.h"

@@ -7,37 +7,35 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "abandoned-copies.h"
 #include "buffer.h"
 #include "connection-pool.h"
 #include "hipobj.h"
+#include "rc-listener.h"
 #include "transport.h"
 
 namespace hipObj {
 
 class HipRuntime;
 class NicTopology;
-class RcListener;
+class RdmaCm;
 class Verbs;
 
-/* Stops an RC-CM listener, which is how one is released */
-struct RcListenerDeleter {
-    void operator()(RcListener *listener) const noexcept;
-};
-
-using RcListenerPtr = std::unique_ptr<RcListener, RcListenerDeleter>;
-
-/* The outside world the library calls: the HIP runtime, libibverbs, and
- * the NIC topology. It refers to them, and doesn't own them, so whatever
- * owns it has to keep them alive for as long as it lives. */
+/* The outside world the library calls: the HIP runtime, libibverbs, the
+ * NIC topology, and librdmacm (null in a v1 build, which doesn't use it).
+ * It refers to them, and doesn't own them, so whatever owns it has to keep
+ * them alive for as long as it lives. */
 class Platform final {
 public:
-    Platform(const HipRuntime &hip, const Verbs &verbs, const NicTopology &topology) noexcept
-        : hip_(&hip), verbs_(&verbs), topology_(&topology)
+    Platform(const HipRuntime &hip, const Verbs &verbs, const NicTopology &topology,
+             const RdmaCm *rdmaCm) noexcept
+        : hip_(&hip), verbs_(&verbs), topology_(&topology), rdmaCm_(rdmaCm)
     {
     }
 
@@ -56,14 +54,22 @@ public:
         return *topology_;
     }
 
+    /* The RC-CM listener's (v3), or null in a v1 build */
+    [[nodiscard]] const RdmaCm *rdmaCm() const noexcept
+    {
+        return rdmaCm_;
+    }
+
 private:
     const HipRuntime  *hip_;
     const Verbs       *verbs_;
     const NicTopology *topology_;
+    const RdmaCm      *rdmaCm_;
 };
 
-/* The platform over the system's HIP runtime, libibverbs, and the NIC
- * topology sysfs reports, or null when libibverbs can't be loaded. Every
+/* The platform over the system's HIP runtime, libibverbs, the NIC
+ * topology sysfs reports, and, in a v3 build, librdmacm, or null when
+ * libibverbs can't be loaded. Every
  * call returns the same platform, built on the first call, which loads
  * libibverbs. It's never destroyed, so libibverbs stays loaded until the
  * process exits. */
@@ -108,6 +114,15 @@ struct Options {
 
     /* HIPOBJ_DMABUF and HIPOBJ_RDMA_DEBUG */
     DmabufPolicy dmabuf{};
+
+    /* The address the RC-CM listener binds to and the v3 token advertises
+     * (HIPOBJ_RC_LISTEN_IP), or empty for the chosen NIC's. v3 only: see
+     * initWith(). */
+    std::string rcListenIp{};
+
+    /* The RC-CM listener's TCP port (HIPOBJ_RC_LISTEN_PORT, from 1 to
+     * 65535). v3 only. */
+    uint16_t rcListenPort = kRcListenerDefaultPort;
 };
 
 /* Looks up an environment variable by name: its value, or null when it
@@ -130,22 +145,33 @@ struct ResolvedConfig {
 /* The library's state from hipObjInit() to hipObjShutdown(). It's
  * complete when it's built, and only the transfers' connections, the
  * buffers, and the abandoned staging copies change after that, and each
- * of those has a lock of its own. The token connection never changes.
+ * of those has a lock of its own. The token connection never changes. A
+ * v3 build has no QP of its own (the RC-CM listener creates one for each
+ * connection it accepts), so its pool is empty and it has no token
+ * connection.
  *
  * It lives in a shared_ptr, and each call that uses it holds a copy (see
  * currentInstance()), so it's destroyed when hipObjShutdown() has removed
  * it and the last of those calls has returned. Members are destroyed in
  * reverse order: the abandoned copies that are over are released, the
  * buffers deregistered, and the connections' QPs and CQs destroyed, before
- * the device's protection domain is deallocated, and the platform
- * outlives them all. */
+ * the RC-CM listener is stopped, which deallocates its protection domain,
+ * and before the device's is, and the platform outlives them all. */
 struct Instance final {
-    Instance(std::shared_ptr<const Platform> instancePlatform, const Options &instanceOptions) noexcept;
-    /* Deregisters the buffers, then stops the RC-CM listener, before the
-     * members are destroyed: the buffers' MRs can be on the listener's own
-     * PD, which Stop() deallocates, and the connection is closed after the
-     * listener's QPs on its PD are gone */
-    ~Instance();
+    /* instanceDevice has to have come from instancePlatform's verbs, and
+     * instanceTokenConn has to have been created on *instanceDevice. The
+     * device is on the heap so the connection can be created on it, at
+     * the address it keeps, before the instance is built. Creates
+     * instanceOptions.maxTransfers connections in the pool in v1, or fewer
+     * if they can't all be created (see ConnectionPool), and none in v3.
+     * instanceListener, which is null in v1, has to have been started on
+     * instancePlatform's librdmacm and verbs, and bound to
+     * instanceListenIp. */
+    Instance(std::shared_ptr<const Platform> instancePlatform, Options instanceOptions,
+             ResolvedConfig instanceConfig, std::shared_ptr<const RdmaDevice> instanceDevice,
+             std::optional<RcConnection> instanceTokenConn, RcListenerPtr instanceListener,
+             std::string instanceListenIp);
+    ~Instance() = default;
 
     /* Lives in a shared_ptr, and isn't copied or moved */
     Instance(const Instance &)            = delete;
@@ -153,52 +179,43 @@ struct Instance final {
     Instance(Instance &&)                 = delete;
     Instance &operator=(Instance &&)      = delete;
 
-    std::shared_ptr<const Platform> platform{};
-    Options                         options{};
-
-    /* From the hipObjConfig_t, with gpuDevice resolved and the NIC
-     * chosen */
-    int         gpuDevice = 0;
-    std::string endpoint{};
-    std::string region{};
-    std::string nicHint{};
-    int         nicIndex = -1;
-    uint32_t    flags    = 0;
+    std::shared_ptr<const Platform> platform;
+    Options                         options;
+    ResolvedConfig                  config;
     /* v3: the address the RC-CM listener binds to and tokens advertise,
      * HIPOBJ_RC_LISTEN_IP or the chosen NIC's. Worked out once, in
      * initWith(). */
-    std::string listenIp{};
+    std::string listenIp;
 
-    // hipObject only ever manages one RC-CM listener at a time (one per
-    // Instance, see initWith()) even though RdmaCmRcListener supports
-    // several concurrently -- this is that one instance's handle, from
-    // startRcListener(). In v3, hipObjInit() only succeeds with it running,
-    // and buffers register on its PD (registrationPd() in hipobj.cpp).
-    RcListenerPtr listener{};
-
-    /* v1's device, PD and QP. In v3 it's only opened to choose the NIC and
-     * read its GID, and isn't opened at all when HIPOBJ_RC_LISTEN_IP is
-     * set. */
-    RcConnection conn{};
-    BufferMap    buffers;
+    /* In v1, the device the connections are on. In v3 the device only
+     * gives the NIC's GID, and with HIPOBJ_RC_LISTEN_IP it's the NIC the
+     * listener's bind resolved to. */
+    std::shared_ptr<const RdmaDevice> device;
+    /* v3: the RC-CM listener, which hipObjInit() only succeeds with.
+     * Buffers register on its PD (registrationPd() in hipobj.cpp), so it's
+     * declared before the buffers, and stopped after they're
+     * deregistered. */
+    RcListenerPtr listener;
+    /* The connection whose QP number hipObjGetRdmaToken() advertises in
+     * v1. It stays in INIT, since nothing tells hipObject when a transfer
+     * that the application drives itself ends, so it's never leased or
+     * connected. */
+    std::optional<RcConnection> tokenConn;
+    ConnectionPool              pool;
+    BufferMap                   buffers;
+    AbandonedCopies             abandoned;
 };
 
-/* The library's instance, or null when it isn't initialized. The copy
- * keeps the instance alive for as long as the caller holds it, even if
- * another thread shuts the library down in the meantime. */
-std::shared_ptr<Instance> currentInstance();
-
 // Selects the RDMA control-plane wire format hipObjGet()/hipObjPut()/
-// hipObjGetRdmaToken() use: v3 (default -- RC-CM dial-back, see
-// v3-wire.h) or v1 (QP number/GID/LID exchanged directly, see
-// token.h), for interop with peers that only understand the older
-// format. Fixed at compile time via -DHIPOBJ_RDMA_WIRE_V1 (CMakeLists.txt's
-// HIPOBJ_RDMA_WIRE_V1 option): hipobj is built for one wire format or the
+// hipObjGetRdmaToken() use: v1 (default -- QP number/GID/LID exchanged
+// directly, see token.h) or v3 (RC-CM dial-back, see v3-wire.h). Fixed
+// at compile time via -DHIPOBJ_RDMA_WIRE_V3 (CMakeLists.txt's
+// HIPOBJ_RDMA_WIRE_V3 option): hipobj is built for one wire format or the
 // other, not switchable at runtime.
 constexpr bool
 useV1Wire()
 {
-#ifdef HIPOBJ_RDMA_WIRE_V1
+#ifndef HIPOBJ_RDMA_WIRE_V3
     return true;
 #else
     return false;
@@ -207,23 +224,16 @@ useV1Wire()
 
 // The IPv4 address a GID encodes (RoCEv2 IPv4-mapped GIDs only), or empty
 // when it has none. initWith() binds the RC-CM listener to the chosen
-// NIC's, unless HIPOBJ_RC_LISTEN_IP names the address peers should dial
-// instead, for a NIC whose GID has none or when this picks the wrong
-// interface. Mirrors parseClientNicFromTokenHex()'s convention (token.cpp).
+// NIC's, unless HIPOBJ_RC_LISTEN_IP (Options::rcListenIp) names the
+// address peers should dial instead, for a NIC whose GID has none or when
+// this picks the wrong interface. Mirrors parseClientNicFromTokenHex()'s
+// convention (token.cpp).
 std::string localNicIp(const ibv_gid &localGid);
 
-/* Starts hipObject's RC-CM listener (v3) on bindIp and port (0 for
- * rcListenerPortFromEnv()): RdmaCmRcListener::Start(), or the function a
- * test installed with setRcListenerStartForTest(). Null when it can't
- * start. */
-RcListenerPtr startRcListener(const char *bindIp, uint16_t port);
-
-/* A function that starts an RC-CM listener, as startRcListener() does */
-using RcListenerStart = RcListener *(*)(const char *bindIp, uint16_t port);
-
-/* Makes startRcListener() call start, or RdmaCmRcListener::Start() when
- * it's null. Returns the function installed before. */
-RcListenerStart setRcListenerStartForTest(RcListenerStart start);
+/* The library's instance, or null when it isn't initialized. The copy
+ * keeps the instance alive for as long as the caller holds it, even if
+ * another thread shuts the library down in the meantime. */
+std::shared_ptr<Instance> currentInstance();
 
 /* hipObjInit(), with its platform and options given: builds an Instance
  * that holds them, and makes it the current one. The caller has checked

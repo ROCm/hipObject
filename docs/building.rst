@@ -107,6 +107,9 @@ Option                              Default        Description
 ``HIPOBJ_BUILD_DOCS``               OFF            Build documentation
 ``HIPOBJ_DOCS_ONLY``                OFF            Docs targets only (no HIP)
 ``HIPOBJ_MINIO_CLIENT``             OFF            Build minio-cpp RDMA bridge
+``HIPOBJ_RDMA_WIRE_V3``             OFF            Build for the v3 (RC-CM) wire
+``HIPOBJ_AWS_S3_CLIENT``            OFF            Build AWS SDK S3 demo (v3)
+``HIPOBJ_CPU_RDMA``                 OFF            Build without ROCm
 ``HIPOBJ_INTEGRATION_TESTS``        ON             Build RC test server (tests)
 ``HIPOBJ_FETCH_CUOBJECT_CLIENT``    OFF            Fetch libcuobjclient 1.2.0.59
 ``HIPOBJ_FIND_CUOBJECT_SERVER``     OFF            Find libcuobjserver + probe
@@ -142,6 +145,16 @@ attributes.
 
 ``HIPOBJ_INTEGRATION_TESTS`` only has an effect when
 ``BUILD_TESTING`` is on.
+
+``HIPOBJ_RDMA_WIRE_V3`` builds hipObject for the hipobj-rc-v3 wire
+format (see :doc:`rc-rdma-flow`) instead of v1. It needs librdmacm,
+and configuring fails if ``HIPOBJ_MINIO_CLIENT``, which only speaks
+v1, is on too. ``HIPOBJ_AWS_S3_CLIENT`` needs it, and builds
+``hipobj-aws-s3-demo`` and the AWS SDK for C++ client it uses, in
+``test/integration/aws-s3-client``, fetching the SDK if it isn't
+installed. ``HIPOBJ_CPU_RDMA`` builds hipObject without ROCm, for
+hosts with an RDMA NIC and no AMD GPU, where transfers move host
+memory. It doesn't set up the install or the packages.
 
 ``HIPOBJ_INSTALL_EXAMPLES`` builds the example programs in the
 build tree (``examples/``) and installs their sources, with a
@@ -573,3 +586,13 @@ When a program that uses hipObject runs:
 The library reads the last five in ``hipObjInit()``, each time
 it runs, and ignores an invalid value, leaving the default
 (see :doc:`architecture`).
+
+With ``HIPOBJ_RDMA_WIRE_V3``, ``hipObjInit()`` also reads
+``HIPOBJ_RC_LISTEN_IP``, the address the RC-CM listener binds to
+and tokens advertise (by default, the IPv4 address in the chosen
+NIC's GID), and ``HIPOBJ_RC_LISTEN_PORT``, its TCP port, from 1 to
+65535 (default 18181). It ignores an invalid port, but fails if the
+listener can't start on the address. ``HIPOBJ_LOG_LEVEL`` sets how
+much the library logs to stderr: ``ERROR``, ``WARN``, ``INFO`` (the
+default), or ``DEBUG``, in any case. The library reads it the first
+time it logs.

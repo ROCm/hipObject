@@ -25,9 +25,6 @@ function(hipobj_add_example name)
   else()
     target_link_libraries(${name} PRIVATE hipobj hip::host dl)
   endif()
-  hipobj_install_executable(
-    NAME ${name}
-    DESTINATION bin/hipobj-examples)
 endfunction()
 
 # The programs are built here but not installed. HIPOBJInstall.cmake

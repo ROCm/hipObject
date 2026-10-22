@@ -65,18 +65,18 @@ namespace hipObj::v3 {
 inline constexpr char kFieldDelim = ':';
 
 struct RdmaTokenV3 {
-  std::string listenIp;   /* dotted-quad IPv4 or colon-form IPv6; empty when
-                            * unknown. See encodeRdmaTokenV3Hex() for the wire
-                            * encoding. */
-  uint16_t listenPort = 0; /* 0 means no RC-CM listener is running */
-  uint32_t rkey = 0;
-  uint64_t remoteAddr = 0;
-  uint64_t length = 0;
+    std::string listenIp{};  /* dotted-quad IPv4 or colon-form IPv6; empty when
+                              * unknown. See encodeRdmaTokenV3Hex() for the wire
+                              * encoding. */
+    uint16_t listenPort = 0; /* 0 means no RC-CM listener is running */
+    uint32_t rkey       = 0;
+    uint64_t remoteAddr = 0;
+    uint64_t length     = 0;
 };
 
 struct RdmaReplyV3 {
-  int httpStatus = 0;
-  uint64_t bytesTransferred = 0;
+    int      httpStatus       = 0;
+    uint64_t bytesTransferred = 0;
 };
 
 /*! Length of an encoded token: 32 + 4 + 8 + 16 + 16 hex digits and the four
@@ -88,7 +88,7 @@ inline constexpr size_t kRdmaTokenV3HexLen = 80;
 using RdmaTokenV3Hex = std::array<char, kRdmaTokenV3HexLen + 1>;
 
 /*! Encodes a RdmaTokenV3 as the x-amz-rc-rdma-token header value. */
-RdmaTokenV3Hex encodeRdmaTokenV3Hex(const RdmaTokenV3& token);
+RdmaTokenV3Hex encodeRdmaTokenV3Hex(const RdmaTokenV3 &token);
 
 /*!
  * Decodes exactly kRdmaTokenV3HexLen characters, an x-amz-rc-rdma-token
@@ -99,7 +99,7 @@ RdmaTokenV3Hex encodeRdmaTokenV3Hex(const RdmaTokenV3& token);
 std::optional<RdmaTokenV3> decodeRdmaTokenV3(std::string_view headerValue);
 
 /*! Encodes a RdmaReplyV3 as the x-amz-rc-rdma-reply header value. */
-std::string encodeRdmaReplyV3(const RdmaReplyV3& reply);
+std::string encodeRdmaReplyV3(const RdmaReplyV3 &reply);
 
 /*!
  * Decodes an x-amz-rc-rdma-reply header value as encodeRdmaReplyV3() writes

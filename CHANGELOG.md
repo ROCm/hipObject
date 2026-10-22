@@ -91,6 +91,42 @@
 - A project that adds hipObject with `add_subdirectory()` or
   `FetchContent` can link the library as `hipobj::hipobj`, the name the
   installed package gives it, as well as `hipobj`.
+- The `HIPOBJ_RDMA_WIRE_V3` CMake option builds hipObject for the
+  hipobj-rc-v3 wire format instead of v1. It defaults to `OFF`, so a
+  default build speaks v1, as before, and doesn't need librdmacm. A v3
+  token names an RDMA CM listener that `hipObjInit()` starts on the
+  client's NIC, and the server dials it and moves the data with RDMA
+  READ or WRITE; the token carries no QP number, GID or LID. The S3
+  headers are `x-amz-rc-rdma-token` and `x-amz-rc-rdma-reply`, which
+  reports the HTTP status and the bytes the server moved. A transfer
+  fails unless the server moved the whole range, and `hipObjInit()`
+  fails with `hipObjRdmaError` if the listener can't start. In a v3
+  build, `hipObjGetRdmaToken()` returns a v3 token, and
+  `hipObjTokenClientNic()` reads one, returning the address of the
+  listener the token names, and rejects a v1 token. A v3 build creates
+  no queue pairs of its own, so `HIPOBJ_MAX_TRANSFERS` only applies to
+  v1. A v3 library links librdmacm. The MinIO bridge
+  (`HIPOBJ_MINIO_CLIENT`) only speaks v1, so configuring fails if both
+  are on. The user guide's RC-RDMA flow page describes the exchange.
+- The `HIPOBJ_RC_LISTEN_IP` environment variable names the address the
+  v3 listener binds to and tokens advertise, for a NIC whose GID has no
+  IPv4 address, or when the chosen NIC's isn't the one the server should
+  dial. `HIPOBJ_RC_LISTEN_PORT` sets the listener's TCP port, from 1 to
+  65535; it defaults to 18181.
+- `hipObjParseRdmaReplyV3()` parses an `x-amz-rc-rdma-reply` value,
+  `<httpStatus>:<bytesTransferred>` with the byte count as 16 hex
+  digits, into the HTTP status and the byte count.
+- The `HIPOBJ_LOG_LEVEL` environment variable sets how much hipObject
+  logs to stderr: `ERROR`, `WARN`, `INFO` (the default), or `DEBUG`.
+- The `HIPOBJ_CPU_RDMA` CMake option builds hipObject without ROCm, for
+  hosts with an RDMA NIC and no AMD GPU: transfers move host memory.
+  It doesn't set up the install or the packages. It defaults to `OFF`.
+- The `HIPOBJ_AWS_S3_CLIENT` CMake option builds `hipobj-aws-s3-demo`,
+  and the AWS SDK for C++ client it uses
+  (`test/integration/aws-s3-client`), which sends `PutObject` and
+  `GetObject` requests whose data moves over hipObject. The SDK is
+  fetched if it isn't installed. It defaults to `OFF`, and needs
+  `HIPOBJ_RDMA_WIRE_V3`, since the demo speaks the v3 headers.
 
 ### Changed
 

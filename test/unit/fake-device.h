@@ -15,7 +15,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,7 +33,8 @@
 #include "ibv-core.h"
 #include "ibv-wrapper.h"
 #include "nic-seam.h"
-#include "rc-listener.h"
+#include "rdmacm-core.h"
+#include "rdmacm-wrapper.h"
 #include "state.h"
 #include "token.h"
 
@@ -74,11 +75,20 @@ struct CallLog {
     std::atomic<int> exportDmabuf{0};
     std::atomic<int> closeDmabuf{0};
 
-    /* RC-CM listener (v3), from FakeRcListener: the times
-     * startRcListener() was called, including the ones fail.startListener
-     * made fail, and the times a started listener was stopped */
-    std::atomic<int> startListener{0};
-    std::atomic<int> stopListener{0};
+    /* librdmacm (FakeRdmaCm), and the async events FakeVerbs reports. The
+     * ids include the ones connectRequest() makes, as librdmacm makes an
+     * id for each connection. */
+    std::atomic<int> createEventChannel{0};
+    std::atomic<int> destroyEventChannel{0};
+    std::atomic<int> createId{0};
+    std::atomic<int> destroyId{0};
+    std::atomic<int> bindAddr{0};
+    std::atomic<int> listen{0};
+    std::atomic<int> ackCmEvent{0};
+    std::atomic<int> accept{0};
+    std::atomic<int> reject{0};
+    std::atomic<int> disconnect{0};
+    std::atomic<int> ackAsyncEvent{0};
 };
 
 /* Which fakes fail */
@@ -102,8 +112,16 @@ struct Faults {
     bool registerAll  = false;
     bool hostMalloc   = false;
     bool exportDmabuf = false;
-    /* The RC-CM listener doesn't start */
-    bool startListener = false;
+
+    /* librdmacm (FakeRdmaCm). With bindResolvesNoDevice, a bind succeeds
+     * but resolves no device, as a bind to a wildcard address does. */
+    bool createEventChannel   = false;
+    bool createId             = false;
+    bool bindAddr             = false;
+    bool bindResolvesNoDevice = false;
+    bool listen               = false;
+    bool cmCreateQp           = false;
+    bool accept               = false;
 };
 
 /* One modify_qp() call */
@@ -177,10 +195,12 @@ struct FakeDevice {
     /* The GID query_gid() reports for every index */
     std::array<uint8_t, 16> gid{};
 
-    /* The RC-CM listener (v3): the device its bind resolves to, and its
-     * port */
-    std::string_view listenerDevice = "mlx5_0";
-    uint16_t         listenerPort   = 18515;
+    /* librdmacm (see FakeRdmaCm): binding to listenerAddress resolves to
+     * the device the fake verbs call listenerDevice. asyncEventType is the
+     * async event its context reports. */
+    std::string_view listenerAddress = "192.0.2.1";
+    const char      *listenerDevice  = "mlx5_0";
+    ibv_event_type   asyncEventType  = IBV_EVENT_QP_FATAL;
 
     /* The S3 server's reply to a transfer (see setReply()) */
     std::array<char, 128> reply    = {{'2', '0', '0', '\0'}};
@@ -199,9 +219,9 @@ FakeDevice &fake();
 void resetFake();
 
 /* The GID FakeDeviceTest gives the fake NIC under v3: IPv4-mapped
- * ::ffff:192.0.2.1, an address for the RC-CM listener to bind to */
-inline constexpr std::array<uint8_t, 16> kFakeNicGid = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 0, 2, 1}};
+ * ::ffff:192.0.2.1, the listenerAddress the RC-CM listener binds to */
+inline constexpr auto kFakeNicGid =
+    std::to_array<uint8_t>({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 0, 2, 1});
 
 /* Sets the reply the fake S3 server sends, with its NUL, as the default "200"
  * is sent */
@@ -323,10 +343,87 @@ public:
     [[nodiscard]] int     destroy_qp(ibv_qp *qp) const override;
     [[nodiscard]] int     poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const override;
     [[nodiscard]] int     post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const override;
+    /* For FakeRdmaCm's context, whose async fd counts the events: reports
+     * the device's asyncEventType */
+    [[nodiscard]] int         get_async_event(ibv_context *context, ibv_async_event *event) const override;
+    void                      ack_async_event(ibv_async_event *event) const override;
+    [[nodiscard]] const char *event_type_str(ibv_event_type event) const override;
 
 private:
     /* A pointer, so the const methods can change what it points to */
     FakeDevice *device_;
+};
+
+/* The device FakeRdmaCm's context is on, which FakeVerbs names the
+ * FakeDevice's listenerDevice */
+inline ibv_device *
+fakeListenerDevice()
+{
+    return hipObj::addressToPointer<ibv_device *>(0x5);
+}
+
+/* A librdmacm that answers from a FakeDevice and records its calls there,
+ * for the RC-CM listener (v3). Binding to the device's listenerAddress
+ * resolves to a context of its own, as librdmacm's is, on
+ * fakeListenerDevice(). Its channels' fds, and that context's async fd,
+ * are eventfds, so the listener's epoll loop runs as it does on hardware.
+ * A test queues the events a listener gets with connectRequest() and
+ * queueEvent(). QPs are created through verbs. The listener's thread
+ * calls it, so what it keeps is behind a lock, and outside the object, so
+ * the const methods can change it. */
+class FakeRdmaCm final : public hipObj::RdmaCm {
+public:
+    /* device and verbs have to outlive it */
+    FakeRdmaCm(FakeDevice &device, const hipObj::Verbs &verbs);
+    ~FakeRdmaCm() override;
+
+    FakeRdmaCm(const FakeRdmaCm &)            = delete;
+    FakeRdmaCm &operator=(const FakeRdmaCm &) = delete;
+    FakeRdmaCm(FakeRdmaCm &&)                 = delete;
+    FakeRdmaCm &operator=(FakeRdmaCm &&)      = delete;
+
+    [[nodiscard]] rdma_event_channel *create_event_channel() const override;
+    void                              destroy_event_channel(rdma_event_channel *channel) const override;
+    [[nodiscard]] int                 create_id(rdma_event_channel *channel, rdma_cm_id **id, void *context,
+                                                rdma_port_space ps) const override;
+    [[nodiscard]] int                 destroy_id(rdma_cm_id *id) const override;
+    [[nodiscard]] int                 bind_addr(rdma_cm_id *id, sockaddr *addr) const override;
+    [[nodiscard]] int                 listen(rdma_cm_id *id, int backlog) const override;
+    [[nodiscard]] int get_cm_event(rdma_event_channel *channel, rdma_cm_event **event) const override;
+    [[nodiscard]] int ack_cm_event(rdma_cm_event *event) const override;
+    [[nodiscard]] int create_qp(rdma_cm_id *id, ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const override;
+    void              destroy_qp(rdma_cm_id *id) const override;
+    [[nodiscard]] int accept(rdma_cm_id *id, rdma_conn_param *conn_param) const override;
+    [[nodiscard]] int reject(rdma_cm_id *id, const void *private_data,
+                             uint8_t private_data_len) const override;
+    [[nodiscard]] int disconnect(rdma_cm_id *id) const override;
+    [[nodiscard]] const char *event_str(rdma_cm_event_type event) const override;
+
+    /* Queues a connect request from a new id on the listening id's channel,
+     * arriving on the context the bind resolved to, or with otherContext,
+     * on another context of the same device. Returns the new id. */
+    [[nodiscard]] rdma_cm_id *connectRequest(bool otherContext = false) const;
+
+    /* Queues an event of type for id, on its channel */
+    void queueEvent(rdma_cm_id *id, rdma_cm_event_type type) const;
+
+    /* Makes the bound context's async fd readable, as an async event does */
+    void raiseAsyncEvent() const;
+
+    /* The address and port the last bind was given, such as "192.0.2.1"
+     * and "18181" */
+    [[nodiscard]] std::string boundAddress() const;
+    [[nodiscard]] std::string boundPort() const;
+
+    /* The context a bind to listenerAddress resolves to */
+    [[nodiscard]] ibv_context *context() const;
+
+private:
+    struct State;
+
+    FakeDevice            *device_;
+    const hipObj::Verbs   *verbs_;
+    std::unique_ptr<State> state_;
 };
 
 /* hipObjOps_t callbacks for the fake S3 server */
@@ -382,8 +479,8 @@ template <typename Hip = FakeHip, typename Verbs = FakeVerbs>
 class FakePlatform final : public std::enable_shared_from_this<FakePlatform<Hip, Verbs>> {
 public:
     /* device has to outlive it */
-    explicit FakePlatform(FakeDevice &device) noexcept
-        : hip_(device), verbs_(device), platform_(hip_, verbs_, topology_)
+    explicit FakePlatform(FakeDevice &device)
+        : hip_(device), verbs_(device), rdmaCm_(device, verbs_), platform_(hip_, verbs_, topology_, &rdmaCm_)
     {
     }
 
@@ -419,63 +516,30 @@ public:
         return topology_;
     }
 
+    [[nodiscard]] const FakeRdmaCm &rdmaCm() const noexcept
+    {
+        return rdmaCm_;
+    }
+
 private:
     Hip              hip_;
     Verbs            verbs_;
     EmptyNicTopology topology_{};
+    FakeRdmaCm       rdmaCm_;
     hipObj::Platform platform_;
 };
 
-/* An RC-CM listener (v3) without librdmacm, which ScopedFakeRcListener
- * makes startRcListener() return. It reports the device's listenerDevice
- * and listenerPort, and counts start() and stop() calls in the device's
- * log. */
-class FakeRcListener final : public hipObj::RcListener {
-public:
-    explicit FakeRcListener(FakeDevice &device) noexcept : device_(&device)
-    {
-    }
-    ~FakeRcListener() override = default;
+/* initWith() with config, platform, and options. hipObjInit() always
+ * uses the system platform, so this is how a test initializes the library
+ * with fakes. */
+hipObjError_t initWithPlatform(const hipObjConfig_t &config, std::shared_ptr<const hipObj::Platform> platform,
+                               const hipObj::Options &options = {});
 
-    FakeRcListener(const FakeRcListener &)            = delete;
-    FakeRcListener &operator=(const FakeRcListener &) = delete;
-    FakeRcListener(FakeRcListener &&)                 = delete;
-    FakeRcListener &operator=(FakeRcListener &&)      = delete;
-
-    /* This listener, or null with fail.startListener */
-    hipObj::RcListener *start();
-
-    uint16_t    port() const override;
-    int         connectionCount() const override;
-    void       *pd() const override;
-    std::string deviceName() const override;
-    void        stop() override;
-
-private:
-    FakeDevice *device_;
-};
-
-/* Makes startRcListener() start listener, and puts back the start function
- * and listener that were installed before when it's destroyed */
-class ScopedFakeRcListener {
-public:
-    explicit ScopedFakeRcListener(FakeRcListener &listener);
-    ~ScopedFakeRcListener();
-
-    ScopedFakeRcListener(const ScopedFakeRcListener &)            = delete;
-    ScopedFakeRcListener &operator=(const ScopedFakeRcListener &) = delete;
-    ScopedFakeRcListener(ScopedFakeRcListener &&)                 = delete;
-    ScopedFakeRcListener &operator=(ScopedFakeRcListener &&)      = delete;
-
-private:
-    FakeRcListener         *listener_;
-    FakeRcListener         *previousListener_;
-    hipObj::RcListenerStart previousStart_;
-};
-
-/* Installs the fakes for each test, and restores the real functions after.
- * After each test, it shuts the library down and checks that the instance
- * is gone. */
+/* Gives each test a FakePlatform over fake(), and resets fake(). Under v3,
+ * the fake NIC's GID is kFakeNicGid, for the RC-CM listener to bind to,
+ * and the fake S3 server sends successReply(). After each test, it shuts
+ * the library down, and checks that the instance is gone and that nothing
+ * but the fixture still holds the fakes. */
 class FakeDeviceTest : public ::testing::Test {
 protected:
     void SetUp() override;
@@ -491,16 +555,24 @@ protected:
     void init() const;
 
     /* Initializes and registers kFakeBufSize bytes at fakeDevBuf() */
-    static void initAndRegister();
+    void initAndRegister() const;
 
-    EmptyNicTopology                    topology_{};
-    std::optional<ScopedFakeTopology>   fakeTopology_{};
-    FakeVerbs                           verbs_{fake()};
-    std::optional<ScopedFakeIbv>        fakeIbv_{};
-    FakeHip                             hip_{fake()};
-    std::optional<ScopedFakeHip>        fakeHip_{};
-    FakeRcListener                      rcListener_{fake()};
-    std::optional<ScopedFakeRcListener> fakeRcListener_{};
+    [[nodiscard]] const hipObj::Verbs &verbs() const noexcept
+    {
+        return fakes_->verbs();
+    }
+
+    [[nodiscard]] const hipObj::NicTopology &topology() const noexcept
+    {
+        return fakes_->topology();
+    }
+
+    [[nodiscard]] const FakeRdmaCm &rdmaCm() const noexcept
+    {
+        return fakes_->rdmaCm();
+    }
+
+    std::shared_ptr<FakePlatform<>> fakes_ = std::make_shared<FakePlatform<>>(fake());
 };
 
 } // namespace hipObjTest
