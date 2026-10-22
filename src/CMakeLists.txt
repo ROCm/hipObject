@@ -15,8 +15,16 @@ set(HIPOBJ_SOURCES
   rdma/connection-pool.cpp
   rdma/transport.cpp
   rdma/token.cpp
+  rdma/everpure/v3-wire.cpp
+  rdma/everpure/rc-listener.cpp
   s3/control.cpp)
 
+# SystemRdmaCm, which the v3 RC-CM listener calls librdmacm through. A v1
+# build has no listener, so it doesn't need librdmacm.
+if(HIPOBJ_RDMA_WIRE_V3)
+  list(APPEND HIPOBJ_SOURCES
+    common/rdmacm-wrapper.cpp)
+endif()
 if(HIPOBJ_BNXT)
   list(APPEND HIPOBJ_SOURCES
     rdma/bnxt/bnxt-backend.cpp)
@@ -71,17 +79,25 @@ target_include_directories(hipobj
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/common
     ${CMAKE_CURRENT_SOURCE_DIR}/rdma
+    ${CMAKE_CURRENT_SOURCE_DIR}/rdma/everpure
     ${CMAKE_CURRENT_SOURCE_DIR}/s3)
 
 # hipobj.h includes no HIP or HSA headers, so consumers don't need their
 # include directories or compile definitions. For the static library,
 # CMake still passes PRIVATE dependencies on to the final link.
+if(NOT HIPOBJ_CPU_RDMA)
 target_link_libraries(hipobj
   PRIVATE
     hip::host
     hsa-runtime64::hsa-runtime64
     dl
     Threads::Threads)
+else()
+target_link_libraries(hipobj
+  PRIVATE
+    dl
+    Threads::Threads)
+endif()
 
 # A shared library records its own dependency on the C++ runtime. The
 # static library doesn't, so a consumer linking with the C compiler
@@ -90,6 +106,18 @@ if(HIPOBJ_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
   target_link_libraries(hipobj INTERFACE stdc++)
 endif()
 
+# common/rdmacm-wrapper.cpp calls librdmacm, in a v3 build
+if(HIPOBJ_RDMA_WIRE_V3)
+  find_library(HIPOBJ_RDMACM_LIB rdmacm REQUIRED)
+  target_link_libraries(hipobj
+    PUBLIC
+      ${HIPOBJ_RDMACM_LIB})
+endif()
+
+if(HIPOBJ_CPU_RDMA)
+  target_compile_definitions(hipobj
+    PRIVATE HIPOBJ_CPU_RDMA)
+endif()
 if(HIPOBJ_BNXT)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_BNXT)
@@ -97,6 +125,10 @@ endif()
 if(HIPOBJ_IONIC)
   target_compile_definitions(hipobj
     PRIVATE HIPOBJ_IONIC)
+endif()
+if(HIPOBJ_RDMA_WIRE_V3)
+  target_compile_definitions(hipobj
+    PRIVATE HIPOBJ_RDMA_WIRE_V3)
 endif()
 
 # The unit tests compile these same sources into a separate object

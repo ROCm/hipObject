@@ -198,7 +198,9 @@ typedef struct {
     /*!
      * Called by hipObject to send the RDMA token.
      * The application should embed the token in the
-     * x-amz-rdma-token S3 request header.
+     * x-amz-rdma-token S3 request header, or in
+     * x-amz-rc-rdma-token when hipObject is built with
+     * HIPOBJ_RDMA_WIRE_V3.
      *
      * @param ctx       User-supplied context pointer
      * @param token     Hex-encoded RDMA token
@@ -210,7 +212,8 @@ typedef struct {
     /*!
      * Called by hipObject to receive the RDMA reply.
      * The application should extract x-amz-rdma-reply
-     * from the S3 response headers.
+     * (x-amz-rc-rdma-reply with HIPOBJ_RDMA_WIRE_V3) from the
+     * S3 response headers.
      *
      * @param ctx       User-supplied context pointer
      * @param reply     Buffer to receive the reply tag
@@ -499,7 +502,17 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
 HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction);
 
 /*!
- * @brief Mint a hex-encoded RC RDMA token for a registered buffer
+ * @brief Mint an RDMA token for a registered buffer
+ *
+ * Returns the same string hipObjPut()/hipObjGet() send as the
+ * x-amz-rdma-token header value: a QP number, GID, rkey, address and
+ * length.
+ *
+ * A library built with HIPOBJ_RDMA_WIRE_V3 returns a hipobj-rc-v3 token
+ * instead, for x-amz-rc-rdma-token: the RC-CM listener's address and
+ * port, and the buffer's rkey, address and length. It carries no QP
+ * number, GID or LID: the peer dials the listener, and RDMA CM sets up
+ * the connection (see the user guide's RC-RDMA flow page).
  *
  * The caller must release @p *outToken with hipObjPutRdmaToken().
  * @p op is HIPOBJ_RDMA_OP_PUT or HIPOBJ_RDMA_OP_GET (reserved).
@@ -528,11 +541,36 @@ HIPOBJ_API hipObjError_t hipObjPutRdmaToken(char *token);
 HIPOBJ_API hipObjError_t hipObjParseRdmaReply(const char *reply, size_t replyLen, int *httpCode);
 
 /*!
- * @brief Extract client NIC IPv4 from a minted RDMA token
+ * @brief Parse an x-amz-rc-rdma-reply header value (hipobj-rc-v3)
  *
- * Writes a dotted-quad address into @p nicIp when the token GID
- * carries an IPv4-mapped RoCEv2 suffix.  Returns hipObjSuccess with
- * an empty string when no address is encoded.
+ * The v3 reply is "<httpStatus>:<bytesTransferred>", the status as 3
+ * decimal digits and the byte count as 16 hex digits, where v1's
+ * x-amz-rdma-reply, which hipObjParseRdmaReply() parses, is the bare
+ * status. On success writes the status to @p httpCode and the bytes
+ * the server moved to @p bytesTransferred. Returns hipObjInvalidValue
+ * if an argument is null or the value is malformed. It parses a v3
+ * reply in either build, but a library's own transfers only get v3
+ * replies when it's built with HIPOBJ_RDMA_WIRE_V3.
+ *
+ * @ingroup io
+ */
+HIPOBJ_API hipObjError_t hipObjParseRdmaReplyV3(const char *reply, size_t replyLen, int *httpCode,
+                                                uint64_t *bytesTransferred);
+
+/*!
+ * @brief Extract the client NIC's address from a minted RDMA token
+ *
+ * Reads a token of the wire hipObject is built for, as
+ * hipObjGetRdmaToken() returns. From a v1 token (the default build),
+ * writes a dotted-quad address when the token GID carries an
+ * IPv4-mapped RoCEv2 suffix. From a v3 token (HIPOBJ_RDMA_WIRE_V3),
+ * writes the RC-CM listener's address, the one the server dials on the
+ * client's NIC: a dotted-quad address, or the colon form for an IPv6
+ * listener.
+ * Either way, returns hipObjSuccess with an empty string when no
+ * address is encoded, and hipObjInvalidValue, with an empty string,
+ * when the token is malformed or the address doesn't fit in
+ * @p nicIpLen bytes with its NUL.
  *
  * @ingroup io
  */

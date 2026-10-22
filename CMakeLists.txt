@@ -50,6 +50,18 @@ option(HIPOBJ_DOCS_ONLY
   "Only configure documentation targets (no HIP/ROCm)"
   OFF)
 
+option(HIPOBJ_CPU_RDMA
+  "Build without the ROCm/HIP GPU runtime: RDMA transfers go to/from \
+regular host memory instead of GPU memory, for targets that have \
+RDMA-capable NICs (e.g. Mellanox ConnectX) but no AMD GPU/ROCm install"
+  OFF)
+
+# Declared here (not in test/integration/CMakeLists.txt, where it's
+# consumed) so it can gate add_subdirectory(test/integration/aws-s3-client)
+# directly, independently of BUILD_TESTING -- see that call below.
+option(HIPOBJ_AWS_S3_CLIENT
+  "Build the hipObject-hooked AWS SDK S3 client (test/integration/aws-s3-client)" OFF)
+
 if(HIPOBJ_DOCS_ONLY)
   project(hipobj
     VERSION ${HIPOBJ_LIBRARY_VERSION}
@@ -130,7 +142,9 @@ endif()
 # doesn't. The subproject test passes it on to its parent project.
 set(HIPOBJ_INHERITED_PREFIX_PATH "${CMAKE_PREFIX_PATH}")
 
+if(NOT HIPOBJ_CPU_RDMA)
 include(HIPOBJUseROCmCMake)
+endif()
 include(HIPOBJCoverage)
 include(HIPOBJClangTidy)
 include(HIPOBJIWYU)
@@ -143,12 +157,14 @@ option(BUILD_SHARED_LIBS
 
 include(CTest)
 
+if(NOT HIPOBJ_CPU_RDMA)
 find_package(hip CONFIG REQUIRED)
 message(STATUS "hip found @ ${hip_DIR}")
 
 find_package(hsa-runtime64 CONFIG REQUIRED)
 message(STATUS
   "hsa-runtime64 @ ${hsa-runtime64_DIR}")
+endif()
 
 # The library uses std::mutex and std::this_thread. Where the C library
 # needs it (glibc before 2.34, for example), Threads::Threads adds
@@ -162,6 +178,21 @@ option(HIPOBJ_BNXT
 option(HIPOBJ_IONIC
   "Build IONIC (Pensando) RDMA provider" ON)
 
+# Selects hipobj's RDMA control-plane wire format at compile time: v1
+# (QP/GID/LID exchanged directly, default) or v3 (RC-CM dial-back).
+# hipobj is built for one wire format or the other, not switchable at
+# runtime.
+option(HIPOBJ_RDMA_WIRE_V3
+  "Build hipobj for the v3 (RC-CM) RDMA wire format instead of v1" OFF)
+
+# hipobj-aws-s3-demo sends the v3 headers, so it only works with a v3
+# library
+if(HIPOBJ_AWS_S3_CLIENT AND NOT HIPOBJ_RDMA_WIRE_V3)
+  message(FATAL_ERROR
+    "HIPOBJ_AWS_S3_CLIENT needs HIPOBJ_RDMA_WIRE_V3=ON: the demo speaks "
+    "the v3 headers (x-amz-rc-rdma-token)")
+endif()
+
 add_subdirectory(src)
 
 # Before the tests, which build the installed examples and run the
@@ -174,6 +205,13 @@ option(HIPOBJ_INSTALL_TOOLS
 if(BUILD_TESTING)
   include(HIPOBJUseGTest)
   add_subdirectory(test)
+elseif(HIPOBJ_AWS_S3_CLIENT)
+  # Demo-only path: build hipobj-aws-s3-demo without the full unit-test
+  # suite's GTest fetch. When BUILD_TESTING is ON, this same directory
+  # is instead reached through test/integration/CMakeLists.txt (guarded
+  # there by the same HIPOBJ_AWS_S3_CLIENT option); the two paths are
+  # mutually exclusive, so this is never add_subdirectory()'d twice.
+  add_subdirectory(test/integration/aws-s3-client)
 endif()
 
 if(HIPOBJ_INSTALL_EXAMPLES)
@@ -186,11 +224,20 @@ endif()
 
 option(HIPOBJ_MINIO_CLIENT
   "Build minio-cpp RDMA bridge (integrations/minio-cpp)" OFF)
+# The bridge sends the v1 headers (x-amz-rdma-token), so it only works
+# with a v1 library
+if(HIPOBJ_MINIO_CLIENT AND HIPOBJ_RDMA_WIRE_V3)
+  message(FATAL_ERROR
+    "HIPOBJ_MINIO_CLIENT needs HIPOBJ_RDMA_WIRE_V3=OFF: the bridge speaks "
+    "the v1 headers (x-amz-rdma-token)")
+endif()
 if(HIPOBJ_MINIO_CLIENT)
   add_subdirectory(integrations/minio-cpp)
 endif()
 
+if(NOT HIPOBJ_CPU_RDMA)
 include(HIPOBJInstall)
+endif()
 
 endif() # NOT HIPOBJ_DOCS_ONLY
 

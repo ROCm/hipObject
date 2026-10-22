@@ -24,8 +24,6 @@
 #include <utility>
 #include <vector>
 
-#include <hip/hip_runtime_api.h>
-
 #include "hip-seam.h"
 #include "hipobj-span.h"
 #include "ibv-core.h"

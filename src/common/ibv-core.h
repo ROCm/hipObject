@@ -751,3 +751,43 @@ struct ibv_context {
     pthread_mutex_t mutex;
     void           *abi_compat;
 };
+
+/* -------------------------------------------------------------------------
+ * 30. ibv_event_type enum, ibv_async_event struct
+ * ------------------------------------------------------------------------- */
+
+enum ibv_event_type {
+    IBV_EVENT_CQ_ERR,
+    IBV_EVENT_QP_FATAL,
+    IBV_EVENT_QP_REQ_ERR,
+    IBV_EVENT_QP_ACCESS_ERR,
+    IBV_EVENT_COMM_EST,
+    IBV_EVENT_SQ_DRAINED,
+    IBV_EVENT_PATH_MIG,
+    IBV_EVENT_PATH_MIG_ERR,
+    IBV_EVENT_DEVICE_FATAL,
+    IBV_EVENT_PORT_ACTIVE,
+    IBV_EVENT_PORT_ERR,
+    IBV_EVENT_LID_CHANGE,
+    IBV_EVENT_PKEY_CHANGE,
+    IBV_EVENT_SM_CHANGE,
+    IBV_EVENT_SRQ_ERR,
+    IBV_EVENT_SRQ_LIMIT_REACHED,
+    IBV_EVENT_QP_LAST_WQE_REACHED,
+    IBV_EVENT_CLIENT_REREGISTER,
+    IBV_EVENT_GID_CHANGE,
+    IBV_EVENT_WQ_FATAL,
+};
+
+struct ibv_wq;
+
+struct ibv_async_event {
+    union {
+        ibv_cq  *cq;
+        ibv_qp  *qp;
+        ibv_srq *srq;
+        ibv_wq  *wq;
+        int      port_num;
+    } element;
+    ibv_event_type event_type;
+};
