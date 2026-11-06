@@ -662,7 +662,8 @@ Configuration
    * - ``HIPOBJ_MAX_TRANSFERS``
      - 16
      - Connections in the pool (1 to 1024), so how many transfers
-       run at once
+       run at once. It doesn't apply to a library built with
+       ``HIPOBJ_RDMA_WIRE_V3``.
    * - ``HIPOBJ_STAGE_TIMEOUT_MS``
      - 30000
      - How long a staging copy can take (up to 24 hours)

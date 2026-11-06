@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <optional>
 #include <span>
@@ -159,6 +160,36 @@ TEST_F(S3ControlTest, ReceiveNeedsCallbackAndBuffer)
     EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(ops_, &ctx_, {}));
     ops_.recvReply = nullptr;
     EXPECT_FALSE(hipObj::receiveRdmaReplyRaw(ops_, &ctx_, buf_));
+}
+
+/* receiveRdmaReplyV3() decodes the callback's x-amz-rc-rdma-reply */
+TEST_F(S3ControlTest, ReceiveV3DecodesReply)
+{
+    g_callbacks.reply = "206:0000000000001000";
+    const auto reply  = hipObj::receiveRdmaReplyV3(ops_, &ctx_);
+    ASSERT_TRUE(reply);
+    EXPECT_EQ(reply->httpStatus, 206);
+    EXPECT_EQ(reply->bytesTransferred, uint64_t{0x1000});
+    EXPECT_EQ(g_callbacks.ctx, &ctx_);
+}
+
+/* It rejects a reply it can't decode, a length past its buffer, a failed
+ * callback, and a missing one */
+TEST_F(S3ControlTest, ReceiveV3RejectsWhatItCantUse)
+{
+    g_callbacks.reply = "200";
+    EXPECT_FALSE(hipObj::receiveRdmaReplyV3(ops_, &ctx_));
+
+    g_callbacks.reply    = "200:0000000000000000";
+    g_callbacks.extraLen = buf_.size();
+    EXPECT_FALSE(hipObj::receiveRdmaReplyV3(ops_, &ctx_));
+
+    g_callbacks.extraLen = 0;
+    g_callbacks.recvRet  = 3;
+    EXPECT_FALSE(hipObj::receiveRdmaReplyV3(ops_, &ctx_));
+
+    ops_.recvReply = nullptr;
+    EXPECT_FALSE(hipObj::receiveRdmaReplyV3(ops_, &ctx_));
 }
 
 } // namespace

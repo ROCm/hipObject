@@ -57,7 +57,9 @@ foreach(var IN ITEMS
     BUILD_SHARED_LIBS
     HIPOBJ_CXX_STANDARD
     HIPOBJ_BNXT
-    HIPOBJ_IONIC)
+    HIPOBJ_IONIC
+    HIPOBJ_CPU_RDMA
+    HIPOBJ_RDMA_WIRE_V3)
   string(APPEND HIPOBJ_SUBPROJECT_CACHE_ENTRIES
     "set(${var} \"${${var}}\" CACHE STRING \"\")\n")
 endforeach()

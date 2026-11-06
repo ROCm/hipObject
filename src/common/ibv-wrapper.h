@@ -69,6 +69,11 @@ public:
     [[nodiscard]] virtual int     destroy_qp(ibv_qp *qp) const                                       = 0;
     [[nodiscard]] virtual int     poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const             = 0;
     [[nodiscard]] virtual int     post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const = 0;
+
+    /* The context's async events, which the RC-CM listener (v3) logs */
+    [[nodiscard]] virtual int         get_async_event(ibv_context *context, ibv_async_event *event) const = 0;
+    virtual void                      ack_async_event(ibv_async_event *event) const                       = 0;
+    [[nodiscard]] virtual const char *event_type_str(ibv_event_type event) const                          = 0;
 };
 
 /* libibverbs, through the functions loadLibibverbs() loads from it */
@@ -96,6 +101,9 @@ public:
         int (*destroy_qp)(ibv_qp *);
         int (*poll_cq)(ibv_cq *, int, ibv_wc *);
         int (*post_send)(ibv_qp *, ibv_send_wr *, ibv_send_wr **);
+        int (*get_async_event)(ibv_context *, ibv_async_event *);
+        void (*ack_async_event)(ibv_async_event *);
+        const char *(*event_type_str)(ibv_event_type);
     };
 
     /* Calls funcs, which came from library, and keeps library loaded for
@@ -130,6 +138,10 @@ public:
     [[nodiscard]] int     destroy_qp(ibv_qp *qp) const override;
     [[nodiscard]] int     poll_cq(ibv_cq *cq, int num_entries, ibv_wc *wc) const override;
     [[nodiscard]] int     post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const override;
+
+    int                       get_async_event(ibv_context *context, ibv_async_event *event) const override;
+    void                      ack_async_event(ibv_async_event *event) const override;
+    [[nodiscard]] const char *event_type_str(ibv_event_type event) const override;
 
 private:
     DlHandle library_;

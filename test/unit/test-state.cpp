@@ -20,13 +20,19 @@
 #include <variant>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 
 #include "buffer.h"
 #include "connection-pool.h"
 #include "fake-device.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
+#include "log.h"
+#include "rc-listener.h"
 #include "state.h"
 
 /* Google Test registers each test with a global constructor */
@@ -35,7 +41,9 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 namespace {
 
 using hipObjTest::fake;
+#ifndef HIPOBJ_RDMA_WIRE_V3
 using hipObjTest::makeOps;
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 using std::chrono::milliseconds;
 
 /* An environment, by variable name */
@@ -61,6 +69,8 @@ TEST(ParseOptionsTest, DefaultsWhenNothingIsSet)
     EXPECT_FALSE(options.requireGpuDirect);
     EXPECT_TRUE(options.dmabuf.enabled);
     EXPECT_FALSE(options.dmabuf.debug);
+    EXPECT_EQ(options.rcListenIp, "");
+    EXPECT_EQ(options.rcListenPort, hipObj::kRcListenerDefaultPort);
 }
 
 TEST(ParseOptionsTest, StageTimeout)
@@ -124,6 +134,27 @@ TEST(ParseOptionsTest, RdmaDebug)
     }
 }
 
+TEST(ParseOptionsTest, RcListenIp)
+{
+    EXPECT_EQ(parse({{"HIPOBJ_RC_LISTEN_IP", "192.0.2.7"}}).rcListenIp, "192.0.2.7");
+    EXPECT_EQ(parse({{"HIPOBJ_RC_LISTEN_IP", ""}}).rcListenIp, "");
+}
+
+TEST(ParseOptionsTest, RcListenPort)
+{
+    EXPECT_EQ(parse({{"HIPOBJ_RC_LISTEN_PORT", "23456"}}).rcListenPort, 23456);
+    EXPECT_EQ(parse({{"HIPOBJ_RC_LISTEN_PORT", "1"}}).rcListenPort, 1);
+    EXPECT_EQ(parse({{"HIPOBJ_RC_LISTEN_PORT", "65535"}}).rcListenPort, 65535);
+}
+
+TEST(ParseOptionsTest, InvalidRcListenPortIsIgnored)
+{
+    for (const char *value : {"", "0", "-1", "+1", " 1", "1 ", "not-a-port", "0x10", "65536"}) {
+        EXPECT_EQ(parse({{"HIPOBJ_RC_LISTEN_PORT", value}}).rcListenPort, hipObj::kRcListenerDefaultPort)
+            << "\"" << value << "\"";
+    }
+}
+
 /* Each variable sets only its own option */
 TEST(ParseOptionsTest, AllSet)
 {
@@ -133,6 +164,8 @@ TEST(ParseOptionsTest, AllSet)
         {"HIPOBJ_REQUIRE_GPU_DIRECT", "1"},
         {"HIPOBJ_DMABUF", "0"},
         {"HIPOBJ_RDMA_DEBUG", "1"},
+        {"HIPOBJ_RC_LISTEN_IP", "192.0.2.7"},
+        {"HIPOBJ_RC_LISTEN_PORT", "23456"},
     });
     EXPECT_EQ(options.stageTimeout, milliseconds(250));
     EXPECT_EQ(options.pollTimeout, std::chrono::seconds(5));
@@ -140,6 +173,8 @@ TEST(ParseOptionsTest, AllSet)
     EXPECT_TRUE(options.requireGpuDirect);
     EXPECT_FALSE(options.dmabuf.enabled);
     EXPECT_TRUE(options.dmabuf.debug);
+    EXPECT_EQ(options.rcListenIp, "192.0.2.7");
+    EXPECT_EQ(options.rcListenPort, 23456);
 }
 
 // ---- initWith ----------------------------------------------------
@@ -175,7 +210,10 @@ TEST_F(InitWithTest, InstanceKeepsItsPlatformAndOptions)
         EXPECT_EQ(instance->options.stageTimeout, milliseconds(7));
         EXPECT_EQ(instance->options.pollTimeout, milliseconds(9));
         EXPECT_EQ(instance->options.maxTransfers, 3U);
+#ifndef HIPOBJ_RDMA_WIRE_V3
+        /* Only v1 creates connections for transfers */
         EXPECT_EQ(instance->pool.size(), 3U);
+#endif
         EXPECT_TRUE(instance->options.requireGpuDirect);
         EXPECT_EQ(instance->config.gpuDevice, -1);
         EXPECT_EQ(instance->config.nicHint, "mlx5_0");
@@ -230,6 +268,8 @@ TEST_F(InitWithTest, ShutdownLeavesTheInstanceToItsLastHolder)
     EXPECT_EQ(fake().log.closeDevice, 1);
 }
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
+/* Only v1's initWith() creates a QP, which is what fails here */
 TEST_F(InitWithTest, FailureLeavesNoInstance)
 {
     fake().fail.createQp = true;
@@ -241,6 +281,7 @@ TEST_F(InitWithTest, FailureLeavesNoInstance)
     EXPECT_EQ(fake().log.openDevice, 1);
     EXPECT_EQ(fake().log.closeDevice, 1);
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 TEST_F(InitWithTest, AlreadyInitialized)
 {
@@ -251,6 +292,9 @@ TEST_F(InitWithTest, AlreadyInitialized)
     EXPECT_EQ(fake().log.openDevice, 1);
 }
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
+/* Only a v1 transfer waits for a completion: under v3 the peer does the
+ * RDMA READ or WRITE, and the reply is the only signal */
 TEST_F(InitWithTest, PollTimeoutLimitsTheWaitForACompletion)
 {
     hipObj::Options options;
@@ -267,6 +311,7 @@ TEST_F(InitWithTest, PollTimeoutLimitsTheWaitForACompletion)
     EXPECT_EQ(result.opError, hipObjRdmaError);
     EXPECT_LT(std::chrono::steady_clock::now() - start, hipObj::Options{}.pollTimeout);
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 TEST_F(InitWithTest, StageTimeoutLimitsTheWaitForACopy)
 {
@@ -310,6 +355,20 @@ TEST_F(InitWithTest, RequireGpuDirectRefusesStaging)
     /* Host memory isn't GPU-direct to begin with */
     fake().memoryType = hipMemoryTypeHost;
     EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjSuccess);
+}
+
+/* HIPOBJ_LOG_LEVEL names a level in any case; anything else is INFO */
+TEST(LogLevelTest, ReadsTheLevelFromItsName)
+{
+    using hipObj::LogLevel;
+    EXPECT_EQ(hipObj::logLevelFromEnv(nullptr), LogLevel::Info);
+    EXPECT_EQ(hipObj::logLevelFromEnv("ERROR"), LogLevel::Error);
+    EXPECT_EQ(hipObj::logLevelFromEnv("warn"), LogLevel::Warn);
+    EXPECT_EQ(hipObj::logLevelFromEnv("INFO"), LogLevel::Info);
+    EXPECT_EQ(hipObj::logLevelFromEnv("Debug"), LogLevel::Debug);
+    for (const char *other : {"", "ERR", "ERRORS", "DEBUGGING", "verbose"}) {
+        EXPECT_EQ(hipObj::logLevelFromEnv(other), LogLevel::Info) << other;
+    }
 }
 
 } // namespace

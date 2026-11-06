@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -22,7 +23,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 #include <sys/types.h>
 
 #include "connection-pool.h"
@@ -37,7 +42,9 @@
 #include "ibv-wrapper.h"
 #include "state.h"
 #include "token.h"
+#include "rc-listener.h"
 #include "transport.h"
+#include "v3-wire.h"
 #include "vendor-ops.h"
 
 /* Google Test registers each test with a global constructor */
@@ -51,7 +58,9 @@ using hipObjTest::modifyQpCalls;
 using hipObjTest::peerToken;
 using hipObjTest::resetFake;
 using hipObjTest::setReply;
+#ifndef HIPOBJ_RDMA_WIRE_V3
 using hipObjTest::setReplyWithPeerToken;
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 void *const kDevBuf = hipObjTest::fakeDevBuf();
 
@@ -64,15 +73,18 @@ constexpr int kRtsMask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_
                          IBV_QP_MAX_QP_RD_ATOMIC;
 constexpr int kInitMask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
 
-/* The QPs an instance creates with the default options: one for each
+#ifndef HIPOBJ_RDMA_WIRE_V3
+/* The QPs a v1 instance creates with the default options: one for each
  * transfer, and the one hipObjGetRdmaToken() advertises */
 constexpr int kDefaultQps = 1 + static_cast<int>(hipObj::Options::kDefaultMaxTransfers);
+#endif
 
 /* The default options, with maxTransfers connections for transfers. A
  * test passes this rather than declaring options of its own: CodeQL reads
  * a local in one of the fixtures' member functions as a global, and
  * reports locals with the same name as hiding it
  * (cpp/local-variable-hides-global-variable). */
+#ifndef HIPOBJ_RDMA_WIRE_V3
 hipObj::Options
 withMaxTransfers(size_t maxTransfers)
 {
@@ -80,6 +92,7 @@ withMaxTransfers(size_t maxTransfers)
     result.maxTransfers = maxTransfers;
     return result;
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 /* The states that the modify_qp() calls so far moved QPs to */
 std::vector<ibv_qp_state>
@@ -135,6 +148,9 @@ protected:
         EXPECT_EQ(log.allocPd, log.deallocPd);
         EXPECT_EQ(log.createCq, log.destroyCq);
         EXPECT_EQ(log.createQp, log.destroyQp);
+        /* The RC-CM listener's, in v3 */
+        EXPECT_EQ(log.createEventChannel, log.destroyEventChannel);
+        EXPECT_EQ(log.createId, log.destroyId);
     }
 
     static void expectPeerGid(const ibv_qp_attr &attr)
@@ -573,8 +589,11 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
              &hipObjTest::Faults::allocPd,
              &hipObjTest::Faults::queryPort,
              &hipObjTest::Faults::queryGid,
+#ifndef HIPOBJ_RDMA_WIRE_V3
+             /* Only v1's hipObjInit() creates a CQ and a QP */
              &hipObjTest::Faults::createCq,
              &hipObjTest::Faults::createQp,
+#endif
          }) {
         resetFake();
         fake().fail.*fault          = true;
@@ -585,6 +604,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenSetupFails)
     }
 }
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
 TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenInitTransitionFails)
 {
     fake().fail.modifyQpToState = IBV_QPS_INIT;
@@ -603,6 +623,7 @@ TEST_F(TransportTest, InitFailsAndReleasesEverythingWhenThePoolCantBeCreated)
     EXPECT_EQ(fake().log.createQp, 2);
     expectNothingLeaked();
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 TEST_F(TransportTest, InitFailsForUnknownNic)
 {
@@ -617,7 +638,9 @@ TEST_F(TransportTest, ShutdownReleasesEverything)
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     EXPECT_EQ(hipObjShutdown().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
+#ifndef HIPOBJ_RDMA_WIRE_V3
     EXPECT_EQ(fake().log.createQp, kDefaultQps);
+#endif
     expectNothingLeaked();
 }
 
@@ -649,6 +672,7 @@ failRecvReply(void * /*ctx*/, char * /*reply*/, size_t * /*replyLen*/)
     return 5;
 }
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
 /* What recordSendRequest() was passed: the token's length, and its bytes
  * up to and including the one after it */
 struct SentToken {
@@ -666,6 +690,7 @@ recordSendRequest(void *ctx, const char *token, size_t tokenLen)
     }
     return 0;
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 class TransportTransferTest : public TransportTest, public ::testing::WithParamInterface<TransferFn> {
 protected:
@@ -685,14 +710,17 @@ protected:
         fake().modifyQpCount = 0;
     }
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
     /* initForTransfers() with one connection for transfers, so each one
      * uses it */
     void initForTransfersOnOneConnection() const
     {
         ASSERT_NO_FATAL_FAILURE(initForTransfers(withMaxTransfers(1)));
     }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 };
 
+#ifndef HIPOBJ_RDMA_WIRE_V3
 TEST_P(TransportTransferTest, ConnectsToPeerInReply)
 {
     ASSERT_NO_FATAL_FAILURE(initForTransfers());
@@ -835,6 +863,7 @@ TEST_P(TransportTransferTest, FailsOnErrorCompletion)
     fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 TEST_P(TransportTransferTest, FailsWhenDeviceSyncFails)
 {
@@ -864,6 +893,112 @@ TEST_P(TransportTransferTest, ReportsS3Failures)
     EXPECT_EQ(fake().modifyQpCount, 0U);
 }
 
+#ifdef HIPOBJ_RDMA_WIRE_V3
+/* A transfer succeeds only when the server moved the whole range, since
+ * hipObjGet() and hipObjPut() can't report that fewer bytes moved */
+TEST_P(TransportTransferTest, SucceedsOnlyWhenTheWholeRangeMoved)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfers());
+    for (const uint64_t bytes : {
+             uint64_t{0},
+             uint64_t{kBufSize - 1},
+             uint64_t{kBufSize + 1},
+             std::numeric_limits<uint64_t>::max(),
+         }) {
+        setReply(hipObj::v3::encodeRdmaReplyV3({.httpStatus = 200, .bytesTransferred = bytes}));
+        EXPECT_EQ(transfer().opError, hipObjS3Error) << bytes << " bytes";
+    }
+    setReply(hipObj::v3::encodeRdmaReplyV3({.httpStatus = 200, .bytesTransferred = kBufSize}));
+    EXPECT_EQ(transfer().opError, hipObjSuccess);
+}
+
+/* Records the v3 token a transfer sends, decoded, in the
+ * std::optional<RdmaTokenV3> ctx points to */
+int
+recordV3SendRequest(void *ctx, const char *token, size_t tokenLen)
+{
+    hipObjTest::noteSentToken(token, tokenLen);
+    auto *sent = static_cast<std::optional<hipObj::v3::RdmaTokenV3> *>(ctx);
+    *sent = hipObj::v3::decodeRdmaTokenV3(hipObj::asStringView(hipObj::spanFromPointer(token, tokenLen)));
+    return 0;
+}
+
+/* The listener binds to the chosen NIC's address, and the token
+ * advertises that address and the listener's port */
+TEST_F(TransportTest, TokenAdvertisesTheListener)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    EXPECT_EQ(rdmaCm().boundAddress(), "192.0.2.1");
+    hipObjOps_t ops = makeOps();
+    ops.sendRequest = &recordV3SendRequest;
+    std::optional<hipObj::v3::RdmaTokenV3> sent;
+    ASSERT_EQ(hipObjGet(nullptr, kDevBuf, kBufSize, 0, &ops, &sent).opError, hipObjSuccess);
+    ASSERT_TRUE(sent);
+    EXPECT_EQ(sent->listenIp, "192.0.2.1");
+    EXPECT_EQ(sent->listenPort, hipObj::kRcListenerDefaultPort);
+    EXPECT_EQ(sent->length, kBufSize);
+    EXPECT_EQ(fake().log.listen, 1);
+}
+
+/* HIPOBJ_RC_LISTEN_IP names the address to listen on and advertise, and
+ * the NIC is the one its bind resolves to, whatever the hint names.
+ * HIPOBJ_RC_LISTEN_PORT names the port. */
+TEST_F(TransportTest, ListenIpPicksTheNic)
+{
+    hipObj::Options options;
+    options.rcListenIp    = "192.0.2.1";
+    options.rcListenPort  = 23456;
+    hipObjConfig_t config = makeConfig();
+    config.nicHint        = "mlx5_9";
+    ASSERT_EQ(initFakes(config, options).opError, hipObjSuccess);
+    ASSERT_EQ(hipObjBufRegister(kDevBuf, kBufSize).opError, hipObjSuccess);
+    EXPECT_EQ(rdmaCm().boundPort(), "23456");
+
+    hipObjOps_t ops = makeOps();
+    ops.sendRequest = &recordV3SendRequest;
+    std::optional<hipObj::v3::RdmaTokenV3> sent;
+    ASSERT_EQ(hipObjGet(nullptr, kDevBuf, kBufSize, 0, &ops, &sent).opError, hipObjSuccess);
+    ASSERT_TRUE(sent);
+    EXPECT_EQ(sent->listenIp, "192.0.2.1");
+    EXPECT_EQ(sent->listenPort, 23456);
+}
+
+/* The server dials the listener, so without one no transfer could work:
+ * hipObjInit() fails, and releases what it acquired, when the NIC has no
+ * IPv4 address to bind to, the listener doesn't start, its bind resolves
+ * to another NIC, or HIPOBJ_RC_LISTEN_IP is no NIC's address */
+TEST_F(TransportTest, InitFailsWhenTheListenerCannotStart)
+{
+    const hipObjConfig_t config = makeConfig();
+
+    fake().gid = {};
+    EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.createEventChannel, 0);
+
+    fake().gid           = hipObjTest::kFakeNicGid;
+    fake().fail.bindAddr = true;
+    EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.bindAddr, 1);
+
+    fake().fail.bindAddr  = false;
+    fake().listenerDevice = "mlx5_1";
+    EXPECT_EQ(initFakes(config).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.listen, 1);
+
+    /* Before any device is opened */
+    fake().listenerDevice = "mlx5_0";
+    hipObj::Options options;
+    options.rcListenIp = "192.0.2.99";
+    EXPECT_EQ(initFakes(config, options).opError, hipObjRdmaError);
+    EXPECT_EQ(fake().log.openDevice, 3);
+
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+    expectNothingLeaked();
+}
+#endif /* HIPOBJ_RDMA_WIRE_V3 */
+
+#ifndef HIPOBJ_RDMA_WIRE_V3
+/* Only v1 creates connections of its own */
 TEST_F(TransportTest, InitCreatesAConnectionForEachTransferAndOneForTokens)
 {
     ASSERT_EQ(initFakes(makeConfig(), withMaxTransfers(3)).opError, hipObjSuccess);
@@ -922,6 +1057,7 @@ TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
         EXPECT_EQ(token->length, kSize);
     }
 }
+#endif /* !HIPOBJ_RDMA_WIRE_V3 */
 
 INSTANTIATE_TEST_SUITE_P(Transport, TransportTransferTest, ::testing::Values(&callGet, &callPut),
                          [](const ::testing::TestParamInfo<TransferFn> &paramInfo) {

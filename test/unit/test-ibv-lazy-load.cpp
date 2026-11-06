@@ -25,6 +25,14 @@ HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
 
 namespace {
 
+#ifdef HIPOBJ_RDMA_WIRE_V3
+/* A v3 build links librdmacm, which links libibverbs, so the dynamic loader
+ * loads libibverbs when the program starts */
+TEST(IbvLazyLoad, LibibverbsLoadsOnFirstUse)
+{
+    GTEST_SKIP() << "a v3 build links librdmacm, which loads libibverbs when the program starts";
+}
+#else
 bool
 libibverbsIsLoaded()
 {
@@ -51,6 +59,7 @@ TEST(IbvLazyLoad, LibibverbsLoadsOnFirstUse)
     /* Built once */
     EXPECT_EQ(hipObj::systemPlatform(), platform);
 }
+#endif /* HIPOBJ_RDMA_WIRE_V3 */
 
 } // namespace
 
