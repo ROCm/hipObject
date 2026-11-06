@@ -24,7 +24,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 #include <sys/types.h>
 
 #include "fake-device.h"
@@ -34,6 +38,7 @@
 #include "hipobj.h"
 #include "state.h"
 #include "token.h"
+#include "v3-wire.h"
 
 /* Google Test registers each test with a global constructor */
 HIPOBJ_WARN_NO_GLOBAL_CTOR_OFF
@@ -698,7 +703,16 @@ TEST_F(ApiArgsTest, GetTokenAcceptsWholeBuffer)
         char *token = nullptr;
         ASSERT_EQ(hipObjGetRdmaToken(kDevBuf, kBufSize, op, &token).opError, hipObjSuccess);
         ASSERT_NE(token, nullptr);
+        // v1's fixed-width hex token (qpNum+gid+rkey+remoteAddr+length+
+        // portNum+lid) is 88 hex chars; v3's RdmaTokenV3 (v3-wire.h) is
+        // 80 (ip+port+rkey+remoteAddr+length, ':'-delimited). Whichever
+        // HIPOBJ_RDMA_WIRE_V3 selects is what hipObjGetRdmaToken() built.
+#ifndef HIPOBJ_RDMA_WIRE_V3
         EXPECT_EQ(hipObj::cStringView(token, hipObj::kRdmaTokenHexLen + 1).size(), hipObj::kRdmaTokenHexLen);
+#else
+        EXPECT_EQ(hipObj::cStringView(token, hipObj::v3::kRdmaTokenV3HexLen + 1).size(),
+                  hipObj::v3::kRdmaTokenV3HexLen);
+#endif
         EXPECT_EQ(hipObjPutRdmaToken(token).opError, hipObjSuccess);
     }
 }
@@ -821,6 +835,10 @@ TEST(ApiArgsParseReply, RejectsMalformedReplies)
 
 // ---- hipObjTokenClientNic ----------------------------------------
 
+/* hipObjTokenClientNic() reads the token hipObjGetRdmaToken() returns, so
+ * a token of the wire hipObject is built for */
+#ifndef HIPOBJ_RDMA_WIRE_V3
+/* A v1 token whose GID carries 192.168.100.200 */
 std::string
 tokenWithIpv4()
 {
@@ -834,6 +852,51 @@ tokenWithIpv4()
     token.gid[15]   = 200;
     return hipObj::encodeRdmaToken(token);
 }
+
+/* A v1 token whose GID carries no IPv4 address */
+std::string
+tokenWithoutIpv4()
+{
+    return validTokenHex();
+}
+#else
+/* A v3 token for a listener at listenIp */
+std::string
+v3TokenFor(const std::string &listenIp)
+{
+    const hipObj::v3::RdmaTokenV3 token = {
+        .listenIp   = listenIp,
+        .listenPort = 18181,
+        .rkey       = 0x1234,
+        .remoteAddr = 0x10000,
+        .length     = 64,
+    };
+    return std::string(hipObj::v3::encodeRdmaTokenV3Hex(token).data());
+}
+
+/* A v3 token for a listener at 192.168.100.200 */
+std::string
+tokenWithIpv4()
+{
+    return v3TokenFor("192.168.100.200");
+}
+
+/* A v3 token with no listener address */
+std::string
+tokenWithoutIpv4()
+{
+    return v3TokenFor("");
+}
+
+/* A v1 token, which a v3 build rejects */
+std::string
+v1Token()
+{
+    hipObj::RdmaToken token;
+    token.transport = hipObj::TransportType::RC;
+    return hipObj::encodeRdmaToken(token);
+}
+#endif
 
 TEST(ApiArgsTokenClientNic, RejectsNullAndEmptyArguments)
 {
@@ -852,10 +915,16 @@ TEST(ApiArgsTokenClientNic, RejectsMalformedTokens)
         token.substr(1),
         token + "0",
         token + ":1:2",
-        std::string(88, 'g'),
+        std::string(token.size(), 'g'),
         "zz" + token.substr(2),
+#ifndef HIPOBJ_RDMA_WIRE_V3
         /* Unknown transport byte */
         "02" + token.substr(2),
+#else
+        /* The address field's delimiter isn't one */
+        token.substr(0, 32) + "0" + token.substr(33),
+        v1Token(),
+#endif
     });
     for (const std::string &bad : cases) {
         std::array<char, 32> nicIp = {{"unchanged"}};
@@ -881,7 +950,7 @@ TEST(ApiArgsTokenClientNic, RespectsBufferLength)
 
 TEST(ApiArgsTokenClientNic, EmptyWhenNoIpv4Address)
 {
-    const std::string    token = validTokenHex();
+    const std::string    token = tokenWithoutIpv4();
     std::array<char, 16> nicIp = {{"unchanged"}};
     EXPECT_EQ(hipObjTokenClientNic(token.c_str(), nicIp.data(), nicIp.size()).opError, hipObjSuccess);
     EXPECT_STREQ(nicIp.data(), "");

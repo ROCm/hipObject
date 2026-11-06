@@ -96,7 +96,10 @@ namespace {
                dlsym_load(funcs.destroy_cq, handle, "ibv_destroy_cq") &&
                dlsym_load(funcs.create_qp, handle, "ibv_create_qp") &&
                dlsym_load(funcs.modify_qp, handle, "ibv_modify_qp") &&
-               dlsym_load(funcs.destroy_qp, handle, "ibv_destroy_qp");
+               dlsym_load(funcs.destroy_qp, handle, "ibv_destroy_qp") &&
+               dlsym_load(funcs.get_async_event, handle, "ibv_get_async_event") &&
+               dlsym_load(funcs.ack_async_event, handle, "ibv_ack_async_event") &&
+               dlsym_load(funcs.event_type_str, handle, "ibv_event_type_str");
     }
 
 } // anonymous namespace
@@ -266,6 +269,24 @@ LoadedVerbs::post_send(ibv_qp *qp, ibv_send_wr *wr, ibv_send_wr **bad_wr) const
         return funcs_.post_send(qp, wr, bad_wr);
     }
     return qp->context->ops.post_send(qp, wr, bad_wr);
+}
+
+int
+LoadedVerbs::get_async_event(ibv_context *context, ibv_async_event *event) const
+{
+    return funcs_.get_async_event(context, event);
+}
+
+void
+LoadedVerbs::ack_async_event(ibv_async_event *event) const
+{
+    funcs_.ack_async_event(event);
+}
+
+const char *
+LoadedVerbs::event_type_str(ibv_event_type event) const
+{
+    return funcs_.event_type_str(event);
 }
 
 // ---- Smart pointer deleters (ibv-ptr.h) -----------------------------

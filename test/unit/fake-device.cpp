@@ -8,17 +8,30 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <new>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
+
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/eventfd.h>
+#include <sys/socket.h>
 
 #include "hipobj-address.h"
 #include "hipobj-span.h"
 #include "hipobj.h"
+#include "ibv-core.h"
+#include "rdmacm-core.h"
 #include "state.h"
+#include "unique-fd.h"
+#include "v3-wire.h"
 
 namespace hipObjTest {
 
@@ -46,6 +59,30 @@ setReply(std::string_view reply)
     std::ranges::copy(reply, f.reply.begin());
     f.reply[reply.size()] = '\0';
     f.replyLen            = reply.size() + 1;
+    f.replyWithSuccess    = false;
+}
+
+void
+noteSentToken([[maybe_unused]] const char *token, [[maybe_unused]] size_t tokenLen)
+{
+#ifdef HIPOBJ_RDMA_WIRE_V3
+    const auto decoded =
+        token != nullptr
+            ? hipObj::v3::decodeRdmaTokenV3(hipObj::asStringView(hipObj::spanFromPointer(token, tokenLen)))
+            : std::nullopt;
+    fake().lastTokenLength = decoded ? decoded->length : 0;
+#endif
+}
+
+std::string
+successReply()
+{
+#ifndef HIPOBJ_RDMA_WIRE_V3
+    return std::string("200");
+#else
+    return hipObj::v3::encodeRdmaReplyV3(
+        {.httpStatus = 200, .bytesTransferred = fake().lastTokenLength.load()});
+#endif
 }
 
 hipObj::RdmaToken
@@ -146,9 +183,9 @@ FakeVerbs::close_device(ibv_context * /*context*/) const
 }
 
 const char *
-FakeVerbs::get_device_name(ibv_device * /*device*/) const
+FakeVerbs::get_device_name(ibv_device *device) const
 {
-    return "mlx5_0";
+    return device == fakeListenerDevice() ? device_->listenerDevice : "mlx5_0";
 }
 
 int
@@ -184,6 +221,7 @@ FakeVerbs::query_gid(ibv_context * /*context*/, uint8_t /*port_num*/, int /*inde
     }
     if (gid != nullptr) {
         hipObj::zeroObject(*gid);
+        std::ranges::copy(device_->gid, std::span(gid->raw).begin());
     }
     return 0;
 }
@@ -327,6 +365,327 @@ FakeVerbs::post_send(ibv_qp * /*qp*/, ibv_send_wr * /*wr*/, ibv_send_wr ** /*bad
 {
     ++device_->log.postSend;
     return 0;
+}
+
+int
+FakeVerbs::get_async_event(ibv_context *context, ibv_async_event *event) const
+{
+    /* Blocks no longer than the real one's caller lets it: the listener
+     * only asks after epoll reports the fd readable */
+    eventfd_t count = 0;
+    if (eventfd_read(context->async_fd, &count) != 0) {
+        return -1;
+    }
+    hipObj::zeroObject(*event);
+    event->event_type = device_->asyncEventType;
+    return 0;
+}
+
+void
+FakeVerbs::ack_async_event(ibv_async_event * /*event*/) const
+{
+    ++device_->log.ackAsyncEvent;
+}
+
+const char *
+FakeVerbs::event_type_str(ibv_event_type /*event*/) const
+{
+    return "fake async event";
+}
+
+// ---- librdmacm -----------------------------------------------------
+
+/* What FakeRdmaCm keeps. Each channel's fd counts the events queued on it
+ * (EFD_SEMAPHORE, so each read takes one), and is nonblocking, so a get
+ * with nothing queued fails rather than waits. */
+struct FakeRdmaCm::State {
+    struct Channel {
+        rdma_event_channel                                      channel{};
+        hipObj::UniqueFd                                        fd{};
+        std::deque<std::pair<rdma_cm_id *, rdma_cm_event_type>> events{};
+    };
+
+    State() : asyncFd(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE))
+    {
+        context.device        = fakeListenerDevice();
+        context.async_fd      = asyncFd.get();
+        otherContext.device   = fakeListenerDevice();
+        otherContext.async_fd = -1;
+    }
+    ~State() = default;
+
+    State(const State &)            = delete;
+    State &operator=(const State &) = delete;
+    State(State &&)                 = delete;
+    State &operator=(State &&)      = delete;
+
+    /* The channel whose rdma_event_channel is channel, or null */
+    Channel *find(const rdma_event_channel *ch)
+    {
+        const auto it =
+            std::ranges::find_if(channels, [ch](const auto &c) noexcept { return &c->channel == ch; });
+        return it == channels.end() ? nullptr : it->get();
+    }
+
+    /* Queues an event for id on its channel */
+    void queue(rdma_cm_id *id, rdma_cm_event_type type)
+    {
+        Channel *channel = find(id->channel);
+        ASSERT_NE(channel, nullptr);
+        channel->events.emplace_back(id, type);
+        ASSERT_EQ(eventfd_write(channel->fd.get(), 1), 0);
+    }
+
+    std::mutex                                  mutex{};
+    ibv_context                                 context{};
+    ibv_context                                 otherContext{};
+    hipObj::UniqueFd                            asyncFd;
+    std::vector<std::unique_ptr<Channel>>       channels{};
+    std::vector<std::unique_ptr<rdma_cm_id>>    ids{};
+    std::vector<std::unique_ptr<rdma_cm_event>> events{};
+    rdma_cm_id                                 *listening = nullptr;
+    std::string                                 boundAddress{};
+    std::string                                 boundPort{};
+};
+
+FakeRdmaCm::FakeRdmaCm(FakeDevice &device, const hipObj::Verbs &verbs)
+    : device_(&device), verbs_(&verbs), state_(std::make_unique<State>())
+{
+}
+
+FakeRdmaCm::~FakeRdmaCm() = default;
+
+rdma_event_channel *
+FakeRdmaCm::create_event_channel() const
+{
+    if (device_->fail.createEventChannel) {
+        errno = ENODEV;
+        return nullptr;
+    }
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    auto                               channel = std::make_unique<State::Channel>();
+    channel->fd            = hipObj::UniqueFd(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK | EFD_SEMAPHORE));
+    channel->channel.fd    = channel->fd.get();
+    rdma_event_channel *ch = &channel->channel;
+    state_->channels.push_back(std::move(channel));
+    ++device_->log.createEventChannel;
+    return ch;
+}
+
+void
+FakeRdmaCm::destroy_event_channel(rdma_event_channel *channel) const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    std::erase_if(state_->channels, [channel](const auto &c) noexcept { return &c->channel == channel; });
+    ++device_->log.destroyEventChannel;
+}
+
+int
+FakeRdmaCm::create_id(rdma_event_channel *channel, rdma_cm_id **id, void *context,
+                      rdma_port_space /*ps*/) const
+{
+    if (device_->fail.createId) {
+        errno = ENOMEM;
+        return -1;
+    }
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    auto                               created = std::make_unique<rdma_cm_id>();
+    created->channel                           = channel;
+    created->context                           = context;
+    *id                                        = created.get();
+    state_->ids.push_back(std::move(created));
+    ++device_->log.createId;
+    return 0;
+}
+
+int
+FakeRdmaCm::destroy_id(rdma_cm_id *id) const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    if (state_->listening == id) {
+        state_->listening = nullptr;
+    }
+    std::erase_if(state_->ids, [id](const auto &i) noexcept { return i.get() == id; });
+    ++device_->log.destroyId;
+    return 0;
+}
+
+int
+FakeRdmaCm::bind_addr(rdma_cm_id *id, sockaddr *addr) const
+{
+    ++device_->log.bindAddr;
+    if (device_->fail.bindAddr) {
+        errno = EADDRINUSE;
+        return -1;
+    }
+    const socklen_t length = addr->sa_family == AF_INET6 ? sizeof(sockaddr_in6) : sizeof(sockaddr_in);
+    std::array<char, NI_MAXHOST> host{};
+    std::array<char, NI_MAXSERV> port{};
+    if (getnameinfo(addr, length, host.data(), host.size(), port.data(), port.size(),
+                    NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    state_->boundAddress = hipObj::cStringView(host.data(), host.size());
+    state_->boundPort    = hipObj::cStringView(port.data(), port.size());
+    if (state_->boundAddress != device_->listenerAddress) {
+        errno = EADDRNOTAVAIL;
+        return -1;
+    }
+    id->verbs = device_->fail.bindResolvesNoDevice ? nullptr : &state_->context;
+    return 0;
+}
+
+int
+FakeRdmaCm::listen(rdma_cm_id *id, int /*backlog*/) const
+{
+    ++device_->log.listen;
+    if (device_->fail.listen) {
+        errno = EADDRINUSE;
+        return -1;
+    }
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    state_->listening = id;
+    return 0;
+}
+
+int
+FakeRdmaCm::get_cm_event(rdma_event_channel *channel, rdma_cm_event **event) const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    State::Channel                    *ch    = state_->find(channel);
+    eventfd_t                          count = 0;
+    if (ch == nullptr || ch->events.empty() || eventfd_read(ch->fd.get(), &count) != 0) {
+        errno = EAGAIN;
+        return -1;
+    }
+    auto created       = std::make_unique<rdma_cm_event>();
+    created->id        = ch->events.front().first;
+    created->listen_id = state_->listening;
+    created->event     = ch->events.front().second;
+    ch->events.pop_front();
+    *event = created.get();
+    state_->events.push_back(std::move(created));
+    return 0;
+}
+
+int
+FakeRdmaCm::ack_cm_event(rdma_cm_event *event) const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    std::erase_if(state_->events, [event](const auto &e) noexcept { return e.get() == event; });
+    ++device_->log.ackCmEvent;
+    return 0;
+}
+
+int
+FakeRdmaCm::create_qp(rdma_cm_id *id, ibv_pd *pd, ibv_qp_init_attr *qp_init_attr) const
+{
+    if (device_->fail.cmCreateQp) {
+        errno = ENOMEM;
+        return -1;
+    }
+    ibv_qp *qp = verbs_->create_qp(pd, qp_init_attr);
+    if (qp == nullptr) {
+        errno = ENOMEM;
+        return -1;
+    }
+    qp->context = id->verbs;
+    qp->pd      = pd;
+    qp->send_cq = qp_init_attr->send_cq;
+    qp->recv_cq = qp_init_attr->recv_cq;
+    id->qp      = qp;
+    return 0;
+}
+
+void
+FakeRdmaCm::destroy_qp(rdma_cm_id *id) const
+{
+    (void)verbs_->destroy_qp(id->qp);
+    id->qp = nullptr;
+}
+
+int
+FakeRdmaCm::accept(rdma_cm_id * /*id*/, rdma_conn_param * /*conn_param*/) const
+{
+    ++device_->log.accept;
+    if (device_->fail.accept) {
+        errno = ECONNREFUSED;
+        return -1;
+    }
+    return 0;
+}
+
+int
+FakeRdmaCm::reject(rdma_cm_id * /*id*/, const void * /*private_data*/, uint8_t /*private_data_len*/) const
+{
+    ++device_->log.reject;
+    return 0;
+}
+
+int
+FakeRdmaCm::disconnect(rdma_cm_id * /*id*/) const
+{
+    ++device_->log.disconnect;
+    return 0;
+}
+
+const char *
+FakeRdmaCm::event_str(rdma_cm_event_type /*event*/) const
+{
+    return "fake CM event";
+}
+
+rdma_cm_id *
+FakeRdmaCm::connectRequest(bool otherContext) const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    if (state_->listening == nullptr) {
+        ADD_FAILURE() << "connectRequest() without a listening id";
+        return nullptr;
+    }
+    auto created     = std::make_unique<rdma_cm_id>();
+    created->channel = state_->listening->channel;
+    created->verbs   = otherContext ? &state_->otherContext : &state_->context;
+    rdma_cm_id *id   = created.get();
+    state_->ids.push_back(std::move(created));
+    ++device_->log.createId;
+    state_->queue(id, RDMA_CM_EVENT_CONNECT_REQUEST);
+    return id;
+}
+
+void
+FakeRdmaCm::queueEvent(rdma_cm_id *id, rdma_cm_event_type type) const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    state_->queue(id, type);
+}
+
+void
+FakeRdmaCm::raiseAsyncEvent() const
+{
+    ASSERT_EQ(eventfd_write(state_->asyncFd.get(), 1), 0);
+}
+
+std::string
+FakeRdmaCm::boundAddress() const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    return state_->boundAddress;
+}
+
+std::string
+FakeRdmaCm::boundPort() const
+{
+    const std::scoped_lock<std::mutex> lock(state_->mutex);
+    return state_->boundPort;
+}
+
+ibv_context *
+FakeRdmaCm::context() const
+{
+    return &state_->context;
 }
 
 // ---- HIP -------------------------------------------------------------
@@ -496,9 +855,10 @@ FakeHip::closeDmabuf(int fd) const
 // ---- S3 callbacks ----------------------------------------------------
 
 int
-fakeSendRequest(void * /*ctx*/, const char * /*token*/, size_t /*tokenLen*/)
+fakeSendRequest(void * /*ctx*/, const char *token, size_t tokenLen)
 {
     ++fake().log.sendRequest;
+    noteSentToken(token, tokenLen);
     return 0;
 }
 
@@ -507,6 +867,18 @@ fakeRecvReply(void * /*ctx*/, char *reply, size_t *replyLen)
 {
     FakeDevice &f = fake();
     ++f.log.recvReply;
+    if (f.replyWithSuccess) {
+        /* With its NUL, as setReply() stores a reply */
+        const std::string success = successReply();
+        if (replyLen == nullptr || *replyLen < success.size() + 1) {
+            return -1;
+        }
+        const std::span<char> out = hipObj::spanFromPointer(reply, *replyLen);
+        std::ranges::copy(success, out.begin());
+        out[success.size()] = '\0';
+        *replyLen           = success.size() + 1;
+        return 0;
+    }
     if (replyLen == nullptr || *replyLen < f.replyLen) {
         return -1;
     }
@@ -552,6 +924,15 @@ void
 FakeDeviceTest::SetUp()
 {
     resetFake();
+#ifdef HIPOBJ_RDMA_WIRE_V3
+    /* FakeDevice's default reply, "200", is a v1 reply. hipObject is built
+     * for one wire format (see useV1Wire() in state.h), so under v3 the
+     * success reply is the encoder's own, which can't drift from the format,
+     * and reports the transfer's length (see successReply()). */
+    fake().replyWithSuccess = true;
+    /* v3's listener binds to the NIC's address */
+    fake().gid = kFakeNicGid;
+#endif
 }
 
 void
