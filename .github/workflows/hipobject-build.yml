@@ -170,9 +170,17 @@ jobs:
             packages: clang-18
     # A plain Ubuntu image, with only the ROCm that hipObject needs
     # installed (see Install ROCm below)
+    #
+    # ThreadSanitizer can't run when the host randomizes addresses with
+    # more than 28 bits, as the Ubuntu 26.04 runners do. It then
+    # restarts the program with randomization off, but Docker's default
+    # seccomp profile blocks the call that does that. So the TSan job's
+    # container runs without a seccomp profile.
     container:
       image: ubuntu:${{ matrix.ubuntu }}
-      options: --user root
+      options: >-
+        --user root
+        ${{ matrix.sanitizer == 'tsan' && '--security-opt seccomp=unconfined' || '' }}
     env:
       # Packages such as tzdata ask questions when they're installed into a
       # plain image; this takes their defaults instead.
