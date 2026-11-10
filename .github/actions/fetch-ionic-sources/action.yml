@@ -14,6 +14,13 @@ inputs:
     description: Directory to fetch into
     required: false
     default: /tmp/ionic-src
+  guest_patches_dir:
+    description: >-
+      Where the guest role stages the patch series in each guest
+      (ernic_guest_ionic_dir, plus /patches). The patches are applied from
+      the same path here, because the fetch script's sentinel names it.
+    required: false
+    default: /tmp/ionic/patches
 
 outputs:
   ref:
@@ -22,6 +29,11 @@ outputs:
   source_dir:
     description: Directory holding the patched sources
     value: ${{ inputs.dest }}
+  sentinel:
+    description: >-
+      Name of the file the fetch script leaves in source_dir, which the guest
+      role looks for before fetching again
+    value: ${{ steps.sentinel.outputs.sentinel }}
 
 runs:
   using: composite
@@ -43,12 +55,13 @@ runs:
       echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
   # Keyed on everything that decides the tree: the ref, the patches applied
-  # on top of it and the script that applies them.
+  # on top of it, the script that applies them, and the path they are applied
+  # from, which the sentinel's name depends on.
   - id: cache
     uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
     with:
       path: ${{ inputs.dest }}
-      key: ionic-src-${{ steps.ref.outputs.ref }}-${{ hashFiles(format('{0}/patches/*.patch', inputs.rocm_ernic), format('{0}/scripts/fetch-ionic-sources.sh', inputs.rocm_ernic)) }}
+      key: ionic-src-${{ steps.ref.outputs.ref }}-${{ hashFiles(format('{0}/ansible/files/patches/*.patch', inputs.rocm_ernic), format('{0}/ansible/files/scripts/fetch-ionic-sources.sh', inputs.rocm_ernic)) }}-${{ inputs.guest_patches_dir }}
 
   - if: steps.cache.outputs.cache-hit != 'true'
     shell: bash
@@ -56,14 +69,36 @@ runs:
       ROCM_ERNIC: ${{ inputs.rocm_ernic }}
       DEST: ${{ inputs.dest }}
       REF: ${{ steps.ref.outputs.ref }}
+      PATCHES: ${{ inputs.guest_patches_dir }}
     run: |
       set -euo pipefail
-      # The guests' own fetch runs this script too, with the same patches
-      # (stage_sources.yml copies rocm-ernic's patches/), so the tree is the
-      # one they would have built.
-      bash "${ROCM_ERNIC}/scripts/fetch-ionic-sources.sh" \
-        --source-dir "$DEST" --kernel-ref "$REF"
+      # The guests' own fetch runs this script too, on the patches
+      # stage_sources.yml copies from the collection's files/patches. The
+      # script names its sentinel after a digest of the patch directory's
+      # path as well as the patches, so apply the same copy from the same
+      # path, or each guest fetches again.
+      rm -rf "$PATCHES"
+      mkdir -p "$PATCHES"
+      cp -R "${ROCM_ERNIC}/ansible/files/patches/." "$PATCHES/"
+      bash "${ROCM_ERNIC}/ansible/files/scripts/fetch-ionic-sources.sh" \
+        --source-dir "$DEST" --kernel-ref "$REF" --patches-dir "$PATCHES"
       # setup-ionic-dkms.sh reads only the two driver directories, so the
       # sparse clone's history need not be cached or copied into a guest.
       rm -rf "${DEST}/.git"
       ls -la "$DEST"
+
+  - id: sentinel
+    shell: bash
+    env:
+      DEST: ${{ inputs.dest }}
+      REF: ${{ steps.ref.outputs.ref }}
+    run: |
+      set -euo pipefail
+      shopt -s nullglob
+      found=("${DEST}/.patches-applied-${REF}-"*)
+      if [ "${#found[@]}" -ne 1 ]; then
+        echo "✗ expected one .patches-applied-${REF}-* in ${DEST}"
+        ls -la "$DEST"
+        exit 1
+      fi
+      echo "sentinel=${found[0]##*/}" >> "$GITHUB_OUTPUT"

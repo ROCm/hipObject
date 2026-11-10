@@ -93,12 +93,9 @@ permissions:
   contents: read
 
 env:
-  # Bump these intentionally when the ernic or rocjitsu images are updated.
-  # ERNIC_IMAGE: ernic.0b48aa1, the build whose rocm-ernic carries the s3
-  #   backend. Every tag here is the date-prefixed, content-versioned one
-  #   (<date>.<repo-sha>-<component>.<sha>-vfu.<sha>): immutable, so a rebuild
-  #   cannot change what this lane tests underneath it.
-  ERNIC_IMAGE: sbates130272/batesste-ci-images-ubuntu-rocm-ernic:20260922.g555f601-ernic.0b48aa1-vfu.8039244
+  # Bump this intentionally when the rocjitsu image is updated. The tag is the
+  # date-prefixed, content-versioned one (<date>.<repo-sha>-rocjitsu.<sha>):
+  # immutable, so a rebuild cannot change what this lane tests underneath it.
   # ROCJITSU_IMAGE_GPU: the tag qemu-minimal's ernic-rocjitsu lane runs.
   #   ip_discovery.bin must come from whichever rocjitsu build serves the
   #   socket, and this lane generates it from this image, so the two cannot
@@ -157,11 +154,16 @@ jobs:
       VM2_SSH_PORT: 2223
       # ernic_guest_setup derives guest addresses as <subnet>.<10 * index>.
       VM1_ADDR: 192.168.200.10
+      VM2_ADDR: 192.168.200.20
       SERVER_PORT: 9000
       TEST_SIZE: 1048576
       # Where the guest role looks for the ionic driver sources. Passed to it
       # explicitly, so the copies staged there cannot drift from its default.
       IONIC_GUEST_DIR: /var/tmp/ionic-src
+      # Where the guest role stages the ionic patches and helper scripts.
+      # The runner applies the patches from the same path (see
+      # fetch-ionic-sources), so the guests can reuse its tree.
+      IONIC_STAGE_DIR: /tmp/ionic
 
     # The two-vm-gpu-direct-gpu-buffer job runs these same steps
     steps: &steps
@@ -170,13 +172,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout rocm-ernic (Ansible collection + guest driver sources)
+      - name: Checkout rocm-ernic (server, Ansible collection, guest driver sources)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/rocm-ernic
-          # Pinned to the last develop commit known to work here; later commits
-          # break these lanes. Bump intentionally, like the images.
-          ref: f7e3ecb18fca02fe9d1e6685952ee10d4a78efe3
+          # A develop commit, bumped on purpose. The server is built from this
+          # checkout too, because the Ansible roles and udev rules only accept
+          # the PCI IDs the server from the same commit presents.
+          ref: 504b5ace99a751b69662f843f5bb4ac6208a0049
           path: rocm-ernic
           persist-credentials: false
 
@@ -252,8 +255,10 @@ jobs:
           # deps" joins it before anything uses what it installs.
           bash ci/ernic/background-task.sh start deps << 'EOF'
           apt-get update -qq
-          apt-get install -y -qq iproute2 sudo libibverbs1 libnl-3-200 \
-            libnl-route-3-200 ansible python3-jmespath
+          # The last line is what building rocm-ernic needs.
+          apt-get install -y -qq iproute2 sudo libnl-3-200 \
+            libnl-route-3-200 ansible python3-jmespath \
+            build-essential cmake ninja-build pkg-config libglib2.0-dev libibverbs-dev
           if [ "$COLLECTIONS_CACHED" != true ]; then
             # Galaxy drops connections often enough to fail a lane on its own.
             for attempt in 1 2 3; do
@@ -271,19 +276,20 @@ jobs:
           fi
           EOF
 
-      - name: Start pulling the ernic and rocjitsu images
+      - name: Start pulling the rocjitsu image
         run: |
           # In the background, alongside the guest image fetch, so the steps
-          # that run them don't wait for the pull. "Wait for the images"
-          # joins it before the first of them.
+          # that run it don't wait for the pull. "Wait for the rocjitsu
+          # image" joins it before the first of them.
           bash ci/ernic/background-task.sh start images << 'EOF'
-          docker pull "$ERNIC_IMAGE"
           docker pull "$ROCJITSU_IMAGE_GPU"
           EOF
 
       - name: Fetch the ionic driver sources
         id: ionic_sources
         uses: $/.github/actions/fetch-ionic-sources
+        with:
+          guest_patches_dir: ${{ env.IONIC_STAGE_DIR }}/patches
 
       - name: Fetch guest VM image
         id: guest_image
@@ -295,16 +301,17 @@ jobs:
       - name: Wait for deps
         run: bash ci/ernic/background-task.sh wait deps
 
-      - name: Wait for the images
+      - name: Wait for the rocjitsu image
         run: bash ci/ernic/background-task.sh wait images
 
-      - name: Extract rocm-ernic binary from ernic image
+      - name: Build rocm-ernic
         run: |
-          docker create --name ernic-tmp-2vm "$ERNIC_IMAGE"
-          # Not the workspace: it is mounted noexec in the job container.
-          docker cp ernic-tmp-2vm:/usr/local/bin/rocm-ernic /usr/local/bin/rocm-ernic
-          docker rm ernic-tmp-2vm
-          chmod +x /usr/local/bin/rocm-ernic
+          # Only the server, not rocm-ernic's tests. Built and installed outside
+          # the workspace: it is mounted noexec in the job container.
+          cmake -S "${GITHUB_WORKSPACE}/rocm-ernic" -B /tmp/rocm-ernic-build \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build /tmp/rocm-ernic-build --target rocm-ernic
+          install -m 0755 /tmp/rocm-ernic-build/rocm-ernic /usr/local/bin/rocm-ernic
           rocm-ernic --help > /tmp/ernic-help.txt
           head -3 /tmp/ernic-help.txt
 
@@ -417,8 +424,14 @@ jobs:
           # needed. --mac is not optional once two instances share a bridge:
           # the emulator's built-in address is a constant, so without it both
           # guests come up on the same MAC and ARP can never resolve.
+          #
+          # ERNIC_TCP_GUEST_GIDS lists the RoCE GIDs each instance's guest
+          # owns: the link-local address the guest derives from --mac, and
+          # the IPv4-mapped one for its address. The mesh refuses to connect
+          # a QP to a GID that no instance lists.
           for n in 1 2; do rm -f "/tmp/vfio-user-server${n}.sock"; done
 
+          ERNIC_TCP_GUEST_GIDS="fe80::a0:d1ff:fe00:1,${VM1_ADDR}" \
           rocm-ernic \
             --socket /tmp/vfio-user-server1.sock \
             --backend "tcp:manager:listen:${TCP_PORT}" \
@@ -434,6 +447,7 @@ jobs:
           timeout 1 bash -c "echo > /dev/tcp/localhost/${TCP_PORT}" 2>/dev/null || {
             echo "manager never listened on ${TCP_PORT}"; cat /tmp/server1.log; exit 1; }
 
+          ERNIC_TCP_GUEST_GIDS="fe80::a0:d1ff:fe00:2,${VM2_ADDR}" \
           rocm-ernic \
             --socket /tmp/vfio-user-server2.sock \
             --backend "tcp:worker:localhost:${TCP_PORT}" \
@@ -442,6 +456,8 @@ jobs:
             --verbose > /tmp/server2.log 2>&1 &
           echo "ERNIC_PID2=$!" >> "$GITHUB_ENV"
 
+          # The sockets stay mode 0600: QEMU runs as root here too, and the
+          # server refuses to start if the mode changes while it checks it.
           for n in 1 2; do
             for _ in $(seq 1 45); do
               [ -S "/tmp/vfio-user-server${n}.sock" ] && break
@@ -449,7 +465,6 @@ jobs:
             done
             [ -S "/tmp/vfio-user-server${n}.sock" ] || {
               echo "server${n} socket never appeared"; cat "/tmp/server${n}.log"; exit 1; }
-            chmod 666 "/tmp/vfio-user-server${n}.sock"
           done
 
       - name: Verify the TCP mesh formed
@@ -599,12 +614,14 @@ jobs:
           VM_USER: ${{ steps.guest_image.outputs.vm_user }}
           IONIC_SRC: ${{ steps.ionic_sources.outputs.source_dir }}
           IONIC_REF: ${{ steps.ionic_sources.outputs.ref }}
+          IONIC_SENTINEL: ${{ steps.ionic_sources.outputs.sentinel }}
         run: |
           # Left to itself, the guest role sparse-clones the kernel from
           # git.kernel.org through user-mode NAT in each guest, ~100 s every
-          # run. It skips that when .patches-applied-<ref> is already in
-          # place, so copy in the runner's cached tree; provisioning is
-          # given the same directory and ref below.
+          # run. It skips that when the fetch script's sentinel for this ref
+          # and patch series is already in place, so copy in the runner's
+          # cached tree; provisioning is given the same directories and ref
+          # below.
           set -o pipefail
           for port in "$VM1_SSH_PORT" "$VM2_SSH_PORT"; do
             tar -C "$IONIC_SRC" -cf - . | \
@@ -612,7 +629,7 @@ jobs:
                 -p "$port" "${VM_USER}@localhost" \
                 "sudo rm -rf '${IONIC_GUEST_DIR}' && sudo mkdir -p '${IONIC_GUEST_DIR}' && \
                  sudo tar -C '${IONIC_GUEST_DIR}' -xf - && \
-                 test -f '${IONIC_GUEST_DIR}/.patches-applied-${IONIC_REF}'"
+                 test -f '${IONIC_GUEST_DIR}/${IONIC_SENTINEL}'"
           done
           echo "ionic sources at ${IONIC_REF} staged in ${IONIC_GUEST_DIR}"
 
@@ -646,6 +663,7 @@ jobs:
             -e ernic_vm_ssh_base_port="$VM1_SSH_PORT" \
             -e ernic_vm_ssh_user="$VM_USER" \
             -e ernic_ionic_source_dir="$IONIC_GUEST_DIR" \
+            -e ernic_guest_ionic_dir="$IONIC_STAGE_DIR" \
             -e ernic_ionic_kernel_ref="$IONIC_REF" \
             -e ernic_gpu_passthrough=false \
             -e ernic_guest_agent=false \
@@ -661,7 +679,7 @@ jobs:
           }
           for spec in "1:${VM1_SSH_PORT}" "2:${VM2_SSH_PORT}"; do
             n=${spec%%:*}; port=${spec##*:}
-            # By PCI vendor ID, never by name: the kernel registers ionic_%d
+            # By PCI ID, never by name: the kernel registers ionic_%d
             # and udev rewrites it twice.
             DEV=$(vm_ssh -p "$port" "${VM_USER}@localhost" 'sh -s' \
               < "${GITHUB_WORKSPACE}/rocm-ernic/scripts/find-rdma-device.sh" | tr -d '\r') || true
