@@ -80,8 +80,20 @@ runs:
       rm -rf "$PATCHES"
       mkdir -p "$PATCHES"
       cp -R "${ROCM_ERNIC}/ansible/files/patches/." "$PATCHES/"
-      bash "${ROCM_ERNIC}/ansible/files/scripts/fetch-ionic-sources.sh" \
-        --source-dir "$DEST" --kernel-ref "$REF" --patches-dir "$PATCHES"
+      # git.kernel.org answers with a 502 often enough to fail every lane at
+      # once. The script starts from an empty directory, so a retry is safe.
+      for attempt in 1 2 3; do
+        if bash "${ROCM_ERNIC}/ansible/files/scripts/fetch-ionic-sources.sh" \
+             --source-dir "$DEST" --kernel-ref "$REF" --patches-dir "$PATCHES"; then
+          break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+          echo "::error::fetching the ionic sources failed after 3 attempts"
+          exit 1
+        fi
+        echo "::warning::fetching the ionic sources failed (attempt ${attempt}/3)"
+        sleep $((attempt * 30))
+      done
       # setup-ionic-dkms.sh reads only the two driver directories, so the
       # sparse clone's history need not be cached or copied into a guest.
       rm -rf "${DEST}/.git"
