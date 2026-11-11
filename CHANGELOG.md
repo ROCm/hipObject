@@ -91,6 +91,10 @@
 - A project that adds hipObject with `add_subdirectory()` or
   `FetchContent` can link the library as `hipobj::hipobj`, the name the
   installed package gives it, as well as `hipobj`.
+- `hipObjError_t` has the `[[nodiscard]]` attribute when `hipobj.h` is
+  compiled as C++17 or C23 or later, so the compiler warns about a call
+  whose `hipObjError_t` is ignored. Cast the call to `void` to ignore
+  one on purpose.
 
 ### Changed
 

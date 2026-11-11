@@ -154,15 +154,38 @@ typedef enum {
     hipObjBusy,
 } hipObjOpError_t;
 
+/* Compilers warn about an ignored hipObjError_t in C++17 and C23 and
+ * later, which have the [[nodiscard]] attribute. Older standards don't
+ * have it, so the macro is empty there. It's only for hipObjError_t, so
+ * it's undefined after it and isn't part of the API. */
+#if defined(__cplusplus)
+#if __cplusplus >= 201703L
+#define HIPOBJ_NODISCARD [[nodiscard]]
+#else
+#define HIPOBJ_NODISCARD
+#endif
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#define HIPOBJ_NODISCARD [[nodiscard]]
+#else
+#define HIPOBJ_NODISCARD
+#endif
+
 /*!
  * @brief Compound error type carrying both an
  *        operation error and an optional HIP error
  * @ingroup error
+ *
+ * @note This struct has the `[[nodiscard]]` attribute in C++17 and C23
+ *       and later, so the compiler warns when a caller ignores a
+ *       function's hipObjError_t. To ignore one on purpose, cast the
+ *       call to `void`.
  */
-typedef struct {
+typedef struct HIPOBJ_NODISCARD {
     hipObjOpError_t opError;
     int             hipError;
 } hipObjError_t;
+
+#undef HIPOBJ_NODISCARD
 
 /*!
  * @brief Return a human-readable string for an
