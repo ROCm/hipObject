@@ -755,6 +755,7 @@ rendered via Breathe.</p>
 <dd><div class="docutils container">
 <em>#include &lt;hipobj.h&gt;</em></div>
 <p>Compound error type carrying both an operation error and an optional HIP error. </p>
+<p>opError says what went wrong. When a HIP call made the function fail, hipError is the hipError_t that call returned. Otherwise, including on success, it’s 0 (hipSuccess).</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>This struct has the <code class="docutils literal notranslate"><span class="pre">[[nodiscard]]</span></code> attribute in C++17 and C23 and later, so the compiler warns when a caller ignores a function’s <a class="reference internal" href="#structhipObjError__t"><span class="std std-ref">hipObjError_t</span></a>. To ignore one on purpose, cast the call to <code class="docutils literal notranslate"><span class="pre">void</span></code>. </p>

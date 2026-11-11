@@ -744,10 +744,13 @@ a heuristic over the bus-id strings, not a walk of the PCIe tree.
 The topology also reports each NIC’s NUMA node, but the selection
 doesn’t use it.</p>
 </dd>
-<dt>Fallback</dt><dd><p>If there’s no GPU, or no NIC with a known bus id, and <code class="docutils literal notranslate"><span class="pre">nicHint</span></code>
-is set, the hint is opened as a device name directly. This is how
-GPU-less hosts, such as the emulated-NIC CI lanes, initialize.
-Without a hint, init fails with <code class="docutils literal notranslate"><span class="pre">hipObjNicNotFound</span></code>.</p>
+<dt>Fallback</dt><dd><p>If there’s no GPU, HIP can’t report the GPU’s bus id, or there’s no
+NIC with a known bus id, and <code class="docutils literal notranslate"><span class="pre">nicHint</span></code> is set, the hint is opened
+as a device name directly. This is how GPU-less hosts, such as the
+emulated-NIC CI lanes, initialize. Without a hint, init fails: with
+<code class="docutils literal notranslate"><span class="pre">hipObjRdmaError</span></code>, and the HIP error in <code class="docutils literal notranslate"><span class="pre">hipError</span></code>, when HIP
+can’t report the GPU or its bus id, and with <code class="docutils literal notranslate"><span class="pre">hipObjNicNotFound</span></code>
+when no NIC has a known bus id.</p>
 </dd>
 <dt>Port</dt><dd><p>The device is always opened on port 1, although the topology
 records each NIC’s first <em>active</em> port.</p>
@@ -1091,9 +1094,11 @@ into <code class="docutils literal notranslate"><span class="pre">hipObjInternal
 fallback string instead (<code class="docutils literal notranslate"><span class="pre">&quot;Unknown</span> <span class="pre">error&quot;</span></code> and <code class="docutils literal notranslate"><span class="pre">&quot;0.0.0&quot;</span></code>).</p>
 <p>Internal functions report failure with <code class="docutils literal notranslate"><span class="pre">bool</span></code>, <code class="docutils literal notranslate"><span class="pre">std::optional</span></code>,
 or a result <code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">class</span></code>, and <code class="docutils literal notranslate"><span class="pre">hipobj.cpp</span></code> maps those to error
-codes. Details that an error code can’t carry, such as a failed work
-completion’s status or a fallback to a staging buffer, go to stderr;
-the hot path prints nothing on success.</p>
+codes. When a HIP call caused the failure, they also pass on its
+<code class="docutils literal notranslate"><span class="pre">hipError_t</span></code>, which becomes <code class="docutils literal notranslate"><span class="pre">hipError</span></code>. Details that an error
+code can’t carry, such as a failed work completion’s status or a
+fallback to a staging buffer, go to stderr; the hot path prints
+nothing on success.</p>
 </section>
 <section id="configuration">
 <h2><a class="toc-backref" href="#id13" role="doc-backlink">Configuration</a><a class="headerlink" href="#configuration" title="Link to this heading">#</a></h2>
