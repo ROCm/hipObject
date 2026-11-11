@@ -109,7 +109,8 @@ namespace {
                 return {.opError = hipObjSuccess, .hipError = 0};
             }
             if (initialized_) {
-                hipObjShutdown();
+                // Ignored: hipObjInit() below reports anything that matters
+                (void)hipObjShutdown();
                 initialized_ = false;
             }
             hipObjConfig_t cfg{};

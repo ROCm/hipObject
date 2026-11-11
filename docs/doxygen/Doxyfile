@@ -45,6 +45,7 @@ WARN_NO_PARAMDOC       = NO
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 PREDEFINED             = HIPOBJ_API= \
+                         HIPOBJ_NODISCARD= \
                          __attribute__(x)=
 
 # Source browsing (available via Breathe)
