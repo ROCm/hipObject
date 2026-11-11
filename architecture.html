@@ -781,10 +781,14 @@ both set the same values the generic code does.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">resetRcConnection()</span></code> moves the QP to RESET, drains the CQ, and
 moves it back to INIT, ready for a different peer. An RC QP can’t
 reconnect from RTS any other way.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">pollCompletion()</span></code> polls the CQ, sleeping 1 ms between empty
-polls, until a completion arrives, a completion reports an error,
-or the timeout passes. An error completion’s status and vendor
-error are printed to stderr, since nothing else keeps them.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pollCompletion()</span></code> polls the CQ until a completion arrives, a
+completion reports an error, or the timeout passes. An error
+completion’s status and vendor error are printed to stderr, since
+nothing else keeps them. Between empty polls, <code class="docutils literal notranslate"><span class="pre">waitFor()</span></code>
+(<code class="docutils literal notranslate"><span class="pre">src/common/poll-wait.h</span></code>) polls again at once for the first 20
+microseconds, then yields the CPU until 200 microseconds, and then
+sleeps for a quarter of the time it has waited, up to 1 ms. Staging
+copies wait for their HIP event the same way.</p></li>
 </ul>
 <section id="the-connection-pool">
 <h3>The Connection Pool<a class="headerlink" href="#the-connection-pool" title="Link to this heading">#</a></h3>
