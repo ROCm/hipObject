@@ -667,6 +667,7 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv415hipObjOpError_t">
 <span id="_CPPv315hipObjOpError_t"></span><span id="_CPPv215hipObjOpError_t"></span><span class="target" id="group__error_1ga1ee9764dda2b20100b8e5463e7246e61"></span><span class="k"><span class="pre">enum</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">hipObjOpError_t</span></span></span><a class="headerlink" href="#_CPPv415hipObjOpError_t" title="Link to this definition">#</a><br /></dt>
 <dd><p>Operation-level error codes. </p>
+<p>hipObjSuccess is 0. Every other code is HIPOBJ_BASE_ERR plus a number that never changes, so the codes don’t overlap errno values or hipError_t codes. A new code gets the next unused number. </p>
 <p><em>Values:</em></p>
 <dl class="cpp enumerator">
 <dt class="sig sig-object cpp" id="_CPPv4N15hipObjOpError_t13hipObjSuccessE">
@@ -745,7 +746,7 @@ rendered via Breathe.</p>
 <dl class="cpp macro">
 <dt class="sig sig-object cpp" id="c.HIPOBJ_BASE_ERR">
 <span class="target" id="group__error_1ga6b8328f869fea10cccf60da20b8c5942"></span><span class="sig-name descname"><span class="n"><span class="pre">HIPOBJ_BASE_ERR</span></span></span><a class="headerlink" href="#c.HIPOBJ_BASE_ERR" title="Link to this definition">#</a><br /></dt>
-<dd><p>Base value for hipObject error codes. </p>
+<dd><p>Base value for hipObject error codes. Every error code except hipObjSuccess is HIPOBJ_BASE_ERR plus a small number. </p>
 </dd></dl>
 
 <dl class="cpp struct">
