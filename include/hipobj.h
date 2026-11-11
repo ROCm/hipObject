@@ -123,26 +123,34 @@ extern "C" {
  *  ERROR HANDLING
  * ------------------------------------------------------- */
 
-/*! @brief Base value for hipObject error codes @ingroup error */
+/*!
+ * @brief Base value for hipObject error codes. Every error code except
+ *        hipObjSuccess is HIPOBJ_BASE_ERR plus a small number.
+ * @ingroup error
+ */
 #define HIPOBJ_BASE_ERR 6000
 
 /*!
  * @brief Operation-level error codes
  * @ingroup error
+ *
+ * hipObjSuccess is 0. Every other code is HIPOBJ_BASE_ERR plus a number
+ * that never changes, so the codes don't overlap errno values or
+ * hipError_t codes. A new code gets the next unused number.
  */
 typedef enum {
-    hipObjSuccess = 0,
-    hipObjInvalidValue,
-    hipObjNotInitialized,
-    hipObjAlreadyInitialized,
-    hipObjRdmaError,
-    hipObjS3Error,
-    hipObjBufNotRegistered,
-    hipObjBufAlreadyRegistered,
-    hipObjNicNotFound,
-    hipObjDmabufNotSupported,
-    hipObjSizeTooLarge,
-    hipObjInternalError,
+    hipObjSuccess              = 0,
+    hipObjInvalidValue         = HIPOBJ_BASE_ERR + 1,
+    hipObjNotInitialized       = HIPOBJ_BASE_ERR + 2,
+    hipObjAlreadyInitialized   = HIPOBJ_BASE_ERR + 3,
+    hipObjRdmaError            = HIPOBJ_BASE_ERR + 4,
+    hipObjS3Error              = HIPOBJ_BASE_ERR + 5,
+    hipObjBufNotRegistered     = HIPOBJ_BASE_ERR + 6,
+    hipObjBufAlreadyRegistered = HIPOBJ_BASE_ERR + 7,
+    hipObjNicNotFound          = HIPOBJ_BASE_ERR + 8,
+    hipObjDmabufNotSupported   = HIPOBJ_BASE_ERR + 9,
+    hipObjSizeTooLarge         = HIPOBJ_BASE_ERR + 10,
+    hipObjInternalError        = HIPOBJ_BASE_ERR + 11,
     /*!
      * The buffer or connection is in use. A staging copy of the buffer
      * that timed out is still running (see hipObjBufSync()); another
@@ -151,7 +159,7 @@ typedef enum {
      * use (see @ref threads). Try again later. hipObject added this
      * code; cuObject doesn't have it.
      */
-    hipObjBusy,
+    hipObjBusy = HIPOBJ_BASE_ERR + 12,
 } hipObjOpError_t;
 
 /*!
