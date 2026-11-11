@@ -311,12 +311,33 @@ TEST_F(ApiArgsTest, InitReportsGetDeviceFailure)
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
 
+TEST_F(ApiArgsTest, InitReportsGpuBusIdFailure)
+{
+    /* The fake knows no GPU's bus id, which is only an error without a
+     * NIC hint */
+    hipObjConfig_t config   = makeConfig();
+    config.gpuDevice        = 0;
+    config.nicHint          = nullptr;
+    const hipObjError_t err = initFakes(config);
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorInvalidDevice));
+    EXPECT_EQ(hipObj::currentInstance(), nullptr);
+
+    config           = makeConfig();
+    config.gpuDevice = 0;
+    EXPECT_EQ(initFakes(config).opError, hipObjSuccess);
+}
+
 TEST_F(ApiArgsTest, InitAcceptsOptionalFieldsUnset)
 {
-    /* endpoint, region, the keys, and the NIC hint may all be NULL */
+    /* endpoint, region, the keys, and the NIC hint may all be NULL. The
+     * GPU has a bus id, but the topology has no NIC. */
+    fake().gpuBusId = "0000:42:00.0";
     hipObjConfig_t config{};
-    config.gpuDevice = 0;
-    EXPECT_EQ(initFakes(config).opError, hipObjNicNotFound);
+    config.gpuDevice        = 0;
+    const hipObjError_t err = initFakes(config);
+    EXPECT_EQ(err.opError, hipObjNicNotFound);
+    EXPECT_EQ(err.hipError, 0);
 
     config.nicHint = "mlx5_0";
     EXPECT_EQ(initFakes(config).opError, hipObjSuccess);
@@ -442,15 +463,20 @@ TEST_F(DeviceRangeTest, RejectsPointerOutsideReportedAllocation)
     /* A runtime that reports an allocation that doesn't hold the pointer */
     EXPECT_EQ(hipObjBufRegister(hipObj::addressToPointer<void *>(kAllocBase - 1), 1).opError,
               hipObjInvalidValue);
-    EXPECT_EQ(hipObjBufRegister(at(kAllocSize), 1).opError, hipObjInvalidValue);
+    const hipObjError_t err = hipObjBufRegister(at(kAllocSize), 1);
+    EXPECT_EQ(err.opError, hipObjInvalidValue);
+    /* No HIP call failed */
+    EXPECT_EQ(err.hipError, 0);
     EXPECT_EQ(fake().log.registerMr, 0);
 }
 
 TEST_F(DeviceRangeTest, RejectsBufferWhoseAllocationIsNotFound)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    fake().addressRangeErr = hipErrorNotFound;
-    EXPECT_EQ(hipObjBufRegister(at(0), kAllocSize).opError, hipObjInvalidValue);
+    fake().addressRangeErr  = hipErrorNotFound;
+    const hipObjError_t err = hipObjBufRegister(at(0), kAllocSize);
+    EXPECT_EQ(err.opError, hipObjInvalidValue);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorNotFound));
     EXPECT_EQ(fake().log.registerMr, 0);
 }
 

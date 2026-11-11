@@ -244,7 +244,13 @@ initWith(const hipObjConfig_t &config, std::shared_ptr<const Platform> platform,
     }
     std::optional<RdmaNic> nic;
     if (gpuDevice >= 0) {
-        nic = GetClosestNicToGpu(runtime, platform->topology(), gpuDevice, nicHint);
+        ClosestNic closest = GetClosestNicToGpu(runtime, platform->topology(), gpuDevice, nicHint);
+        // The GPU's bus id is only needed to choose a NIC, so a NIC hint
+        // makes a failure to find it harmless
+        if (closest.hipError != hipSuccess && !haveNicHint) {
+            return makeError(hipObjRdmaError, static_cast<int>(closest.hipError));
+        }
+        nic = std::move(closest.nic);
     }
     if (!nic) {
         // GPU topology lookup failed (no GPU or no matching NIC). When a NIC name

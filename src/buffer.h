@@ -15,6 +15,8 @@
 #include <optional>
 #include <utility>
 
+#include <hip/hip_runtime_api.h>
+
 #include "ibv-core.h"
 #include "ibv-ptr.h"
 #include "thread-safety.h"
@@ -57,11 +59,9 @@ private:
 
 using HostBufPtr = std::unique_ptr<void, HostBufDeleter>;
 
-/* False when runtime reports ptr as device memory and [ptr, ptr + size)
- * doesn't fit inside the allocation that holds ptr, or when that
- * allocation can't be found. Memory the runtime doesn't report as device
- * memory passes: registering it with the NIC checks that it's mapped. */
-bool isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size);
+/* Whether runtime reports ptr as device memory. A pointer it can't
+ * classify isn't. */
+bool isDevicePointer(const HipRuntime &runtime, const void *ptr);
 
 /* The registered buffers, by address. Several threads can use it at once.
  *
@@ -120,6 +120,13 @@ public:
      * an oversize buffer, a full map, and a registration that failed. */
     enum class RegisterResult { Registered, AlreadyRegistered, Failed };
 
+    /* What a registration did, and the error of the HIP call that made it
+     * fail, if one did */
+    struct Registration {
+        RegisterResult result   = RegisterResult::Failed;
+        hipError_t     hipError = hipSuccess;
+    };
+
     /* What deregisterBuffer() did. It's Busy when something else holds the
      * entry (see find()). */
     enum class DeregisterResult { Deregistered, NotRegistered, Busy };
@@ -146,9 +153,8 @@ public:
      * holding the map's lock. When two threads register the same address
      * at once, one gets Registered, and the other AlreadyRegistered, and
      * its registration is released. */
-    [[nodiscard]] RegisterResult registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
-        HIPOBJ_REQUIRES(!mutex_);
-    [[nodiscard]] RegisterResult registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
+    [[nodiscard]] Registration registerBuffer(void *devPtr, size_t size, ibv_pd *pd) HIPOBJ_REQUIRES(!mutex_);
+    [[nodiscard]] Registration registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
         HIPOBJ_REQUIRES(!mutex_);
     /* Removes the entry, and releases its registration and any staging
      * buffer without holding the map's lock */

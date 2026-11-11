@@ -90,16 +90,45 @@ namespace {
         return makeError(hipObjSuccess);
     }
 
-    /* What a registration call returns for what the buffer map did */
-    hipObjError_t registrationError(BufferMap::RegisterResult result)
+    /* hipObjInvalidValue when runtime reports ptr as device memory and
+     * [ptr, ptr + size) doesn't fit inside the allocation that holds ptr,
+     * or when that allocation can't be found. Memory the runtime doesn't
+     * report as device memory passes: registering it with the NIC checks
+     * that it's mapped. */
+    hipObjError_t checkDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
     {
-        if (result == BufferMap::RegisterResult::Registered) {
+        if (!isDevicePointer(runtime, ptr)) {
             return makeError(hipObjSuccess);
         }
-        if (result == BufferMap::RegisterResult::AlreadyRegistered) {
+        hipDeviceptr_t   base      = nullptr;
+        size_t           allocSize = 0;
+        const hipError_t err       = runtime.memGetAddressRange(&base, &allocSize, ptr);
+        if (err != hipSuccess) {
+            return makeError(hipObjInvalidValue, static_cast<int>(err));
+        }
+        const auto start = pointerToAddress(base);
+        const auto addr  = pointerToAddress(ptr);
+        if (addr < start || addr - start >= allocSize) {
+            return makeError(hipObjInvalidValue);
+        }
+        /* Compared against the space left rather than as addr + size, which
+         * could wrap */
+        if (size > allocSize - (addr - start)) {
+            return makeError(hipObjInvalidValue);
+        }
+        return makeError(hipObjSuccess);
+    }
+
+    /* What a registration call returns for what the buffer map did */
+    hipObjError_t registrationError(const BufferMap::Registration &registration)
+    {
+        if (registration.result == BufferMap::RegisterResult::Registered) {
+            return makeError(hipObjSuccess);
+        }
+        if (registration.result == BufferMap::RegisterResult::AlreadyRegistered) {
             return makeError(hipObjBufAlreadyRegistered);
         }
-        return makeError(hipObjRdmaError);
+        return makeError(hipObjRdmaError, static_cast<int>(registration.hipError));
     }
 
     /* What a transfer returns when it can't lease a connection */
@@ -156,13 +185,13 @@ namespace {
         };
     }
 
-    [[nodiscard]] bool finishTransferAfterReply(const HipRuntime &runtime, ConnectionPool::Lease &lease,
-                                                std::string_view reply, bool requiresDeviceSync,
-                                                std::chrono::milliseconds pollTimeout)
+    hipObjError_t finishTransferAfterReply(const HipRuntime &runtime, ConnectionPool::Lease &lease,
+                                           std::string_view reply, bool requiresDeviceSync,
+                                           std::chrono::milliseconds pollTimeout)
     {
         if (const auto peerToken = parsePeerTokenFromReply(reply)) {
             if (!lease.connect(*peerToken)) {
-                return false;
+                return makeError(hipObjRdmaError);
             }
         }
         // A poll timeout or error completion is a failure: the transfer outcome
@@ -170,12 +199,15 @@ namespace {
         // may not observe a completion at all (see issue #22), so this check
         // reports "no evidence of failure" rather than "transfer verified".
         if (!pollCompletion(lease.connection(), std::nullopt, pollTimeout)) {
-            return false;
+            return makeError(hipObjRdmaError);
         }
-        if (!requiresDeviceSync) {
-            return true;
+        if (requiresDeviceSync) {
+            const hipError_t err = runtime.deviceSynchronize();
+            if (err != hipSuccess) {
+                return makeError(hipObjRdmaError, static_cast<int>(err));
+            }
         }
-        return runtime.deviceSynchronize() == hipSuccess;
+        return makeError(hipObjSuccess);
     }
 
     /* hipMemcpy with a deadline (see Options::stageTimeout), between the
@@ -194,20 +226,21 @@ namespace {
         AbandonedCopies::Slot slot    = instance.abandoned.reserve();
         const HipRuntime     &runtime = instance.platform->hip();
         hipEvent_t            rawDone = nullptr;
-        if (runtime.eventCreate(&rawDone) != hipSuccess) {
-            return makeError(hipObjInternalError);
+        hipError_t            err     = runtime.eventCreate(&rawDone);
+        if (err != hipSuccess) {
+            return makeError(hipObjInternalError, static_cast<int>(err));
         }
         auto done = own<HipEventPtr>(runtime, rawDone);
 
         /* The calling thread's default stream, not the null stream, which
          * waits for every other blocking stream on the device, so copies from
          * different threads would wait for each other */
-        hipError_t err = runtime.memcpyAsync(dst, src, size, kind, hipStreamPerThread);
+        err = runtime.memcpyAsync(dst, src, size, kind, hipStreamPerThread);
         if (err == hipSuccess) {
             err = runtime.eventRecord(done.get(), hipStreamPerThread);
         }
         if (err != hipSuccess) {
-            return makeError(hipObjInternalError);
+            return makeError(hipObjInternalError, static_cast<int>(err));
         }
 
         /* The event's status, or nothing while the copy is running */
@@ -220,7 +253,10 @@ namespace {
         };
         const std::chrono::milliseconds timeout = instance.options.stageTimeout;
         if (const std::optional<hipError_t> status = waitFor(timeout, query)) {
-            return makeError(*status == hipSuccess ? hipObjSuccess : hipObjInternalError);
+            if (*status != hipSuccess) {
+                return makeError(hipObjInternalError, static_cast<int>(*status));
+            }
+            return makeError(hipObjSuccess);
         }
         instance.abandoned.add(slot, std::move(done), buf);
         const std::string_view direction =
@@ -311,11 +347,8 @@ namespace {
         if (!reply || reply->status != RdmaReplyStatus::Success) {
             return makeError(hipObjS3Error);
         }
-        if (!finishTransferAfterReply(instance.platform->hip(), lease, reply->text, buf.isDmabuf,
-                                      instance.options.pollTimeout)) {
-            return makeError(hipObjRdmaError);
-        }
-        return makeError(hipObjSuccess);
+        return finishTransferAfterReply(instance.platform->hip(), lease, reply->text, buf.isDmabuf,
+                                        instance.options.pollTimeout);
     }
 
 } // namespace
@@ -409,12 +442,13 @@ try {
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    const hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
+    hipObjError_t err = hipObj::checkRegistrationArgs(devPtr, size);
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    if (!hipObj::isValidDeviceRange(instance->platform->hip(), devPtr, size)) {
-        return hipObj::makeError(hipObjInvalidValue);
+    err = hipObj::checkDeviceRange(instance->platform->hip(), devPtr, size);
+    if (err.opError != hipObjSuccess) {
+        return err;
     }
     return hipObj::registrationError(instance->buffers.registerBuffer(devPtr, size, instance->device->pd()));
 }
