@@ -341,10 +341,14 @@ QP state changes:
 - ``resetRcConnection()`` moves the QP to RESET, drains the CQ, and
   moves it back to INIT, ready for a different peer. An RC QP can't
   reconnect from RTS any other way.
-- ``pollCompletion()`` polls the CQ, sleeping 1 ms between empty
-  polls, until a completion arrives, a completion reports an error,
-  or the timeout passes. An error completion's status and vendor
-  error are printed to stderr, since nothing else keeps them.
+- ``pollCompletion()`` polls the CQ until a completion arrives, a
+  completion reports an error, or the timeout passes. An error
+  completion's status and vendor error are printed to stderr, since
+  nothing else keeps them. Between empty polls, ``waitFor()``
+  (``src/common/poll-wait.h``) polls again at once for the first 20
+  microseconds, then yields the CPU until 200 microseconds, and then
+  sleeps for a quarter of the time it has waited, up to 1 ms. Staging
+  copies wait for their HIP event the same way.
 
 The Connection Pool
 ^^^^^^^^^^^^^^^^^^^
