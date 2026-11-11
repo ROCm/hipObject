@@ -98,6 +98,15 @@
 
 ### Changed
 
+- The `offset` parameter of `hipObjGet()`, `hipObjPut()`, and
+  `hipObjBufSync()`, the byte offset into the registered buffer, is now a
+  `size_t` instead of an `off_t`, which is signed and 32 bits on Windows.
+  A negative offset converts to a value larger than any buffer, so it's
+  still rejected with `hipObjInvalidValue`, but code that passes a signed
+  value may now get a sign conversion warning. `hipobj.h` no longer includes
+  `<sys/types.h>`; code that relied on it for `off_t` or `ssize_t` has to
+  include it itself. On 64-bit Linux, code built against the old header
+  doesn't have to be recompiled.
 - The `hipObjOpError_t` error codes now have explicit values, so adding
   a code no longer renumbers the ones after it. `hipObjSuccess` is still
   0, and every other code is now `HIPOBJ_BASE_ERR` (6000) plus a fixed
