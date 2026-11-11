@@ -537,6 +537,20 @@ TEST_F(TransportTest, PollReturnsOnCompletion)
     EXPECT_TRUE(hipObj::pollCompletion(*conn_, IBV_WC_RDMA_READ, std::chrono::seconds(1)));
 }
 
+TEST_F(TransportTest, PollWaitsForCompletion)
+{
+    ASSERT_NO_FATAL_FAILURE(open());
+    fake().pollEmptyCount = 3;
+    EXPECT_TRUE(hipObj::pollCompletion(*conn_, std::nullopt, std::chrono::seconds(1)));
+    EXPECT_EQ(fake().log.pollCq, 4);
+
+    /* A failure after the CQ was empty is still a failure */
+    fake().log.pollCq = 0;
+    fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
+    EXPECT_FALSE(hipObj::pollCompletion(*conn_, std::nullopt, std::chrono::seconds(1)));
+    EXPECT_EQ(fake().log.pollCq, 4);
+}
+
 TEST_F(TransportTest, PollFailsOnErrorCompletion)
 {
     ASSERT_NO_FATAL_FAILURE(open());

@@ -333,6 +333,15 @@
 - Building the MinIO bridge (`HIPOBJ_MINIO_CLIENT=ON`) requires OpenSSL 3
   or later, which every supported platform has. Configuring fails with an
   older OpenSSL.
+- `hipObjGet()`, `hipObjPut()`, and `hipObjBufSync()` notice that their
+  RDMA work or staging copy has finished sooner. They used to sleep 1 ms
+  each time they found it unfinished, so a transfer or copy that
+  finished in microseconds took a millisecond or more. They now check
+  again at once for the first 20 microseconds of the wait, then yield
+  the CPU between checks until 200 microseconds, and only then sleep,
+  for a quarter of the time waited so far, up to 1 ms. So the waiting
+  thread keeps its CPU core busy for the first 200 microseconds of a
+  wait, unless other threads need the core.
 
 ### Removed
 

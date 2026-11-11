@@ -18,7 +18,6 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <variant>
 
@@ -36,6 +35,7 @@
 #include "ibv-core.h"
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
+#include "poll-wait.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
@@ -213,29 +213,27 @@ namespace {
             return makeError(hipObjInternalError);
         }
 
-        const std::chrono::milliseconds timeout  = instance.options.stageTimeout;
-        const auto                      deadline = std::chrono::steady_clock::now() + timeout;
-        for (;;) {
+        /* The event's status, or nothing while the copy is running */
+        const auto query = [&runtime, &done]() -> std::optional<hipError_t> {
             const hipError_t q = runtime.eventQuery(done.get());
-            if (q == hipSuccess) {
-                return makeError(hipObjSuccess);
+            if (q == hipErrorNotReady) {
+                return std::nullopt;
             }
-            if (q != hipErrorNotReady) {
-                return makeError(hipObjInternalError);
-            }
-            if (std::chrono::steady_clock::now() >= deadline) {
-                instance.abandoned.add(slot, std::move(done), buf);
-                const std::string_view direction =
-                    kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";
-                printTo(stderr,
-                        "hipObj: staging {} copy of {} bytes did not complete within "
-                        "{} ms; abandoning it. The GPU never signalled completion -- "
-                        "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
-                        direction, size, timeout.count());
-                return makeError(hipObjInternalError);
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return q;
+        };
+        const std::chrono::milliseconds timeout = instance.options.stageTimeout;
+        if (const std::optional<hipError_t> status = waitFor(timeout, query)) {
+            return makeError(*status == hipSuccess ? hipObjSuccess : hipObjInternalError);
         }
+        instance.abandoned.add(slot, std::move(done), buf);
+        const std::string_view direction =
+            kind == hipMemcpyHostToDevice ? "host-to-device" : "device-to-host";
+        printTo(stderr,
+                "hipObj: staging {} copy of {} bytes did not complete within "
+                "{} ms; abandoning it. The GPU never signalled completion -- "
+                "see HIPOBJ_STAGE_TIMEOUT_MS.\n",
+                direction, size, timeout.count());
+        return makeError(hipObjInternalError);
     }
 
     /* hipObjBusy when a staging copy of buf that timed out is still

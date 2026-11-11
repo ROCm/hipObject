@@ -135,6 +135,9 @@ hipobj_add_test(test-unique-fd
 hipobj_add_test(test-scope-guard
   test-scope-guard.cpp)
 
+hipobj_add_test(test-poll-wait
+  test-poll-wait.cpp)
+
 hipobj_add_test(test-gid-select
   test-gid-select.cpp)
 

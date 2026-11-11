@@ -312,7 +312,9 @@ FakeVerbs::destroy_qp(ibv_qp *qp) const
 int
 FakeVerbs::poll_cq(ibv_cq * /*cq*/, int /*num_entries*/, ibv_wc *wc) const
 {
-    ++device_->log.pollCq;
+    if (++device_->log.pollCq <= device_->pollEmptyCount) {
+        return 0;
+    }
     if (device_->pollResult <= 0) {
         return device_->pollResult;
     }

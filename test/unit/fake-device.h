@@ -149,14 +149,17 @@ struct FakeDevice {
     std::atomic<int> closedDmabufFd{-1};
 
     /* ibverbs: the vendor query_device() reports, what poll_cq() returns,
-     * and the QP transitions. modifyQpCount counts the modify_qp() calls,
-     * and modifyQp holds the first ones; read it only once no thread is
-     * calling modify_qp(). Each QP returned by create_qp() gets the next
-     * nextQpNum value. */
-    uint32_t                    vendorId   = 0;
-    int                         pollResult = 1;
-    ibv_wc_status               pollStatus = IBV_WC_SUCCESS;
-    ibv_wc_opcode               pollOpcode = IBV_WC_SEND;
+     * and the QP transitions. poll_cq() finds the CQ empty for the first
+     * pollEmptyCount polls (counted by log.pollCq), and then returns
+     * pollResult. modifyQpCount counts the modify_qp() calls, and modifyQp
+     * holds the first ones; read it only once no thread is calling
+     * modify_qp(). Each QP returned by create_qp() gets the next nextQpNum
+     * value. */
+    uint32_t                    vendorId       = 0;
+    int                         pollEmptyCount = 0;
+    int                         pollResult     = 1;
+    ibv_wc_status               pollStatus     = IBV_WC_SUCCESS;
+    ibv_wc_opcode               pollOpcode     = IBV_WC_SEND;
     std::array<ModifyQpCall, 8> modifyQp{};
     std::atomic<size_t>         modifyQpCount{0};
     std::atomic<uint32_t>       nextQpNum{0x55};

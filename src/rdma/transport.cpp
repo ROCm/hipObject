@@ -13,7 +13,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 
 #include "hipobj-print.h"
@@ -22,6 +21,7 @@
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "ibv-wrapper.h"
+#include "poll-wait.h"
 #include "rdma-topology.h"
 #include "token.h"
 #include "vendor-ops.h"
@@ -272,17 +272,17 @@ bool
 pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
                std::chrono::milliseconds timeout)
 {
-    const Verbs &verbs    = conn.device().verbs();
-    const auto   deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
+    const Verbs &verbs = conn.device().verbs();
+    /* Whether the work succeeded, or nothing until the awaited completion
+     * arrives */
+    const auto poll = [&]() -> std::optional<bool> {
         ibv_wc    wc{};
         const int n = verbs.poll_cq(conn.cq(), 1, &wc);
         if (n < 0) {
             return false;
         }
         if (n == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
+            return std::nullopt;
         }
         if (wc.status != IBV_WC_SUCCESS) {
             /* The NIC has told us exactly why the transfer died, and this is the
@@ -298,6 +298,10 @@ pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,
         if (!expectedOpcode || wc.opcode == *expectedOpcode) {
             return true;
         }
+        return std::nullopt;
+    };
+    if (const std::optional<bool> succeeded = waitFor(timeout, poll)) {
+        return *succeeded;
     }
     // A timeout is a failure: no completion arrived for the awaited work
     // request, so the transfer outcome is unknown and must not be reported
