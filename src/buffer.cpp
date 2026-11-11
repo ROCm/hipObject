@@ -26,20 +26,21 @@
 
 namespace hipObj {
 
-namespace {
-
-    /* Is this pointer device memory? Answered through the seam so unit tests can
-     * drive both branches without a GPU. A pointer the runtime cannot classify is
-     * treated as "not device memory": the strict check below must not fail a host
-     * buffer it merely failed to classify. */
-    bool isDevicePointer(const HipRuntime &runtime, const void *ptr)
-    {
-        hipPointerAttribute_t attr{};
-        if (runtime.pointerGetAttributes(&attr, ptr) != hipSuccess) {
-            return false;
-        }
-        return attr.type == hipMemoryTypeDevice;
+/* Answered through the seam so unit tests can drive both branches without
+ * a GPU. A pointer the runtime cannot classify is treated as "not device
+ * memory": the strict range check in hipObjBufRegister() must not fail a
+ * host buffer it merely failed to classify. */
+bool
+isDevicePointer(const HipRuntime &runtime, const void *ptr)
+{
+    hipPointerAttribute_t attr{};
+    if (runtime.pointerGetAttributes(&attr, ptr) != hipSuccess) {
+        return false;
     }
+    return attr.type == hipMemoryTypeDevice;
+}
+
+namespace {
 
     /* Owns a dmabuf fd from HipRuntime::exportDmabuf(), and closes it
      * with the same runtime's closeDmabuf(). Only the registration needs
@@ -118,27 +119,6 @@ registerDeviceMemory(const Verbs &verbs, const HipRuntime &runtime, ibv_pd *pd, 
     return own<IbvMrPtr>(verbs, verbs.reg_mr(pd, addr, length, access));
 }
 
-bool
-isValidDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
-{
-    if (!isDevicePointer(runtime, ptr)) {
-        return true;
-    }
-    hipDeviceptr_t base      = nullptr;
-    size_t         allocSize = 0;
-    if (runtime.memGetAddressRange(&base, &allocSize, ptr) != hipSuccess) {
-        return false;
-    }
-    const auto start = pointerToAddress(base);
-    const auto addr  = pointerToAddress(ptr);
-    if (addr < start || addr - start >= allocSize) {
-        return false;
-    }
-    /* Compared against the space left rather than as addr + size, which
-     * could wrap */
-    return size <= allocSize - (addr - start);
-}
-
 void
 HostBufDeleter::operator()(void *hostBuf) const noexcept
 {
@@ -179,15 +159,15 @@ BufferMap::insert(uintptr_t key, std::shared_ptr<const BufEntry> entry)
     return RegisterResult::Registered;
 }
 
-BufferMap::RegisterResult
+BufferMap::Registration
 BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
 {
     if (size > MAX_MR_SIZE) {
-        return RegisterResult::Failed;
+        return {.result = RegisterResult::Failed};
     }
     const auto key = pointerToAddress(devPtr);
     if (const auto refused = precheck(key)) {
-        return *refused;
+        return {.result = *refused};
     }
     const Verbs      &verbs   = *verbs_;
     const HipRuntime &runtime = *runtime_;
@@ -196,8 +176,9 @@ BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
     if (mr) {
         /* The NIC reaches the caller's memory, so there's no staging
          * buffer */
-        return insert(key, std::make_shared<const BufEntry>(own<HostBufPtr>(runtime, nullptr), std::move(mr),
-                                                            size, true, key));
+        auto entry = std::make_shared<const BufEntry>(own<HostBufPtr>(runtime, nullptr), std::move(mr), size,
+                                                      true, key);
+        return {.result = insert(key, std::move(entry))};
     }
 
     const bool deviceMemory = isDevicePointer(runtime, devPtr);
@@ -208,7 +189,7 @@ BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
                     "HIPOBJ_REQUIRE_GPU_DIRECT is set; refusing to stage through "
                     "host memory.\n",
                     size, devPtr);
-            return RegisterResult::Failed;
+            return {.result = RegisterResult::Failed};
         }
         printTo(stderr,
                 "hipObj: GPU-direct registration of {} bytes at {} failed; "
@@ -219,40 +200,45 @@ BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
 
     void            *rawHostBuf = nullptr;
     const hipError_t err        = runtime.hostMalloc(&rawHostBuf, size, hipHostMallocDefault);
-    if (err != hipSuccess || rawHostBuf == nullptr) {
-        return RegisterResult::Failed;
+    if (err != hipSuccess) {
+        return {.result = RegisterResult::Failed, .hipError = err};
+    }
+    if (rawHostBuf == nullptr) {
+        return {.result = RegisterResult::Failed};
     }
     auto hostBuf = own<HostBufPtr>(runtime, rawHostBuf);
     /* Declared after hostBuf, so if building the entry throws, the MR is
      * deregistered before the staging buffer it covers is freed */
     auto stagingMr = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostBuf.get(), size, access));
     if (!stagingMr) {
-        return RegisterResult::Failed;
+        return {.result = RegisterResult::Failed};
     }
     /* Read the address before hostBuf is moved into the entry */
     const uint64_t remoteAddr = pointerToAddress(hostBuf.get());
-    return insert(key, std::make_shared<const BufEntry>(std::move(hostBuf), std::move(stagingMr), size, false,
-                                                        remoteAddr));
+    auto           entry =
+        std::make_shared<const BufEntry>(std::move(hostBuf), std::move(stagingMr), size, false, remoteAddr);
+    return {.result = insert(key, std::move(entry))};
 }
 
-BufferMap::RegisterResult
+BufferMap::Registration
 BufferMap::registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
 {
     if (size > MAX_MR_SIZE) {
-        return RegisterResult::Failed;
+        return {.result = RegisterResult::Failed};
     }
     const auto key = pointerToAddress(hostPtr);
     if (const auto refused = precheck(key)) {
-        return *refused;
+        return {.result = *refused};
     }
     const Verbs &verbs  = *verbs_;
     const int    access = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     auto         mr     = own<IbvMrPtr>(verbs, verbs.reg_mr(pd, hostPtr, size, access));
     if (!mr) {
-        return RegisterResult::Failed;
+        return {.result = RegisterResult::Failed};
     }
-    return insert(key, std::make_shared<const BufEntry>(own<HostBufPtr>(*runtime_, nullptr), std::move(mr),
-                                                        size, false, pointerToAddress(hostPtr)));
+    auto entry = std::make_shared<const BufEntry>(own<HostBufPtr>(*runtime_, nullptr), std::move(mr), size,
+                                                  false, pointerToAddress(hostPtr));
+    return {.result = insert(key, std::move(entry))};
 }
 
 BufferMap::DeregisterResult

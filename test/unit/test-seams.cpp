@@ -188,7 +188,7 @@ protected:
     /* The NIC closest to GPU 0, with the fakes */
     [[nodiscard]] std::optional<hipObj::RdmaNic> closestNic(std::string_view hcaList = {}) const
     {
-        return hipObj::GetClosestNicToGpu(hip_, topology_, 0, hcaList);
+        return hipObj::GetClosestNicToGpu(hip_, topology_, 0, hcaList).nic;
     }
 
     TopologyState          state_{};
@@ -227,12 +227,22 @@ TEST_F(NicSeamTest, NoKnownBusIdFails)
     EXPECT_FALSE(closestNic());
 }
 
-/* The GPU's bus id comes from the runtime */
+/* The GPU's bus id comes from the runtime, whose error is passed on */
 TEST_F(NicSeamTest, UnknownGpuBusIdFails)
 {
     state_.nics      = {{.dev_name = "mlx5_0", .pcie_bus_id = "0000:43:00.0", .numa_node = 0, .port_num = 1}};
     device_.gpuBusId = {};
-    EXPECT_FALSE(closestNic());
+    const hipObj::ClosestNic closest = hipObj::GetClosestNicToGpu(hip_, topology_, 0, {});
+    EXPECT_FALSE(closest.nic);
+    EXPECT_EQ(closest.hipError, hipErrorInvalidDevice);
+}
+
+/* Not finding a NIC isn't a HIP error */
+TEST_F(NicSeamTest, NoNicIsNotAHipError)
+{
+    const hipObj::ClosestNic closest = hipObj::GetClosestNicToGpu(hip_, topology_, 0, {});
+    EXPECT_FALSE(closest.nic);
+    EXPECT_EQ(closest.hipError, hipSuccess);
 }
 
 TEST_F(NicSeamTest, FirstOfClosestWins)
@@ -289,7 +299,7 @@ TEST_F(NicSeamTest, BusIdThatFillsTheBufferIsUsedWhole)
     };
 
     const FullBufferBusIdHip hip(device_);
-    const auto               nic = hipObj::GetClosestNicToGpu(hip, topology_, 0, {});
+    const auto               nic = hipObj::GetClosestNicToGpu(hip, topology_, 0, {}).nic;
     ASSERT_TRUE(nic) << "the fake fails unless the buffer is 32 bytes";
     EXPECT_EQ(nic->index, 1);
     EXPECT_EQ(nic->name, "mlx5_1");
@@ -533,7 +543,7 @@ TEST_F(SysfsTopologyTest, NicSelection)
     hipDevice.gpuBusId = kGpuBusId;
 
     /* The fake device has no bus id, so it's not chosen */
-    EXPECT_FALSE(hipObj::GetClosestNicToGpu(hip, topology_, 0, {}));
+    EXPECT_FALSE(hipObj::GetClosestNicToGpu(hip, topology_, 0, {}).nic);
     EXPECT_EQ(device_.log.openDevice, 1);
 }
 

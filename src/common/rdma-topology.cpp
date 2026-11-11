@@ -236,21 +236,22 @@ SysfsTopology::roceVersion(std::string_view devName, uint8_t portNum, int gidInd
     return RoceVersion::Unknown;
 }
 
-std::optional<RdmaNic>
+ClosestNic
 GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int gpuIndex,
                    std::string_view hcaList)
 {
     std::array<char, kPciBusIdBufLen> gpu_bus_id{};
     const int                         len = static_cast<int>(gpu_bus_id.size());
-    if (runtime.deviceGetPCIBusId(gpu_bus_id.data(), len, gpuIndex) != hipSuccess) {
-        return std::nullopt;
+    const hipError_t                  err = runtime.deviceGetPCIBusId(gpu_bus_id.data(), len, gpuIndex);
+    if (err != hipSuccess) {
+        return {.nic = std::nullopt, .hipError = err};
     }
 
     /* Up to the first NUL, or the whole array if HIP didn't write one */
     std::string gpu_bus(gpu_bus_id.begin(), std::ranges::find(gpu_bus_id, '\0'));
     auto        devices = topology.enumerate(hcaList);
     if (devices.empty()) {
-        return std::nullopt;
+        return {};
     }
 
     const auto distance = [&gpu_bus](const NicInfo &nic) {
@@ -260,10 +261,11 @@ GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int g
     const auto best = std::ranges::min_element(devices, {}, distance);
     /* No NIC has a known bus id */
     if (distance(*best) == std::numeric_limits<int>::max()) {
-        return std::nullopt;
+        return {};
     }
 
-    return RdmaNic{.index = static_cast<int>(best - devices.begin()), .name = std::move(best->dev_name)};
+    RdmaNic nic{.index = static_cast<int>(best - devices.begin()), .name = std::move(best->dev_name)};
+    return {.nic = std::move(nic)};
 }
 
 std::optional<int>

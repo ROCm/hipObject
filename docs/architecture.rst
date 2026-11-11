@@ -301,10 +301,13 @@ NIC
    doesn't use it.
 
 Fallback
-   If there's no GPU, or no NIC with a known bus id, and ``nicHint``
-   is set, the hint is opened as a device name directly. This is how
-   GPU-less hosts, such as the emulated-NIC CI lanes, initialize.
-   Without a hint, init fails with ``hipObjNicNotFound``.
+   If there's no GPU, HIP can't report the GPU's bus id, or there's no
+   NIC with a known bus id, and ``nicHint`` is set, the hint is opened
+   as a device name directly. This is how GPU-less hosts, such as the
+   emulated-NIC CI lanes, initialize. Without a hint, init fails: with
+   ``hipObjRdmaError``, and the HIP error in ``hipError``, when HIP
+   can't report the GPU or its bus id, and with ``hipObjNicNotFound``
+   when no NIC has a known bus id.
 
 Port
    The device is always opened on port 1, although the topology
@@ -646,9 +649,11 @@ fallback string instead (``"Unknown error"`` and ``"0.0.0"``).
 
 Internal functions report failure with ``bool``, ``std::optional``,
 or a result ``enum class``, and ``hipobj.cpp`` maps those to error
-codes. Details that an error code can't carry, such as a failed work
-completion's status or a fallback to a staging buffer, go to stderr;
-the hot path prints nothing on success.
+codes. When a HIP call caused the failure, they also pass on its
+``hipError_t``, which becomes ``hipError``. Details that an error
+code can't carry, such as a failed work completion's status or a
+fallback to a staging buffer, go to stderr; the hot path prints
+nothing on success.
 
 Configuration
 -------------

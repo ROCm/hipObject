@@ -214,7 +214,7 @@ TEST_F(DmabufTest, DisabledPolicyRegistersWithoutExporting)
 TEST_F(DmabufTest, BufferMapExportsByDefault)
 {
     hipObj::BufferMap buffers(verbs_, hip_, {}, false);
-    ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()),
+    ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()).result,
               hipObj::BufferMap::RegisterResult::Registered);
     EXPECT_EQ(fake().log.exportDmabuf, 1);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 1);
@@ -224,7 +224,7 @@ TEST_F(DmabufTest, BufferMapExportsByDefault)
 TEST_F(DmabufTest, BufferMapRegistersWithoutExportingWhenDisabled)
 {
     hipObj::BufferMap buffers(verbs_, hip_, {.enabled = false, .debug = false}, false);
-    ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()),
+    ASSERT_EQ(buffers.registerBuffer(fakeDevBuf(), kBufSize, fakePd()).result,
               hipObj::BufferMap::RegisterResult::Registered);
     EXPECT_EQ(fake().log.exportDmabuf, 0);
     EXPECT_EQ(g_log.dmabufRegisterCalls, 0);

@@ -181,6 +181,10 @@ typedef enum {
  *        operation error and an optional HIP error
  * @ingroup error
  *
+ * opError says what went wrong. When a HIP call made the function fail,
+ * hipError is the hipError_t that call returned. Otherwise, including on
+ * success, it's 0 (hipSuccess).
+ *
  * @note This struct has the `[[nodiscard]]` attribute in C++17 and C23
  *       and later, so the compiler warns when a caller ignores a
  *       function's hipObjError_t. To ignore one on purpose, cast the

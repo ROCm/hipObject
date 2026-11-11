@@ -114,7 +114,7 @@ TEST_F(BufferRegistrationTest, HostRegistrationUsesCallerMemory)
     hipObj::BufferMap    buffers = makeBuffers();
     std::array<char, 32> hostBuf{};
 
-    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()),
+    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()).result,
               RegisterResult::Registered);
     auto entry = buffers.find(hostBuf.data());
     ASSERT_NE(entry, nullptr);
@@ -136,7 +136,7 @@ TEST_F(BufferRegistrationTest, DirectGpuRegistrationRequiresDeviceSync)
     hipObj::BufferMap buffers = makeBuffers();
     void             *gpuBuf  = hipObj::addressToPointer<void *>(0x4000);
 
-    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()), RegisterResult::Registered);
+    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()).result, RegisterResult::Registered);
     auto entry = buffers.find(gpuBuf);
     ASSERT_NE(entry, nullptr);
     EXPECT_TRUE(entry->isDmabuf);
@@ -153,7 +153,7 @@ TEST_F(BufferRegistrationTest, GpuRegistrationFallbackOwnsAllocatedHostBuffer)
     void             *gpuBuf     = hipObj::addressToPointer<void *>(0x1000);
     hipDevice_.fail.registerAddr = gpuBuf;
 
-    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()), RegisterResult::Registered);
+    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()).result, RegisterResult::Registered);
     auto entry = buffers.find(gpuBuf);
     ASSERT_NE(entry, nullptr);
     ASSERT_NE(entry->mr, nullptr);
@@ -178,7 +178,7 @@ TEST_F(BufferRegistrationTest, DestroyingFreesOwnedFallbackHostBuffers)
         void             *gpuBuf     = hipObj::addressToPointer<void *>(0x2000);
         hipDevice_.fail.registerAddr = gpuBuf;
 
-        EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()), RegisterResult::Registered);
+        EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()).result, RegisterResult::Registered);
         ASSERT_NE(hipDevice_.lastHostMalloc, nullptr);
         EXPECT_EQ(hipDevice_.log.hostFree, 0);
     }
@@ -197,15 +197,16 @@ TEST_F(BufferRegistrationTest, RejectsOversizeAndDuplicateRegistrations)
     void                *gpuBuf  = hipObj::addressToPointer<void *>(0x3000);
     std::array<char, 32> hostBuf{};
 
-    EXPECT_EQ(buffers.registerBuffer(gpuBuf, hipObj::MAX_MR_SIZE + 1, pd), RegisterResult::Failed);
-    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hipObj::MAX_MR_SIZE + 1, pd),
+    EXPECT_EQ(buffers.registerBuffer(gpuBuf, hipObj::MAX_MR_SIZE + 1, pd).result, RegisterResult::Failed);
+    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hipObj::MAX_MR_SIZE + 1, pd).result,
               RegisterResult::Failed);
     EXPECT_EQ(hipDevice_.log.registerMr, 0);
 
-    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), RegisterResult::Registered);
-    ASSERT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), pd), RegisterResult::Registered);
-    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, pd), RegisterResult::AlreadyRegistered);
-    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), pd),
+    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, pd).result, RegisterResult::Registered);
+    ASSERT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), pd).result,
+              RegisterResult::Registered);
+    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, pd).result, RegisterResult::AlreadyRegistered);
+    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), pd).result,
               RegisterResult::AlreadyRegistered);
     EXPECT_EQ(hipDevice_.log.registerMr, 2);
     ASSERT_NE(buffers.find(gpuBuf), nullptr);
@@ -223,7 +224,7 @@ TEST_F(BufferRegistrationTest, FindsOnlyRegisteredBuffers)
     EXPECT_EQ(buffers.find(gpuBuf), nullptr);
     EXPECT_EQ(buffers.deregisterBuffer(gpuBuf), DeregisterResult::NotRegistered);
 
-    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()), RegisterResult::Registered);
+    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()).result, RegisterResult::Registered);
     EXPECT_NE(buffers.find(gpuBuf), nullptr);
     /* Only the start of a registration finds it */
     EXPECT_EQ(buffers.find(hipObj::addressToPointer<void *>(kGpuAddr + 1)), nullptr);
@@ -240,7 +241,7 @@ TEST_F(BufferRegistrationTest, DeregisterIsBusyWhileAnEntryIsHeld)
     hipObj::BufferMap buffers    = makeBuffers();
     void             *gpuBuf     = hipObj::addressToPointer<void *>(0x6000);
     hipDevice_.fail.registerAddr = gpuBuf;
-    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()), RegisterResult::Registered);
+    ASSERT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()).result, RegisterResult::Registered);
 
     auto held = buffers.find(gpuBuf);
     ASSERT_NE(held, nullptr);
@@ -265,11 +266,11 @@ TEST_F(BufferRegistrationTest, RegistrationThatLosesARaceIsReleased)
     const ibv_mr        *winner = nullptr;
 
     verbs_.setOnRegister([&] {
-        EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()),
+        EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()).result,
                   RegisterResult::Registered);
         winner = buffers.find(hostBuf.data())->mr.get();
     });
-    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()),
+    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()).result,
               RegisterResult::AlreadyRegistered);
 
     EXPECT_EQ(hipDevice_.log.registerMr, 2);
@@ -289,10 +290,10 @@ TEST_F(BufferRegistrationTest, StagedRegistrationThatLosesARaceIsReleased)
     void *winner                 = nullptr;
 
     verbs_.setOnRegister([&] {
-        EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()), RegisterResult::Registered);
+        EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()).result, RegisterResult::Registered);
         winner = buffers.find(gpuBuf)->hostBuf.get();
     });
-    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()), RegisterResult::AlreadyRegistered);
+    EXPECT_EQ(buffers.registerBuffer(gpuBuf, 64, fakePd()).result, RegisterResult::AlreadyRegistered);
 
     /* Each tried gpuBuf, and then registered a staging buffer */
     EXPECT_EQ(hipDevice_.log.registerMr, 4);
@@ -309,22 +310,23 @@ TEST_F(BufferRegistrationTest, RegistrationFailsWhenTheMapIsFull)
     constexpr size_t  kMax    = hipObj::BufferMap::kMaxEntries;
     hipObj::BufferMap buffers = makeBuffers();
     for (size_t i = 0; i + 1 < kMax; ++i) {
-        ASSERT_EQ(buffers.registerHostBuffer(fakeAddress(i), 64, fakePd()), RegisterResult::Registered);
+        ASSERT_EQ(buffers.registerHostBuffer(fakeAddress(i), 64, fakePd()).result,
+                  RegisterResult::Registered);
     }
 
     /* Another registration takes the last place while this one registers */
     verbs_.setOnRegister([&] {
-        EXPECT_EQ(buffers.registerHostBuffer(fakeAddress(kMax - 1), 64, fakePd()),
+        EXPECT_EQ(buffers.registerHostBuffer(fakeAddress(kMax - 1), 64, fakePd()).result,
                   RegisterResult::Registered);
     });
-    EXPECT_EQ(buffers.registerHostBuffer(fakeAddress(kMax), 64, fakePd()), RegisterResult::Failed);
+    EXPECT_EQ(buffers.registerHostBuffer(fakeAddress(kMax), 64, fakePd()).result, RegisterResult::Failed);
     EXPECT_EQ(buffers.size(), kMax);
     EXPECT_EQ(hipDevice_.log.deregMr, 1);
 
     /* A full map refuses before registering */
     const int registered = hipDevice_.log.registerMr;
-    EXPECT_EQ(buffers.registerHostBuffer(fakeAddress(kMax + 1), 64, fakePd()), RegisterResult::Failed);
-    EXPECT_EQ(buffers.registerBuffer(fakeAddress(kMax + 1), 64, fakePd()), RegisterResult::Failed);
+    EXPECT_EQ(buffers.registerHostBuffer(fakeAddress(kMax + 1), 64, fakePd()).result, RegisterResult::Failed);
+    EXPECT_EQ(buffers.registerBuffer(fakeAddress(kMax + 1), 64, fakePd()).result, RegisterResult::Failed);
     EXPECT_EQ(hipDevice_.log.registerMr, registered);
 }
 
@@ -335,7 +337,8 @@ TEST_F(BufferRegistrationTest, OneOfManyThreadsRegisteringAnAddressWins)
     std::atomic<int>     registered{0};
 
     runThreads(kThreads, [&](int) {
-        const RegisterResult result = buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd());
+        const RegisterResult result =
+            buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()).result;
         if (result == RegisterResult::Registered) {
             registered.fetch_add(1);
         }
@@ -357,7 +360,7 @@ TEST_F(BufferRegistrationTest, LookupsDuringDeregistration)
 {
     hipObj::BufferMap    buffers = makeBuffers();
     std::array<char, 32> hostBuf{};
-    ASSERT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()),
+    ASSERT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()).result,
               RegisterResult::Registered);
 
     runThreads(kThreads, [&](int t) {
@@ -366,7 +369,7 @@ TEST_F(BufferRegistrationTest, LookupsDuringDeregistration)
                 const DeregisterResult result = buffers.deregisterBuffer(hostBuf.data());
                 EXPECT_NE(result, DeregisterResult::NotRegistered);
                 if (result == DeregisterResult::Deregistered) {
-                    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()),
+                    EXPECT_EQ(buffers.registerHostBuffer(hostBuf.data(), hostBuf.size(), fakePd()).result,
                               RegisterResult::Registered);
                 }
                 continue;
@@ -390,7 +393,7 @@ TEST_F(BufferRegistrationTest, AbandonedCopiesFromManyThreads)
     hipObj::BufferMap       buffers = makeBuffers();
     hipObj::AbandonedCopies abandoned(hip_);
     for (int t = 0; t < kThreads; ++t) {
-        ASSERT_EQ(buffers.registerHostBuffer(fakeAddress(static_cast<size_t>(t)), 64, fakePd()),
+        ASSERT_EQ(buffers.registerHostBuffer(fakeAddress(static_cast<size_t>(t)), 64, fakePd()).result,
                   RegisterResult::Registered);
     }
     hipDevice_.eventNeverCompletes = true;
@@ -433,7 +436,7 @@ TEST_F(BufferRegistrationTest, TakingOverACopyDoesntAllocate)
     constexpr size_t        kCopies = 5;
     hipObj::BufferMap       buffers = makeBuffers();
     hipObj::AbandonedCopies abandoned(hip_);
-    ASSERT_EQ(buffers.registerHostBuffer(fakeAddress(0), 64, fakePd()), RegisterResult::Registered);
+    ASSERT_EQ(buffers.registerHostBuffer(fakeAddress(0), 64, fakePd()).result, RegisterResult::Registered);
     const auto entry = buffers.find(fakeAddress(0));
     ASSERT_NE(entry, nullptr);
     hipDevice_.eventNeverCompletes = true;

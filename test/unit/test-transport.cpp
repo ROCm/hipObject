@@ -845,16 +845,21 @@ TEST_P(TransportTransferTest, FailsWithoutConnections)
 TEST_P(TransportTransferTest, FailsOnErrorCompletion)
 {
     ASSERT_NO_FATAL_FAILURE(initForTransfers());
-    fake().pollStatus = IBV_WC_REM_ACCESS_ERR;
-    EXPECT_EQ(transfer().opError, hipObjRdmaError);
+    fake().pollStatus       = IBV_WC_REM_ACCESS_ERR;
+    const hipObjError_t err = transfer();
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    /* No HIP call failed */
+    EXPECT_EQ(err.hipError, 0);
 }
 
 TEST_P(TransportTransferTest, FailsWhenDeviceSyncFails)
 {
     /* A GPU-direct buffer is synchronized after the transfer */
     ASSERT_NO_FATAL_FAILURE(initForTransfers());
-    fake().deviceSyncErr = hipErrorLaunchFailure;
-    EXPECT_EQ(transfer().opError, hipObjRdmaError);
+    fake().deviceSyncErr    = hipErrorLaunchFailure;
+    const hipObjError_t err = transfer();
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorLaunchFailure));
 }
 
 TEST_P(TransportTransferTest, ReportsS3Failures)

@@ -114,6 +114,20 @@
   codes don't overlap errno values or HIP error codes. Code that uses the
   enumerators needs only to be recompiled; code that stored or compared
   the old numbers (1 to 12) has to use the new ones.
+- The `hipError` field of `hipObjError_t` now holds the error of the HIP
+  call that made a function fail, whenever one did. Before, only
+  `hipObjInit()`'s `hipGetDevice()` and `hipGetDeviceCount()` calls set
+  it. Now `hipObjInit()` sets it when it can't find the GPU's PCIe bus
+  ID; `hipObjBufRegister()` when it can't find the GPU allocation that
+  holds the buffer or allocate a host staging buffer; `hipObjGet()` and
+  `hipObjPut()` when they can't synchronize the device after a transfer
+  to or from GPU memory; and `hipObjGet()`, `hipObjPut()`, and
+  `hipObjBufSync()` when a copy to or from a staging buffer fails. It's
+  0 for every other error, as before.
+- When `hipObjInit()` can't find the PCIe bus ID of the GPU it chooses
+  a NIC for, and no NIC is named in `nicHint`, it returns
+  `hipObjRdmaError`, as it does when other HIP calls fail, rather than
+  `hipObjNicNotFound`.
 - hipObject is now built as plain C/C++ instead of HIP. It contains no GPU
   kernels, so the HIP language (and its per-architecture device compilation
   pass) is no longer enabled. The HIP runtime is still used via the

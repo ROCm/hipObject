@@ -91,7 +91,9 @@ TEST_F(RegistrationTest, FailsWhenStagingBufferCannotBeAllocated)
     ASSERT_NO_FATAL_FAILURE(init());
     fake().fail.registerAddr = kStagedBuf;
     fake().fail.hostMalloc   = true;
-    EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjRdmaError);
+    const hipObjError_t err  = hipObjBufRegister(kStagedBuf, kBufSize);
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorOutOfMemory));
     EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjBufNotRegistered);
 }
 
@@ -99,7 +101,10 @@ TEST_F(RegistrationTest, FailsWhenNothingCanBeRegistered)
 {
     ASSERT_NO_FATAL_FAILURE(init());
     fake().fail.registerAll = true;
-    EXPECT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjRdmaError);
+    /* No HIP call failed */
+    const hipObjError_t err = hipObjBufRegister(kStagedBuf, kBufSize);
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, 0);
     EXPECT_EQ(hipObjBufRegisterHost(kStagedBuf, kBufSize).opError, hipObjRdmaError);
     /* The device registration tried the caller's buffer and then the
      * staging buffer */
@@ -144,7 +149,10 @@ protected:
         options.stageTimeout = std::chrono::milliseconds(1);
         ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged(options));
         fake().eventNeverCompletes = true;
-        ASSERT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+        /* No HIP call failed */
+        const hipObjError_t err = sync(HIPOBJ_SYNC_TO_HOST);
+        ASSERT_EQ(err.opError, hipObjInternalError);
+        ASSERT_EQ(err.hipError, 0);
         ASSERT_EQ(fake().log.memcpy, 1);
     }
 
@@ -201,8 +209,10 @@ TEST_F(StagingTest, CopiesOnTheCallingThreadsStream)
 TEST_F(StagingTest, FailsWithoutEvent)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    fake().eventCreateErr = hipErrorOutOfMemory;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+    fake().eventCreateErr   = hipErrorOutOfMemory;
+    const hipObjError_t err = sync(HIPOBJ_SYNC_TO_HOST);
+    EXPECT_EQ(err.opError, hipObjInternalError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorOutOfMemory));
     EXPECT_EQ(fake().log.memcpy, 0);
     EXPECT_EQ(fake().log.eventDestroy, 0);
 }
@@ -210,14 +220,18 @@ TEST_F(StagingTest, FailsWithoutEvent)
 TEST_F(StagingTest, ReleasesEventWhenCopyCannotStart)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
-    fake().memcpyErr = hipErrorInvalidValue;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+    fake().memcpyErr  = hipErrorInvalidValue;
+    hipObjError_t err = sync(HIPOBJ_SYNC_TO_HOST);
+    EXPECT_EQ(err.opError, hipObjInternalError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorInvalidValue));
     EXPECT_EQ(fake().log.eventRecord, 0);
     EXPECT_EQ(fake().log.eventDestroy, 1);
 
     fake().memcpyErr      = hipSuccess;
-    fake().eventRecordErr = hipErrorInvalidValue;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+    fake().eventRecordErr = hipErrorInvalidHandle;
+    err                   = sync(HIPOBJ_SYNC_TO_HOST);
+    EXPECT_EQ(err.opError, hipObjInternalError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorInvalidHandle));
     EXPECT_EQ(fake().log.eventQuery, 0);
     EXPECT_EQ(fake().log.eventDestroy, 2);
 }
@@ -227,7 +241,9 @@ TEST_F(StagingTest, FailsAndReleasesEventWhenCopyFails)
     ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
     fake().eventNotReadyCount = 1;
     fake().eventQueryResult   = hipErrorLaunchFailure;
-    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjInternalError);
+    const hipObjError_t err   = sync(HIPOBJ_SYNC_TO_HOST);
+    EXPECT_EQ(err.opError, hipObjInternalError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorLaunchFailure));
     EXPECT_EQ(fake().log.eventDestroy, 1);
 }
 

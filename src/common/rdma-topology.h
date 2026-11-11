@@ -14,6 +14,8 @@
 #include <string>
 #include <string_view>
 
+#include <hip/hip_runtime_api.h>
+
 #include "gid.h"
 
 struct ibv_context;
@@ -61,13 +63,20 @@ struct RdmaNic {
  * bytes with its NUL. */
 inline constexpr size_t kPciBusIdBufLen = 32;
 
+/* What GetClosestNicToGpu() found: the NIC, or std::nullopt and, when
+ * the HIP runtime can't report the GPU's bus id, its error */
+struct ClosestNic {
+    std::optional<RdmaNic> nic;
+    hipError_t             hipError = hipSuccess;
+};
+
 /* The NIC in topology with a known PCIe bus id closest to the bus id
  * runtime reports for GPU gpuIndex, picking the first of the closest,
  * among the NICs that hcaList (comma-separated device names, or empty for
- * all) allows. std::nullopt when there's no such NIC or the GPU's bus id
- * can't be found. */
-std::optional<RdmaNic> GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology,
-                                          int gpuIndex, std::string_view hcaList);
+ * all) allows. No NIC when there's no such NIC or the GPU's bus id can't
+ * be found. */
+ClosestNic GetClosestNicToGpu(const HipRuntime &runtime, const NicTopology &topology, int gpuIndex,
+                              std::string_view hcaList);
 
 /* PickBestGid() over the GID table that verbs reports for port_num on
  * ctx's device, with each entry's RoCE version from topology.
