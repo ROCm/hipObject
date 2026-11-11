@@ -71,6 +71,12 @@ pollPause(std::chrono::steady_clock::duration elapsed) noexcept
  * at least once, even when timeout is zero, and no sleep is asked to last
  * past the deadline.
  *
+ * The time is checked before each poll, not after, so the last poll
+ * starts at or after the deadline. A result that's ready by the deadline
+ * is never missed, and one that's ready during that last poll is
+ * returned, though the deadline has passed. The work did finish, so
+ * reporting a timeout instead would fail a transfer that worked.
+ *
  * Poll is a template parameter, not a std::function, so a lambda passed
  * here is called directly, with no allocation. */
 template <typename Poll>
@@ -81,12 +87,12 @@ waitFor(std::chrono::steady_clock::duration timeout, const Poll &poll)
     using Clock                      = std::chrono::steady_clock;
     const Clock::time_point start    = Clock::now();
     const Clock::time_point deadline = start + timeout;
-    for (;;) {
+    for (Clock::time_point now = start;; now = Clock::now()) {
+        const bool expired = now >= deadline;
         if (auto result = poll()) {
             return result;
         }
-        const Clock::time_point now = Clock::now();
-        if (now >= deadline) {
+        if (expired) {
             return std::nullopt;
         }
         const PollPause pause = pollPause(now - start);

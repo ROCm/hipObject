@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <optional>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -26,6 +27,11 @@ using std::chrono::milliseconds;
 
 /* Long enough that no test reaches it */
 constexpr std::chrono::hours kNoTimeout{1};
+
+/* The timeout of PollsAgainAfterTheDeadline, and how long its first poll
+ * takes */
+constexpr milliseconds kShortTimeout{1};
+constexpr milliseconds kSlowPoll = 2 * kShortTimeout;
 
 } // namespace
 
@@ -100,6 +106,23 @@ TEST(WaitFor, TimesOutWithoutAResult)
     EXPECT_EQ(waitFor(kTimeout, poll), std::nullopt);
     EXPECT_GE(std::chrono::steady_clock::now() - start, kTimeout);
     EXPECT_GE(calls, 2);
+}
+
+/* A result that's ready when the deadline passes isn't missed: the poll
+ * that runs past the deadline is followed by one more */
+TEST(WaitFor, PollsAgainAfterTheDeadline)
+{
+    int        calls = 0;
+    const auto poll  = [&calls]() -> std::optional<int> {
+        if (++calls == 1) {
+            /* The result becomes ready while the first poll runs, which
+             * takes longer than the whole timeout */
+            std::this_thread::sleep_for(kSlowPoll);
+            return std::nullopt;
+        }
+        return calls;
+    };
+    EXPECT_EQ(waitFor(kShortTimeout, poll), 2);
 }
 
 TEST(WaitFor, PollsOnceWithNoTime)
