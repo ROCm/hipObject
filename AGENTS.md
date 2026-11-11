@@ -25,8 +25,6 @@ that will survive that move:
   `hipobj_add_*()` helpers, which give them the standard, warnings,
   hardening, and clang-tidy, and set flags per target, as
   `cmake/HIPOBJCompilerOptions.cmake` does, not globally.
-- **Some known issues are left for the move**, such as `off_t` in the public
-  header (see [Portability](#portability)).
 
 The same team writes two sister projects. **hipFile** (GPU-direct file I/O,
 in rocm-systems under
@@ -268,10 +266,10 @@ hipObject only builds on Linux, but may be built for Windows someday.
   and the `<cstdint>` fixed-width types, especially for values on the wire.
   Watch for `%ld` and `%lu` in the examples' `printf()` calls (use `PRIu64`
   and the like, or `%zu`), and for `L` and `UL` literal suffixes.
-- **`off_t` in the public header is a known exception**, to be fixed in
-  rocm-systems. Don't change it, and don't spread it into internal code: use
-  a fixed-width type there, and convert, with a range check, at the API
-  boundary.
+- **Don't use `off_t`**; it's 32 bits on Windows. Use `size_t` for an offset
+  into memory, and a fixed-width type for anything else. Don't add a
+  typedef for one to the public header either: applications may include it
+  with `hipfile.h`, which defines its own (`hoff_t`).
 - **Keep Linux-specific code behind the `Platform` interfaces**
   ([`src/state.h`](src/state.h)). Their production implementations
   (`SystemHip`; `LoadedVerbs`, which loads libibverbs with `dlopen()`; and
@@ -305,9 +303,9 @@ priority over speed and convenience.
   (`__builtin_add_overflow`, `__builtin_mul_overflow`, or comparing against
   the limit first). Check ranges before narrowing, such as a `uint64_t` into
   a 32-bit verbs length. Use `std::in_range` and the `std::cmp_*` functions
-  for signed/unsigned comparisons (`off_t` is signed). Avoid signed
-  overflow, shifts by a negative amount or by the type's width or more, and
-  casts of out-of-range values. No sanitizer reports unsigned wrap-around.
+  for signed/unsigned comparisons. Avoid signed overflow, shifts by a
+  negative amount or by the type's width or more, and casts of out-of-range
+  values. No sanitizer reports unsigned wrap-around.
 - **Bound every buffer.** No `strcpy`, `sprintf`, or unbounded `strcat`.
   Where the C API fills a caller's buffer (such as
   `hipObjTokenClientNic()`), respect its length and always NUL-terminate.

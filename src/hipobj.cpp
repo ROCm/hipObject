@@ -69,12 +69,9 @@ namespace {
 
     /* True when [offset, offset + size) lies inside a registration of regSize
      * bytes. Compares without computing offset + size, which could wrap. */
-    bool rangeInRegistration(off_t offset, size_t size, size_t regSize)
+    bool rangeInRegistration(size_t offset, size_t size, size_t regSize)
     {
-        if (offset < 0 || std::cmp_greater(offset, regSize)) {
-            return false;
-        }
-        return size <= regSize - static_cast<size_t>(offset);
+        return offset <= regSize && size <= regSize - offset;
     }
 
     /* Checks the arguments to a call that registers [ptr, ptr + size) */
@@ -124,9 +121,9 @@ namespace {
     /* Checks the arguments to a call that uses [offset, offset + size) of the
      * buffer registered at devPtr. buf is the instance's buffers.find(devPtr). */
     hipObjError_t checkBufferArgs(const void *devPtr, const BufferMap::BufEntry *buf, size_t size,
-                                  off_t offset)
+                                  size_t offset)
     {
-        if (devPtr == nullptr || size == 0 || offset < 0) {
+        if (devPtr == nullptr || size == 0) {
             return makeError(hipObjInvalidValue);
         }
         if (buf == nullptr) {
@@ -139,7 +136,7 @@ namespace {
     }
 
     std::optional<RdmaToken> buildRdmaToken(const RcConnection &conn, const BufferMap::BufEntry &buf,
-                                            size_t size, off_t offset)
+                                            size_t size, size_t offset)
     {
         if (!buf.mr) {
             return std::nullopt;
@@ -151,7 +148,7 @@ namespace {
             .qpNum      = conn.qp()->qp_num,
             .gid        = toGid(conn.device().localGid()),
             .rkey       = buf.mr->rkey,
-            .remoteAddr = buf.remoteAddr + static_cast<uint64_t>(offset),
+            .remoteAddr = buf.remoteAddr + offset,
             .length     = size,
             .transport  = TransportType::RC,
             .portNum    = conn.device().portNum(),
@@ -251,7 +248,7 @@ namespace {
      * staging buffer to the device memory at devPtr */
     hipObjError_t stageToDevice(Instance &instance, void *devPtr,
                                 const std::shared_ptr<const BufferMap::BufEntry> &buf, size_t size,
-                                off_t offset)
+                                size_t offset)
     {
         if (!buf->hostBuf) {
             /* the NIC writes the caller's memory */
@@ -261,18 +258,17 @@ namespace {
             return makeError(hipObjInvalidValue);
         }
         /* The device memory is only viewed for its bounds, never accessed here */
-        const auto host  = spanFromPointer(static_cast<const std::byte *>(buf->hostBuf.get()), buf->size);
-        const auto dev   = spanFromPointer(static_cast<std::byte *>(devPtr), buf->size);
-        const auto start = static_cast<size_t>(offset);
-        return stageCopyWithDeadline(instance, buf, dev.subspan(start, size).data(),
-                                     host.subspan(start, size).data(), size, hipMemcpyHostToDevice);
+        const auto host = spanFromPointer(static_cast<const std::byte *>(buf->hostBuf.get()), buf->size);
+        const auto dev  = spanFromPointer(static_cast<std::byte *>(devPtr), buf->size);
+        return stageCopyWithDeadline(instance, buf, dev.subspan(offset, size).data(),
+                                     host.subspan(offset, size).data(), size, hipMemcpyHostToDevice);
     }
 
     /* Copies [offset, offset + size) of a host-staged registration from the
      * device memory at devPtr to its staging buffer */
     hipObjError_t stageToHost(Instance &instance, const void *devPtr,
                               const std::shared_ptr<const BufferMap::BufEntry> &buf, size_t size,
-                              off_t offset)
+                              size_t offset)
     {
         if (!buf->hostBuf) {
             /* the NIC reads the caller's memory */
@@ -282,15 +278,14 @@ namespace {
             return makeError(hipObjInvalidValue);
         }
         /* The device memory is only viewed for its bounds, never accessed here */
-        const auto host  = spanFromPointer(static_cast<std::byte *>(buf->hostBuf.get()), buf->size);
-        const auto dev   = spanFromPointer(static_cast<const std::byte *>(devPtr), buf->size);
-        const auto start = static_cast<size_t>(offset);
-        return stageCopyWithDeadline(instance, buf, host.subspan(start, size).data(),
-                                     dev.subspan(start, size).data(), size, hipMemcpyDeviceToHost);
+        const auto host = spanFromPointer(static_cast<std::byte *>(buf->hostBuf.get()), buf->size);
+        const auto dev  = spanFromPointer(static_cast<const std::byte *>(devPtr), buf->size);
+        return stageCopyWithDeadline(instance, buf, host.subspan(offset, size).data(),
+                                     dev.subspan(offset, size).data(), size, hipMemcpyDeviceToHost);
     }
 
     hipObjError_t runRdmaTransfer(Instance &instance, const BufferMap::BufEntry &buf, size_t size,
-                                  off_t offset, const hipObjOps_t &ops, void *ctx)
+                                  size_t offset, const hipObjOps_t &ops, void *ctx)
     {
         /* Waits for a connection if every one is leased, unless this thread
          * already holds one. The lease returns it when it's destroyed, after
@@ -477,7 +472,7 @@ catch (...) {
  * which matches cuObject's API */
 // NOLINTBEGIN(misc-const-correctness)
 hipObjError_t
-hipObjGet([[maybe_unused]] hipObjHandle_t handle, void *devPtr, size_t size, off_t offset, hipObjOps_t *ops,
+hipObjGet([[maybe_unused]] hipObjHandle_t handle, void *devPtr, size_t size, size_t offset, hipObjOps_t *ops,
           void *ctx)
 // NOLINTEND(misc-const-correctness)
 try {
@@ -511,7 +506,7 @@ catch (...) {
  * which matches cuObject's API */
 // NOLINTBEGIN(misc-const-correctness)
 hipObjError_t
-hipObjPut([[maybe_unused]] hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset,
+hipObjPut([[maybe_unused]] hipObjHandle_t handle, const void *devPtr, size_t size, size_t offset,
           hipObjOps_t *ops, void *ctx)
 // NOLINTEND(misc-const-correctness)
 try {
@@ -542,7 +537,7 @@ catch (...) {
 }
 
 hipObjError_t
-hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction)
+hipObjBufSync(void *devPtr, size_t size, size_t offset, int direction)
 try {
     const std::shared_ptr<hipObj::Instance> instance = hipObj::currentInstance();
     if (!instance) {

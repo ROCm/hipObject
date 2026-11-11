@@ -25,7 +25,6 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
-#include <sys/types.h>
 
 #include "fake-device.h"
 #include "hipobj-address.h"
@@ -489,10 +488,10 @@ TEST_F(ApiArgsTest, DeregisterRejectsUnregisteredBuffer)
 
 // ---- hipObjGet and hipObjPut -------------------------------------
 
-using TransferFn = hipObjError_t (*)(void *, size_t, off_t, hipObjOps_t *);
+using TransferFn = hipObjError_t (*)(void *, size_t, size_t, hipObjOps_t *);
 
 hipObjError_t
-callGet(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops)
+callGet(void *devPtr, size_t size, size_t offset, hipObjOps_t *ops)
 {
     return hipObjGet(nullptr, devPtr, size, offset, ops, nullptr);
 }
@@ -500,7 +499,7 @@ callGet(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops)
 /* callPut() only reads devPtr, but it's a TransferFn, as callGet() is */
 // NOLINTBEGIN(misc-const-correctness)
 hipObjError_t
-callPut(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops)
+callPut(void *devPtr, size_t size, size_t offset, hipObjOps_t *ops)
 // NOLINTEND(misc-const-correctness)
 {
     return hipObjPut(nullptr, devPtr, size, offset, ops, nullptr);
@@ -508,7 +507,7 @@ callPut(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops)
 
 class TransferArgsTest : public ApiArgsTest, public ::testing::WithParamInterface<TransferFn> {
 protected:
-    static void expectRejected(void *devPtr, size_t size, off_t offset, hipObjOps_t *ops,
+    static void expectRejected(void *devPtr, size_t size, size_t offset, hipObjOps_t *ops,
                                hipObjOpError_t expected)
     {
         EXPECT_EQ(GetParam()(devPtr, size, offset, ops).opError, expected)
@@ -547,12 +546,13 @@ TEST_P(TransferArgsTest, RejectsZeroSize)
     expectRejected(kDevBuf, 0, 0, &ops, hipObjInvalidValue);
 }
 
-TEST_P(TransferArgsTest, RejectsNegativeOffset)
+TEST_P(TransferArgsTest, RejectsHugeOffset)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
     hipObjOps_t ops = makeOps();
-    expectRejected(kDevBuf, 1, -1, &ops, hipObjInvalidValue);
-    expectRejected(kDevBuf, 1, std::numeric_limits<off_t>::min(), &ops, hipObjInvalidValue);
+    /* A negative offset from the caller converts to a value like these */
+    expectRejected(kDevBuf, 1, std::numeric_limits<size_t>::max(), &ops, hipObjInvalidValue);
+    expectRejected(kDevBuf, 1, (std::numeric_limits<size_t>::max() / 2) + 1, &ops, hipObjInvalidValue);
 }
 
 TEST_P(TransferArgsTest, RejectsUnregisteredBuffer)
@@ -571,7 +571,7 @@ TEST_P(TransferArgsTest, RejectsRangeOutsideBuffer)
     expectRejected(kDevBuf, kBufSize + 1, 0, &ops, hipObjInvalidValue);
     expectRejected(kDevBuf, 2, kBufSize - 1, &ops, hipObjInvalidValue);
     expectRejected(kDevBuf, 1, kBufSize, &ops, hipObjInvalidValue);
-    expectRejected(kDevBuf, 1, std::numeric_limits<off_t>::max(), &ops, hipObjInvalidValue);
+    expectRejected(kDevBuf, 1, kBufSize + 1, &ops, hipObjInvalidValue);
 }
 
 TEST_P(TransferArgsTest, RejectsRangeThatWraps)
@@ -649,7 +649,8 @@ TEST_F(ApiArgsTest, SyncRejectsBadBufferArguments)
     for (const int direction : {HIPOBJ_SYNC_TO_HOST, HIPOBJ_SYNC_TO_DEVICE}) {
         EXPECT_EQ(hipObjBufSync(nullptr, kBufSize, 0, direction).opError, hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(kDevBuf, 0, 0, direction).opError, hipObjInvalidValue);
-        EXPECT_EQ(hipObjBufSync(kDevBuf, 1, -1, direction).opError, hipObjInvalidValue);
+        EXPECT_EQ(hipObjBufSync(kDevBuf, 1, std::numeric_limits<size_t>::max(), direction).opError,
+                  hipObjInvalidValue);
         EXPECT_EQ(hipObjBufSync(hipObjTest::fakeDevBufPlusOne(), 1, 0, direction).opError,
                   hipObjBufNotRegistered);
     }

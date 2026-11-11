@@ -23,7 +23,6 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
-#include <sys/types.h>
 
 #include "connection-pool.h"
 #include "fake-device.h"
@@ -912,7 +911,7 @@ TEST_F(TransportTest, InitCreatesAConnectionForEachTransferAndOneForTokens)
 TEST_F(TransportTest, SendsTokenForTheRegisteredRange)
 {
     ASSERT_NO_FATAL_FAILURE(initAndRegister());
-    constexpr off_t  kOffset = 16;
+    constexpr size_t kOffset = 16;
     constexpr size_t kSize   = kBufSize - 16;
 
     hipObjOps_t ops = makeOps();

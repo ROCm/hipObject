@@ -8,8 +8,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <sys/types.h>
-
 #if defined(__GNUC__)
 #define HIPOBJ_API __attribute__((visibility("default")))
 #else
@@ -443,7 +441,7 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * @return hipObjError_t
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t size, off_t offset,
+HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t size, size_t offset,
                                    hipObjOps_t *ops, void *ctx);
 
 /*!
@@ -486,7 +484,7 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * @return hipObjError_t
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, size_t size, off_t offset,
+HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, size_t size, size_t offset,
                                    hipObjOps_t *ops, void *ctx);
 
 /*! @brief hipObjBufSync direction: device -> staging buffer @ingroup io */
@@ -527,7 +525,7 @@ HIPOBJ_API hipObjError_t hipObjPut(hipObjHandle_t handle, const void *devPtr, si
  *
  * @ingroup io
  */
-HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, off_t offset, int direction);
+HIPOBJ_API hipObjError_t hipObjBufSync(void *devPtr, size_t size, size_t offset, int direction);
 
 /*!
  * @brief Mint a hex-encoded RC RDMA token for a registered buffer
