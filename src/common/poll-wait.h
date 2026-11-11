@@ -100,7 +100,11 @@ waitFor(std::chrono::steady_clock::duration timeout, const Poll &poll)
             std::this_thread::yield();
         }
         else if (pause.kind == PollPause::Kind::Sleep) {
-            std::this_thread::sleep_for(std::min(pause.sleep, deadline - now));
+            /* now was read before the poll, so a sleep for a time would
+             * add the poll's time to it, and could pass the deadline.
+             * Sleeping until a time measures the sleep from the poll's
+             * start instead, and stops it at the deadline. */
+            std::this_thread::sleep_until(std::min(now + pause.sleep, deadline));
         }
     }
 }
