@@ -85,15 +85,33 @@ TEST(ApiArgsErrorString, EveryCodeHasItsOwnString)
     }
 }
 
+/* The codes are part of the ABI, so a code's value must never change */
+static_assert(hipObjSuccess == 0);
+static_assert(hipObjInvalidValue == 6001);
+static_assert(hipObjNotInitialized == 6002);
+static_assert(hipObjAlreadyInitialized == 6003);
+static_assert(hipObjRdmaError == 6004);
+static_assert(hipObjS3Error == 6005);
+static_assert(hipObjBufNotRegistered == 6006);
+static_assert(hipObjBufAlreadyRegistered == 6007);
+static_assert(hipObjNicNotFound == 6008);
+static_assert(hipObjDmabufNotSupported == 6009);
+static_assert(hipObjSizeTooLarge == 6010);
+static_assert(hipObjInternalError == 6011);
+static_assert(hipObjBusy == 6012);
+
 TEST(ApiArgsErrorString, UnknownCode)
 {
     /* A C caller can pass any int. Copy its bits in the way C would see it,
-     * rather than casting a value no enumerator has. 15 stays within the
-     * 4 bits the enumerators need, which keeps it a valid value in C++. */
+     * rather than casting a value no enumerator has. Each value stays within
+     * the 13 bits the enumerators need, which keeps it a valid value in C++.
+     * 1 is below the base, the base itself isn't a code, and 6013 is the
+     * first number after the last code. */
     static_assert(sizeof(hipObjOpError_t) == sizeof(int));
-    const int  raw  = 15;
-    const auto code = std::bit_cast<hipObjOpError_t>(raw);
-    EXPECT_STREQ(hipObjGetErrorString(code), "Unknown error");
+    for (const int raw : {1, HIPOBJ_BASE_ERR, HIPOBJ_BASE_ERR + 13}) {
+        const auto code = std::bit_cast<hipObjOpError_t>(raw);
+        EXPECT_STREQ(hipObjGetErrorString(code), "Unknown error") << "code " << raw;
+    }
 }
 
 // ---- hipObjGetVersion --------------------------------------------

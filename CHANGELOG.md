@@ -98,6 +98,13 @@
 
 ### Changed
 
+- The `hipObjOpError_t` error codes now have explicit values, so adding
+  a code no longer renumbers the ones after it. `hipObjSuccess` is still
+  0, and every other code is now `HIPOBJ_BASE_ERR` (6000) plus a fixed
+  number, from `hipObjInvalidValue` (6001) to `hipObjBusy` (6012), so the
+  codes don't overlap errno values or HIP error codes. Code that uses the
+  enumerators needs only to be recompiled; code that stored or compared
+  the old numbers (1 to 12) has to use the new ones.
 - hipObject is now built as plain C/C++ instead of HIP. It contains no GPU
   kernels, so the HIP language (and its per-architecture device compilation
   pass) is no longer enabled. The HIP runtime is still used via the
