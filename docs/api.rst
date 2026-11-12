@@ -19,6 +19,13 @@ Thread Safety
    :desc-only:
    :no-title:
 
+API Versions
+------------
+
+.. doxygengroup:: versions
+   :desc-only:
+   :no-title:
+
 Errors and Error Handling
 -------------------------
 

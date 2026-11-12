@@ -4,6 +4,15 @@
 
 ### Added
 
+- The "API Versions" section of the API reference (the `versions` group in
+  `hipobj.h`) says how the API changes from hipObject 0.1.0 on. Once a
+  version is released, its functions keep their parameters and return
+  types, its structs keep their fields, and its error codes, and the
+  macros that functions take or return, keep their values, so an
+  application compiled with an older header works with a newer library. A
+  function or struct that has to change gets a new name with a version
+  number, such as `hipObjInit2()` and `hipObjConfig2_t`, and the old one
+  keeps working; only a new major version can remove it.
 - `hipobj-test-install`, a program in the runtime package, installed in
   `bin`. It will check that hipObject is installed and works, as far as
   the system's hardware allows, without an S3 server. For now it only
@@ -327,11 +336,9 @@
   finish within `HIPOBJ_STAGE_TIMEOUT_MS`, the call returns
   `hipObjInternalError` while the copy may still be using the buffer.
 - The `hipobj.h` documentation of `hipObjConfig_t` and `hipObjInit()` now
-  says what hipObject does with the configuration. It doesn't use
-  `endpoint`, `region`, `accessKey`, or `secretKey`, since the
-  application's S3 client makes the requests. A `gpuDevice` of -1 means
-  the calling thread's current HIP device, and on a host without a GPU,
-  `gpuDevice` has to be -1 and `nicHint` set. `nicHint` is a
+  says what hipObject does with the configuration. A `gpuDevice` of -1
+  means the calling thread's current HIP device, and on a host without a
+  GPU, `gpuDevice` has to be -1 and `nicHint` set. `nicHint` is a
   comma-separated list of the RDMA devices hipObject can choose from, or,
   when it can't choose by where the GPU is, the one device to open. The
   documentation of `hipObjInit()` lists the errors it returns, and the
@@ -379,6 +386,9 @@
 
 ### Removed
 
+- The `endpoint`, `region`, `accessKey`, and `secretKey` fields of
+  `hipObjConfig_t`. hipObject never used them, since the application's S3
+  client makes the S3 requests. Remove the code that sets them.
 - The `HIPOBJ_SANITIZER_TYPE` CMake cache variable. Use
   `HIPOBJ_USE_SANITIZERS` or `HIPOBJ_USE_THREAD_SANITIZER` instead.
   Configuring fails if it's set, so remove it from existing build

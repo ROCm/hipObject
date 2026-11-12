@@ -185,8 +185,6 @@ main(int argc, char *argv[])
 
     hipObjConfig_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.endpoint  = endpoint;
-    cfg.region    = "us-east-1";
     cfg.gpuDevice = 0;
     cfg.nicHint   = std::getenv("HIPOBJ_NIC_HINT");
 
@@ -240,6 +238,7 @@ main(int argc, char *argv[])
     {
         // Only --live uses these, and only with libcurl
         (void)live;
+        (void)endpoint;
         (void)bucket;
         (void)object;
         ops.sendRequest = stubSendRequest;

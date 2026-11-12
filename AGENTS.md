@@ -105,6 +105,22 @@ cmake --build build -j"$(nproc)"
   enumerators and their values, and macros. Don't rename, move, reorder, or
   restyle declarations as a side effect of other work. If a change seems to
   need an API change, ask first.
+- **Once a version is released, its API never changes; a change gets a new,
+  versioned name.** The header's `versions` group says what callers can rely
+  on. A released function keeps its parameters and return type, a struct
+  keeps its fields and layout, and the error codes, and the macros that
+  functions take or return, keep their values. To change a function or
+  struct, add a new one with a version number in its name, such as
+  `hipObjInit2()` taking a `hipObjConfig2_t`, as HDF5 does, and keep the old
+  one working, usually as a wrapper that converts its arguments and calls
+  the new one. Don't add size or version fields to structs. A field that's
+  no longer needed stays where it is, and is ignored, since older
+  applications still set it, until a new version of the struct drops it.
+- **[`test/unit/api-stability.cpp`](test/unit/api-stability.cpp) pins
+  the released API at compile time.** Add each function, struct, error code,
+  and macro that a change adds, and never change or remove what's there.
+  Until 0.1.0 is released, an approved API change can still change the API
+  in place, and updates the pins to match.
 - **The header's documentation comments can change without asking**, and
   should whenever a change makes them wrong or incomplete, such as a new
   requirement on callers or a new error. Check that the documentation still
