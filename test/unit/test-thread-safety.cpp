@@ -204,12 +204,20 @@ gateRecvReply(void *ctx, char *reply, size_t *replyLen)
     return plainRecvReply(ctx, reply, replyLen);
 }
 
+/* Callbacks for a transfer */
+constexpr hipObjOps_t
+opsWith(decltype(hipObjOps_t::sendRequest) sendRequest, decltype(hipObjOps_t::recvReply) recvReply)
+{
+    return {.structSize = sizeof(hipObjOps_t), .sendRequest = sendRequest, .recvReply = recvReply};
+}
+
 hipObjConfig_t
 makeConfig()
 {
     hipObjConfig_t config{};
-    config.gpuDevice = -1;
-    config.nicHint   = "mlx5_0";
+    config.structSize = sizeof(config);
+    config.gpuDevice  = -1;
+    config.nicHint    = "mlx5_0";
     return config;
 }
 
@@ -259,9 +267,9 @@ protected:
     std::shared_ptr<hipObjTest::FakePlatform<>> fakes_ =
         std::make_shared<hipObjTest::FakePlatform<>>(hipDevice_);
     std::vector<char> pool_        = std::vector<char>(kThreads * kBufSize);
-    hipObjOps_t       plainOps_    = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
-    hipObjOps_t       countingOps_ = {.sendRequest = &countingSendRequest, .recvReply = &plainRecvReply};
-    hipObjOps_t       gateOps_     = {.sendRequest = &gateSendRequest, .recvReply = &gateRecvReply};
+    hipObjOps_t       plainOps_    = opsWith(&plainSendRequest, &plainRecvReply);
+    hipObjOps_t       countingOps_ = opsWith(&countingSendRequest, &plainRecvReply);
+    hipObjOps_t       gateOps_     = opsWith(&gateSendRequest, &gateRecvReply);
 };
 
 // ---- Transfers ---------------------------------------------------------
@@ -328,7 +336,7 @@ TEST_F(ThreadSafetyTest, TransferWaitsForAConnectionWhenAllAreLeased)
 /* What nestedSendRequest() needs, and what it got */
 struct NestedProbe {
     void           *buffer   = nullptr;
-    hipObjOps_t     plainOps = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t     plainOps = opsWith(&plainSendRequest, &plainRecvReply);
     hipObjOpError_t result   = hipObjInternalError;
 };
 
@@ -350,7 +358,7 @@ TEST_F(ThreadSafetyTest, TransferFromACallbackIsBusyWhenNoConnectionIsFree)
 
     NestedProbe probe;
     probe.buffer    = buffer(1);
-    hipObjOps_t ops = {.sendRequest = &nestedSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t ops = opsWith(&nestedSendRequest, &plainRecvReply);
     EXPECT_EQ(hipObjGet(nullptr, buffer(0), kBufSize, 0, &ops, &probe).opError, hipObjSuccess);
     EXPECT_EQ(probe.result, hipObjBusy);
 
@@ -573,7 +581,7 @@ struct ReentryProbe {
     void       *registered = nullptr;
     void       *device     = nullptr;
     void       *host       = nullptr;
-    hipObjOps_t plainOps   = {.sendRequest = &plainSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t plainOps   = opsWith(&plainSendRequest, &plainRecvReply);
 
     std::vector<ReentrantCall> calls{};
     const char                *errorString = nullptr;
@@ -640,7 +648,7 @@ TEST_F(ThreadSafetyTest, CallbacksCanCallEveryFunction)
     probe.host       = buffer(2);
     ASSERT_NO_FATAL_FAILURE(registerBuffers(1));
 
-    hipObjOps_t ops = {.sendRequest = &reentrantSendRequest, .recvReply = &plainRecvReply};
+    hipObjOps_t ops = opsWith(&reentrantSendRequest, &plainRecvReply);
     EXPECT_EQ(hipObjGet(nullptr, probe.registered, kBufSize, 0, &ops, &probe).opError, hipObjSuccess);
 
     /* calls has every function but hipObjGetErrorString() and

@@ -31,6 +31,7 @@
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
+#include "sized-struct.h"
 #include "state.h"
 #include "token.h"
 
@@ -48,6 +49,35 @@ void *const kDevBuf = hipObjTest::fakeDevBuf();
 
 constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
 constexpr size_t kMaxMr   = 4ULL * 1024 * 1024 * 1024;
+
+/* structSize values that are never valid for a struct whose 0.1.0 size
+ * is minSize: smaller than that, or larger than any struct is allowed to
+ * be. None of them makes hipObject read past the struct, so they can be
+ * set in a struct of this version's size. */
+std::vector<size_t>
+badStructSizes(size_t minSize)
+{
+    return {
+        0, 1, sizeof(size_t), minSize - 1, hipObj::kMaxStructSize + 1, std::numeric_limits<size_t>::max(),
+    };
+}
+
+/* A T from a newer hipObject header, which has Extra bytes of fields that
+ * this version doesn't know after T's. Its structSize is its own size,
+ * and every byte is zero until a test sets one. */
+template <typename T, size_t Extra> struct NewerStruct {
+    explicit NewerStruct(const T &fields) : base(fields)
+    {
+        static_assert(sizeof(NewerStruct) == sizeof(T) + Extra, "NewerStruct has no padding");
+        base.structSize = sizeof(*this);
+    }
+
+    T                            base;
+    std::array<std::byte, Extra> newFields{};
+};
+
+/* The largest struct hipObject accepts */
+template <typename T> using LargestStruct = NewerStruct<T, hipObj::kMaxStructSize - sizeof(T)>;
 
 // ---- Fixture -----------------------------------------------------
 
@@ -221,15 +251,64 @@ TEST_F(ApiArgsTest, EverythingButInitNeedsInit)
 
 // ---- hipObjInit --------------------------------------------------
 
-/* hipObjInit() rejects a missing config, reserved flags, a negative device
- * other than -1, and a second initialization before it gets the system
- * platform, so those tests call it. The rest of its checks need the
- * platform, so their tests initialize with the fakes. */
+/* hipObjInit() rejects a missing config, a bad structSize, reserved flags,
+ * a negative device other than -1, and a second initialization before it
+ * gets the system platform, so those tests call it. The rest of its checks
+ * need the platform, so their tests initialize with the fakes. */
 
 TEST_F(ApiArgsTest, InitRejectsNullConfig)
 {
     EXPECT_EQ(hipObjInit(nullptr).opError, hipObjInvalidValue);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
+}
+
+/* hipObjInit() checks the config before it checks for an instance, so
+ * with one, a config that passes returns hipObjAlreadyInitialized rather
+ * than initializing with the system platform */
+
+TEST_F(ApiArgsTest, InitRejectsBadStructSize)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+
+    for (const size_t structSize : badStructSizes(hipObj::kConfigMinSize)) {
+        hipObjConfig_t config = makeConfig();
+        config.structSize     = structSize;
+        EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue) << "structSize " << structSize;
+    }
+
+    /* A config that was only zeroed */
+    hipObjConfig_t config{};
+    EXPECT_EQ(hipObjInit(&config).opError, hipObjInvalidValue);
+
+    config = makeConfig();
+    EXPECT_EQ(hipObjInit(&config).opError, hipObjAlreadyInitialized);
+}
+
+TEST_F(ApiArgsTest, InitAcceptsNewerConfigWithNewFieldsZero)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+
+    NewerStruct<hipObjConfig_t, 8> newer(makeConfig());
+    EXPECT_EQ(hipObjInit(&newer.base).opError, hipObjAlreadyInitialized);
+
+    LargestStruct<hipObjConfig_t> largest(makeConfig());
+    EXPECT_EQ(hipObjInit(&largest.base).opError, hipObjAlreadyInitialized);
+}
+
+TEST_F(ApiArgsTest, InitRejectsNewerConfigWithNewFieldsSet)
+{
+    ASSERT_NO_FATAL_FAILURE(init());
+
+    NewerStruct<hipObjConfig_t, 8> newer(makeConfig());
+    newer.newFields.back() = std::byte{1};
+    EXPECT_EQ(hipObjInit(&newer.base).opError, hipObjInvalidValue);
+
+    /* Every byte after the known fields is checked */
+    for (const size_t index : {size_t{0}, hipObj::kMaxStructSize - sizeof(hipObjConfig_t) - 1}) {
+        LargestStruct<hipObjConfig_t> largest(makeConfig());
+        largest.newFields.at(index) = std::byte{0x80};
+        EXPECT_EQ(hipObjInit(&largest.base).opError, hipObjInvalidValue) << "byte " << index;
+    }
 }
 
 TEST_F(ApiArgsTest, InitRejectsReservedFlags)
@@ -330,10 +409,11 @@ TEST_F(ApiArgsTest, InitReportsGpuBusIdFailure)
 
 TEST_F(ApiArgsTest, InitAcceptsOptionalFieldsUnset)
 {
-    /* endpoint, region, the keys, and the NIC hint may all be NULL. The
-     * GPU has a bus id, but the topology has no NIC. */
+    /* The NIC hint may be NULL. The GPU has a bus id, but the topology has
+     * no NIC. */
     fake().gpuBusId = "0000:42:00.0";
     hipObjConfig_t config{};
+    config.structSize       = sizeof(config);
     config.gpuDevice        = 0;
     const hipObjError_t err = initFakes(config);
     EXPECT_EQ(err.opError, hipObjNicNotFound);
@@ -556,6 +636,43 @@ TEST_P(TransferArgsTest, RejectsMissingCallbacks)
     ops           = makeOps();
     ops.recvReply = nullptr;
     expectRejected(kDevBuf, kBufSize, 0, &ops, hipObjInvalidValue);
+}
+
+TEST_P(TransferArgsTest, RejectsBadStructSize)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    for (const size_t structSize : badStructSizes(hipObj::kOpsMinSize)) {
+        hipObjOps_t ops = makeOps();
+        ops.structSize  = structSize;
+        expectRejected(kDevBuf, kBufSize, 0, &ops, hipObjInvalidValue);
+    }
+}
+
+TEST_P(TransferArgsTest, AcceptsNewerOpsWithNewFieldsZero)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    NewerStruct<hipObjOps_t, 8> newer(makeOps());
+    EXPECT_EQ(GetParam()(kDevBuf, kBufSize, 0, &newer.base).opError, hipObjSuccess);
+
+    LargestStruct<hipObjOps_t> largest(makeOps());
+    EXPECT_EQ(GetParam()(kDevBuf, kBufSize, 0, &largest.base).opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.sendRequest, 2);
+    EXPECT_EQ(fake().log.recvReply, 2);
+}
+
+TEST_P(TransferArgsTest, RejectsNewerOpsWithNewFieldsSet)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegister());
+    NewerStruct<hipObjOps_t, 8> newer(makeOps());
+    newer.newFields.back() = std::byte{1};
+    expectRejected(kDevBuf, kBufSize, 0, &newer.base, hipObjInvalidValue);
+
+    /* Every byte after the known fields is checked */
+    for (const size_t index : {size_t{0}, hipObj::kMaxStructSize - sizeof(hipObjOps_t) - 1}) {
+        LargestStruct<hipObjOps_t> largest(makeOps());
+        largest.newFields.at(index) = std::byte{0x80};
+        expectRejected(kDevBuf, kBufSize, 0, &largest.base, hipObjInvalidValue);
+    }
 }
 
 TEST_P(TransferArgsTest, RejectsNullPointer)

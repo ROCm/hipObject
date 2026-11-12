@@ -114,10 +114,8 @@ namespace {
                 initialized_ = false;
             }
             hipObjConfig_t cfg{};
-            endpoint_storage_ = (base_url.https ? "https://" : "http://") + base_url.host;
-            cfg.endpoint      = endpoint_storage_.c_str();
-            cfg.region        = base_url.region.c_str();
-            cfg.gpuDevice     = -1;
+            cfg.structSize = sizeof(cfg);
+            cfg.gpuDevice  = -1;
             // Without a GPU there is no topology to walk, so hipObjInit can only find
             // a NIC if it is named explicitly. Same variable the examples read.
             if (const char *hint = std::getenv("HIPOBJ_NIC_HINT"); hint != nullptr && *hint != '\0') {
@@ -151,7 +149,6 @@ namespace {
         mutable std::mutex mutex_{};
         bool               initialized_ = false;
         std::string        active_key_{};
-        std::string        endpoint_storage_{};
         std::string        nic_hint_storage_{};
     };
 
