@@ -162,6 +162,7 @@ jobs:
           - buffer_label: Host Buffer
             gpu_mode: nogpu
             allow_failure: false
+            client_timeout: 300
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container: &container
@@ -689,7 +690,8 @@ jobs:
         # continue-on-error below does not apply, steps.client.outcome is
         # 'cancelled' rather than 'failure', and the reporting step is
         # skipped. A wedge has to become a non-zero exit for any of the
-        # non-fatal handling to engage.
+        # non-fatal handling to engage. The guest-side bound is per matrix
+        # entry; see client_timeout.
         timeout-minutes: 10
         # TEMPORARY. The GPU buffer passed until HIPOBJ_REQUIRE_GPU_DIRECT
         # stopped the client staging a device buffer through host memory and
@@ -702,13 +704,14 @@ jobs:
         env:
           SSH_KEY: ${{ steps.guest_image.outputs.ssh_key }}
           VM_USER: ${{ steps.guest_image.outputs.vm_user }}
+          CLIENT_TIMEOUT: ${{ matrix.client_timeout }}
         run: |
           GPU_MODE="${{ matrix.gpu_mode }}"
           BUFFER_LABEL="${{ matrix.buffer_label }}"
           ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
               -p "$SSH_PORT" "${VM_USER}@localhost" \
-              "S3_ADDR='${S3_ADDR}' S3_PORT='${S3_PORT}' RDMA_DEVICE='${RDMA_DEVICE}' GPU_MODE='${GPU_MODE}' BUFFER_LABEL='${BUFFER_LABEL}' bash -s" << 'EOFVM'
+              "S3_ADDR='${S3_ADDR}' S3_PORT='${S3_PORT}' RDMA_DEVICE='${RDMA_DEVICE}' GPU_MODE='${GPU_MODE}' BUFFER_LABEL='${BUFFER_LABEL}' CLIENT_TIMEOUT='${CLIENT_TIMEOUT}' bash -s" << 'EOFVM'
           set -e
           chmod +x /tmp/minio-getput-rdma
           export LD_LIBRARY_PATH=/tmp/rocm-libs
@@ -735,19 +738,21 @@ jobs:
           echo "=== minio-getput-rdma, ${BUFFER_LABEL} (NIC $HIPOBJ_NIC_HINT) ==="
           rc=0
           if [ "$GPU_MODE" = gpu ]; then
-            sudo timeout 300 env LD_LIBRARY_PATH=/tmp/rocm-libs \
+            sudo timeout "${CLIENT_TIMEOUT}" env LD_LIBRARY_PATH=/tmp/rocm-libs \
                 HIPOBJ_NIC_HINT="$HIPOBJ_NIC_HINT" \
                 HIPOBJ_REQUIRE_GPU_DIRECT=1 \
                 /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
                 minioadmin minioadmin 65536 gpu > /tmp/getput.log 2>&1 || rc=$?
           else
-            sudo timeout 300 env LD_LIBRARY_PATH=/tmp/rocm-libs \
+            sudo timeout "${CLIENT_TIMEOUT}" env LD_LIBRARY_PATH=/tmp/rocm-libs \
                 HIPOBJ_NIC_HINT="$HIPOBJ_NIC_HINT" \
                 /tmp/minio-getput-rdma "${S3_ADDR}:${S3_PORT}" \
                 minioadmin minioadmin 65536 "${GPU_MODE}" > /tmp/getput.log 2>&1 || rc=$?
           fi
           cat /tmp/getput.log
-          if [ "$rc" -eq 124 ]; then echo "client hung and was killed after 300s"; fi
+          if [ "$rc" -eq 124 ]; then
+            echo "client hung and was killed after ${CLIENT_TIMEOUT}s"
+          fi
           if [ "$rc" -ne 0 ]; then
             if [ "$GPU_MODE" = gpu ]; then
               echo "=== HIP saw no device; agent enumeration ==="
@@ -782,9 +787,8 @@ jobs:
           Two signatures seen so far, and it is not known whether they share a
           cause. `RDMA PUT failed (-1)` at 65536 bytes, immediately; and a hang
           with no output at all after the client acquires a KFD VM, which the
-          `timeout 300` in the step above converts into exit 124. Check the
-          step log for `client hung and was killed after 300s` to tell them
-          apart.
+          client's `timeout` in the step above converts into exit 124. Check
+          the step log for `client hung and was killed` to tell them apart.
           EOF
       - name: Collect logs
         if: always()
@@ -820,7 +824,8 @@ jobs:
   # step's continue-on-error), so it runs nightly and on manual runs rather
   # than on every pull request and push, where it cost runner time and
   # reported nothing. When the transfer works, move this matrix entry back
-  # into the gpu-direct job with allow_failure false, and delete this job.
+  # into the gpu-direct job with allow_failure false and a client_timeout of
+  # 300, and delete this job.
   # ---------------------------------------------------------------------
   gpu-direct-gpu-buffer:
     name: GPU-Capable RDMA (GPU Buffer)
@@ -831,6 +836,10 @@ jobs:
           - buffer_label: GPU Buffer
             gpu_mode: gpu
             allow_failure: true
+            # When this known-failing transfer hangs rather than erroring,
+            # the job sits out the whole guest-side timeout. The transfer
+            # takes about a second when it doesn't hang, from either buffer.
+            client_timeout: 120
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container: *container
