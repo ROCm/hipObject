@@ -25,13 +25,18 @@ struct RdmaToken;
 /* A fixed set of connections on one device, for transfers to lease one at
  * a time each. Each connection has its own CQ, so a transfer only sees its
  * own completions, and its own QP, which the transfer can connect to the
- * peer the server names. A connection that was connected is reset to INIT
- * when its lease ends, so the next transfer can connect it to another
- * peer.
+ * peer the server names. A connection that was connected is replaced with
+ * a new one when its lease ends, so the next transfer can connect it to
+ * another peer.
  *
- * A connection that can't be reset is replaced with a new one, and one
- * that can't be replaced is dropped, so the pool can shrink. Several
- * threads can use it at once. */
+ * Replacing the connection, rather than moving its QP back to INIT through
+ * RESET, gives the next transfer a new QP, and drivers usually give a new
+ * QP a number that wasn't used recently. Every QP starts at PSN 0, so a
+ * late packet from the last peer, sent to a reused QP, could be taken for
+ * part of the next transfer.
+ *
+ * A connection that can't be replaced is dropped, so the pool can shrink.
+ * Several threads can use it at once. */
 class ConnectionPool {
 public:
     /* What each connection's CQ holds, and its QP's work requests. A
@@ -54,7 +59,7 @@ public:
     ConnectionPool &operator=(ConnectionPool &&)      = delete;
 
     /* One connection, for one transfer, from acquire(). It returns the
-     * connection to the pool when it's destroyed, after resetting it if
+     * connection to the pool when it's destroyed, after replacing it if
      * connect() was called. The pool has to outlive it, and it has to be
      * destroyed on the thread that acquired it, which it counts as holding
      * a lease until then (see acquire()). */
@@ -77,8 +82,8 @@ public:
         [[nodiscard]] RcConnection &connection() noexcept;
 
         /* connectRcPeer() on the connection. Whether or not it succeeds,
-         * the connection is reset when the lease ends, since a transition
-         * that failed may have followed one that didn't. */
+         * the connection is replaced when the lease ends, since a
+         * transition that failed may have followed one that didn't. */
         [[nodiscard]] bool connect(const RdmaToken &peerToken);
 
     private:
@@ -117,13 +122,13 @@ public:
 
 private:
     /* Takes back the connection at index, from a lease that's ending. If
-     * it was connected, it's reset, or replaced if it can't be, without
-     * holding mutex_; if it can't be replaced either, it's dropped. */
+     * it was connected, it's replaced without holding mutex_; if it can't
+     * be, it's dropped. */
     void release(size_t index, bool connected) noexcept HIPOBJ_REQUIRES(!mutex_);
 
-    /* Resets conn, or replaces it with a new connection. False, with conn
-     * empty, if neither works. */
-    [[nodiscard]] bool restore(std::optional<RcConnection> &conn) const noexcept;
+    /* Destroys conn and creates a new connection in its place. False, with
+     * conn empty, if the new one can't be created. */
+    [[nodiscard]] bool replace(std::optional<RcConnection> &conn) const noexcept;
 
     std::shared_ptr<const RdmaDevice> device_;
     /* One per connection the pool created. Its size never changes, so the

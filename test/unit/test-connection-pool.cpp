@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: MIT
  *
  * The connection pool that transfers lease their connections from:
- * creating the connections, leasing and returning them, resetting,
- * replacing, or dropping a connection that was connected, and waiting for
- * one, against the fake device in fake-device.h.
+ * creating the connections, leasing and returning them, replacing or
+ * dropping a connection that was connected, and waiting for one, against
+ * the fake device in fake-device.h.
  */
 
 #include <array>
@@ -18,6 +18,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -223,42 +224,9 @@ TEST_F(ConnectionPoolTest, MovingALeaseHandsOverTheConnection)
     EXPECT_EQ(pool->available(), 1U);
 }
 
-TEST_F(ConnectionPoolTest, ResetsAConnectedConnectionWhenItsReturned)
-{
-    const auto pool = makePool(1);
-    {
-        std::optional<Lease> lease = leaseFrom(*pool);
-        ASSERT_TRUE(lease);
-        ASSERT_TRUE(lease->connect(peerToken()));
-        EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_RTS);
-    }
-    EXPECT_EQ(pool->available(), 1U);
-    EXPECT_GT(fake().log.pollCq, 0);
-
-    /* It can connect again */
-    std::optional<Lease> lease = leaseFrom(*pool);
-    ASSERT_TRUE(lease);
-    EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_INIT);
-    EXPECT_TRUE(lease->connect(peerToken()));
-}
-
-TEST_F(ConnectionPoolTest, ResetsAConnectionThatFailedToConnect)
-{
-    const auto pool = makePool(1);
-    {
-        std::optional<Lease> lease = leaseFrom(*pool);
-        ASSERT_TRUE(lease);
-        fake().fail.modifyQpToState = IBV_QPS_RTS;
-        EXPECT_FALSE(lease->connect(peerToken()));
-        EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_RTR);
-        fake().fail.modifyQpToState = -1;
-    }
-    std::optional<Lease> lease = leaseFrom(*pool);
-    ASSERT_TRUE(lease);
-    EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_INIT);
-}
-
-TEST_F(ConnectionPoolTest, ReplacesAConnectionItCantReset)
+/* The connection is replaced, not moved back to INIT through RESET, so
+ * the next transfer gets a QP with a different number */
+TEST_F(ConnectionPoolTest, ReplacesAConnectedConnectionWhenItsReturned)
 {
     const auto pool  = makePool(2);
     uint32_t   qpNum = 0;
@@ -267,22 +235,46 @@ TEST_F(ConnectionPoolTest, ReplacesAConnectionItCantReset)
         ASSERT_TRUE(lease);
         qpNum = lease->connection().qp()->qp_num;
         ASSERT_TRUE(lease->connect(peerToken()));
-        fake().fail.modifyQpToState = IBV_QPS_RESET;
+        EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_RTS);
+        fake().modifyQpCount = 0;
     }
-    fake().fail.modifyQpToState = -1;
     EXPECT_EQ(fake().log.destroyQp, 1);
     EXPECT_EQ(fake().log.destroyCq, 1);
     EXPECT_EQ(fake().log.createQp, 3);
+    EXPECT_EQ(fake().log.createCq, 3);
+    EXPECT_EQ(fake().log.pollCq, 0);
+    const std::vector<hipObjTest::ModifyQpCall> calls = hipObjTest::modifyQpCalls();
+    ASSERT_EQ(calls.size(), 1U);
+    EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_INIT);
     EXPECT_EQ(pool->size(), 2U);
     EXPECT_EQ(pool->available(), 2U);
 
     /* The replacement is the connection returned last, so it's leased
-     * first */
+     * first, and it can connect */
     std::optional<Lease> lease = leaseFrom(*pool);
     ASSERT_TRUE(lease);
     EXPECT_NE(lease->connection().qp()->qp_num, qpNum);
     EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_INIT);
     EXPECT_TRUE(lease->connect(peerToken()));
+}
+
+TEST_F(ConnectionPoolTest, ReplacesAConnectionThatFailedToConnect)
+{
+    const auto pool  = makePool(1);
+    uint32_t   qpNum = 0;
+    {
+        std::optional<Lease> lease = leaseFrom(*pool);
+        ASSERT_TRUE(lease);
+        qpNum                       = lease->connection().qp()->qp_num;
+        fake().fail.modifyQpToState = IBV_QPS_RTS;
+        EXPECT_FALSE(lease->connect(peerToken()));
+        EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_RTR);
+        fake().fail.modifyQpToState = -1;
+    }
+    std::optional<Lease> lease = leaseFrom(*pool);
+    ASSERT_TRUE(lease);
+    EXPECT_NE(lease->connection().qp()->qp_num, qpNum);
+    EXPECT_EQ(lease->connection().qp()->state, IBV_QPS_INIT);
 }
 
 TEST_F(ConnectionPoolTest, DropsAConnectionItCantReplace)
@@ -293,8 +285,7 @@ TEST_F(ConnectionPoolTest, DropsAConnectionItCantReplace)
             std::optional<Lease> lease = leaseFrom(*pool);
             ASSERT_TRUE(lease);
             ASSERT_TRUE(lease->connect(peerToken()));
-            fake().fail.modifyQpToState = IBV_QPS_RESET;
-            fake().fail.createQp        = true;
+            fake().fail.createQp = true;
         }
         EXPECT_EQ(pool->size(), 1U);
         EXPECT_EQ(pool->available(), 1U);
@@ -319,8 +310,7 @@ TEST_F(ConnectionPoolTest, DropsAConnectionWhoseReplacementThrows)
         std::optional<Lease> lease = leaseFrom(pool);
         ASSERT_TRUE(lease);
         ASSERT_TRUE(lease->connect(peerToken()));
-        fake().fail.modifyQpToState = IBV_QPS_RESET;
-        throwingVerbs.throws        = true;
+        throwingVerbs.throws = true;
     }
     EXPECT_EQ(pool.size(), 0U);
     EXPECT_EQ(acquireError(pool), AcquireError::NoConnections);
@@ -379,8 +369,7 @@ TEST_F(ConnectionPoolTest, DroppingTheLastConnectionStopsAcquireWaiting)
     std::optional<AcquireError> err;
     std::jthread                waiter([&] { err = acquireError(*pool); });
     std::this_thread::sleep_for(kStillWaiting);
-    fake().fail.modifyQpToState = IBV_QPS_RESET;
-    fake().fail.createQp        = true;
+    fake().fail.createQp = true;
     held.reset();
     waiter.join();
     EXPECT_EQ(err, AcquireError::NoConnections);
@@ -470,7 +459,27 @@ TEST_F(ConnectionPoolTest, LeasesFromManyThreads)
     constexpr int    kThreads     = 8;
     constexpr int    kIterations  = 50;
     const auto       pool         = makePool(kConnections);
-    const uint32_t   firstQpNum   = fake().nextQpNum - static_cast<uint32_t>(kConnections);
+
+    /* Each connection's address. A QP's number changes each time its
+     * connection is replaced, but the connection is replaced in its slot,
+     * so its address doesn't change. */
+    std::array<const hipObj::RcConnection *, kConnections> conns{};
+    {
+        std::vector<Lease> leases;
+        for (const hipObj::RcConnection *&conn : conns) {
+            std::optional<Lease> lease = leaseFrom(*pool);
+            ASSERT_TRUE(lease);
+            conn = &lease->connection();
+            leases.push_back(std::move(*lease));
+        }
+    }
+    const auto indexOf = [&conns](const hipObj::RcConnection &conn) {
+        size_t index = 0;
+        while (index < conns.size() && conns.at(index) != &conn) {
+            ++index;
+        }
+        return index;
+    };
 
     std::array<std::atomic<bool>, kConnections> held{};
     std::atomic<int>                            overlaps{0};
@@ -482,7 +491,7 @@ TEST_F(ConnectionPoolTest, LeasesFromManyThreads)
                 for (int i = 0; i < kIterations; ++i) {
                     std::optional<Lease> lease = leaseFrom(*pool);
                     ASSERT_TRUE(lease);
-                    const size_t index = lease->connection().qp()->qp_num - firstQpNum;
+                    const size_t index = indexOf(lease->connection());
                     ASSERT_LT(index, kConnections);
                     if (held.at(index).exchange(true)) {
                         ++overlaps;

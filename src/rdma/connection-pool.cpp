@@ -126,12 +126,9 @@ ConnectionPool::available() const
 }
 
 bool
-ConnectionPool::restore(std::optional<RcConnection> &conn) const noexcept
+ConnectionPool::replace(std::optional<RcConnection> &conn) const noexcept
 {
     try {
-        if (conn && resetRcConnection(*conn)) {
-            return true;
-        }
         /* The old QP and CQ are destroyed before the new ones are created */
         conn.reset();
         std::optional<RcConnection> fresh = createRcConnection(*device_, kCqSize, kMaxSendWr, kMaxRecvWr);
@@ -151,7 +148,7 @@ ConnectionPool::restore(std::optional<RcConnection> &conn) const noexcept
 void
 ConnectionPool::release(size_t index, bool connected) noexcept
 {
-    const bool usable = !connected || restore(slots_[index]);
+    const bool usable = !connected || replace(slots_[index]);
 
     size_t left = 0;
     {
@@ -176,8 +173,8 @@ ConnectionPool::release(size_t index, bool connected) noexcept
         returned_.notify_all();
     }
     printTo(stderr,
-            "hipObj: could neither reset nor replace an RDMA connection after a transfer, so it's "
-            "dropped; {} of {} are left.\n",
+            "hipObj: could not replace an RDMA connection after a transfer, so it's dropped; {} of "
+            "{} are left.\n",
             left, slots_.size());
 }
 
