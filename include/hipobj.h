@@ -88,7 +88,11 @@ extern "C" {
  * synchronization after a GPU-direct transfer, on the GPU that holds the
  * buffer, and then makes the thread's own device current again. A thread
  * can use buffers on any GPU, whichever device it has made current, and
- * the callbacks run with the thread's own device current.
+ * the callbacks run with the thread's own device current. If HIP fails to
+ * make the thread's device current again, which it shouldn't, hipObject
+ * reports it on stderr, and the call's result doesn't change: the thread
+ * is left on the buffer's GPU for the rest of the call, including its
+ * callbacks, and after it returns.
  *
  * **Shutdown.** hipObjShutdown() doesn't wait for the calls in progress.
  * They finish normally, and hipObject releases its RDMA resources and
