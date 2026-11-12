@@ -241,6 +241,7 @@ main(int argc, char *argv[])
     {
         // Only --live uses these, and only with libcurl
         (void)live;
+        (void)endpoint;
         (void)bucket;
         (void)object;
         ops.sendRequest = stubSendRequest;
