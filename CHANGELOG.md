@@ -98,19 +98,6 @@
 
 ### Changed
 
-- `hipObjConfig_t` and `hipObjOps_t` now start with a `structSize` field,
-  which the application sets to the size of the struct, as in
-  `config.structSize = sizeof(hipObjConfig_t)`, so that later versions of
-  hipObject can add fields to the end of them. hipObject reads a struct
-  from an older header only up to its `structSize`, and treats the
-  fields after that as zero. It accepts a struct from a newer header if
-  every byte after the fields it knows is zero. `hipObjInit()`,
-  `hipObjGet()`, and `hipObjPut()` return `hipObjInvalidValue` if
-  `structSize` is smaller than the struct in this version, as it is in a
-  struct that's only been zeroed, or larger than 4096, or if a newer
-  struct has a field this version doesn't know set. Every application has
-  to set `structSize` and be recompiled. The "Struct Sizes" section of the
-  API reference has the rules, and the examples set it.
 - The `offset` parameter of `hipObjGet()`, `hipObjPut()`, and
   `hipObjBufSync()`, the byte offset into the registered buffer, is now a
   `size_t` instead of an `off_t`, which is signed and 32 bits on Windows.
@@ -392,9 +379,6 @@
 
 ### Removed
 
-- The `endpoint`, `region`, `accessKey`, and `secretKey` fields of
-  `hipObjConfig_t`. hipObject never used them, since the application's S3
-  client makes the S3 requests. Remove the code that sets them.
 - The `HIPOBJ_SANITIZER_TYPE` CMake cache variable. Use
   `HIPOBJ_USE_SANITIZERS` or `HIPOBJ_USE_THREAD_SANITIZER` instead.
   Configuring fails if it's set, so remove it from existing build

@@ -603,9 +603,8 @@ TEST(PlatformTest, SystemPlatformIsTheSystem)
 TEST(PlatformTest, InitUsesTheSystemPlatform)
 {
     hipObjConfig_t config{};
-    config.structSize = sizeof(config);
-    config.gpuDevice  = -1;
-    config.nicHint    = "hipobj_no_such_nic";
+    config.gpuDevice = -1;
+    config.nicHint   = "hipobj_no_such_nic";
     EXPECT_EQ(hipObjInit(&config).opError, hipObjRdmaError);
     EXPECT_EQ(hipObj::currentInstance(), nullptr);
 }
@@ -722,7 +721,6 @@ namespace {
         ASSERT_EQ(hipObjBufRegisterHost(hostBuf.data(), hostBuf.size()).opError, hipObjSuccess);
 
         hipObjOps_t ops{};
-        ops.structSize  = sizeof(ops);
         ops.sendRequest = &fakeSendRequest;
         ops.recvReply   = &fakeRecvReply;
 
@@ -744,7 +742,6 @@ namespace {
         ASSERT_EQ(hipObjBufRegister(gpuBuf, 64).opError, hipObjSuccess);
 
         hipObjOps_t ops{};
-        ops.structSize  = sizeof(ops);
         ops.sendRequest = &fakeSendRequest;
         ops.recvReply   = &fakeRecvReply;
 

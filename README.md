@@ -145,7 +145,7 @@ int
 main(void)
 {
     /* Use GPU 0 and the RDMA NIC closest to it */
-    hipObjConfig_t config = {.structSize = sizeof(hipObjConfig_t), .gpuDevice = 0, .nicHint = NULL};
+    hipObjConfig_t config = {.gpuDevice = 0, .nicHint = NULL};
     hipObjError_t  err    = hipObjInit(&config);
     if (err.opError != hipObjSuccess) {
         fprintf(stderr, "hipObjInit: %s\n", hipObjGetErrorString(err.opError));
@@ -163,9 +163,8 @@ main(void)
     if (err.opError == hipObjSuccess) {
         /* Read BUF_SIZE bytes into the start of gpuBuf. The handle isn't
          * used, and ctx (here NULL) is passed to the callbacks. */
-        hipObjOps_t ops = {
-            .structSize = sizeof(hipObjOps_t), .sendRequest = sendRequest, .recvReply = recvReply};
-        err = hipObjGet(NULL, gpuBuf, BUF_SIZE, 0, &ops, NULL);
+        hipObjOps_t ops = {.sendRequest = sendRequest, .recvReply = recvReply};
+        err             = hipObjGet(NULL, gpuBuf, BUF_SIZE, 0, &ops, NULL);
 
         /* If a copy through host memory timed out, it can still write
          * gpuBuf, and deregistering returns hipObjBusy until it's done.
