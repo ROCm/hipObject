@@ -53,9 +53,6 @@ hipobj_add_test(test-rdma-token
 hipobj_add_test(test-parse-number
   test-parse-number.cpp)
 
-hipobj_add_test(test-sized-struct
-  test-sized-struct.cpp)
-
 hipobj_add_fake_device_test(test-span
   test-span.cpp)
 

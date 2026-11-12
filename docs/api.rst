@@ -19,13 +19,6 @@ Thread Safety
    :desc-only:
    :no-title:
 
-Struct Sizes
-------------
-
-.. doxygengroup:: structsize
-   :desc-only:
-   :no-title:
-
 Errors and Error Handling
 -------------------------
 

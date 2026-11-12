@@ -169,10 +169,9 @@ struct Instance final {
 std::shared_ptr<Instance> currentInstance();
 
 /* hipObjInit(), with its platform and options given: builds an Instance
- * that holds them, and makes it the current one. The caller has read and
- * checked config as hipObjInit() does (see readSizedStruct()). Returns
- * hipObjAlreadyInitialized if there's already an instance. Throws only
- * before anything changes.
+ * that holds them, and makes it the current one. The caller has checked
+ * config as hipObjInit() does. Returns hipObjAlreadyInitialized if there's
+ * already an instance. Throws only before anything changes.
  *
  * It runs one at a time with shutdownInstance(), so of several calls at
  * once, only one opens a device and succeeds.

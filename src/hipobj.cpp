@@ -36,7 +36,6 @@
 #include "ibv-gid.h"
 #include "ibv-ptr.h"
 #include "poll-wait.h"
-#include "sized-struct.h"
 #include "state.h"
 #include "token.h"
 #include "transport.h"
@@ -352,18 +351,6 @@ namespace {
                                         instance.options.pollTimeout);
     }
 
-    /* A copy of the application's callbacks (see readSizedStruct()), or
-     * nullopt if ops is null, its structSize isn't valid, or a callback is
-     * null */
-    std::optional<hipObjOps_t> readOps(const hipObjOps_t *ops) noexcept
-    {
-        std::optional<hipObjOps_t> copy = readSizedStruct<hipObjOps_t, kOpsMinSize>(ops);
-        if (copy && (copy->sendRequest == nullptr || copy->recvReply == nullptr)) {
-            copy.reset();
-        }
-        return copy;
-    }
-
 } // namespace
 
 } // namespace hipObj
@@ -417,10 +404,8 @@ hipObjError_t
 hipObjInit(hipObjConfig_t *config)
 // NOLINTEND(misc-const-correctness)
 try {
-    const std::optional<hipObjConfig_t> copy =
-        hipObj::readSizedStruct<hipObjConfig_t, hipObj::kConfigMinSize>(config);
     // flags is reserved, and -1 is the only negative gpuDevice
-    if (!copy || copy->flags != 0 || copy->gpuDevice < -1) {
+    if (config == nullptr || config->flags != 0 || config->gpuDevice < -1) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     if (hipObj::currentInstance() != nullptr) {
@@ -432,7 +417,7 @@ try {
     }
     /* std::getenv is called through a lambda, since C++ doesn't allow
      * taking the address of most standard library functions */
-    return hipObj::initWith(*copy, std::move(platform), hipObj::parseOptions([](const char *name) noexcept {
+    return hipObj::initWith(*config, std::move(platform), hipObj::parseOptions([](const char *name) noexcept {
         return std::getenv(name);
     }));
 }
@@ -529,8 +514,7 @@ try {
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    const std::optional<hipObjOps_t> callbacks = hipObj::readOps(ops);
-    if (!callbacks) {
+    if (ops == nullptr || ops->sendRequest == nullptr || ops->recvReply == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     const auto    buf = instance->buffers.find(devPtr);
@@ -542,7 +526,7 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    err = hipObj::runRdmaTransfer(*instance, *buf, size, offset, *callbacks, ctx);
+    err = hipObj::runRdmaTransfer(*instance, *buf, size, offset, *ops, ctx);
     if (err.opError != hipObjSuccess) {
         return err;
     }
@@ -564,8 +548,7 @@ try {
     if (!instance) {
         return hipObj::makeError(hipObjNotInitialized);
     }
-    const std::optional<hipObjOps_t> callbacks = hipObj::readOps(ops);
-    if (!callbacks) {
+    if (ops == nullptr || ops->sendRequest == nullptr || ops->recvReply == nullptr) {
         return hipObj::makeError(hipObjInvalidValue);
     }
     const auto    buf = instance->buffers.find(devPtr);
@@ -581,7 +564,7 @@ try {
     if (err.opError != hipObjSuccess) {
         return err;
     }
-    return hipObj::runRdmaTransfer(*instance, *buf, size, offset, *callbacks, ctx);
+    return hipObj::runRdmaTransfer(*instance, *buf, size, offset, *ops, ctx);
 }
 catch (...) {
     return hipObj::kExceptionError;

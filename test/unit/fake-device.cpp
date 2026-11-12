@@ -522,7 +522,6 @@ hipObjOps_t
 makeOps()
 {
     hipObjOps_t ops{};
-    ops.structSize  = sizeof(ops);
     ops.sendRequest = &fakeSendRequest;
     ops.recvReply   = &fakeRecvReply;
     return ops;
@@ -570,9 +569,8 @@ hipObjConfig_t
 FakeDeviceTest::makeConfig()
 {
     hipObjConfig_t config{};
-    config.structSize = sizeof(config);
-    config.gpuDevice  = -1;
-    config.nicHint    = "mlx5_0";
+    config.gpuDevice = -1;
+    config.nicHint   = "mlx5_0";
     return config;
 }
 

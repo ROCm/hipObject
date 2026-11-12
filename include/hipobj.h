@@ -26,7 +26,6 @@ extern "C" {
  * @section contents Contents
  * - @ref core
  * - @ref threads
- * - @ref structsize
  * - @ref error
  * - @ref buffer
  * - @ref io
@@ -101,32 +100,6 @@ extern "C" {
  * application must also make sure that such transfers don't overlap
  * each other. They can overlap hipObjGet() and hipObjPut() transfers,
  * which use connections of their own.
- */
-
-/*!
- * @defgroup structsize Struct Sizes
- *
- * hipObjConfig_t and hipObjOps_t start with structSize, which the
- * application sets to the size of the struct, as in
- * `config.structSize = sizeof(hipObjConfig_t)`. A later version of
- * hipObject can add fields to the end of either struct. structSize tells
- * hipObject which version of the struct the application was compiled
- * with, so adding a field doesn't break an application compiled with an
- * older or a newer header.
- *
- * - **A struct from an older hipObject header** is shorter. hipObject
- *   reads only the structSize bytes the application gave it, and treats
- *   the fields after them as 0 or NULL. A field that a later version adds
- *   does what the version before it did when it's 0 or NULL.
- * - **A struct from a newer hipObject header** is longer. hipObject
- *   accepts it if every byte after the fields it knows is 0, and returns
- *   hipObjInvalidValue otherwise, rather than ignore a field it doesn't
- *   know. So set the whole struct to zero, for example with a designated
- *   initializer or memset(), before setting its fields.
- * - hipObject returns hipObjInvalidValue if structSize is smaller than
- *   the struct in hipObject 0.1.0, the first version with structSize, or
- *   larger than 4096. A struct that's all zero, with structSize left at
- *   0, is rejected.
  */
 
 /* -------------------------------------------------------
@@ -249,18 +222,12 @@ typedef void *hipObjHandle_t;
  * and receive RDMA reply tags from the server.  This
  * mirrors cuObject's CUObjOps_t pattern.
  *
- * Set structSize to sizeof(hipObjOps_t) (see
- * @ref structsize).
- *
  * The callbacks can call any hipObject function; see
  * @ref threads.
  *
  * @ingroup core
  */
 typedef struct {
-    /*! sizeof(hipObjOps_t) (see @ref structsize) */
-    size_t structSize;
-
     /*!
      * Called by hipObject to send the RDMA token.
      * The application should embed the token in the
@@ -289,10 +256,8 @@ typedef struct {
 /*!
  * @brief Configuration for hipObject initialization
  *
- * hipObject doesn't make S3 requests, so the configuration has no S3
- * endpoint or credentials: the application's S3 client has those.
- *
- * Set structSize to sizeof(hipObjConfig_t) (see @ref structsize).
+ * hipObject doesn't make S3 requests, so it doesn't use endpoint,
+ * region, accessKey, or secretKey: the application's S3 client does.
  *
  * gpuDevice is the HIP device index of the GPU that hipObject chooses
  * the closest RDMA NIC to, or -1 for the calling thread's current
@@ -309,10 +274,13 @@ typedef struct {
  * @ingroup core
  */
 typedef struct {
-    size_t      structSize; /*!< sizeof(hipObjConfig_t)     */
-    uint32_t    flags;      /*!< Reserved, set to 0         */
-    int         gpuDevice;  /*!< HIP device index, or -1    */
-    const char *nicHint;    /*!< RDMA NIC names, or NULL    */
+    const char *endpoint;  /*!< Not used                  */
+    const char *region;    /*!< Not used                  */
+    const char *accessKey; /*!< Not used                  */
+    const char *secretKey; /*!< Not used                  */
+    uint32_t    flags;     /*!< Reserved, set to 0        */
+    int         gpuDevice; /*!< HIP device index, or -1   */
+    const char *nicHint;   /*!< RDMA NIC names, or NULL   */
 } hipObjConfig_t;
 
 /*! @brief RDMA token operation: server RDMA READ (client PUT) @ingroup io */
@@ -346,8 +314,7 @@ typedef struct {
  * don't change the environment on another thread
  * while it runs (see @ref threads).
  *
- * Returns hipObjInvalidValue if config is NULL, its
- * structSize isn't valid (see @ref structsize), flags
+ * Returns hipObjInvalidValue if config is NULL, flags
  * isn't 0, or gpuDevice is below -1 or names a GPU that
  * doesn't exist; hipObjAlreadyInitialized if hipObject
  * is already initialized; hipObjNicNotFound if there's
@@ -454,10 +421,6 @@ HIPOBJ_API hipObjError_t hipObjBufDeregister(void *devPtr);
  * buffer is still running when you call this. When it
  * returns hipObjSuccess, the data is in the buffer.
  *
- * Returns hipObjInvalidValue if ops is NULL, its
- * structSize isn't valid (see @ref structsize), or
- * either callback is NULL.
- *
  * If every RDMA connection is in use by other
  * transfers, this waits for one to be free, or, if
  * it's called from a callback, returns hipObjBusy
@@ -500,10 +463,6 @@ HIPOBJ_API hipObjError_t hipObjGet(hipObjHandle_t handle, void *devPtr, size_t s
  * buffer, on any stream. Make sure that it has finished,
  * for example with hipStreamSynchronize(), before you
  * call this.
- *
- * Returns hipObjInvalidValue if ops is NULL, its
- * structSize isn't valid (see @ref structsize), or
- * either callback is NULL.
  *
  * If every RDMA connection is in use by other
  * transfers, this waits for one to be free, or, if
