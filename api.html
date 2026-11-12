@@ -376,22 +376,23 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MINOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MINOR</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_PATCH"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_PATCH</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9accessKeyE"><code class="docutils literal notranslate"><span class="pre">accessKey</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t5flagsE"><code class="docutils literal notranslate"><span class="pre">flags</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9gpuDeviceE"><code class="docutils literal notranslate"><span class="pre">gpuDevice</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t7nicHintE"><code class="docutils literal notranslate"><span class="pre">nicHint</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t10structSizeE"><code class="docutils literal notranslate"><span class="pre">structSize</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t6regionE"><code class="docutils literal notranslate"><span class="pre">region</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9secretKeyE"><code class="docutils literal notranslate"><span class="pre">secretKey</span></code></a></li>
 </ul>
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOps_t"><code class="docutils literal notranslate"><span class="pre">hipObjOps_t</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t9recvReplyE"><code class="docutils literal notranslate"><span class="pre">recvReply</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t11sendRequestE"><code class="docutils literal notranslate"><span class="pre">sendRequest</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t10structSizeE"><code class="docutils literal notranslate"><span class="pre">structSize</span></code></a></li>
 </ul>
 </li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#thread-safety">Thread Safety</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#struct-sizes">Struct Sizes</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#errors-and-error-handling">Errors and Error Handling</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv415hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpError_t</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjSuccessE"><code class="docutils literal notranslate"><span class="pre">hipObjSuccess</span></code></a></li>
@@ -492,7 +493,7 @@ rendered via Breathe.</p>
 <p>Selects the closest NIC to the GPU (see <a class="reference internal" href="#structhipObjConfig__t"><span class="std std-ref">hipObjConfig_t</span></a>), opens it, and creates the RDMA connections that transfers use (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
 <p><a class="reference internal" href="#group__error_1ga3d847cc075755e1e3cc4ca1a21e24f52"><span class="std std-ref">hipObjGetErrorString()</span></a>, <a class="reference internal" href="#group__core_1ga9e1534d88db59149240b934840c70391"><span class="std std-ref">hipObjGetVersionString()</span></a>, <a class="reference internal" href="#group__core_1ga6b3dfa4a04d7cbb5fb16d79f090a5c1d"><span class="std std-ref">hipObjGetVersion()</span></a>, <a class="reference internal" href="#group__io_1ga3878729f7564208a6160f667aea8a500"><span class="std std-ref">hipObjParseRdmaReply()</span></a>, <a class="reference internal" href="#group__io_1ga85ce7d367ff2f1fe671d1e41c37fb8f0"><span class="std std-ref">hipObjTokenClientNic()</span></a>, and <a class="reference internal" href="#group__io_1gaae230e1f71aa7243d882deff8ff4efcf"><span class="std std-ref">hipObjPutRdmaToken()</span></a> work without it, and <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> does nothing without it. The other functions return hipObjNotInitialized until it has succeeded.</p>
 <p>It reads hipObject’s environment variables, so don’t change the environment on another thread while it runs (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
-<p>Returns hipObjInvalidValue if config is NULL, its structSize isn’t valid (see <a class="reference internal" href="#group__structsize"><span class="std std-ref">Struct Sizes</span></a>), flags isn’t 0, or gpuDevice is below -1 or names a GPU that doesn’t exist; hipObjAlreadyInitialized if hipObject is already initialized; hipObjNicNotFound if there’s no NIC to use; and hipObjRdmaError if libibverbs doesn’t load, a HIP call fails (hipError says which error), or the NIC can’t be opened or the connections created.</p>
+<p>Returns hipObjInvalidValue if config is NULL, flags isn’t 0, or gpuDevice is below -1 or names a GPU that doesn’t exist; hipObjAlreadyInitialized if hipObject is already initialized; hipObjNicNotFound if there’s no NIC to use; and hipObjRdmaError if libibverbs doesn’t load, a HIP call fails (hipError says which error), or the NIC can’t be opened or the connections created.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>config</strong> – Pointer to configuration struct </p>
@@ -541,13 +542,24 @@ rendered via Breathe.</p>
 <dd><div class="docutils container">
 <em>#include &lt;hipobj.h&gt;</em></div>
 <p>Configuration for hipObject initialization. </p>
-<p>hipObject doesn’t make S3 requests, so the configuration has no S3 endpoint or credentials: the application’s S3 client has those.</p>
-<p>Set structSize to sizeof(hipObjConfig_t) (see <a class="reference internal" href="#group__structsize"><span class="std std-ref">Struct Sizes</span></a>).</p>
+<p>hipObject doesn’t make S3 requests, so it doesn’t use endpoint, region, accessKey, or secretKey: the application’s S3 client does.</p>
 <p>gpuDevice is the HIP device index of the GPU that hipObject chooses the closest RDMA NIC to, or -1 for the calling thread’s current device. On a host without a GPU, set it to -1, and set nicHint.</p>
 <p>nicHint lists the RDMA devices that hipObject can choose from, by name (as ibv_devices lists them), separated by commas; NULL or “” allows them all. If hipObject can’t choose a NIC by where the GPU is, as on a host without one, it opens the device that nicHint names, which must then be a single name.</p>
 <p>Set the fields you don’t use to 0 or NULL. </p>
 <div class="breathe-sectiondef docutils container">
 <p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9accessKeyE">
+<span id="_CPPv3N14hipObjConfig_t9accessKeyE"></span><span id="_CPPv2N14hipObjConfig_t9accessKeyE"></span><span id="hipObjConfig_t::accessKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a0b5dcc5a7b3ca31fcb0848a362f0654e"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">accessKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9accessKeyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Not used </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t8endpointE">
+<span id="_CPPv3N14hipObjConfig_t8endpointE"></span><span id="_CPPv2N14hipObjConfig_t8endpointE"></span><span id="hipObjConfig_t::endpoint__cCP"></span><span class="target" id="structhipObjConfig__t_1a3a54a13819c14885fa8f9678bed8028b"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">endpoint</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t8endpointE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Not used </p>
+</dd></dl>
+
 <dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t5flagsE">
 <span id="_CPPv3N14hipObjConfig_t5flagsE"></span><span id="_CPPv2N14hipObjConfig_t5flagsE"></span><span id="hipObjConfig_t::flags__uint32_t"></span><span class="target" id="structhipObjConfig__t_1a4e56b12abc8cc80fa5f4ae2a6eef5527"></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">flags</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t5flagsE" title="Link to this definition">#</a><br /></dt>
@@ -567,9 +579,15 @@ rendered via Breathe.</p>
 </dd></dl>
 
 <dl class="cpp var">
-<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t10structSizeE">
-<span id="_CPPv3N14hipObjConfig_t10structSizeE"></span><span id="_CPPv2N14hipObjConfig_t10structSizeE"></span><span id="hipObjConfig_t::structSize__s"></span><span class="target" id="structhipObjConfig__t_1aaf3477558bd2b488366b2027ed5abe5f"></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">structSize</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t10structSizeE" title="Link to this definition">#</a><br /></dt>
-<dd><p>sizeof(hipObjConfig_t) </p>
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t6regionE">
+<span id="_CPPv3N14hipObjConfig_t6regionE"></span><span id="_CPPv2N14hipObjConfig_t6regionE"></span><span id="hipObjConfig_t::region__cCP"></span><span class="target" id="structhipObjConfig__t_1aa53af17a63bc86a33f9834259f2739c8"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">region</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t6regionE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Not used </p>
+</dd></dl>
+
+<dl class="cpp var">
+<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9secretKeyE">
+<span id="_CPPv3N14hipObjConfig_t9secretKeyE"></span><span id="_CPPv2N14hipObjConfig_t9secretKeyE"></span><span id="hipObjConfig_t::secretKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a234137e07eb2ff71d7b4cacc6e499a65"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">secretKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9secretKeyE" title="Link to this definition">#</a><br /></dt>
+<dd><p>Not used </p>
 </dd></dl>
 
 </div>
@@ -582,7 +600,6 @@ rendered via Breathe.</p>
 <em>#include &lt;hipobj.h&gt;</em></div>
 <p>Callback struct for S3 SDK integration. </p>
 <p>The application provides these callbacks so that hipObject can inject RDMA tokens into S3 requests and receive RDMA reply tags from the server. This mirrors cuObject’s CUObjOps_t pattern.</p>
-<p>Set structSize to sizeof(hipObjOps_t) (see <a class="reference internal" href="#group__structsize"><span class="std std-ref">Struct Sizes</span></a>).</p>
 <p>The callbacks can call any hipObject function; see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>. </p>
 <div class="breathe-sectiondef docutils container">
 <p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
@@ -626,12 +643,6 @@ rendered via Breathe.</p>
 </dl>
 </dd></dl>
 
-<dl class="cpp var">
-<dt class="sig sig-object cpp" id="_CPPv4N11hipObjOps_t10structSizeE">
-<span id="_CPPv3N11hipObjOps_t10structSizeE"></span><span id="_CPPv2N11hipObjOps_t10structSizeE"></span><span id="hipObjOps_t::structSize__s"></span><span class="target" id="structhipObjOps__t_1a825b43bb1bbe8dd7f4448f4d56832450"></span><span class="n"><span class="pre">size_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">structSize</span></span></span><a class="headerlink" href="#_CPPv4N11hipObjOps_t10structSizeE" title="Link to this definition">#</a><br /></dt>
-<dd><p>sizeof(hipObjOps_t) (see <a class="reference internal" href="#group__structsize"><span class="std std-ref">Struct Sizes</span></a>) </p>
-</dd></dl>
-
 </div>
 </dd></dl>
 
@@ -647,21 +658,6 @@ rendered via Breathe.</p>
 <p><strong>Buffers.</strong> <a class="reference internal" href="#group__buffer_1ga2dc6e401b67d9f0dcef8725556dcea83"><span class="std std-ref">hipObjBufDeregister()</span></a> returns hipObjBusy, and leaves the buffer registered, while another call is using the buffer: a transfer, including the one whose callback deregisters it, <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>, or <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a>. Calls on other buffers don’t wait for each other. As with any C function, calls that run at the same time mustn’t share memory that one of them writes to: overlapping parts of a registered buffer, or a token that one of them releases. For a buffer that’s staged through host memory (see <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>), <a class="reference internal" href="#group__io_1gadf37450052d584b7b9649f0233a3add9"><span class="std std-ref">hipObjPut()</span></a> and HIPOBJ_SYNC_TO_HOST write the staging buffer, so they count as writing the part of the buffer they use.</p>
 <p><strong>Shutdown.</strong> <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> doesn’t wait for the calls in progress. They finish normally, and hipObject releases its RDMA resources and buffer registrations when the last of them returns. A transfer that’s waiting for a connection returns hipObjNotInitialized. Calls that start after <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a>, on any thread, and need an initialized library fail with hipObjNotInitialized until <a class="reference internal" href="#group__core_1ga2b4e5bd6f1170f792720293c41864619"><span class="std std-ref">hipObjInit()</span></a> is called again, which can be before the earlier calls have finished.</p>
 <p><strong>Transfers made of several calls.</strong> A transfer that the application drives itself, with <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a>, its own S3 request, and <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>, is several calls, and hipObject doesn’t know that the transfer is in progress between them. Other threads’ calls can run between them, and nothing keeps those from deregistering the buffer or shutting hipObject down: the application must keep the buffer registered, and hipObject initialized, until the transfer ends. Every token from <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a> names the same RDMA connection, so the application must also make sure that such transfers don’t overlap each other. They can overlap <a class="reference internal" href="#group__io_1ga26766ccee0e0270aaacc1de61babcf69"><span class="std std-ref">hipObjGet()</span></a> and <a class="reference internal" href="#group__io_1gadf37450052d584b7b9649f0233a3add9"><span class="std std-ref">hipObjPut()</span></a> transfers, which use connections of their own. </p>
-</dd></dl>
-
-</section>
-<section id="struct-sizes">
-<h2>Struct Sizes<a class="headerlink" href="#struct-sizes" title="Link to this heading">#</a></h2>
-<dl>
-<dt class="sig sig-object cpp">
-<span class="target" id="group__structsize"></span></dt>
-<dd><p><a class="reference internal" href="#structhipObjConfig__t"><span class="std std-ref">hipObjConfig_t</span></a> and <a class="reference internal" href="#structhipObjOps__t"><span class="std std-ref">hipObjOps_t</span></a> start with structSize, which the application sets to the size of the struct, as in <code class="docutils literal notranslate"><span class="pre">config.structSize</span> <span class="pre">=</span> <span class="pre">sizeof(hipObjConfig_t)</span></code>. A later version of hipObject can add fields to the end of either struct. structSize tells hipObject which version of the struct the application was compiled with, so adding a field doesn’t break an application compiled with an older or a newer header.</p>
-<p><ul class="simple">
-<li><p><strong>A struct from an older hipObject header</strong> is shorter. hipObject reads only the structSize bytes the application gave it, and treats the fields after them as 0 or NULL. A field that a later version adds does what the version before it did when it’s 0 or NULL.</p></li>
-<li><p><strong>A struct from a newer hipObject header</strong> is longer. hipObject accepts it if every byte after the fields it knows is 0, and returns hipObjInvalidValue otherwise, rather than ignore a field it doesn’t know. So set the whole struct to zero, for example with a designated initializer or memset(), before setting its fields.</p></li>
-<li><p>hipObject returns hipObjInvalidValue if structSize is smaller than the struct in hipObject 0.1.0, the first version with structSize, or larger than 4096. A struct that’s all zero, with structSize left at 0, is rejected. </p></li>
-</ul>
-</p>
 </dd></dl>
 
 </section>
@@ -838,7 +834,6 @@ rendered via Breathe.</p>
 <dd><p>GET: fetch an S3 object into a registered buffer via RDMA. </p>
 <p>The server performs an RDMA WRITE to push data into the registered buffer, starting <code class="docutils literal notranslate"><span class="pre">offset</span></code> bytes into it. The bytes from offset to offset + size must lie inside the buffer. hipObject doesn’t send an object offset; the request the callbacks make selects the part of the object to fetch.</p>
 <p>Make sure that no GPU work that reads or writes the buffer is still running when you call this. When it returns hipObjSuccess, the data is in the buffer.</p>
-<p>Returns hipObjInvalidValue if ops is NULL, its structSize isn’t valid (see <a class="reference internal" href="#group__structsize"><span class="std std-ref">Struct Sizes</span></a>), or either callback is NULL.</p>
 <p>If every RDMA connection is in use by other transfers, this waits for one to be free, or, if it’s called from a callback, returns hipObjBusy (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
 <p>For a buffer that’s staged through host memory (see <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>), if the copy into the buffer doesn’t finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS environment variable), this returns hipObjInternalError and leaves the copy running. It can still write the buffer after this returns, and until it finishes, calls that start after this returns can’t use or deregister the buffer (see <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>).</p>
 <dl class="field-list simple">
@@ -879,7 +874,6 @@ rendered via Breathe.</p>
 <dd><p>PUT: store a registered buffer to an S3 object via RDMA. </p>
 <p>The server performs an RDMA READ to pull data from the registered buffer, starting <code class="docutils literal notranslate"><span class="pre">offset</span></code> bytes into it. The bytes from offset to offset + size must lie inside the buffer. hipObject doesn’t send an object offset; the request the callbacks make selects where the data goes in the object.</p>
 <p>hipObject doesn’t wait for GPU work that writes the buffer, on any stream. Make sure that it has finished, for example with hipStreamSynchronize(), before you call this.</p>
-<p>Returns hipObjInvalidValue if ops is NULL, its structSize isn’t valid (see <a class="reference internal" href="#group__structsize"><span class="std std-ref">Struct Sizes</span></a>), or either callback is NULL.</p>
 <p>If every RDMA connection is in use by other transfers, this waits for one to be free, or, if it’s called from a callback, returns hipObjBusy (see <a class="reference internal" href="#group__threads"><span class="std std-ref">Thread Safety</span></a>).</p>
 <p>For a buffer that’s staged through host memory (see <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>), if the copy out of the buffer doesn’t finish within the staging timeout (the HIPOBJ_STAGE_TIMEOUT_MS environment variable), this returns hipObjInternalError and leaves the copy running. It can still read the buffer after this returns, and until it finishes, calls that start after this returns can’t use or deregister the buffer (see <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>).</p>
 <dl class="field-list simple">
@@ -993,22 +987,23 @@ rendered via Breathe.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MINOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MINOR</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_PATCH"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_PATCH</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9accessKeyE"><code class="docutils literal notranslate"><span class="pre">accessKey</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t5flagsE"><code class="docutils literal notranslate"><span class="pre">flags</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9gpuDeviceE"><code class="docutils literal notranslate"><span class="pre">gpuDevice</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t7nicHintE"><code class="docutils literal notranslate"><span class="pre">nicHint</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t10structSizeE"><code class="docutils literal notranslate"><span class="pre">structSize</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t6regionE"><code class="docutils literal notranslate"><span class="pre">region</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9secretKeyE"><code class="docutils literal notranslate"><span class="pre">secretKey</span></code></a></li>
 </ul>
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOps_t"><code class="docutils literal notranslate"><span class="pre">hipObjOps_t</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t9recvReplyE"><code class="docutils literal notranslate"><span class="pre">recvReply</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t11sendRequestE"><code class="docutils literal notranslate"><span class="pre">sendRequest</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N11hipObjOps_t10structSizeE"><code class="docutils literal notranslate"><span class="pre">structSize</span></code></a></li>
 </ul>
 </li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#thread-safety">Thread Safety</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#struct-sizes">Struct Sizes</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#errors-and-error-handling">Errors and Error Handling</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv415hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpError_t</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjSuccessE"><code class="docutils literal notranslate"><span class="pre">hipObjSuccess</span></code></a></li>
