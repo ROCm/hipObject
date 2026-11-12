@@ -781,9 +781,9 @@ then to RTS (timeout 14, 7 retries, 7 RNR retries, PSNs 0). If the
 device is a Broadcom (<code class="docutils literal notranslate"><span class="pre">0x14E4</span></code>) or Pensando (<code class="docutils literal notranslate"><span class="pre">0x1DD8</span></code>) NIC and
 that backend was compiled in, its attributes are applied; today
 both set the same values the generic code does.</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">resetRcConnection()</span></code> moves the QP to RESET, drains the CQ, and
-moves it back to INIT, ready for a different peer. An RC QP can’t
-reconnect from RTS any other way.</p></li>
+<li><p>A connected QP isn’t connected again. To connect to a different
+peer, the connection pool replaces the whole connection (see
+below).</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">pollCompletion()</span></code> polls the CQ until a completion arrives, a
 completion reports an error, or the timeout passes. An error
 completion’s status and vendor error are printed to stderr, since
@@ -806,10 +806,14 @@ unless the calling thread already holds a lease (a thread-local
 count): then it returns <code class="docutils literal notranslate"><span class="pre">Busy</span></code>, since the connection it would
 wait for could be its own, as when a transfer’s callback starts
 another transfer.</p></li>
-<li><p>When a lease ends, a connection that was connected is reset. If it
-can’t be reset it’s replaced with a new one, and if that fails too
-it’s dropped and the pool shrinks; an empty pool fails transfers
-with <code class="docutils literal notranslate"><span class="pre">hipObjRdmaError</span></code>.</p></li>
+<li><p>When a lease ends, a connection that was connected is destroyed
+and replaced with a new one, rather than having its QP moved back to
+INIT through RESET. The new QP usually gets a QP number that wasn’t
+used recently. Every QP starts at PSN 0, so a late packet from the
+last peer that reached a reused QP could be taken for part of the
+next transfer. If the new connection can’t be created, the slot is
+dropped and the pool shrinks; an empty pool fails transfers with
+<code class="docutils literal notranslate"><span class="pre">hipObjRdmaError</span></code>.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">close()</span></code>, from shutdown, makes <code class="docutils literal notranslate"><span class="pre">acquire()</span></code> fail with
 <code class="docutils literal notranslate"><span class="pre">Closed</span></code>, including calls already waiting.</p></li>
 </ul>
@@ -935,8 +939,8 @@ token’s transport (which must be RC), QP number, GID, and LID; the
 other fields are reserved in a reply (see <a class="reference internal" href="interop.html"><span class="doc">hipObject cuObject Interoperability</span></a>).</p></li>
 <li><p><strong>Wait for a completion</strong> on the lease’s CQ, for up to 5 seconds.</p></li>
 <li><p><strong>Synchronize the device</strong>, for a directly registered GPU buffer.</p></li>
-<li><p><strong>End the lease</strong>, which resets the QP if it was connected and
-returns it to the pool.</p></li>
+<li><p><strong>End the lease</strong>, which replaces the connection if it was
+connected and returns it to the pool.</p></li>
 <li><p><strong>GET, staged:</strong> copy the range from the staging buffer to the
 device.</p></li>
 </ol>
