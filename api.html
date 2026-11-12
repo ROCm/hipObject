@@ -376,13 +376,9 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MINOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MINOR</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_PATCH"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_PATCH</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9accessKeyE"><code class="docutils literal notranslate"><span class="pre">accessKey</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t5flagsE"><code class="docutils literal notranslate"><span class="pre">flags</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9gpuDeviceE"><code class="docutils literal notranslate"><span class="pre">gpuDevice</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t7nicHintE"><code class="docutils literal notranslate"><span class="pre">nicHint</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t6regionE"><code class="docutils literal notranslate"><span class="pre">region</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9secretKeyE"><code class="docutils literal notranslate"><span class="pre">secretKey</span></code></a></li>
 </ul>
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOps_t"><code class="docutils literal notranslate"><span class="pre">hipObjOps_t</span></code></a><ul class="nav section-nav flex-column">
@@ -393,6 +389,7 @@
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#thread-safety">Thread Safety</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-versions">API Versions</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#errors-and-error-handling">Errors and Error Handling</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv415hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpError_t</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjSuccessE"><code class="docutils literal notranslate"><span class="pre">hipObjSuccess</span></code></a></li>
@@ -542,24 +539,12 @@ rendered via Breathe.</p>
 <dd><div class="docutils container">
 <em>#include &lt;hipobj.h&gt;</em></div>
 <p>Configuration for hipObject initialization. </p>
-<p>hipObject doesn’t make S3 requests, so it doesn’t use endpoint, region, accessKey, or secretKey: the application’s S3 client does.</p>
+<p>hipObject doesn’t make S3 requests, so the configuration has no S3 endpoint or credentials: the application’s S3 client has those.</p>
 <p>gpuDevice is the HIP device index of the GPU that hipObject chooses the closest RDMA NIC to, or -1 for the calling thread’s current device. On a host without a GPU, set it to -1, and set nicHint.</p>
 <p>nicHint lists the RDMA devices that hipObject can choose from, by name (as ibv_devices lists them), separated by commas; NULL or “” allows them all. If hipObject can’t choose a NIC by where the GPU is, as on a host without one, it opens the device that nicHint names, which must then be a single name.</p>
 <p>Set the fields you don’t use to 0 or NULL. </p>
 <div class="breathe-sectiondef docutils container">
 <p class="breathe-sectiondef-title rubric" id="breathe-section-title-public-members">Public Members</p>
-<dl class="cpp var">
-<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9accessKeyE">
-<span id="_CPPv3N14hipObjConfig_t9accessKeyE"></span><span id="_CPPv2N14hipObjConfig_t9accessKeyE"></span><span id="hipObjConfig_t::accessKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a0b5dcc5a7b3ca31fcb0848a362f0654e"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">accessKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9accessKeyE" title="Link to this definition">#</a><br /></dt>
-<dd><p>Not used </p>
-</dd></dl>
-
-<dl class="cpp var">
-<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t8endpointE">
-<span id="_CPPv3N14hipObjConfig_t8endpointE"></span><span id="_CPPv2N14hipObjConfig_t8endpointE"></span><span id="hipObjConfig_t::endpoint__cCP"></span><span class="target" id="structhipObjConfig__t_1a3a54a13819c14885fa8f9678bed8028b"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">endpoint</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t8endpointE" title="Link to this definition">#</a><br /></dt>
-<dd><p>Not used </p>
-</dd></dl>
-
 <dl class="cpp var">
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t5flagsE">
 <span id="_CPPv3N14hipObjConfig_t5flagsE"></span><span id="_CPPv2N14hipObjConfig_t5flagsE"></span><span id="hipObjConfig_t::flags__uint32_t"></span><span class="target" id="structhipObjConfig__t_1a4e56b12abc8cc80fa5f4ae2a6eef5527"></span><span class="n"><span class="pre">uint32_t</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">flags</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t5flagsE" title="Link to this definition">#</a><br /></dt>
@@ -576,18 +561,6 @@ rendered via Breathe.</p>
 <dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t7nicHintE">
 <span id="_CPPv3N14hipObjConfig_t7nicHintE"></span><span id="_CPPv2N14hipObjConfig_t7nicHintE"></span><span id="hipObjConfig_t::nicHint__cCP"></span><span class="target" id="structhipObjConfig__t_1ac5fcea279bee344f92fe5bac7efcaae3"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">nicHint</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t7nicHintE" title="Link to this definition">#</a><br /></dt>
 <dd><p>RDMA NIC names, or NULL </p>
-</dd></dl>
-
-<dl class="cpp var">
-<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t6regionE">
-<span id="_CPPv3N14hipObjConfig_t6regionE"></span><span id="_CPPv2N14hipObjConfig_t6regionE"></span><span id="hipObjConfig_t::region__cCP"></span><span class="target" id="structhipObjConfig__t_1aa53af17a63bc86a33f9834259f2739c8"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">region</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t6regionE" title="Link to this definition">#</a><br /></dt>
-<dd><p>Not used </p>
-</dd></dl>
-
-<dl class="cpp var">
-<dt class="sig sig-object cpp" id="_CPPv4N14hipObjConfig_t9secretKeyE">
-<span id="_CPPv3N14hipObjConfig_t9secretKeyE"></span><span id="_CPPv2N14hipObjConfig_t9secretKeyE"></span><span id="hipObjConfig_t::secretKey__cCP"></span><span class="target" id="structhipObjConfig__t_1a234137e07eb2ff71d7b4cacc6e499a65"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="kt"><span class="pre">char</span></span><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">secretKey</span></span></span><a class="headerlink" href="#_CPPv4N14hipObjConfig_t9secretKeyE" title="Link to this definition">#</a><br /></dt>
-<dd><p>Not used </p>
 </dd></dl>
 
 </div>
@@ -658,6 +631,17 @@ rendered via Breathe.</p>
 <p><strong>Buffers.</strong> <a class="reference internal" href="#group__buffer_1ga2dc6e401b67d9f0dcef8725556dcea83"><span class="std std-ref">hipObjBufDeregister()</span></a> returns hipObjBusy, and leaves the buffer registered, while another call is using the buffer: a transfer, including the one whose callback deregisters it, <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>, or <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a>. Calls on other buffers don’t wait for each other. As with any C function, calls that run at the same time mustn’t share memory that one of them writes to: overlapping parts of a registered buffer, or a token that one of them releases. For a buffer that’s staged through host memory (see <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>), <a class="reference internal" href="#group__io_1gadf37450052d584b7b9649f0233a3add9"><span class="std std-ref">hipObjPut()</span></a> and HIPOBJ_SYNC_TO_HOST write the staging buffer, so they count as writing the part of the buffer they use.</p>
 <p><strong>Shutdown.</strong> <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a> doesn’t wait for the calls in progress. They finish normally, and hipObject releases its RDMA resources and buffer registrations when the last of them returns. A transfer that’s waiting for a connection returns hipObjNotInitialized. Calls that start after <a class="reference internal" href="#group__core_1ga395aabc844f28115e01f5b5e41e644f7"><span class="std std-ref">hipObjShutdown()</span></a>, on any thread, and need an initialized library fail with hipObjNotInitialized until <a class="reference internal" href="#group__core_1ga2b4e5bd6f1170f792720293c41864619"><span class="std std-ref">hipObjInit()</span></a> is called again, which can be before the earlier calls have finished.</p>
 <p><strong>Transfers made of several calls.</strong> A transfer that the application drives itself, with <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a>, its own S3 request, and <a class="reference internal" href="#group__io_1gacecb5f1cd6bec16aa34ae1f768680c39"><span class="std std-ref">hipObjBufSync()</span></a>, is several calls, and hipObject doesn’t know that the transfer is in progress between them. Other threads’ calls can run between them, and nothing keeps those from deregistering the buffer or shutting hipObject down: the application must keep the buffer registered, and hipObject initialized, until the transfer ends. Every token from <a class="reference internal" href="#group__io_1ga4b1095efab54d620753fc18d475531f4"><span class="std std-ref">hipObjGetRdmaToken()</span></a> names the same RDMA connection, so the application must also make sure that such transfers don’t overlap each other. They can overlap <a class="reference internal" href="#group__io_1ga26766ccee0e0270aaacc1de61babcf69"><span class="std std-ref">hipObjGet()</span></a> and <a class="reference internal" href="#group__io_1gadf37450052d584b7b9649f0233a3add9"><span class="std std-ref">hipObjPut()</span></a> transfers, which use connections of their own. </p>
+</dd></dl>
+
+</section>
+<section id="api-versions">
+<h2>API Versions<a class="headerlink" href="#api-versions" title="Link to this heading">#</a></h2>
+<dl>
+<dt class="sig sig-object cpp">
+<span class="target" id="group__versions"></span></dt>
+<dd><p>Starting with hipObject 0.1.0, what’s in this header doesn’t change once a version is released, so an application compiled with an older header works with a newer library: a function keeps its parameters and return type, a struct keeps its fields, and the error codes, and the macros that functions take or return, such as HIPOBJ_SYNC_TO_HOST, keep their values. A later version can add functions, structs, error codes, and macros.</p>
+<p>When a function or struct has to change, the new one gets a new name with a version number, such as hipObjInit2() taking a hipObjConfig2_t, and the old one stays and works as it did. A later version can deprecate the old one, and only a new major version can remove it.</p>
+<p>Reserved fields, such as <a class="reference internal" href="#structhipObjConfig__t"><span class="std std-ref">hipObjConfig_t</span></a>’s flags, must be 0. A later version can give one a meaning, and 0 then does what it did before. </p>
 </dd></dl>
 
 </section>
@@ -987,13 +971,9 @@ rendered via Breathe.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_MINOR"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_MINOR</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#c.HIPOBJ_VERSION_PATCH"><code class="docutils literal notranslate"><span class="pre">HIPOBJ_VERSION_PATCH</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv414hipObjConfig_t"><code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code></a><ul class="nav section-nav flex-column">
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9accessKeyE"><code class="docutils literal notranslate"><span class="pre">accessKey</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t8endpointE"><code class="docutils literal notranslate"><span class="pre">endpoint</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t5flagsE"><code class="docutils literal notranslate"><span class="pre">flags</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9gpuDeviceE"><code class="docutils literal notranslate"><span class="pre">gpuDevice</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t7nicHintE"><code class="docutils literal notranslate"><span class="pre">nicHint</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t6regionE"><code class="docutils literal notranslate"><span class="pre">region</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N14hipObjConfig_t9secretKeyE"><code class="docutils literal notranslate"><span class="pre">secretKey</span></code></a></li>
 </ul>
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv411hipObjOps_t"><code class="docutils literal notranslate"><span class="pre">hipObjOps_t</span></code></a><ul class="nav section-nav flex-column">
@@ -1004,6 +984,7 @@ rendered via Breathe.</p>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#thread-safety">Thread Safety</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#api-versions">API Versions</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#errors-and-error-handling">Errors and Error Handling</a><ul class="pst-show_toc_level nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv415hipObjOpError_t"><code class="docutils literal notranslate"><span class="pre">hipObjOpError_t</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N15hipObjOpError_t13hipObjSuccessE"><code class="docutils literal notranslate"><span class="pre">hipObjSuccess</span></code></a></li>
