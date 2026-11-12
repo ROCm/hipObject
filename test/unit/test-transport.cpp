@@ -344,72 +344,14 @@ TEST_F(TransportTest, ConnectMovesQpToRtrThenRts)
     EXPECT_EQ(rts.max_rd_atomic, 1);
 }
 
-/* An RC QP connects once: from RTS, it has to go back through RESET
- * before it can connect again, as the fake device enforces */
-TEST_F(TransportTest, ConnectedQpConnectsAgainOnlyAfterReset)
+/* An RC QP connects once: from RTS, it can't move to RTR again, as the
+ * fake device enforces */
+TEST_F(TransportTest, ConnectedQpDoesntConnectAgain)
 {
     ASSERT_NO_FATAL_FAILURE(open());
     ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
     EXPECT_EQ(conn_->qp()->state, IBV_QPS_RTS);
     EXPECT_FALSE(hipObj::connectRcPeer(*conn_, peerToken()));
-
-    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
-    EXPECT_EQ(conn_->qp()->state, IBV_QPS_INIT);
-    EXPECT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
-}
-
-TEST_F(TransportTest, ResetMovesQpToInitThroughReset)
-{
-    ASSERT_NO_FATAL_FAILURE(open());
-    ASSERT_TRUE(hipObj::connectRcPeer(*conn_, peerToken()));
-    fake().modifyQpCount = 0;
-    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
-
-    std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
-    ASSERT_EQ(calls.size(), 2U);
-    EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_RESET);
-    EXPECT_EQ(calls[0].mask, IBV_QP_STATE);
-    /* The same INIT transition as creating the connection, which doesn't
-     * widen the access flags */
-    EXPECT_EQ(calls[1].attr.qp_state, IBV_QPS_INIT);
-    EXPECT_EQ(calls[1].mask, kInitMask);
-    EXPECT_EQ(calls[1].attr.qp_access_flags,
-              static_cast<unsigned int>(IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
-}
-
-TEST_F(TransportTest, ResetDrainsTheCq)
-{
-    ASSERT_NO_FATAL_FAILURE(open());
-
-    /* Polls until the CQ is empty */
-    fake().pollResult = 0;
-    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
-    EXPECT_EQ(fake().log.pollCq, 1);
-
-    /* A CQ that always has a completion is polled no more times than it
-     * can hold completions */
-    fake().log.pollCq = 0;
-    fake().pollResult = 1;
-    ASSERT_TRUE(hipObj::resetRcConnection(*conn_));
-    EXPECT_EQ(fake().log.pollCq, conn_->cq()->cqe);
-}
-
-TEST_F(TransportTest, ResetFailsWhenAStepFails)
-{
-    ASSERT_NO_FATAL_FAILURE(open());
-    fake().fail.modifyQpToState = IBV_QPS_RESET;
-    EXPECT_FALSE(hipObj::resetRcConnection(*conn_));
-    EXPECT_EQ(fake().log.pollCq, 0);
-
-    fake().fail.modifyQpToState = -1;
-    fake().pollResult           = -1;
-    fake().modifyQpCount        = 0;
-    EXPECT_FALSE(hipObj::resetRcConnection(*conn_));
-    EXPECT_EQ(modifiedStates(), std::vector<ibv_qp_state>({IBV_QPS_RESET}));
-
-    fake().pollResult           = 0;
-    fake().fail.modifyQpToState = IBV_QPS_INIT;
-    EXPECT_FALSE(hipObj::resetRcConnection(*conn_));
 }
 
 TEST_F(TransportTest, ConnectDoesNotQueryTheDevice)
@@ -715,16 +657,21 @@ TEST_P(TransportTransferTest, ConnectsToPeerInReply)
     /* Connecting reads the vendor ID initialization stored, not the device */
     EXPECT_EQ(fake().log.queryDevice, queries);
 
-    /* The reply's token connects the QP, and it's reset to INIT once the
-     * transfer is over */
+    /* The reply's token connects the QP. Once the transfer is over, the
+     * connection is replaced with one whose QP is in INIT, with the same
+     * access flags. */
     std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
-    ASSERT_EQ(calls.size(), 4U);
+    ASSERT_EQ(calls.size(), 3U);
     EXPECT_EQ(calls[0].attr.qp_state, IBV_QPS_RTR);
     EXPECT_EQ(calls[0].attr.dest_qp_num, peerToken().qpNum);
     expectPeerGid(calls[0].attr);
     EXPECT_EQ(calls[1].attr.qp_state, IBV_QPS_RTS);
-    EXPECT_EQ(calls[2].attr.qp_state, IBV_QPS_RESET);
-    EXPECT_EQ(calls[3].attr.qp_state, IBV_QPS_INIT);
+    EXPECT_EQ(calls[2].attr.qp_state, IBV_QPS_INIT);
+    EXPECT_EQ(calls[2].mask, kInitMask);
+    EXPECT_EQ(calls[2].attr.qp_access_flags,
+              static_cast<unsigned int>(IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE));
+    EXPECT_EQ(fake().log.destroyQp, 1);
+    EXPECT_EQ(fake().log.destroyCq, 1);
 }
 
 /* docs/interop.rst reserves the peer token's rkey, address, length, and
@@ -753,7 +700,7 @@ TEST_P(TransportTransferTest, IgnoresReservedFieldsOfPeerToken)
         ASSERT_EQ(transfer().opError, hipObjSuccess);
 
         const std::vector<hipObjTest::ModifyQpCall> calls = modifyQpCalls();
-        ASSERT_EQ(calls.size(), 4U);
+        ASSERT_EQ(calls.size(), 3U);
         const ibv_qp_attr &rtr = calls[0].attr;
         EXPECT_EQ(rtr.qp_state, IBV_QPS_RTR);
         EXPECT_EQ(calls[0].mask, kRtrMask);
@@ -766,17 +713,19 @@ TEST_P(TransportTransferTest, IgnoresReservedFieldsOfPeerToken)
     }
 }
 
-/* A QP that's connected can't connect again until it's reset, so this
- * fails if the transfer doesn't reset it */
+/* A QP that's connected can't connect again, so this fails if the transfer
+ * doesn't replace the connection */
 TEST_P(TransportTransferTest, PeerTokenTransfersBackToBack)
 {
     ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
+    const int qps = fake().log.createQp;
     setReplyWithPeerToken(peerToken());
     ASSERT_EQ(transfer().opError, hipObjSuccess);
     ASSERT_EQ(transfer().opError, hipObjSuccess);
-    EXPECT_EQ(modifiedStates(),
-              std::vector<ibv_qp_state>({IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT, IBV_QPS_RTR,
-                                         IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT}));
+    EXPECT_EQ(modifiedStates(), std::vector<ibv_qp_state>({IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_INIT,
+                                                           IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_INIT}));
+    EXPECT_EQ(fake().log.createQp, qps + 2);
+    EXPECT_EQ(fake().log.destroyQp, 2);
 }
 
 TEST_P(TransportTransferTest, DoesNotConnectWithoutPeerToken)
@@ -791,8 +740,8 @@ TEST_P(TransportTransferTest, RejectsPeerTokenThatIsNotRc)
     ASSERT_NO_FATAL_FAILURE(initForTransfers());
     setReplyWithPeerToken(peerToken(hipObj::TransportType::DC));
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
-    /* The QP isn't connected, though it's still reset */
-    EXPECT_EQ(modifiedStates(), std::vector<ibv_qp_state>({IBV_QPS_RESET, IBV_QPS_INIT}));
+    /* The QP isn't connected, though the connection is still replaced */
+    EXPECT_EQ(modifiedStates(), std::vector<ibv_qp_state>({IBV_QPS_INIT}));
 }
 
 TEST_P(TransportTransferTest, FailsWhenConnectionFails)
@@ -802,38 +751,21 @@ TEST_P(TransportTransferTest, FailsWhenConnectionFails)
     fake().fail.modifyQpToState = IBV_QPS_RTS;
     EXPECT_EQ(transfer().opError, hipObjRdmaError);
 
-    /* The QP got as far as RTR, and it's reset, so the next transfer can
-     * connect it */
+    /* The QP got as far as RTR, and the connection is replaced, so the
+     * next transfer can connect */
     fake().fail.modifyQpToState = -1;
     EXPECT_EQ(transfer().opError, hipObjSuccess);
-    EXPECT_EQ(modifiedStates(),
-              std::vector<ibv_qp_state>({IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT, IBV_QPS_RTR,
-                                         IBV_QPS_RTS, IBV_QPS_RESET, IBV_QPS_INIT}));
+    EXPECT_EQ(modifiedStates(), std::vector<ibv_qp_state>({IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_INIT,
+                                                           IBV_QPS_RTR, IBV_QPS_RTS, IBV_QPS_INIT}));
 }
 
-/* A connection that can't be reset is replaced */
-TEST_P(TransportTransferTest, ReplacesAConnectionItCantReset)
-{
-    ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
-    const int qps = fake().log.createQp;
-    setReplyWithPeerToken(peerToken());
-    fake().fail.modifyQpToState = IBV_QPS_RESET;
-    ASSERT_EQ(transfer().opError, hipObjSuccess);
-    EXPECT_EQ(fake().log.createQp, qps + 1);
-    EXPECT_EQ(fake().log.destroyQp, 1);
-
-    fake().fail.modifyQpToState = -1;
-    EXPECT_EQ(transfer().opError, hipObjSuccess);
-}
-
-/* A connection that can't be reset or replaced is dropped, and with none
- * left, transfers fail */
+/* A connection that can't be replaced is dropped, and with none left,
+ * transfers fail */
 TEST_P(TransportTransferTest, FailsWithoutConnections)
 {
     ASSERT_NO_FATAL_FAILURE(initForTransfersOnOneConnection());
     setReplyWithPeerToken(peerToken());
-    fake().fail.modifyQpToState = IBV_QPS_RESET;
-    fake().fail.createQp        = true;
+    fake().fail.createQp = true;
     ASSERT_EQ(transfer().opError, hipObjSuccess);
     EXPECT_EQ(hipObj::currentInstance()->pool.size(), 0U);
 

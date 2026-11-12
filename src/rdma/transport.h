@@ -170,12 +170,9 @@ std::optional<RcConnection> createRcConnection(const RdmaDevice &&, int, uint32_
 [[nodiscard]] bool transitionQpToRtr(RcConnection &conn, uint32_t destQpNum, uint16_t destLid,
                                      ibv_gid destGid);
 [[nodiscard]] bool transitionQpToRts(RcConnection &conn);
+/* Connects conn's QP to the peer that peerToken names. An RC QP connects
+ * once; to connect to another peer, create a new connection. */
 [[nodiscard]] bool connectRcPeer(RcConnection &conn, const RdmaToken &peerToken);
-/* Moves conn's QP back to INIT, through RESET, so it can connect to
- * another peer, and discards the completions left on its CQ. An RC QP
- * can't connect again from RTS. False when a step fails, which can leave
- * the QP in any state. */
-[[nodiscard]] bool resetRcConnection(RcConnection &conn);
 /* Fails on an error completion, or when no completion with expectedOpcode
  * (any opcode, if it's std::nullopt) arrives within timeout */
 [[nodiscard]] bool pollCompletion(RcConnection &conn, std::optional<ibv_wc_opcode> expectedOpcode,

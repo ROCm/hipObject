@@ -341,9 +341,9 @@ QP state changes:
   device is a Broadcom (``0x14E4``) or Pensando (``0x1DD8``) NIC and
   that backend was compiled in, its attributes are applied; today
   both set the same values the generic code does.
-- ``resetRcConnection()`` moves the QP to RESET, drains the CQ, and
-  moves it back to INIT, ready for a different peer. An RC QP can't
-  reconnect from RTS any other way.
+- A connected QP isn't connected again. To connect to a different
+  peer, the connection pool replaces the whole connection (see
+  below).
 - ``pollCompletion()`` polls the CQ until a completion arrives, a
   completion reports an error, or the timeout passes. An error
   completion's status and vendor error are printed to stderr, since
@@ -367,10 +367,14 @@ at init and leases them out:
   count): then it returns ``Busy``, since the connection it would
   wait for could be its own, as when a transfer's callback starts
   another transfer.
-- When a lease ends, a connection that was connected is reset. If it
-  can't be reset it's replaced with a new one, and if that fails too
-  it's dropped and the pool shrinks; an empty pool fails transfers
-  with ``hipObjRdmaError``.
+- When a lease ends, a connection that was connected is destroyed
+  and replaced with a new one, rather than having its QP moved back to
+  INIT through RESET. The new QP usually gets a QP number that wasn't
+  used recently. Every QP starts at PSN 0, so a late packet from the
+  last peer that reached a reused QP could be taken for part of the
+  next transfer. If the new connection can't be created, the slot is
+  dropped and the pool shrinks; an empty pool fails transfers with
+  ``hipObjRdmaError``.
 - ``close()``, from shutdown, makes ``acquire()`` fail with
   ``Closed``, including calls already waiting.
 
@@ -491,8 +495,8 @@ checked:
    other fields are reserved in a reply (see :doc:`interop`).
 #. **Wait for a completion** on the lease's CQ, for up to 5 seconds.
 #. **Synchronize the device**, for a directly registered GPU buffer.
-#. **End the lease**, which resets the QP if it was connected and
-   returns it to the pool.
+#. **End the lease**, which replaces the connection if it was
+   connected and returns it to the pool.
 #. **GET, staged:** copy the range from the staging buffer to the
    device.
 

@@ -325,7 +325,7 @@ namespace {
     {
         /* Waits for a connection if every one is leased, unless this thread
          * already holds one. The lease returns it when it's destroyed, after
-         * the transfer, resetting it if it was connected. No lock is held
+         * the transfer, replacing it if it was connected. No lock is held
          * while the transfer runs, so the callbacks can call any public
          * function. */
         auto acquired = instance.pool.acquire();

@@ -473,8 +473,15 @@
   had named its queue pair, which connects the client's queue pair to
   it, every later transfer whose reply did the same failed with
   `hipObjRdmaError`, since a connected queue pair can't connect again.
-  hipObject now resets a queue pair after each transfer that connected
-  it, so the next transfer can connect it to another peer.
+  hipObject now destroys a queue pair after each transfer that connected
+  it, and its completion queue, and creates new ones for the next
+  transfer. Creating a new queue pair, rather than reusing the old one,
+  usually gives the next transfer a different queue pair number. Since
+  every queue pair still starts at packet sequence number 0, a late
+  packet from the last server that reached a reused queue pair could be
+  taken for part of the next transfer. If the new ones can't be created,
+  hipObject prints a message to stderr and has one fewer RDMA connection
+  for transfers.
 - The `get-object` and `put-object` examples read a size argument such
   as `12abc` as its leading number, and a negative one such as `-1` as
   a huge size. They now reject anything but a plain decimal number of
