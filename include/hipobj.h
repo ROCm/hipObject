@@ -26,6 +26,7 @@ extern "C" {
  * @section contents Contents
  * - @ref core
  * - @ref threads
+ * - @ref versions
  * - @ref error
  * - @ref buffer
  * - @ref io
@@ -100,6 +101,27 @@ extern "C" {
  * application must also make sure that such transfers don't overlap
  * each other. They can overlap hipObjGet() and hipObjPut() transfers,
  * which use connections of their own.
+ */
+
+/*!
+ * @defgroup versions API Versions
+ *
+ * Starting with hipObject 0.1.0, what's in this header doesn't change
+ * once a version is released, so an application compiled with an older
+ * header works with a newer library: a function keeps its parameters and
+ * return type, a struct keeps its fields, and the error codes, and the
+ * macros that functions take or return, such as HIPOBJ_SYNC_TO_HOST,
+ * keep their values. A later version can add functions, structs, error
+ * codes, and macros.
+ *
+ * When a function or struct has to change, the new one gets a new name
+ * with a version number, such as hipObjInit2() taking a
+ * hipObjConfig2_t, and the old one stays and works as it did. A later
+ * version can deprecate the old one, and only a new major version can
+ * remove it.
+ *
+ * Reserved fields, such as hipObjConfig_t's flags, must be 0. A later
+ * version can give one a meaning, and 0 then does what it did before.
  */
 
 /* -------------------------------------------------------
@@ -256,8 +278,8 @@ typedef struct {
 /*!
  * @brief Configuration for hipObject initialization
  *
- * hipObject doesn't make S3 requests, so it doesn't use endpoint,
- * region, accessKey, or secretKey: the application's S3 client does.
+ * hipObject doesn't make S3 requests, so the configuration has no S3
+ * endpoint or credentials: the application's S3 client has those.
  *
  * gpuDevice is the HIP device index of the GPU that hipObject chooses
  * the closest RDMA NIC to, or -1 for the calling thread's current
@@ -274,10 +296,6 @@ typedef struct {
  * @ingroup core
  */
 typedef struct {
-    const char *endpoint;  /*!< Not used                  */
-    const char *region;    /*!< Not used                  */
-    const char *accessKey; /*!< Not used                  */
-    const char *secretKey; /*!< Not used                  */
     uint32_t    flags;     /*!< Reserved, set to 0        */
     int         gpuDevice; /*!< HIP device index, or -1   */
     const char *nicHint;   /*!< RDMA NIC names, or NULL   */

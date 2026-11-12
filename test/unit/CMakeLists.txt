@@ -47,6 +47,15 @@ function(hipobj_add_fake_device_test TEST_NAME TEST_SOURCE)
     ${CMAKE_CURRENT_SOURCE_DIR}/fake-device.cpp)
 endfunction()
 
+# Pins the public API as released (see api-stability.cpp). It only has to
+# compile, so it's an object library that nothing links.
+hipobj_add_library(
+  NAME hipobj_api_stability
+  TYPE OBJECT
+  SRCS api-stability.cpp)
+target_include_directories(hipobj_api_stability PRIVATE
+  ${PROJECT_SOURCE_DIR}/include)
+
 hipobj_add_test(test-rdma-token
   test-rdma-token.cpp)
 

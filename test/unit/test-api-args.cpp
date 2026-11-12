@@ -330,8 +330,8 @@ TEST_F(ApiArgsTest, InitReportsGpuBusIdFailure)
 
 TEST_F(ApiArgsTest, InitAcceptsOptionalFieldsUnset)
 {
-    /* endpoint, region, the keys, and the NIC hint may all be NULL. The
-     * GPU has a bus id, but the topology has no NIC. */
+    /* The NIC hint may be NULL. The GPU has a bus id, but the topology has
+     * no NIC. */
     fake().gpuBusId = "0000:42:00.0";
     hipObjConfig_t config{};
     config.gpuDevice        = 0;
