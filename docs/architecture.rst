@@ -57,6 +57,9 @@ Source Map
    * - ``src/hipobj.cpp``
      - The C API's implementation: argument checks, the transfer
        sequence, staging copies
+   * - ``src/sized-struct.h``
+     - ``readSizedStruct()``, which reads the public structs that
+       start with ``structSize``
    * - ``src/state.h``, ``state.cpp``
      - ``Platform``, ``Options``, ``Instance``, the current instance,
        init and shutdown
@@ -176,7 +179,10 @@ function: it could find a different instance.
 Init
 ^^^^
 
-``hipObjInit()`` checks its ``hipObjConfig_t``, returns
+``hipObjInit()`` copies its ``hipObjConfig_t`` with
+``readSizedStruct()``, which uses the struct's ``structSize`` to read
+the version of it that the application was compiled with (see the
+``structsize`` group in ``hipobj.h``). It checks the copy, returns
 ``hipObjAlreadyInitialized`` if there's an instance, gets the system
 platform (see `The Platform`_), reads the options (see
 `Configuration`_), and calls ``initWith()``, which holds
@@ -463,7 +469,8 @@ A Transfer
 
 ``hipObjGet()`` and ``hipObjPut()`` (``src/hipobj.cpp``) share
 ``runRdmaTransfer()``. With the instance found and the arguments
-checked:
+checked, including ``ops``, which ``readSizedStruct()`` copies as it
+does ``hipObjInit()``'s config:
 
 #. **Look up the buffer** with ``buffers.find()``, check that
    ``[offset, offset + size)`` lies inside it without computing the
