@@ -30,14 +30,14 @@ namespace hipObj {
  * a GPU. A pointer the runtime cannot classify is treated as "not device
  * memory": the strict range check in hipObjBufRegister() must not fail a
  * host buffer it merely failed to classify. */
-bool
-isDevicePointer(const HipRuntime &runtime, const void *ptr)
+std::optional<int>
+deviceOfPointer(const HipRuntime &runtime, const void *ptr)
 {
     hipPointerAttribute_t attr{};
-    if (runtime.pointerGetAttributes(&attr, ptr) != hipSuccess) {
-        return false;
+    if (runtime.pointerGetAttributes(&attr, ptr) != hipSuccess || attr.type != hipMemoryTypeDevice) {
+        return std::nullopt;
     }
-    return attr.type == hipMemoryTypeDevice;
+    return attr.device;
 }
 
 namespace {
@@ -173,16 +173,19 @@ BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
     const HipRuntime &runtime = *runtime_;
     const int         access  = IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE;
     IbvMrPtr          mr      = registerDeviceMemory(verbs, runtime, pd, devPtr, size, access, dmabuf_);
+
+    /* Whichever way the memory is registered, the GPU work on it runs on
+     * the GPU that holds it */
+    const std::optional<int> device = deviceOfPointer(runtime, devPtr);
     if (mr) {
         /* The NIC reaches the caller's memory, so there's no staging
          * buffer */
         auto entry = std::make_shared<const BufEntry>(own<HostBufPtr>(runtime, nullptr), std::move(mr), size,
-                                                      true, key);
+                                                      true, key, device);
         return {.result = insert(key, std::move(entry))};
     }
 
-    const bool deviceMemory = isDevicePointer(runtime, devPtr);
-    if (deviceMemory) {
+    if (device) {
         if (requireGpuDirect_) {
             printTo(stderr,
                     "hipObj: GPU-direct registration of {} bytes at {} failed and "
@@ -215,8 +218,8 @@ BufferMap::registerBuffer(void *devPtr, size_t size, ibv_pd *pd)
     }
     /* Read the address before hostBuf is moved into the entry */
     const uint64_t remoteAddr = pointerToAddress(hostBuf.get());
-    auto           entry =
-        std::make_shared<const BufEntry>(std::move(hostBuf), std::move(stagingMr), size, false, remoteAddr);
+    auto entry = std::make_shared<const BufEntry>(std::move(hostBuf), std::move(stagingMr), size, false,
+                                                  remoteAddr, device);
     return {.result = insert(key, std::move(entry))};
 }
 
@@ -237,7 +240,7 @@ BufferMap::registerHostBuffer(void *hostPtr, size_t size, ibv_pd *pd)
         return {.result = RegisterResult::Failed};
     }
     auto entry = std::make_shared<const BufEntry>(own<HostBufPtr>(*runtime_, nullptr), std::move(mr), size,
-                                                  false, pointerToAddress(hostPtr));
+                                                  false, pointerToAddress(hostPtr), std::nullopt);
     return {.result = insert(key, std::move(entry))};
 }
 

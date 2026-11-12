@@ -24,6 +24,7 @@
 #include <format>
 #include <functional>
 #include <latch>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -34,8 +35,10 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 
 #include "fake-device.h"
+#include "hip-seam.h"
 #include "hipobj-span.h"
 #include "hipobj-warnings.h"
 #include "hipobj.h"
@@ -463,6 +466,39 @@ TEST_F(ThreadSafetyTest, BufferCallsFromManyThreads)
     for (int t = 0; t < kThreads; ++t) {
         EXPECT_EQ(hipObjBufDeregister(buffer(t)).opError, hipObjBufNotRegistered);
     }
+}
+
+/* HIP keeps a current device for each thread. Threads on different GPUs
+ * transfer into GPU-direct buffers on GPU 1, each synchronizing that GPU,
+ * and each is left on its own GPU. */
+TEST_F(ThreadSafetyTest, TransfersLeaveEachThreadOnItsOwnGpu)
+{
+    ASSERT_EQ(init(), hipObjSuccess);
+    hipDevice_.memoryType    = hipMemoryTypeDevice;
+    hipDevice_.pointerDevice = 1;
+    hipDevice_.deviceCount   = 2;
+    hipDevice_.getDeviceErr  = hipSuccess;
+    hipDevice_.allocBase     = 0;
+    hipDevice_.allocSize     = std::numeric_limits<size_t>::max();
+    for (int t = 0; t < kThreads; ++t) {
+        ASSERT_EQ(hipObjBufRegister(buffer(t), kBufSize).opError, hipObjSuccess);
+    }
+
+    const hipObj::HipRuntime &runtime = fakes_->hip();
+    runThreads(kThreads, [&](int t) {
+        const int gpu = t % 2;
+        ASSERT_EQ(runtime.setDevice(gpu), hipSuccess);
+        for (int i = 0; i < kIterations; ++i) {
+            EXPECT_EQ(hipObjGet(nullptr, buffer(t), kBufSize, 0, &plainOps_, nullptr).opError, hipObjSuccess);
+            EXPECT_EQ(hipObjPut(nullptr, buffer(t), kBufSize, 0, &plainOps_, nullptr).opError, hipObjSuccess);
+            int current = -1;
+            EXPECT_EQ(runtime.getDevice(&current), hipSuccess);
+            EXPECT_EQ(current, gpu);
+        }
+    });
+
+    EXPECT_EQ(hipDevice_.deviceSyncsOn[0], 0);
+    EXPECT_EQ(hipDevice_.deviceSyncsOn[1], 2 * kThreads * kIterations);
 }
 
 // ---- Initialization and shutdown ---------------------------------------

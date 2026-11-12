@@ -12,8 +12,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <limits>
 #include <memory>
+#include <string>
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -40,16 +40,6 @@ constexpr size_t kBufSize = hipObjTest::kFakeBufSize;
  * buffer */
 void *const kStagedBuf = hipObjTest::fakeStagedBuf();
 
-/* The HIP runtime reports every pointer as device memory in one allocation,
- * which holds every buffer these tests register */
-void
-fakeDeviceMemory()
-{
-    fake().memoryType = hipMemoryTypeDevice;
-    fake().allocBase  = 0;
-    fake().allocSize  = std::numeric_limits<size_t>::max();
-}
-
 // ---- Registration through a staging buffer -----------------------
 
 class RegistrationTest : public hipObjTest::FakeDeviceTest {};
@@ -57,7 +47,7 @@ class RegistrationTest : public hipObjTest::FakeDeviceTest {};
 TEST_F(RegistrationTest, GpuBufferFallsBackToStaging)
 {
     ASSERT_NO_FATAL_FAILURE(init());
-    fakeDeviceMemory();
+    hipObjTest::fakeGpuMemory();
     fake().fail.registerAddr = kStagedBuf;
     ASSERT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjSuccess);
 
@@ -299,6 +289,151 @@ TEST_F(StagingTest, TimedOutCopyKeepsTheBufferUntilItsOver)
     EXPECT_EQ(fake().log.eventDestroy, 2);
     EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjSuccess);
     EXPECT_EQ(fake().log.hostFree, 1);
+}
+
+// ---- The buffer's GPU ---------------------------------------------
+
+/* HIP keeps a current device for each thread. A staging copy runs on the
+ * GPU that holds the buffer, whichever one the calling thread has made
+ * current, and leaves the thread on its own. */
+class StagingDeviceTest : public StagingTest {
+protected:
+    /* initAndRegisterStaged(), with the buffer on GPU 1 of 2, and the
+     * calling thread on GPU 0 */
+    void initOnSecondGpu() const
+    {
+        hipObjTest::fakeGpuMemory(1);
+        ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
+        ASSERT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+    }
+};
+
+TEST_F(StagingDeviceTest, CopiesOnTheBuffersGpu)
+{
+    ASSERT_NO_FATAL_FAILURE(initOnSecondGpu());
+    /* Checks the call's copy, and forgets it for the next call */
+    const auto expectCopyOnGpu1 = [](hipObjError_t err) {
+        EXPECT_EQ(err.opError, hipObjSuccess);
+        /* The event is created on the device it's recorded on */
+        EXPECT_EQ(fake().lastMemcpyDevice.exchange(-1), 1);
+        EXPECT_EQ(fake().lastEventCreateDevice.exchange(-1), 1);
+        EXPECT_EQ(fake().lastEventRecordDevice.exchange(-1), 1);
+        EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+    };
+    hipObjOps_t ops = makeOps();
+    {
+        SCOPED_TRACE("HIPOBJ_SYNC_TO_HOST");
+        expectCopyOnGpu1(sync(HIPOBJ_SYNC_TO_HOST));
+    }
+    {
+        SCOPED_TRACE("HIPOBJ_SYNC_TO_DEVICE");
+        expectCopyOnGpu1(sync(HIPOBJ_SYNC_TO_DEVICE));
+    }
+    {
+        SCOPED_TRACE("hipObjGet()");
+        expectCopyOnGpu1(hipObjGet(nullptr, kStagedBuf, kBufSize, 0, &ops, nullptr));
+    }
+    {
+        SCOPED_TRACE("hipObjPut()");
+        expectCopyOnGpu1(hipObjPut(nullptr, kStagedBuf, kBufSize, 0, &ops, nullptr));
+    }
+}
+
+TEST_F(StagingDeviceTest, DoesntSwitchWhenTheThreadIsOnTheBuffersGpu)
+{
+    ASSERT_NO_FATAL_FAILURE(initOnSecondGpu());
+    ASSERT_NO_FATAL_FAILURE(hipObjTest::setFakeCurrentDevice(1));
+    const int calls = fake().log.setDevice;
+    ASSERT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
+    EXPECT_EQ(fake().lastMemcpyDevice, 1);
+    EXPECT_EQ(fake().log.setDevice, calls);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 1);
+}
+
+/* Host memory staged through another host buffer isn't on any GPU, so
+ * the copy doesn't ask which device is current */
+TEST_F(StagingDeviceTest, LeavesTheDeviceAloneForHostMemory)
+{
+    ASSERT_NO_FATAL_FAILURE(initAndRegisterStaged());
+    ASSERT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
+    EXPECT_EQ(fake().lastMemcpyDevice, fake().device);
+    EXPECT_EQ(fake().log.setDevice, 0);
+}
+
+TEST_F(StagingDeviceTest, RestoresTheThreadsGpuWhenTheCopyFails)
+{
+    ASSERT_NO_FATAL_FAILURE(initOnSecondGpu());
+    fake().memcpyErr        = hipErrorInvalidValue;
+    const hipObjError_t err = sync(HIPOBJ_SYNC_TO_HOST);
+    EXPECT_EQ(err.opError, hipObjInternalError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorInvalidValue));
+    EXPECT_EQ(fake().log.eventDestroy, 1);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+}
+
+TEST_F(StagingDeviceTest, RestoresTheThreadsGpuWhenTheCopyTimesOut)
+{
+    hipObjTest::fakeGpuMemory(1);
+    ASSERT_NO_FATAL_FAILURE(initAndTimeOut());
+    EXPECT_EQ(fake().lastEventCreateDevice, 1);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+
+    /* Once the copy finishes, the buffer can be deregistered */
+    fake().eventNeverCompletes = false;
+    EXPECT_EQ(hipObjBufDeregister(kStagedBuf).opError, hipObjSuccess);
+}
+
+TEST_F(StagingDeviceTest, FailsWhenTheBuffersGpuCantBeMadeCurrent)
+{
+    ASSERT_NO_FATAL_FAILURE(initOnSecondGpu());
+    fake().setDeviceErr     = hipErrorContextIsDestroyed;
+    const hipObjError_t err = sync(HIPOBJ_SYNC_TO_HOST);
+    EXPECT_EQ(err.opError, hipObjInternalError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorContextIsDestroyed));
+    EXPECT_EQ(fake().log.eventCreate, 0);
+    EXPECT_EQ(fake().log.memcpy, 0);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+}
+
+TEST_F(StagingDeviceTest, FailsWhenTheThreadsGpuIsUnknown)
+{
+    ASSERT_NO_FATAL_FAILURE(initOnSecondGpu());
+    fake().getDeviceErr     = hipErrorNotInitialized;
+    const hipObjError_t err = sync(HIPOBJ_SYNC_TO_HOST);
+    EXPECT_EQ(err.opError, hipObjInternalError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorNotInitialized));
+    EXPECT_EQ(fake().log.setDevice, 0);
+    EXPECT_EQ(fake().log.memcpy, 0);
+}
+
+/* The fake HIP runtime, unable to make GPU 0 current, as restoring a
+ * thread that was on it does */
+class NoReturnToGpu0Hip : public hipObjTest::FakeHip {
+public:
+    using FakeHip::FakeHip;
+
+    [[nodiscard]] hipError_t setDevice(int device) const override
+    {
+        if (device == 0) {
+            return hipErrorInvalidDevice;
+        }
+        return FakeHip::setDevice(device);
+    }
+};
+
+/* The copy finished, so the call reports it, and leaves the thread on the
+ * buffer's GPU */
+TEST_F(StagingDeviceTest, SucceedsWhenTheThreadsGpuCantBeRestored)
+{
+    const auto fakes = std::make_shared<hipObjTest::FakePlatform<NoReturnToGpu0Hip>>(fake());
+    hipObjTest::fakeGpuMemory(1);
+    ASSERT_EQ(hipObjTest::initWithPlatform(makeConfig(), fakes->platform()).opError, hipObjSuccess);
+    fake().fail.registerAddr = kStagedBuf;
+    ASSERT_EQ(hipObjBufRegister(kStagedBuf, kBufSize).opError, hipObjSuccess);
+
+    EXPECT_EQ(sync(HIPOBJ_SYNC_TO_HOST).opError, hipObjSuccess);
+    EXPECT_EQ(fake().lastMemcpyDevice, 1);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 1);
 }
 
 /* A copy that failed after it timed out is over too, and deregistering

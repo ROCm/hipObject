@@ -8,8 +8,10 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -21,6 +23,19 @@
 #include "state.h"
 
 namespace hipObjTest {
+
+namespace {
+
+    /* The device FakeHip::setDevice() made the calling thread's current
+     * one, or nothing before it's called. Each thread has its own, as in
+     * HIP. */
+    std::optional<int> &threadDevice()
+    {
+        thread_local std::optional<int> device;
+        return device;
+    }
+
+} // namespace
 
 FakeDevice &
 fake()
@@ -36,6 +51,7 @@ resetFake()
     FakeDevice &f = fake();
     std::destroy_at(&f);
     std::construct_at(&f);
+    threadDevice().reset();
 }
 
 void
@@ -69,6 +85,34 @@ void
 setReplyWithPeerToken(const hipObj::RdmaToken &token)
 {
     setReply(hipObj::encodeReplyWithPeerToken(200, token));
+}
+
+void
+fakeGpuMemory(int gpu)
+{
+    FakeDevice &f   = fake();
+    f.memoryType    = hipMemoryTypeDevice;
+    f.pointerDevice = gpu;
+    f.allocBase     = 0;
+    f.allocSize     = std::numeric_limits<size_t>::max();
+    f.getDeviceErr  = hipSuccess;
+    f.deviceCount   = std::max(f.deviceCount, gpu + 1);
+}
+
+int
+fakeCurrentDevice()
+{
+    const FakeHip runtime(fake());
+    int           device = -1;
+    EXPECT_EQ(runtime.getDevice(&device), hipSuccess);
+    return device;
+}
+
+void
+setFakeCurrentDevice(int device)
+{
+    const FakeHip runtime(fake());
+    ASSERT_EQ(runtime.setDevice(device), hipSuccess);
 }
 
 std::vector<ModifyQpCall>
@@ -333,13 +377,33 @@ FakeVerbs::post_send(ibv_qp * /*qp*/, ibv_send_wr * /*wr*/, ibv_send_wr ** /*bad
 
 // ---- HIP -------------------------------------------------------------
 
+int
+FakeHip::currentDevice() const
+{
+    return threadDevice().value_or(device_->device);
+}
+
 hipError_t
 FakeHip::getDevice(int *device) const
 {
     if (device_->getDeviceErr != hipSuccess) {
         return device_->getDeviceErr;
     }
-    *device = device_->device;
+    *device = currentDevice();
+    return hipSuccess;
+}
+
+hipError_t
+FakeHip::setDevice(int device) const
+{
+    ++device_->log.setDevice;
+    if (device_->setDeviceErr != hipSuccess) {
+        return device_->setDeviceErr;
+    }
+    if (device < 0 || device >= std::min(device_->deviceCount, kFakeMaxDevices)) {
+        return hipErrorInvalidDevice;
+    }
+    threadDevice() = device;
     return hipSuccess;
 }
 
@@ -399,6 +463,7 @@ hipError_t
 FakeHip::deviceSynchronize() const
 {
     ++device_->log.deviceSynchronize;
+    ++device_->deviceSyncsOn.at(static_cast<size_t>(currentDevice()));
     return device_->deviceSyncErr;
 }
 
@@ -409,6 +474,7 @@ FakeHip::memcpyAsync(void * /*dst*/, const void * /*src*/, size_t /*size*/, hipM
     ++device_->log.memcpy;
     device_->lastMemcpyKind   = kind;
     device_->lastMemcpyStream = stream;
+    device_->lastMemcpyDevice = currentDevice();
     return device_->memcpyErr;
 }
 
@@ -419,8 +485,9 @@ FakeHip::eventCreate(hipEvent_t *event) const
         return device_->eventCreateErr;
     }
     ++device_->log.eventCreate;
-    device_->eventQueriesAtCreate = device_->log.eventQuery.load();
-    *event                        = fakeEvent();
+    device_->eventQueriesAtCreate  = device_->log.eventQuery.load();
+    device_->lastEventCreateDevice = currentDevice();
+    *event                         = fakeEvent();
     return hipSuccess;
 }
 
@@ -430,6 +497,7 @@ FakeHip::eventRecord(hipEvent_t event, hipStream_t stream) const
     EXPECT_EQ(event, fakeEvent());
     ++device_->log.eventRecord;
     device_->lastEventRecordStream = stream;
+    device_->lastEventRecordDevice = currentDevice();
     return device_->eventRecordErr;
 }
 
@@ -455,8 +523,9 @@ FakeHip::eventDestroy(hipEvent_t event) const
 hipError_t
 FakeHip::pointerGetAttributes(hipPointerAttribute_t *attributes, const void * /*ptr*/) const
 {
-    *attributes      = {};
-    attributes->type = device_->memoryType;
+    *attributes        = {};
+    attributes->type   = device_->memoryType;
+    attributes->device = device_->pointerDevice;
     return hipSuccess;
 }
 

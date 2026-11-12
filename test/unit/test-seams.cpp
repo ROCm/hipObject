@@ -68,6 +68,9 @@ TEST(HipSeamTest, SystemHipForwardsEachCall)
     direct    = -1;
     EXPECT_EQ(system.getDevice(&viaSystem), hipGetDevice(&direct));
     EXPECT_EQ(viaSystem, direct);
+    /* The device that's already current, so neither call changes it */
+    const int current = direct >= 0 ? direct : 0;
+    EXPECT_EQ(system.setDevice(current), hipSetDevice(current));
 
     std::array<char, 32> busIdViaSystem{};
     std::array<char, 32> busIdDirect{};

@@ -527,6 +527,16 @@
   `cmake --install` installed GoogleTest's headers, libraries, and CMake
   and pkg-config files in hipObject's prefix too. The packages weren't
   affected.
+- hipObject ran a buffer's GPU work on the calling thread's current HIP
+  device, which HIP keeps for each thread, rather than on the GPU that
+  holds the buffer. A thread on GPU 0 that used a buffer on GPU 1 ran its
+  staging copies on GPU 0's stream, and after a GPU-direct transfer,
+  synchronized GPU 0 instead of GPU 1. hipObject now records the GPU that
+  holds a buffer when `hipObjBufRegister()` registers it, makes that GPU
+  current for the copy or the synchronization, and then makes the
+  thread's own device current again. If HIP fails to switch back,
+  hipObject reports it on stderr, and the thread is left on the buffer's
+  GPU. The "Thread Safety" section of the API reference now says so.
 
 ### Known issues
 

@@ -59,9 +59,9 @@ private:
 
 using HostBufPtr = std::unique_ptr<void, HostBufDeleter>;
 
-/* Whether runtime reports ptr as device memory. A pointer it can't
- * classify isn't. */
-bool isDevicePointer(const HipRuntime &runtime, const void *ptr);
+/* The GPU that holds ptr, if runtime reports it as device memory. A
+ * pointer it can't classify isn't device memory. */
+std::optional<int> deviceOfPointer(const HipRuntime &runtime, const void *ptr);
 
 /* The registered buffers, by address. Several threads can use it at once.
  *
@@ -90,6 +90,11 @@ public:
          * ibv_reg_dmabuf_mr leaves that NULL, and on the bounce path it
          * is the host staging buffer rather than the caller's pointer. */
         uint64_t remoteAddr;
+        /* The GPU that holds the caller's memory, or nothing when it isn't
+         * device memory. Staging copies, and the device synchronization
+         * after a transfer, run on it, whatever device the calling thread
+         * has made current. */
+        std::optional<int> device;
         /* Set when a staging copy that timed out may still use hostBuf
          * when the entry is destroyed (see AbandonedCopies), so the
          * staging buffer is leaked rather than freed. It's mutable since
@@ -97,9 +102,9 @@ public:
         mutable std::atomic<bool> leakHostBuf{false};
 
         BufEntry(HostBufPtr entryHostBuf, IbvMrPtr entryMr, size_t entrySize, bool entryIsDmabuf,
-                 uint64_t entryRemoteAddr) noexcept
+                 uint64_t entryRemoteAddr, std::optional<int> entryDevice) noexcept
             : hostBuf(std::move(entryHostBuf)), mr(std::move(entryMr)), size(entrySize),
-              isDmabuf(entryIsDmabuf), remoteAddr(entryRemoteAddr)
+              isDmabuf(entryIsDmabuf), remoteAddr(entryRemoteAddr), device(entryDevice)
         {
         }
         /* The members are destroyed after this runs, so the MR is still

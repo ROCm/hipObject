@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 #include <hip/hip_runtime_api.h>
@@ -40,6 +41,7 @@ public:
     HipRuntime &operator=(HipRuntime &&)      = delete;
 
     [[nodiscard]] virtual hipError_t getDevice(int *device) const                                  = 0;
+    [[nodiscard]] virtual hipError_t setDevice(int device) const                                   = 0;
     [[nodiscard]] virtual hipError_t getDeviceCount(int *count) const                              = 0;
     [[nodiscard]] virtual hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const  = 0;
     [[nodiscard]] virtual hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const = 0;
@@ -68,6 +70,7 @@ public:
 class SystemHip final : public HipRuntime {
 public:
     [[nodiscard]] hipError_t getDevice(int *device) const override;
+    [[nodiscard]] hipError_t setDevice(int device) const override;
     [[nodiscard]] hipError_t getDeviceCount(int *count) const override;
     [[nodiscard]] hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
     [[nodiscard]] hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
@@ -105,5 +108,37 @@ private:
 
 /* hipEvent_t is itself a pointer, to an opaque struct */
 using HipEventPtr = std::unique_ptr<std::remove_pointer_t<hipEvent_t>, HipEventDeleter>;
+
+/* Makes a GPU the calling thread's current device while it lives, and
+ * then makes the thread's earlier device current again. HIP keeps a
+ * current device for each thread, and work that names no device, such as
+ * a copy on hipStreamPerThread, an event, or hipDeviceSynchronize(), uses
+ * it. With no device, or with the one that's already current, it changes
+ * nothing. Check status() before doing the work. runtime has to outlive
+ * it. */
+class DeviceGuard {
+public:
+    DeviceGuard(const HipRuntime &runtime, std::optional<int> device);
+    ~DeviceGuard();
+
+    /* Restores the device once, when it's destroyed */
+    DeviceGuard(const DeviceGuard &)            = delete;
+    DeviceGuard &operator=(const DeviceGuard &) = delete;
+    DeviceGuard(DeviceGuard &&)                 = delete;
+    DeviceGuard &operator=(DeviceGuard &&)      = delete;
+
+    /* hipSuccess, or the error of the HIP call that kept the device from
+     * being made current */
+    [[nodiscard]] hipError_t status() const noexcept
+    {
+        return status_;
+    }
+
+private:
+    const HipRuntime *runtime_;
+    int               previous_ = 0;
+    bool              switched_ = false;
+    hipError_t        status_   = hipSuccess;
+};
 
 } // namespace hipObj

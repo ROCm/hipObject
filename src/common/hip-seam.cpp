@@ -6,7 +6,12 @@
 
 #include "hip-seam.h"
 
+#include <cstdio>
+#include <optional>
+
 #include <hsa/hsa_ext_amd.h>
+
+#include "hipobj-print.h"
 
 namespace hipObj {
 
@@ -14,6 +19,12 @@ hipError_t
 SystemHip::getDevice(int *device) const
 {
     return hipGetDevice(device);
+}
+
+hipError_t
+SystemHip::setDevice(int device) const
+{
+    return hipSetDevice(device);
 }
 
 hipError_t
@@ -98,6 +109,36 @@ int
 SystemHip::closeDmabuf(int fd) const
 {
     return static_cast<int>(hsa_amd_portable_close_dmabuf(fd));
+}
+
+DeviceGuard::DeviceGuard(const HipRuntime &runtime, std::optional<int> device) : runtime_(&runtime)
+{
+    if (!device) {
+        return;
+    }
+    /* hipGetDevice() only reads the thread's own setting, so the usual
+     * case, where the device is already current, costs very little */
+    status_ = runtime.getDevice(&previous_);
+    if (status_ != hipSuccess || previous_ == *device) {
+        return;
+    }
+    status_   = runtime.setDevice(*device);
+    switched_ = status_ == hipSuccess;
+}
+
+DeviceGuard::~DeviceGuard()
+{
+    if (!switched_) {
+        return;
+    }
+    /* A device that was current a moment ago should always be accepted,
+     * but if it isn't, the caller's thread is left on another device, so
+     * say so */
+    const hipError_t err = runtime_->setDevice(previous_);
+    if (err != hipSuccess) {
+        printTo(stderr, "hipObj: couldn't make HIP device {} current again: HIP error {}\n", previous_,
+                static_cast<int>(err));
+    }
 }
 
 } // namespace hipObj
