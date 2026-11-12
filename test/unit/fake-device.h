@@ -65,9 +65,13 @@ struct CallLog {
     std::atomic<int> hostMalloc{0};
     std::atomic<int> hostFree{0};
     std::atomic<int> deviceSynchronize{0};
+    std::atomic<int> setDevice{0};
     std::atomic<int> exportDmabuf{0};
     std::atomic<int> closeDmabuf{0};
 };
+
+/* The most GPUs a FakeDevice can have */
+constexpr int kFakeMaxDevices = 4;
 
 /* Which fakes fail */
 struct Faults {
@@ -110,17 +114,24 @@ struct FakeDevice {
     Faults  fail{};
 
     /* HIP: the GPUs, and what the runtime reports for every pointer (its
-     * memory type and the allocation it's in). There's no current device,
-     * and no GPU's bus ID is known, so hipObjInit() opens the hinted NIC.
-     * Every pointer is host memory, so registration doesn't look for the
-     * allocation. */
+     * memory type, the GPU that holds it, and the allocation it's in).
+     * getDevice() fails, as it does on a host without a GPU, and no GPU's
+     * bus ID is known, so hipObjInit() opens the hinted NIC. Every pointer
+     * is host memory, so registration doesn't look for the allocation.
+     *
+     * As in HIP, each thread has its own current device, which is device
+     * until the thread calls setDevice(). getDeviceErr makes getDevice()
+     * fail, and setDeviceErr makes setDevice() fail, whatever device the
+     * thread has set. */
     hipError_t          getDeviceErr    = hipErrorNoDevice;
     int                 device          = 0;
+    hipError_t          setDeviceErr    = hipSuccess;
     int                 deviceCount     = 1;
     hipError_t          deviceCountErr  = hipSuccess;
     std::string_view    gpuBusId        = {};
     hipError_t          deviceSyncErr   = hipSuccess;
     hipMemoryType       memoryType      = hipMemoryTypeHost;
+    int                 pointerDevice   = 0;
     uintptr_t           allocBase       = 0;
     size_t              allocSize       = 0;
     hipError_t          addressRangeErr = hipSuccess;
@@ -133,17 +144,26 @@ struct FakeDevice {
      * eventNotReadyCount queries of each event, and then
      * eventQueryResult; with eventNeverCompletes, it reports
      * hipErrorNotReady forever. lastMemcpyStream and lastEventRecordStream
-     * hold the streams the last copy and the last eventRecord() used. */
+     * hold the streams the last copy and the last eventRecord() used. The
+     * last...Device fields hold the calling thread's current device at the
+     * last call of each kind, or -1 before the first. */
     hipError_t                 memcpyErr = hipSuccess;
     std::atomic<hipMemcpyKind> lastMemcpyKind{hipMemcpyDefault};
     std::atomic<hipStream_t>   lastMemcpyStream{nullptr};
     std::atomic<hipStream_t>   lastEventRecordStream{nullptr};
+    std::atomic<int>           lastMemcpyDevice{-1};
+    std::atomic<int>           lastEventCreateDevice{-1};
+    std::atomic<int>           lastEventRecordDevice{-1};
     hipError_t                 eventCreateErr      = hipSuccess;
     hipError_t                 eventRecordErr      = hipSuccess;
     hipError_t                 eventQueryResult    = hipSuccess;
     int                        eventNotReadyCount  = 0;
     bool                       eventNeverCompletes = false;
     std::atomic<int>           eventQueriesAtCreate{0}; /* log.eventQuery when the last event was created */
+
+    /* The deviceSynchronize() calls on each device: the calling thread's
+     * current device when it's called */
+    std::array<std::atomic<int>, kFakeMaxDevices> deviceSyncsOn{};
 
     /* HSA: the fd closeDmabuf() was last given */
     std::atomic<int> closedDmabufFd{-1};
@@ -171,7 +191,8 @@ struct FakeDevice {
 
 FakeDevice &fake();
 
-/* Puts fake() back the way a new FakeDevice is */
+/* Puts fake() back the way a new FakeDevice is, and the calling thread
+ * back on fake().device */
 void resetFake();
 
 /* Sets the reply the fake S3 server sends, with its NUL, as the default "200"
@@ -182,6 +203,18 @@ void setReply(std::string_view reply);
  * QP to the peer */
 hipObj::RdmaToken peerToken(hipObj::TransportType transport = hipObj::TransportType::RC);
 void              setReplyWithPeerToken(const hipObj::RdmaToken &token);
+
+/* Makes the runtime report every pointer as memory on GPU gpu, in one
+ * allocation that holds every buffer a test registers. Makes sure the
+ * host has that GPU, and that the calling thread has a current device,
+ * fake().device, which a test can set to another GPU. */
+void fakeGpuMemory(int gpu = 0);
+
+/* The calling thread's current device in the fake runtime, and setting
+ * it, as an application does with hipSetDevice(). A call that fails is a
+ * test failure. */
+int  fakeCurrentDevice();
+void setFakeCurrentDevice(int device);
 
 /* The modify_qp() calls so far, up to the number modifyQp holds */
 std::vector<ModifyQpCall> modifyQpCalls();
@@ -216,6 +249,7 @@ public:
     FakeHip &operator=(FakeHip &&)      = delete;
 
     [[nodiscard]] hipError_t getDevice(int *device) const override;
+    [[nodiscard]] hipError_t setDevice(int device) const override;
     [[nodiscard]] hipError_t getDeviceCount(int *count) const override;
     [[nodiscard]] hipError_t deviceGetPCIBusId(char *pciBusId, int len, int device) const override;
     [[nodiscard]] hipError_t hostMalloc(void **ptr, size_t size, unsigned int flags) const override;
@@ -235,6 +269,9 @@ public:
     [[nodiscard]] int closeDmabuf(int fd) const override;
 
 private:
+    /* The calling thread's current device, even when getDevice() fails */
+    [[nodiscard]] int currentDevice() const;
+
     /* A pointer, so the const methods can change what it points to */
     FakeDevice *device_;
 };

@@ -646,6 +646,15 @@ protected:
     {
         ASSERT_NO_FATAL_FAILURE(initForTransfers(withMaxTransfers(1)));
     }
+
+    /* initForTransfers(), with kDevBuf on GPU 1 of 2, and the calling
+     * thread on GPU 0 */
+    void initForTransfersOnSecondGpu() const
+    {
+        hipObjTest::fakeGpuMemory(1);
+        ASSERT_NO_FATAL_FAILURE(initForTransfers());
+        ASSERT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+    }
 };
 
 TEST_P(TransportTransferTest, ConnectsToPeerInReply)
@@ -792,6 +801,48 @@ TEST_P(TransportTransferTest, FailsWhenDeviceSyncFails)
     const hipObjError_t err = transfer();
     EXPECT_EQ(err.opError, hipObjRdmaError);
     EXPECT_EQ(err.hipError, static_cast<int>(hipErrorLaunchFailure));
+}
+
+/* HIP keeps a current device for each thread. The device that's
+ * synchronized is the buffer's, whichever one the calling thread has made
+ * current, and the thread is left on its own. */
+TEST_P(TransportTransferTest, SynchronizesTheBuffersGpu)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnSecondGpu());
+    ASSERT_EQ(transfer().opError, hipObjSuccess);
+    EXPECT_EQ(fake().log.deviceSynchronize, 1);
+    EXPECT_EQ(fake().deviceSyncsOn[1], 1);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+
+    /* Already on the buffer's GPU, the thread stays there */
+    ASSERT_NO_FATAL_FAILURE(hipObjTest::setFakeCurrentDevice(1));
+    const int calls = fake().log.setDevice;
+    ASSERT_EQ(transfer().opError, hipObjSuccess);
+    EXPECT_EQ(fake().deviceSyncsOn[1], 2);
+    EXPECT_EQ(fake().log.setDevice, calls);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 1);
+}
+
+TEST_P(TransportTransferTest, RestoresTheThreadsGpuWhenDeviceSyncFails)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnSecondGpu());
+    fake().deviceSyncErr    = hipErrorLaunchFailure;
+    const hipObjError_t err = transfer();
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorLaunchFailure));
+    EXPECT_EQ(fake().deviceSyncsOn[1], 1);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 0);
+}
+
+TEST_P(TransportTransferTest, FailsWhenTheBuffersGpuCantBeMadeCurrent)
+{
+    ASSERT_NO_FATAL_FAILURE(initForTransfersOnSecondGpu());
+    fake().setDeviceErr     = hipErrorContextIsDestroyed;
+    const hipObjError_t err = transfer();
+    EXPECT_EQ(err.opError, hipObjRdmaError);
+    EXPECT_EQ(err.hipError, static_cast<int>(hipErrorContextIsDestroyed));
+    EXPECT_EQ(fake().log.deviceSynchronize, 0);
+    EXPECT_EQ(hipObjTest::fakeCurrentDevice(), 0);
 }
 
 TEST_P(TransportTransferTest, ReportsS3Failures)

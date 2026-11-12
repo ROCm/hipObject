@@ -97,7 +97,7 @@ namespace {
      * that it's mapped. */
     hipObjError_t checkDeviceRange(const HipRuntime &runtime, void *ptr, size_t size)
     {
-        if (!isDevicePointer(runtime, ptr)) {
+        if (!deviceOfPointer(runtime, ptr)) {
             return makeError(hipObjSuccess);
         }
         hipDeviceptr_t   base      = nullptr;
@@ -186,7 +186,7 @@ namespace {
     }
 
     hipObjError_t finishTransferAfterReply(const HipRuntime &runtime, ConnectionPool::Lease &lease,
-                                           std::string_view reply, bool requiresDeviceSync,
+                                           std::string_view reply, const BufferMap::BufEntry &buf,
                                            std::chrono::milliseconds pollTimeout)
     {
         if (const auto peerToken = parsePeerTokenFromReply(reply)) {
@@ -201,8 +201,13 @@ namespace {
         if (!pollCompletion(lease.connection(), std::nullopt, pollTimeout)) {
             return makeError(hipObjRdmaError);
         }
-        if (requiresDeviceSync) {
-            const hipError_t err = runtime.deviceSynchronize();
+        if (buf.isDmabuf) {
+            /* The GPU that holds the buffer, not the calling thread's */
+            const DeviceGuard guard(runtime, buf.device);
+            hipError_t        err = guard.status();
+            if (err == hipSuccess) {
+                err = runtime.deviceSynchronize();
+            }
             if (err != hipSuccess) {
                 return makeError(hipObjRdmaError, static_cast<int>(err));
             }
@@ -218,23 +223,33 @@ namespace {
      * the registration are handed to the instance's abandoned copies,
      * which keep the staging buffer until the copy is over. Room for that
      * is set aside before the copy starts, so handing them over can't
-     * fail and leave a running copy untracked. */
+     * fail and leave a running copy untracked. The copy and its event are
+     * on the GPU that holds the buffer, and the calling thread's current
+     * device is restored afterwards. */
     hipObjError_t stageCopyWithDeadline(Instance                                         &instance,
                                         const std::shared_ptr<const BufferMap::BufEntry> &buf, void *dst,
                                         const void *src, size_t size, hipMemcpyKind kind)
     {
         AbandonedCopies::Slot slot    = instance.abandoned.reserve();
         const HipRuntime     &runtime = instance.platform->hip();
-        hipEvent_t            rawDone = nullptr;
-        hipError_t            err     = runtime.eventCreate(&rawDone);
+        /* Before the event is created: an event, and hipStreamPerThread,
+         * belong to the device that's current when they're used */
+        const DeviceGuard guard(runtime, buf->device);
+        hipError_t        err = guard.status();
+        if (err != hipSuccess) {
+            return makeError(hipObjInternalError, static_cast<int>(err));
+        }
+        hipEvent_t rawDone = nullptr;
+        err                = runtime.eventCreate(&rawDone);
         if (err != hipSuccess) {
             return makeError(hipObjInternalError, static_cast<int>(err));
         }
         auto done = own<HipEventPtr>(runtime, rawDone);
 
-        /* The calling thread's default stream, not the null stream, which
-         * waits for every other blocking stream on the device, so copies from
-         * different threads would wait for each other */
+        /* The calling thread's default stream on the buffer's device, not
+         * the null stream, which waits for every other blocking stream on the
+         * device, so copies from different threads would wait for each
+         * other */
         err = runtime.memcpyAsync(dst, src, size, kind, hipStreamPerThread);
         if (err == hipSuccess) {
             err = runtime.eventRecord(done.get(), hipStreamPerThread);
@@ -347,7 +362,7 @@ namespace {
         if (!reply || reply->status != RdmaReplyStatus::Success) {
             return makeError(hipObjS3Error);
         }
-        return finishTransferAfterReply(instance.platform->hip(), lease, reply->text, buf.isDmabuf,
+        return finishTransferAfterReply(instance.platform->hip(), lease, reply->text, buf,
                                         instance.options.pollTimeout);
     }
 

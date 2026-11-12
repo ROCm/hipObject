@@ -82,6 +82,14 @@ extern "C" {
  * and HIPOBJ_SYNC_TO_HOST write the staging buffer, so they count as
  * writing the part of the buffer they use.
  *
+ * **GPUs.** HIP keeps a current device for each thread, which
+ * hipObject doesn't rely on. For a buffer in GPU memory, hipObject runs
+ * the GPU work a call needs, such as a staging copy, or the device
+ * synchronization after a GPU-direct transfer, on the GPU that holds the
+ * buffer, and then makes the thread's own device current again. A thread
+ * can use buffers on any GPU, whichever device it has made current, and
+ * the callbacks run with the thread's own device current.
+ *
  * **Shutdown.** hipObjShutdown() doesn't wait for the calls in progress.
  * They finish normally, and hipObject releases its RDMA resources and
  * buffer registrations when the last of them returns. A transfer that's
