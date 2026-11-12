@@ -485,61 +485,65 @@ Connection (DC), on Broadcom (bnxt) and AMD Pensando (ionic) NICs.</p>
 <td><p>The C API’s implementation: argument checks, the transfer
 sequence, staging copies</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/state.h</span></code>, <code class="docutils literal notranslate"><span class="pre">state.cpp</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/sized-struct.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">readSizedStruct()</span></code>, which reads the public structs that
+start with <code class="docutils literal notranslate"><span class="pre">structSize</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/state.h</span></code>, <code class="docutils literal notranslate"><span class="pre">state.cpp</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">Platform</span></code>, <code class="docutils literal notranslate"><span class="pre">Options</span></code>, <code class="docutils literal notranslate"><span class="pre">Instance</span></code>, the current instance,
 init and shutdown</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/buffer.h</span></code>, <code class="docutils literal notranslate"><span class="pre">buffer.cpp</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/buffer.h</span></code>, <code class="docutils literal notranslate"><span class="pre">buffer.cpp</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">BufferMap</span></code>: registered buffers, dma-buf and staging-buffer
 registration</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/abandoned-copies.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/abandoned-copies.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">AbandonedCopies</span></code>: staging copies that timed out but may
 still run</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/transport.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/transport.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">RdmaDevice</span></code>, <code class="docutils literal notranslate"><span class="pre">RcConnection</span></code>, QP state transitions,
 completion polling</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/connection-pool.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/connection-pool.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">ConnectionPool</span></code> and <code class="docutils literal notranslate"><span class="pre">Lease</span></code>: one connection per transfer</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/token.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/token.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
 <td><p>Token encoding and decoding, <code class="docutils literal notranslate"><span class="pre">x-amz-rdma-reply</span></code> parsing</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/vendor-ops.h</span></code>, <code class="docutils literal notranslate"><span class="pre">bnxt/</span></code>, <code class="docutils literal notranslate"><span class="pre">ionic/</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/rdma/vendor-ops.h</span></code>, <code class="docutils literal notranslate"><span class="pre">bnxt/</span></code>, <code class="docutils literal notranslate"><span class="pre">ionic/</span></code></p></td>
 <td><p>Vendor QP attributes, compiled in by <code class="docutils literal notranslate"><span class="pre">HIPOBJ_BNXT</span></code> and
 <code class="docutils literal notranslate"><span class="pre">HIPOBJ_IONIC</span></code></p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/s3/control.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/s3/control.h</span></code>, <code class="docutils literal notranslate"><span class="pre">.cpp</span></code></p></td>
 <td><p>Calling the <code class="docutils literal notranslate"><span class="pre">hipObjOps_t</span></code> callbacks</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/hip-seam.*</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/hip-seam.*</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">HipRuntime</span></code> interface and <code class="docutils literal notranslate"><span class="pre">SystemHip</span></code> (HIP, plus HSA’s
 dma-buf export)</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/ibv-wrapper.*</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/ibv-wrapper.*</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">Verbs</span></code> interface and <code class="docutils literal notranslate"><span class="pre">LoadedVerbs</span></code> (libibverbs through
 <code class="docutils literal notranslate"><span class="pre">dlopen()</span></code>)</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/ibv-core.h</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/ibv-core.h</span></code></p></td>
 <td><p>hipObject’s own copy of the libibverbs ABI types</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/ibv-ptr.h</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/ibv-ptr.h</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">std::unique_ptr</span></code> types for verbs objects, and <code class="docutils literal notranslate"><span class="pre">own()</span></code></p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/nic-seam.h</span></code>, <code class="docutils literal notranslate"><span class="pre">rdma-topology.*</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/nic-seam.h</span></code>, <code class="docutils literal notranslate"><span class="pre">rdma-topology.*</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">NicTopology</span></code> interface, <code class="docutils literal notranslate"><span class="pre">SysfsTopology</span></code>, NIC and GID
 selection</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/thread-safety.h</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/thread-safety.h</span></code></p></td>
 <td><p>Mutexes and locks annotated for Clang’s thread safety analysis</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/no-destructor.h</span></code>, <code class="docutils literal notranslate"><span class="pre">dl-handle.h</span></code>, <code class="docutils literal notranslate"><span class="pre">gid.h</span></code>,
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">src/common/no-destructor.h</span></code>, <code class="docutils literal notranslate"><span class="pre">dl-handle.h</span></code>, <code class="docutils literal notranslate"><span class="pre">gid.h</span></code>,
 <code class="docutils literal notranslate"><span class="pre">ibv-gid.h</span></code></p></td>
 <td><p>Small helpers</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">shared/</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">shared/</span></code></p></td>
 <td><p>Helpers shared with tools and tests: span, address, parse,
 sockaddr, warnings</p></td>
 </tr>
@@ -616,7 +620,10 @@ function: it could find a different instance.</p>
 </section>
 <section id="init">
 <h3>Init<a class="headerlink" href="#init" title="Link to this heading">#</a></h3>
-<p><code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code> checks its <code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code>, returns
+<p><code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code> copies its <code class="docutils literal notranslate"><span class="pre">hipObjConfig_t</span></code> with
+<code class="docutils literal notranslate"><span class="pre">readSizedStruct()</span></code>, which uses the struct’s <code class="docutils literal notranslate"><span class="pre">structSize</span></code> to read
+the version of it that the application was compiled with (see the
+<code class="docutils literal notranslate"><span class="pre">structsize</span></code> group in <code class="docutils literal notranslate"><span class="pre">hipobj.h</span></code>). It checks the copy, returns
 <code class="docutils literal notranslate"><span class="pre">hipObjAlreadyInitialized</span></code> if there’s an instance, gets the system
 platform (see <a class="reference internal" href="#the-platform">The Platform</a>), reads the options (see
 <a class="reference internal" href="#configuration">Configuration</a>), and calls <code class="docutils literal notranslate"><span class="pre">initWith()</span></code>, which holds
@@ -907,7 +914,8 @@ are released after the lock.</p>
 <h2><a class="toc-backref" href="#id9" role="doc-backlink">A Transfer</a><a class="headerlink" href="#a-transfer" title="Link to this heading">#</a></h2>
 <p><code class="docutils literal notranslate"><span class="pre">hipObjGet()</span></code> and <code class="docutils literal notranslate"><span class="pre">hipObjPut()</span></code> (<code class="docutils literal notranslate"><span class="pre">src/hipobj.cpp</span></code>) share
 <code class="docutils literal notranslate"><span class="pre">runRdmaTransfer()</span></code>. With the instance found and the arguments
-checked:</p>
+checked, including <code class="docutils literal notranslate"><span class="pre">ops</span></code>, which <code class="docutils literal notranslate"><span class="pre">readSizedStruct()</span></code> copies as it
+does <code class="docutils literal notranslate"><span class="pre">hipObjInit()</span></code>’s config:</p>
 <ol class="arabic simple">
 <li><p><strong>Look up the buffer</strong> with <code class="docutils literal notranslate"><span class="pre">buffers.find()</span></code>, check that
 <code class="docutils literal notranslate"><span class="pre">[offset,</span> <span class="pre">offset</span> <span class="pre">+</span> <span class="pre">size)</span></code> lies inside it without computing the
