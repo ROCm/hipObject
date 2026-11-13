@@ -67,12 +67,23 @@ function(hipobj_add_test TEST_NAME TEST_SOURCE)
   if(HIPOBJ_IONIC)
     target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_IONIC)
   endif()
+  if(HIPOBJ_RDMA_WIRE_V3)
+    target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_RDMA_WIRE_V3)
+  endif()
+  if(HIPOBJ_CPU_RDMA)
+    # Not just hipobj_test_objects: a test .cpp that #includes hip-seam.h
+    # directly (rather than only linking the object library) needs this
+    # macro visible at its own compilation too, or hip-seam.h falls
+    # through to the real <hip/hip_runtime_api.h> branch.
+    target_compile_definitions(${TEST_NAME} PRIVATE HIPOBJ_CPU_RDMA)
+  endif()
   target_include_directories(${TEST_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/shared
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/src/common
     ${PROJECT_SOURCE_DIR}/src/rdma
+    ${PROJECT_SOURCE_DIR}/src/rdma/everpure
     ${PROJECT_SOURCE_DIR}/src/s3
     ${PROJECT_SOURCE_DIR}/test/common
     ${PROJECT_SOURCE_DIR}/test/integration/rdma-test-server

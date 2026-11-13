@@ -21,7 +21,11 @@
 #include <memory>
 #include <type_traits>
 
+#ifdef HIPOBJ_CPU_RDMA
+#include "hip-shim.h"
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 
 namespace hipObj {
 

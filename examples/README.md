@@ -14,6 +14,10 @@ hipObject a program is running with.
 put hipObject's RDMA token in an S3 request with libcurl and read the
 server's reply.
 
+`get-object` and `put-object` don't work with a hipObject built with
+`HIPOBJ_RDMA_WIRE_V3`. `hipobj-aws-s3-demo` (the `HIPOBJ_AWS_S3_CLIENT`
+option) is the only example that exercises v3.
+
 ## Building
 
 hipObject installs these files in `share/doc/hipobject<mm>/examples` under
