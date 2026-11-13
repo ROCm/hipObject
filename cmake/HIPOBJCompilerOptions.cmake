@@ -50,8 +50,15 @@ endif()
 option(HIPOBJ_WERROR
   "Treat compiler warnings as errors in hipObject targets" OFF)
 
-# Add the compiler-specific warning flags (and -Werror and code coverage
-# flags, if enabled) to a target
+# Add the compiler-specific warning flags (and code coverage flags, if
+# enabled) to a target, and make its warnings errors with HIPOBJ_WERROR
+#
+# NOTE: HIPOBJ_WERROR sets the target's COMPILE_WARNING_AS_ERROR
+#       property rather than adding -Werror, so CMake's
+#       --compile-no-warning-as-error option turns it off. With
+#       HIPOBJ_WERROR off, the property keeps the value
+#       CMAKE_COMPILE_WARNING_AS_ERROR gave it, so setting that turns it
+#       on for every target, including third-party ones.
 #
 # NOTE: HIPOBJSanitizers.cmake adds the sanitizer flags to every target
 #       itself.
@@ -76,7 +83,8 @@ function(hipobj_set_compiler_flags target)
     "$<$<COMPILE_LANGUAGE:CXX>:${flags}>")
 
   if(HIPOBJ_WERROR)
-    target_compile_options(${target} PRIVATE -Werror)
+    set_target_properties(${target} PROPERTIES
+      COMPILE_WARNING_AS_ERROR ON)
   endif()
 
   if(HIPOBJ_USE_CODE_COVERAGE)

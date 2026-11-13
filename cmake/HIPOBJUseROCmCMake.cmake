@@ -120,13 +120,16 @@ list(APPEND CMAKE_PREFIX_PATH
   ${ROCM_PATH})
 
 # Use the rocm-cmake that comes with ROCm, or fetch it if there isn't
-# one. FetchContent_Declare's FIND_PACKAGE_ARGS can't do this. The
-# package has to be found as ROCmCMakeBuildTools, the name a
-# superproject such as TheRock provides it under, so that has to be the
-# content name too. When it's fetched, FetchContent_MakeAvailable()
-# then writes a stub ROCmCMakeBuildToolsConfig.cmake to
-# CMAKE_FIND_PACKAGE_REDIRECTS_DIR, which every later find_package()
-# for it loads instead of the fetched one.
+# one. The package is found as ROCmCMakeBuildTools, the name a
+# superproject such as TheRock provides it under.
+#
+# FetchContent_Declare's FIND_PACKAGE_ARGS wouldn't help. The package
+# file FetchContent_MakeAvailable() writes for fetched content, in
+# CMAKE_FIND_PACKAGE_REDIRECTS_DIR, only says the package was found; it
+# doesn't load rocm-cmake's modules. Instead, when rocm-cmake is
+# fetched, the second find_package() below loads the fetched copy's own
+# package file. That also caches ROCmCMakeBuildTools_DIR, so every
+# later find_package() for it finds the same copy.
 find_package(ROCmCMakeBuildTools CONFIG QUIET)
 if(NOT ROCmCMakeBuildTools_FOUND)
   # rocm-cmake is only a collection of CMake modules, so it's

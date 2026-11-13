@@ -5,9 +5,10 @@
 # Fetch and expose minio-cpp dependencies using vcpkg-style
 # imported target names (unofficial::curlpp::curlpp, etc.)
 #
-# Dependencies added with FetchContent_MakeAvailable() are declared
-# SYSTEM, so warnings in their headers don't fire in hipObject targets
-# that use them.
+# Dependencies that FetchContent_MakeAvailable() adds to the build are
+# declared SYSTEM, and the ones built here have SYSTEM include
+# directories, so warnings in their headers don't fire in hipObject
+# targets that use them.
 
 include(FetchContent)
 
@@ -21,50 +22,59 @@ endif()
 find_package(ZLIB REQUIRED)
 find_package(CURL REQUIRED)
 
-find_package(nlohmann_json CONFIG QUIET)
-if(NOT nlohmann_json_FOUND)
-  FetchContent_Declare(
-    nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-    SYSTEM
-  )
-  FetchContent_MakeAvailable(nlohmann_json)
+# FetchContent_MakeAvailable() uses an installed nlohmann_json or
+# pugixml if find_package() finds one (FIND_PACKAGE_ARGS), and downloads
+# it otherwise. When it downloads one, FIND_PACKAGE_ARGS also makes it
+# write package files to CMAKE_FIND_PACKAGE_REDIRECTS_DIR, so that
+# minio-cpp's own find_package() calls find the downloaded copy.
+# FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER would drop FIND_PACKAGE_ARGS,
+# and with it those package files, so minio-cpp would find an installed
+# copy, or none.
+if(FETCHCONTENT_TRY_FIND_PACKAGE_MODE STREQUAL "NEVER")
+  message(FATAL_ERROR
+    "HIPOBJ_MINIO_CLIENT doesn't build with "
+    "FETCHCONTENT_TRY_FIND_PACKAGE_MODE set to NEVER, since minio-cpp "
+    "wouldn't find the nlohmann_json and pugixml that the build downloads")
+endif()
+FetchContent_Declare(
+  nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
+  SYSTEM
+  FIND_PACKAGE_ARGS CONFIG QUIET
+)
+FetchContent_Declare(
+  pugixml
+  GIT_REPOSITORY https://github.com/zeux/pugixml.git
+  GIT_TAG v1.14
+  SYSTEM
+  FIND_PACKAGE_ARGS CONFIG QUIET
+)
+FetchContent_MakeAvailable(nlohmann_json pugixml)
+if(NOT TARGET pugixml::pugixml AND TARGET pugixml)
+  add_library(pugixml::pugixml ALIAS pugixml)
 endif()
 
-find_package(pugixml CONFIG QUIET)
-if(NOT pugixml_FOUND)
-  FetchContent_Declare(
-    pugixml
-    GIT_REPOSITORY https://github.com/zeux/pugixml.git
-    GIT_TAG v1.14
-    SYSTEM
-  )
-  set(PUGIXML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  FetchContent_MakeAvailable(pugixml)
-  if(NOT TARGET pugixml::pugixml AND TARGET pugixml)
-    add_library(pugixml::pugixml ALIAS pugixml)
-  endif()
-endif()
-
+# inih and curlpp are built here, not with their own build files, so
+# SOURCE_SUBDIR names a directory that doesn't exist, which keeps
+# FetchContent_MakeAvailable() from adding them to the build. It only
+# downloads them.
 if(NOT TARGET unofficial::inih::inireader)
   FetchContent_Declare(
     inih
     GIT_REPOSITORY https://github.com/benhoyt/inih.git
     GIT_TAG r57
+    SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
   )
-  FetchContent_GetProperties(inih)
-  if(NOT inih_POPULATED)
-    FetchContent_Populate(inih)
-    add_library(inih_c STATIC ${inih_SOURCE_DIR}/ini.c)
-    target_include_directories(inih_c SYSTEM PUBLIC ${inih_SOURCE_DIR})
-    add_library(inih_cpp STATIC ${inih_SOURCE_DIR}/cpp/INIReader.cpp)
-    target_include_directories(inih_cpp SYSTEM PUBLIC
-      ${inih_SOURCE_DIR}
-      ${inih_SOURCE_DIR}/cpp)
-    target_link_libraries(inih_cpp PUBLIC inih_c)
-    add_library(unofficial::inih::inireader ALIAS inih_cpp)
-  endif()
+  FetchContent_MakeAvailable(inih)
+  add_library(inih_c STATIC ${inih_SOURCE_DIR}/ini.c)
+  target_include_directories(inih_c SYSTEM PUBLIC ${inih_SOURCE_DIR})
+  add_library(inih_cpp STATIC ${inih_SOURCE_DIR}/cpp/INIReader.cpp)
+  target_include_directories(inih_cpp SYSTEM PUBLIC
+    ${inih_SOURCE_DIR}
+    ${inih_SOURCE_DIR}/cpp)
+  target_link_libraries(inih_cpp PUBLIC inih_c)
+  add_library(unofficial::inih::inireader ALIAS inih_cpp)
 endif()
 
 if(NOT TARGET unofficial::curlpp::curlpp)
@@ -89,18 +99,16 @@ if(NOT TARGET unofficial::curlpp::curlpp)
       curlpp
       GIT_REPOSITORY https://github.com/jpbarrette/curlpp.git
       GIT_TAG ec1b66e699557cd9d608d322c013a1ebda16bd08
+      SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
     )
-    FetchContent_GetProperties(curlpp)
-    if(NOT curlpp_POPULATED)
-      FetchContent_Populate(curlpp)
-      file(GLOB_RECURSE CURLPP_SOURCES ${curlpp_SOURCE_DIR}/src/*.cpp)
-      add_library(curlpp_built STATIC ${CURLPP_SOURCES})
-      target_include_directories(curlpp_built SYSTEM PUBLIC
-        ${curlpp_SOURCE_DIR}/include)
-      target_compile_options(curlpp_built PRIVATE -Wno-deprecated-declarations)
-      target_link_libraries(curlpp_built PUBLIC CURL::libcurl)
-      add_library(unofficial::curlpp::curlpp ALIAS curlpp_built)
-    endif()
+    FetchContent_MakeAvailable(curlpp)
+    file(GLOB_RECURSE CURLPP_SOURCES ${curlpp_SOURCE_DIR}/src/*.cpp)
+    add_library(curlpp_built STATIC ${CURLPP_SOURCES})
+    target_include_directories(curlpp_built SYSTEM PUBLIC
+      ${curlpp_SOURCE_DIR}/include)
+    target_compile_options(curlpp_built PRIVATE -Wno-deprecated-declarations)
+    target_link_libraries(curlpp_built PUBLIC CURL::libcurl)
+    add_library(unofficial::curlpp::curlpp ALIAS curlpp_built)
   endif()
 endif()
 
