@@ -49,8 +49,9 @@ set(system_packages
 # hsakmt with a shared ROCr, isn't provided, so a find_package() for
 # it fails, as it would in TheRock. GoogleTest is the exception: when
 # this build downloaded it, or found it without its package files, the
-# test's hipObject looks for it as a system package, and downloads it
-# from this build's copy.
+# test's hipObject looks for it as a system package, with this build's
+# copy or the paths FindGTest found (see below), so it doesn't download
+# it again.
 if(NOT GTest_DIR)
   list(REMOVE_ITEM therock_packages GTest)
   list(APPEND system_packages GTest)
@@ -79,6 +80,21 @@ string(APPEND HIPOBJ_PROVIDER_CACHE_ENTRIES
 if(googletest_SOURCE_DIR)
   string(APPEND HIPOBJ_PROVIDER_CACHE_ENTRIES
     "set(FETCHCONTENT_SOURCE_DIR_GOOGLETEST \"${googletest_SOURCE_DIR}\" CACHE PATH \"\")\n")
+elseif(NOT GTest_DIR)
+  # FindGTest found GoogleTest without a config package, possibly
+  # through a GTEST_ROOT hint, so pass on the paths it found
+  foreach(var IN ITEMS
+      GTEST_INCLUDE_DIR
+      GTEST_LIBRARY
+      GTEST_LIBRARY_DEBUG
+      GTEST_MAIN_LIBRARY
+      GTEST_MAIN_LIBRARY_DEBUG)
+    if(${var})
+      get_property(type CACHE ${var} PROPERTY TYPE)
+      string(APPEND HIPOBJ_PROVIDER_CACHE_ENTRIES
+        "set(${var} \"${${var}}\" CACHE ${type} \"\")\n")
+    endif()
+  endforeach()
 endif()
 foreach(var IN ITEMS
     CMAKE_C_COMPILER

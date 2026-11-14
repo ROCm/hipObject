@@ -50,7 +50,26 @@ FetchContent_Declare(
   SYSTEM
   FIND_PACKAGE_ARGS CONFIG QUIET
 )
-FetchContent_MakeAvailable(nlohmann_json pugixml)
+FetchContent_MakeAvailable(nlohmann_json)
+
+# A downloaded pugixml is only a build dependency of the bridge, like
+# minio-cpp (see integrations/minio-cpp/CMakeLists.txt), but its own
+# build files install it, and v1.14 has no option to stop that. So it's
+# added with CMAKE_SKIP_INSTALL_RULES on, which keeps its directory from
+# getting an install script, and EXCLUDE_FROM_ALL, which keeps ours from
+# including the script it doesn't have. A pugixml that something else
+# found or added first, such as a superproject, is left alone.
+# (nlohmann_json only installs itself when it's the top-level project.)
+FetchContent_GetProperties(pugixml)
+set(_hipobj_pugixml_was_populated "${pugixml_POPULATED}")
+set(_hipobj_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
+set(CMAKE_SKIP_INSTALL_RULES ON)
+FetchContent_MakeAvailable(pugixml)
+set(CMAKE_SKIP_INSTALL_RULES "${_hipobj_skip_install_rules}")
+if(NOT _hipobj_pugixml_was_populated AND pugixml_SOURCE_DIR)
+  set_property(DIRECTORY ${pugixml_SOURCE_DIR}
+    PROPERTY EXCLUDE_FROM_ALL TRUE)
+endif()
 if(NOT TARGET pugixml::pugixml AND TARGET pugixml)
   add_library(pugixml::pugixml ALIAS pugixml)
 endif()
