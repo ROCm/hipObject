@@ -156,11 +156,14 @@ one, ``hipobj-test-install``, which will check that hipObject is
 installed and works, as far as the system's hardware allows. For
 now it only reports the hipObject version, with ``--version``.
 
-``HIPOBJ_WERROR`` adds ``-Werror`` to hipObject's own targets
-(the library, tests, examples, and tools), but not to third-party
-code that CMake fetches. It's off by default so that a compiler
-hipObject hasn't been tested with can't break the build with a new
-warning. CI turns it on, and developers should too.
+``HIPOBJ_WERROR`` makes the compiler treat warnings as errors in
+hipObject's own targets (the library, tests, examples, and tools),
+but not in third-party code that CMake fetches. It sets CMake's
+``COMPILE_WARNING_AS_ERROR`` target property, so the
+``--compile-no-warning-as-error`` option of ``cmake`` turns it off
+again without changing the option. It's off by default so that a
+compiler hipObject hasn't been tested with can't break the build with
+a new warning. CI turns it on, and developers should too.
 
 ``HIPOBJ_USE_CODE_COVERAGE`` builds hipObject with LLVM's
 source-based code coverage instrumentation. It needs Clang (or
@@ -469,9 +472,14 @@ Additional system packages (Ubuntu 24.04):
    sudo apt install libssl-dev zlib1g-dev libcurl4-openssl-dev \
      nlohmann-json3-dev libpugixml-dev libcurlpp-dev
 
-The build needs every package but ``libcurlpp-dev``. Without it,
-the build downloads curlpp from GitHub and builds it. The build
-always downloads minio-cpp and inih.
+The build needs ``libssl-dev``, ``zlib1g-dev``, and
+``libcurl4-openssl-dev``. Without
+``nlohmann-json3-dev``, ``libpugixml-dev``, or ``libcurlpp-dev``,
+the build downloads nlohmann_json, pugixml, or curlpp from GitHub and
+builds it. The build always downloads minio-cpp and inih. The bridge
+can't be built with ``FETCHCONTENT_TRY_FIND_PACKAGE_MODE`` set to
+``NEVER``, since minio-cpp then wouldn't find the nlohmann_json and
+pugixml that the build downloads.
 
 See ``integrations/minio-cpp/TESTING.md`` for lab validation
 against MinIO AIStor over RDMA.

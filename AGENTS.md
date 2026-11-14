@@ -438,7 +438,7 @@ comment why.
   ctest --test-dir build -T memcheck --output-on-failure \
     --overwrite "MemoryCheckCommand=$(command -v valgrind)" \
     --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --num-callers=40 --error-exitcode=1" \
-    -E '^hipobj-(exports|subproject|install|package-deb|package-rpm)$'
+    -E '^hipobj-(exports|subproject|dependency-provider|install|package-deb|package-rpm)$'
   ```
 
   The reports go to `build/Testing/Temporary/MemoryChecker.*.log`, not to

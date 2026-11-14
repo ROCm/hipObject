@@ -49,7 +49,9 @@
   prefix to the parent project instead of defaulting them to
   `RelWithDebInfo` and `ROCM_PATH`.
 - The `HIPOBJ_WERROR` CMake option makes the build treat compiler
-  warnings in hipObject's own code as errors. It defaults to `OFF`.
+  warnings in hipObject's own code as errors. It defaults to `OFF`. It
+  sets CMake's `COMPILE_WARNING_AS_ERROR` target property, so
+  `cmake --compile-no-warning-as-error` overrides it.
 - The `HIPOBJ_USE_IWYU` CMake option runs include-what-you-use on
   hipObject's own code while it compiles, which prints suggestions for
   `#include` lines to add or remove. The suggestions don't fail the
@@ -456,6 +458,16 @@
 - The MinIO bridge leaked the token it gets from `hipObjGetRdmaToken()`
   for each transfer when building or sending the request threw an
   exception. It now releases the token on every path.
+- The MinIO bridge didn't build without nlohmann_json's or pugixml's
+  development package (`nlohmann-json3-dev` and `libpugixml-dev` on
+  Ubuntu). The build downloaded the missing one, but minio-cpp didn't
+  find the downloaded copy, and the configure failed. Now it does, so
+  neither package is needed. Configuring the bridge with
+  `FETCHCONTENT_TRY_FIND_PACKAGE_MODE` set to `NEVER`, which would keep
+  minio-cpp from finding the downloaded copies, fails with an error that
+  says so.
+- Configuring the MinIO bridge with CMake 3.30 or later warned that
+  calling `FetchContent_Populate()` is deprecated.
 - Building the MinIO bridge with GCC 14 or later warned that two
   returns in `integrations/minio-cpp/src/client.cpp` couldn't avoid a
   copy, and failed with `HIPOBJ_WERROR=ON`.

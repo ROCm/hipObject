@@ -76,6 +76,10 @@ jobs:
       #   packages      None. Extra apt packages, such as a compiler.
       #   valgrind      OFF. ON runs the tests again under valgrind's
       #                 memcheck, which needs the valgrind package.
+      #   fetch_deps    OFF. ON leaves out the packages of the MinIO
+      #                 bridge's dependencies that the build can
+      #                 download and build itself, so it does (see
+      #                 Install dependencies below).
       #
       # Every job uses ROCm 10.1, the latest ROCm (see Install ROCm below).
       matrix:
@@ -156,12 +160,15 @@ jobs:
             build_type: RelWithDebInfo
             sanitizer: asan
           # The oldest supported Ubuntu release, with older compilers and
-          # an older CMake (3.28)
+          # an older CMake (3.28). The GCC job also builds the MinIO
+          # bridge's dependencies itself, as a build without their
+          # packages does, which no other job tests.
           - label: Ubuntu 24.04, GCC 13
             ubuntu: '24.04'
             cc: gcc-13
             cxx: g++-13
             build_type: RelWithDebInfo
+            fetch_deps: ON
           - label: Ubuntu 24.04, Clang 18
             ubuntu: '24.04'
             cc: clang-18
@@ -199,27 +206,30 @@ jobs:
       # rpm provides rpmbuild, so hipObject can build RPM packages here
       # as well as DEB packages, and the RPM package test runs.
       #
-      # The MinIO bridge needs nlohmann-json3-dev, libpugixml-dev, and
-      # zlib1g-dev. libcurlpp-dev saves downloading and building curlpp.
+      # The MinIO bridge needs zlib1g-dev. nlohmann-json3-dev,
+      # libpugixml-dev, and libcurlpp-dev save downloading and building
+      # nlohmann_json, pugixml, and curlpp, so a fetch_deps job leaves
+      # them out.
       #
       # A job's packages (EXTRA_PACKAGES) are separated by spaces, so read
       # splits them into an array with one package in each element.
       - name: Install dependencies
         env:
           EXTRA_PACKAGES: ${{ matrix.packages }}
+          FETCH_DEPS: ${{ matrix.fetch_deps || 'OFF' }}
         run: |
           read -ra extra_packages <<< "${EXTRA_PACKAGES}"
+          if [[ "${FETCH_DEPS}" != ON ]]; then
+            extra_packages+=(libcurlpp-dev libpugixml-dev nlohmann-json3-dev)
+          fi
           apt-get update
           apt-get install -y \
             build-essential \
             cmake \
             git \
             libcurl4-openssl-dev \
-            libcurlpp-dev \
             libibverbs-dev \
-            libpugixml-dev \
             libssl-dev \
-            nlohmann-json3-dev \
             rpm \
             zlib1g-dev \
             "${extra_packages[@]}"
@@ -287,7 +297,7 @@ jobs:
           ctest --test-dir build -T memcheck --output-on-failure --no-tests=error -j"$(nproc)" \
             --overwrite "MemoryCheckCommand=$(command -v valgrind)" \
             --overwrite "MemoryCheckCommandOptions=--leak-check=full --track-origins=yes --num-callers=40 --error-exitcode=1" \
-            -E '^hipobj-(exports|subproject|install|package-deb|package-rpm)$' \
+            -E '^hipobj-(exports|subproject|dependency-provider|install|package-deb|package-rpm)$' \
             || status=$?
           shopt -s nullglob
           for log in build/Testing/Temporary/MemoryChecker.*.log; do
