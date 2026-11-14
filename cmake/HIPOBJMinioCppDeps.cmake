@@ -78,13 +78,23 @@ endif()
 # SOURCE_SUBDIR names a directory that doesn't exist, which keeps
 # FetchContent_MakeAvailable() from adding them to the build. It only
 # downloads them.
+#
+# They're declared with FETCHCONTENT_TRY_FIND_PACKAGE_MODE set to
+# OPT_IN, so FetchContent_MakeAvailable() never looks for them with
+# find_package() first. FETCHCONTENT_TRY_FIND_PACKAGE_MODE=ALWAYS would
+# make it, and a package it found would leave no sources to build. The
+# block() limits the setting to these declarations, which are the ones
+# its value counts for.
 if(NOT TARGET unofficial::inih::inireader)
-  FetchContent_Declare(
-    inih
-    GIT_REPOSITORY https://github.com/benhoyt/inih.git
-    GIT_TAG r57
-    SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
-  )
+  block()
+    set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE OPT_IN)
+    FetchContent_Declare(
+      inih
+      GIT_REPOSITORY https://github.com/benhoyt/inih.git
+      GIT_TAG r57
+      SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
+    )
+  endblock()
   FetchContent_MakeAvailable(inih)
   add_library(inih_c STATIC ${inih_SOURCE_DIR}/ini.c)
   target_include_directories(inih_c SYSTEM PUBLIC ${inih_SOURCE_DIR})
@@ -114,12 +124,15 @@ if(NOT TARGET unofficial::curlpp::curlpp)
     # or later, which defines CURLOPT_CLOSEPOLICY as a plain int rather
     # than a CURLoption. Upstream removed that option after the release,
     # so pin a later commit on master.
-    FetchContent_Declare(
-      curlpp
-      GIT_REPOSITORY https://github.com/jpbarrette/curlpp.git
-      GIT_TAG ec1b66e699557cd9d608d322c013a1ebda16bd08
-      SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
-    )
+    block()
+      set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE OPT_IN)
+      FetchContent_Declare(
+        curlpp
+        GIT_REPOSITORY https://github.com/jpbarrette/curlpp.git
+        GIT_TAG ec1b66e699557cd9d608d322c013a1ebda16bd08
+        SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
+      )
+    endblock()
     FetchContent_MakeAvailable(curlpp)
     file(GLOB_RECURSE CURLPP_SOURCES ${curlpp_SOURCE_DIR}/src/*.cpp)
     add_library(curlpp_built STATIC ${CURLPP_SOURCES})
