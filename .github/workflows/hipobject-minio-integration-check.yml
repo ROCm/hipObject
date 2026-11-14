@@ -97,7 +97,7 @@ jobs:
       # After the compilers, so the libstdc++ that ROCm's compiler
       # packages need is the one already installed
       - name: Install ROCm
-        uses: ./.github/actions/install-rocm
+        uses: $/.github/actions/install-rocm
         with:
           version: '10.1'
 
