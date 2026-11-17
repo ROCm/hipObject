@@ -45,6 +45,7 @@ Operation     Description
    :caption: User Guide
 
    building
+   rc-rdma-flow-v2
    interop
 
 .. toctree::
