@@ -10,7 +10,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -65,6 +64,13 @@ TEST(Span, CStringViewOfAnArrayStopsAtTheNulOrTheEnd)
     EXPECT_EQ(hipObj::cStringView(unterminated), "abcd");
 }
 
+TEST(Span, CStringViewOfAnEmptySpanIsEmpty)
+{
+    /* A default-constructed span's data() is null */
+    EXPECT_EQ(hipObj::cStringView(std::span<const char>{}), "");
+    EXPECT_EQ(hipObj::cStringView(nullptr, 0), "");
+}
+
 TEST(Span, AsStringViewViewsTheSameCharacters)
 {
     const std::array<char, 5> chars{{'h', 'e', 'l', 'l', 'o'}};
@@ -87,37 +93,49 @@ TEST(Span, ArgSpanViewsTheArguments)
     EXPECT_TRUE(hipObj::argSpan(-1, argv.data()).empty());
 }
 
-/* Padding after c and after s, on every ABI hipObject builds for */
+/* Padding after c and after s, on every ABI hipObject builds for. Big
+ * enough to be passed and returned through memory. */
 struct Padded {
     char     c;
     uint64_t u;
     uint16_t s;
 };
 
+/* Padding after c. Small enough to be passed and returned in registers,
+ * where a copy is the most likely to drop the padding. */
+struct SmallPadded {
+    char     c;
+    uint16_t s;
+};
+
+/* Fills obj with a nonzero pattern, zeroes it, and checks every byte */
+template <typename T>
+bool
+zeroObjectZeroesEveryByte(T &obj)
+{
+    const std::span<std::byte, sizeof(T)> bytes = std::as_writable_bytes(std::span<T, 1>{&obj, 1});
+    std::ranges::fill(bytes, std::byte{0xa5});
+    hipObj::zeroObject(obj);
+    return std::ranges::all_of(bytes, [](std::byte b) noexcept { return b == std::byte{0}; });
+}
+
 TEST(Span, ZeroObjectZeroesThePadding)
 {
     Padded padded{};
-    std::ranges::fill(std::as_writable_bytes(std::span<Padded, 1>{&padded, 1}), std::byte{0xa5});
-    hipObj::zeroObject(padded);
-    const std::span<const std::byte, sizeof(Padded)> bytes = std::as_bytes(std::span<Padded, 1>{&padded, 1});
-    EXPECT_TRUE(std::ranges::all_of(bytes, [](std::byte b) noexcept { return b == std::byte{0}; }));
+    EXPECT_TRUE(zeroObjectZeroesEveryByte(padded));
 }
 
-TEST(Span, ZeroedObjectZeroesThePadding)
+TEST(Span, ZeroObjectZeroesThePaddingOfASmallStruct)
 {
-    /* Built in memory that isn't zero to begin with. The result
-     * initializes the new Padded directly, without a copy, as it does a
-     * variable declared with it. */
-    alignas(Padded) std::array<std::byte, sizeof(Padded)> storage{};
-    std::ranges::fill(storage, std::byte{0xa5});
-    ::new (static_cast<void *>(storage.data())) Padded(hipObj::zeroedObject<Padded>());
-    EXPECT_TRUE(std::ranges::all_of(storage, [](std::byte b) noexcept { return b == std::byte{0}; }));
+    SmallPadded padded{};
+    EXPECT_TRUE(zeroObjectZeroesEveryByte(padded));
 }
 
-TEST(Span, ZeroedObjectZeroesEnumsWithoutAZeroEnumerator)
+TEST(Span, ZeroObjectZeroesEnumsWithoutAZeroEnumerator)
 {
     /* ibv_mtu has no zero enumerator, and the member is zero anyway */
-    const auto attr = hipObj::zeroedObject<ibv_qp_attr>();
+    ibv_qp_attr attr{};
+    hipObj::zeroObject(attr);
     EXPECT_EQ(static_cast<int>(attr.path_mtu), 0);
     EXPECT_EQ(attr.qp_state, IBV_QPS_RESET);
 }

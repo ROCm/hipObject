@@ -51,11 +51,13 @@ spanFromPointer(T *ptr, size_t count) noexcept
 /* Views the NUL-terminated string at str, without its NUL, scanning at
  * most maxLen bytes. A string with no NUL in its first maxLen bytes is
  * cut to maxLen bytes, so to reject a string longer than some limit,
- * pass the limit plus one and compare the length with the limit. */
+ * pass the limit plus one and compare the length with the limit. str may
+ * be null when maxLen is zero, as it is for an empty span. */
 inline std::string_view
 cStringView(const char *str, size_t maxLen) noexcept
 {
-    return {str, strnlen(str, maxLen)};
+    /* strnlen()'s pointer must not be null, even with a zero limit */
+    return {str, maxLen == 0 ? 0 : strnlen(str, maxLen)};
 }
 
 /* Views a span of characters as a string. A span's size always matches
@@ -94,41 +96,15 @@ argSpan(int argc, char **argv) noexcept
 
 /* Sets every byte of obj to zero, padding included. Use it on a struct
  * that's handed to libibverbs or reaches the wire, where T x{} isn't
- * enough, since it doesn't have to zero the padding. */
+ * enough, since it doesn't have to zero the padding. Zero the object
+ * that's handed over, not one it's copied from: copying or returning a
+ * struct needn't keep its padding. */
 template <typename T>
     requires std::is_trivially_copyable_v<T>
 void
 zeroObject(T &obj) noexcept
 {
     std::ranges::fill(std::as_writable_bytes(std::span<T, 1>{std::addressof(obj), 1}), std::byte{0});
-}
-
-/* Returns a T with every byte zero, padding included, as zeroObject()
- * leaves one. Declare a C struct with it, as in
- * auto attr = zeroedObject<ibv_qp_attr>(), rather than declaring it
- * uninitialized and zeroing it with zeroObject().
- *
- * Neither T() nor T{} is enough on its own. The standard says T()
- * zero-initializes a C struct, padding included, but GCC 13 sets only the
- * members, and T{} doesn't have to zero the padding at all. So this
- * zeroes every byte with zeroObject().
- *
- * The object is returned by name, and every supported compiler constructs
- * it in place of the object being declared with the result (the named
- * return value optimization), so the padding isn't lost to a copy. The
- * standard doesn't require that, but -Wnrvo (GCC 14 and later) reports a
- * function where it doesn't happen, and the tests check the padding with
- * every compiler. Assigning the result to an existing object is a copy,
- * though, and a copy needn't keep the padding, so use zeroObject() for
- * that. */
-template <typename T>
-    requires std::is_trivially_copyable_v<T> && std::is_trivially_default_constructible_v<T>
-[[nodiscard]] T
-zeroedObject() noexcept
-{
-    T obj{};
-    zeroObject(obj);
-    return obj;
 }
 
 } // namespace hipObj

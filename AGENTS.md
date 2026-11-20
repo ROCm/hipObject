@@ -301,11 +301,13 @@ priority over speed and convenience.
 
 - **Fully initialize anything that touches the wire**: tokens, HTTP headers
   and bodies, and every verbs structure (work requests, scatter/gather
-  entries, QP attributes). Use `T x{}`, or for C structs
-  `auto x = hipObj::zeroedObject<T>()` from
-  [`shared/hipobj-span.h`](shared/hipobj-span.h), which zeroes the padding
-  too; zero an existing one with `hipObj::zeroObject()`. Serialize field by
-  field; never copy a struct's raw bytes onto the wire.
+  entries, QP attributes). Declare them with `T x{}`. Where the padding
+  matters too, as in a C struct handed to libibverbs, also call
+  `hipObj::zeroObject(x)` from
+  [`shared/hipobj-span.h`](shared/hipobj-span.h), which zeroes every byte.
+  Zero the object that's handed over, not one it's copied from, since a
+  copy needn't keep the padding. Serialize field by field; never copy a
+  struct's raw bytes onto the wire.
 - **Treat everything from the network as untrusted**: S3 responses,
   `x-amz-rdma-reply` values, peer tokens, and completions. Check each
   field's exact length or width, characters, and range, and reject

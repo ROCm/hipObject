@@ -63,8 +63,8 @@
 #endif
 
 /* Also turns off the -Wunsafe-buffer-usage-in-* warnings, which are in
- * its group */
-#ifdef __clang__
+ * its group. The warning first appeared in Clang 16. */
+#if defined(__clang__) && __clang_major__ >= 16
 #define HIPOBJ_WARN_UNSAFE_BUFFER_OFF HIPOBJ_WARN_OFF("unsafe-buffer-usage")
 #define HIPOBJ_WARN_UNSAFE_BUFFER_ON  HIPOBJ_WARN_ON("unsafe-buffer-usage")
 #else
